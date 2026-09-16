@@ -1,0 +1,27 @@
+<Solution>
+  <Folder Name="/services/" />
+  <Folder Name="/services/compliance/" />
+  <Folder Name="/services/compliance/src/">
+    <Project Path="services/compliance/src/GrainLedger.Compliance.Api/GrainLedger.Compliance.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/field-capture/" />
+  <Folder Name="/services/field-capture/src/">
+    <Project Path="services/field-capture/src/GrainLedger.FieldCapture.Api/GrainLedger.FieldCapture.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/identity/" />
+  <Folder Name="/services/identity/src/">
+    <Project Path="services/identity/src/GrainLedger.Identity.Api/GrainLedger.Identity.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/ledger/" />
+  <Folder Name="/services/ledger/src/">
+    <Project Path="services/ledger/src/GrainLedger.Ledger.Api/GrainLedger.Ledger.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/optimization/" />
+  <Folder Name="/services/optimization/src/">
+    <Project Path="services/optimization/src/GrainLedger.Optimization.Api/GrainLedger.Optimization.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/traceback/" />
+  <Folder Name="/services/traceback/src/">
+    <Project Path="services/traceback/src/GrainLedger.Traceback.Api/GrainLedger.Traceback.Api.csproj" />
+  </Folder>
+</Solution>

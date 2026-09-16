@@ -1,0 +1,7 @@
+{
+  "name": "grainledger",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
+}
