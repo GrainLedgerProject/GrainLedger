@@ -1,6 +1,11 @@
 {
   "name": "grainledger",
   "private": true,
+  "scripts": {
+    "dev": "npm run dev --workspace @grainledger/web",
+    "build": "npm run build --workspace @grainledger/web",
+    "test": "npm run test --workspace @grainledger/web"
+  },
   "workspaces": [
     "apps/*"
   ]
