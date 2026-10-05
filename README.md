@@ -18,24 +18,27 @@ The original six `Hello World` API projects have been replaced by one deployable
 
 Requires .NET SDK 10, Node.js 24, npm, and Docker (or an existing PostgreSQL server).
 
-1. Copy `.env.example` to `.env` and set a local database password. Start PostgreSQL:
+1. If you do not already have a `.env`, copy `.env.example` to `.env` at the repository root. Keep an existing `.env` instead of overwriting it.
+
+2. Edit these settings in `.env`:
+
+   ```dotenv
+   POSTGRES_PASSWORD='YOUR_LOCAL_PASSWORD'
+   ConnectionStrings__GrainLedger='Host=localhost;Port=5433;Database=grainledger;Username=grainledger;Password=YOUR_LOCAL_PASSWORD'
+   Authentication__Google__ClientId='YOUR_GOOGLE_CLIENT_ID'
+   Authentication__Google__ClientSecret='YOUR_GOOGLE_CLIENT_SECRET'
+   Bootstrap__AdminEmail='YOUR_VERIFIED_GOOGLE_EMAIL'
+   ```
+
+   Use the same database password in both settings. Single quotes preserve literal `$` and `#` characters. If the database volume already exists, keep its existing password; editing `.env` does not change the password stored in PostgreSQL.
+
+   The backend loads the root `.env` when launched from the repository or API project in Development. It no longer loads .NET user-secrets. Actual process environment variables and command-line settings override `.env`; clear any old shell overrides if you want `.env` to control them. Restart the backend after editing `.env`. Tests use isolated configuration instead of your local file. Do not prefix backend secrets with `VITE_` or commit `.env`.
+
+   Start PostgreSQL:
 
    ```bash
-   cp .env.example .env
-   # Edit POSTGRES_PASSWORD in .env before continuing.
    docker compose up -d postgres
    ```
-
-2. Store backend configuration in .NET user-secrets. Replace the placeholders below. The database password must match `.env`:
-
-   ```bash
-   dotnet user-secrets set 'ConnectionStrings:GrainLedger' 'Host=localhost;Port=5433;Database=grainledger;Username=grainledger;Password=YOUR_LOCAL_PASSWORD' --project backend/src/GrainLedger.Api
-   dotnet user-secrets set 'Authentication:Google:ClientId' 'YOUR_GOOGLE_CLIENT_ID' --project backend/src/GrainLedger.Api
-   dotnet user-secrets set 'Authentication:Google:ClientSecret' 'YOUR_GOOGLE_CLIENT_SECRET' --project backend/src/GrainLedger.Api
-   dotnet user-secrets set 'Bootstrap:AdminEmail' 'YOUR_VERIFIED_GOOGLE_EMAIL' --project backend/src/GrainLedger.Api
-   ```
-
-   `.env` is consumed by Docker Compose; .NET does not automatically load it. Do not put the Google client secret in a `VITE_` variable or commit it.
 
 3. Create a **Web application** OAuth client in Google Cloud and configure the consent screen. In testing mode, add your Google accounts as test users. Register this exact authorized redirect URI:
 
@@ -63,11 +66,7 @@ Requires .NET SDK 10, Node.js 24, npm, and Docker (or an existing PostgreSQL ser
 
 ## First administrator and account lifecycle
 
-Sign in with the verified Google email configured in `Bootstrap:AdminEmail` to initialize the first administrator. Remove that bootstrap setting after initial setup:
-
-```bash
-dotnet user-secrets remove 'Bootstrap:AdminEmail' --project backend/src/GrainLedger.Api
-```
+Sign in with the verified Google email configured in `Bootstrap__AdminEmail` in `.env` to initialize the first administrator. After setup, remove that line or set it to an empty value and restart the backend. Existing administrators retain their access.
 
 Other people sign in through Google and receive a pending profile with no business permissions. The administrator creates customer organizations and assigns each account an organization and role from **Administration**. Roles must match the organization's kind. Access changes revoke existing sessions; disabled accounts cannot sign in.
 
@@ -93,6 +92,8 @@ Backend integration tests start an isolated PostgreSQL container using Testconta
 ```bash
 docker build -t grainledger:local .
 ```
+
+The `.env` file is excluded from the image. For deployment, mount a protected `.env` read-only at `/app/.env`, readable by the container user, and use a database host reachable from the container. This preserves the same quoted-value format used locally. Runtime environment variables can also supply or override settings.
 
 The image builds React into the .NET host's `wwwroot`, so production serves the UI and API from one origin. Place it behind an HTTPS reverse proxy. Configure:
 
