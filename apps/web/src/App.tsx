@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, errorMessage, roleLabel, type User } from './api';
+import { api, ApiError, clearLocalSession, errorMessage, hasLocalSession, roleLabel, type User } from './api';
 import { Administration } from './Administration';
 import { googleLoginError } from './auth-errors';
+import { LocalAuth } from './LocalAuth';
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -30,6 +31,7 @@ export function App() {
     setError('');
     try {
       await api<void>(all ? '/api/auth/logout-all' : '/api/auth/logout', { method: 'POST' });
+      clearLocalSession();
       setUser(null);
       setTab('profile');
     } catch (e) { setError(errorMessage(e)); }
@@ -49,16 +51,7 @@ export function App() {
       <p className="story-footer">GrainLedger <span>Traceability starts with trust.</span></p>
     </section>
     <section className="login-form">
-      <div className="login-card">
-        <span className="eyebrow">YOUR WORKSPACE</span>
-        <h2>Welcome to GrainLedger</h2>
-        <p className="muted">Sign in with your work Google account to continue.</p>
-        {(error || oauthError) && <div className="notice error" role="alert">{error || oauthError}</div>}
-        <a className="button google" href="/api/auth/google"><span aria-hidden="true" className="google-mark">G</span> Continue with Google <span aria-hidden="true">↗</span></a>
-        {error && <button className="text-button" onClick={() => void loadSession()}>Retry connection</button>}
-        <div className="login-note"><strong>First time here?</strong><p>Sign in to create your profile. Your administrator will assign your company and workspace access.</p></div>
-        <p className="small muted">Your Google password stays with Google.</p>
-      </div>
+      <LocalAuth oauthError={oauthError} connectionError={error} onAuthenticated={setUser} onRetry={() => void loadSession()} />
     </section>
   </main>;
 
@@ -77,7 +70,7 @@ export function App() {
       <main className="content">
         {error && <div className="notice error" role="alert">{error}</div>}
         {tab === 'administration' && user.role === 'Administrator' ? <Administration currentUser={user} />
-          : <Profile user={user} onUpdate={setUser} onLogoutAll={() => void logout(true)} signingOut={signingOut} />}
+          : <Profile user={user} onUpdate={setUser} onReload={() => void loadSession()} onLogoutAll={() => void logout(true)} signingOut={signingOut} />}
       </main>
     </div>
   </div>;
@@ -85,7 +78,7 @@ export function App() {
 
 function Brand() { return <div className="brand"><span className="brand-icon" aria-hidden="true">❧</span> GrainLedger<span className="brand-dot">.</span></div>; }
 
-function Profile({ user, onUpdate, onLogoutAll, signingOut }: { user: User; onUpdate: (user: User) => void; onLogoutAll: () => void; signingOut: boolean }) {
+function Profile({ user, onUpdate, onReload, onLogoutAll, signingOut }: { user: User; onUpdate: (user: User) => void; onReload: () => void; onLogoutAll: () => void; signingOut: boolean }) {
   const [name, setName] = useState(user.displayName);
   const [phone, setPhone] = useState(user.phoneNumber || '');
   const [busy, setBusy] = useState(false);
@@ -104,14 +97,14 @@ function Profile({ user, onUpdate, onLogoutAll, signingOut }: { user: User; onUp
 
   return <>
     <div className="page-heading"><span className="eyebrow">ACCOUNT SETTINGS</span><h1>My profile</h1><p className="muted">Manage your personal details and review your workspace access.</p></div>
-    {!user.role && <div className="notice pending"><strong>Your account is ready. Workspace access is next.</strong><p>Ask your administrator to assign your organization and role. You can update your profile while you wait.</p><button className="text-button" onClick={() => window.location.reload()}>Refresh access</button></div>}
+    {!user.role && <div className="notice pending"><strong>Your account is ready. Workspace access is next.</strong><p>Ask your administrator to assign your organization and role. You can update your profile while you wait.</p><button className="text-button" onClick={onReload}>Refresh access</button></div>}
     <div className="profile-grid">
       <section className="panel"><div className="panel-heading"><h2>Personal details</h2><p className="muted">How your team sees you in GrainLedger.</p></div>
         <form onSubmit={save}>
-          <div className="identity-preview"><span className="avatar large">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span className="muted">Google account</span></div></div>
+          <div className="identity-preview"><span className="avatar large">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span className="muted">GrainLedger account</span></div></div>
           <label>Full name<input autoComplete="name" value={name} onChange={e => { setName(e.target.value); setSaved(false); }} required maxLength={100} disabled={busy} /></label>
           <label>Email address<input type="email" value={user.email} readOnly aria-describedby="email-help" /></label>
-          <p className="field-help" id="email-help">Your verified sign-in address is managed by Google.</p>
+          <p className="field-help" id="email-help">This is the verified address for this GrainLedger account.</p>
           <label>Phone number <span className="optional">(optional)</span><input type="tel" autoComplete="tel" placeholder="+84 …" value={phone} onChange={e => { setPhone(e.target.value); setSaved(false); }} maxLength={30} disabled={busy} /></label>
           {error && <div className="notice error" role="alert">{error}</div>}
           <div className="form-footer"><span role="status" className="success">{saved ? 'Changes saved.' : ''}</span><button type="submit" disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save changes'}</button></div>
@@ -121,7 +114,7 @@ function Profile({ user, onUpdate, onLogoutAll, signingOut }: { user: User; onUp
         <section className="panel"><div className="panel-heading"><h2>Workspace access</h2><p className="muted">Assigned by your administrator.</p></div><dl><dt>Organization</dt><dd>{user.organizationName || 'Not assigned'}</dd><dt>Role</dt><dd><span className="badge">{roleLabel(user.role)}</span></dd><dt>Account status</dt><dd><span className="status-dot" /> {user.role ? 'Active' : 'Pending assignment'}</dd></dl>
           {user.permissions.length > 0 && <details><summary>Your permissions ({user.permissions.length})</summary><ul className="permissions">{user.permissions.map(p => <li key={p}>{p}</li>)}</ul></details>}
         </section>
-        <section className="panel security"><h2>Sign-in & security</h2><p className="muted">You sign in securely through Google. Sessions expire after 15 minutes of inactivity.</p><button className="secondary" disabled={signingOut} onClick={onLogoutAll}>{signingOut ? 'Signing out…' : 'Sign out on all devices'}</button></section>
+        <section className="panel security"><h2>Sign-in & security</h2><p className="muted">Your current session uses {hasLocalSession() ? 'email and password with rotating security tokens' : 'Google sign-in'}. Use the button below if you no longer trust another signed-in device.</p><button className="secondary" disabled={signingOut} onClick={onLogoutAll}>{signingOut ? 'Signing out…' : 'Sign out on all devices'}</button></section>
       </div>
     </div>
   </>;

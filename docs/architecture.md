@@ -27,11 +27,13 @@ Future business endpoints must check **both** the named permission and the resou
 
 ## Authentication
 
+Email/password API authentication is described in [the OTP/JWT and Scalar guide](auth-email-password-scalar.md). It uses JWT access tokens plus rotating opaque refresh tokens, with server-side revocation. Successful Bearer authentication does not require CSRF; the following cookie rules describe the existing Google browser flow.
+
 Google OAuth uses the backend authorization-code flow with PKCE. Google credentials and provider tokens are not exposed to React or stored in local storage. A stable Google subject identifies the account; a different subject with the same email is not automatically linked to an existing account. Verified email is required for provisioning.
 
 The application cookie carries the account/session identifiers and is HttpOnly, SameSite=Lax, and Secure in production. The database validates activity, expiry, and revocation on authenticated requests. Sessions expire after 15 minutes of inactivity; cookie sliding renewal requires continued requests. Logout revokes the current session, and logout-all revokes all the user's sessions. Access changes and account disabling invalidate sessions.
 
-Mutating API calls require `X-CSRF-TOKEN`, fetched from `/api/auth/csrf` for the current identity. OAuth uses the authentication middleware's state/correlation protection. Development supports HTTP only on localhost; production uses HTTPS and an explicitly trusted proxy list.
+Cookie-authenticated mutating API calls require `X-CSRF-TOKEN`, fetched from `/api/auth/csrf` for the current identity. OAuth uses the authentication middleware's state/correlation protection. Development supports HTTP only on localhost; production uses HTTPS and an explicitly trusted proxy list.
 
 ## HTTP contract
 

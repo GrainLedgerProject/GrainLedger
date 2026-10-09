@@ -1,6 +1,6 @@
 # GrainLedger
 
-GrainLedger is a modular monolith for rice supply-chain traceability. This implementation provides Google sign-in, session management, user profiles, organization management, and server-enforced access control.
+GrainLedger is a modular monolith for rice supply-chain traceability. This implementation provides Google sign-in, email/password registration with email OTP, JWT access/refresh tokens, password recovery, user profiles, organization management, and server-enforced access control.
 
 ## Structure
 
@@ -64,13 +64,19 @@ Requires .NET SDK 10, Node.js 24, npm, and Docker (or an existing PostgreSQL ser
 
    Open **http://localhost:5173**.
 
+## Email/password API and Scalar
+
+See [the Vietnamese authentication and Scalar guide](docs/auth-email-password-scalar.md) for SMTP/JWT configuration, registration and verification, login, refresh, logout, password recovery, and example requests.
+
+Run the database migrations, start the backend, and open **http://localhost:5080/scalar/v1** in Development. Login returns `accessToken`, `refreshToken`, and the user profile. Paste the access token into Scalar's Bearer field to test protected endpoints without browser cookies or CSRF tokens. SMTP must be configured for real verification/reset email delivery. The React UI supports both Google sign-in and email/password registration, verification, login, and password recovery. See [development accounts](docs/development-accounts.md) to seed six local role accounts and one demo customer organization.
+
 ## First administrator and account lifecycle
 
-Sign in with the verified Google email configured in `Bootstrap__AdminEmail` in `.env` to initialize the first administrator. After setup, remove that line or set it to an empty value and restart the backend. Existing administrators retain their access.
+Configure `Bootstrap__AdminEmail` in `.env` before initial signup. The first matching newly provisioned Google account, or local account after email OTP verification, becomes administrator if no administrator exists. After setup, remove that line or set it to an empty value and restart the backend. Existing administrators retain their access.
 
-Other people sign in through Google and receive a pending profile with no business permissions. The administrator creates customer organizations and assigns each account an organization and role from **Administration**. Roles must match the organization's kind. Access changes revoke existing sessions; disabled accounts cannot sign in.
+Other people sign in through Google or complete local email verification and receive a pending profile with no business permissions. The administrator creates customer organizations and assigns each account an organization and role from **Administration**. Roles must match the organization's kind. Access changes revoke existing sessions; disabled accounts cannot sign in.
 
-Profiles support display name and optional phone number. Email and Google identity are managed by Google; editing a profile cannot grant roles or change organizations. Google handles password changes, recovery, and multifactor authentication. GrainLedger does not maintain a second password database or implement the older SRS's local-password lockout flow.
+Profiles support display name and optional phone number; editing a profile cannot grant roles or change organizations. Local passwords are hashed and support recovery through email OTP; Google handles recovery for Google identities. Accounts from different providers are not automatically linked merely because they share an email address.
 
 ## Checks
 
