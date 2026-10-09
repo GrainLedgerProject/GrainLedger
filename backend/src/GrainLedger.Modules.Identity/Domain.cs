@@ -40,6 +40,10 @@ public sealed class User
     public required string ProviderSubject { get; set; }
     public required string Email { get; set; }
     public required string DisplayName { get; set; }
+    public string? NormalizedEmail { get; set; }
+    public string? PasswordHash { get; set; }
+    public int FailedLoginCount { get; set; }
+    public DateTimeOffset? LockoutEnd { get; set; }
     public string? PhoneNumber { get; set; }
     public string? Role { get; set; }
     public Guid? OrganizationId { get; set; }
@@ -60,8 +64,41 @@ public sealed class LoginSession
     public DateTimeOffset LastSeenAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
+    public Guid FamilyId { get; set; } = Guid.NewGuid();
+    public string? RefreshTokenHash { get; set; }
+    public DateTimeOffset? RefreshTokenUsedAt { get; set; }
+    public Guid? ReplacedBySessionId { get; set; }
     public string? IpAddress { get; set; }
     public string? UserAgent { get; set; }
+}
+
+public sealed class RegistrationAttempt
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public required string Email { get; set; }
+    public required string NormalizedEmail { get; set; }
+    public required string DisplayName { get; set; }
+    public required string PasswordHash { get; set; }
+    public required string CodeHash { get; set; }
+    public int FailedAttempts { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset LastSentAt { get; set; }
+    public DateTimeOffset? InvalidatedAt { get; set; }
+    public DateTimeOffset? ConsumedAt { get; set; }
+}
+
+public sealed class PasswordResetCode
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+    public required string CodeHash { get; set; }
+    public int FailedAttempts { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset LastSentAt { get; set; }
+    public DateTimeOffset? ConsumedAt { get; set; }
 }
 
 public sealed class IdentityAuditEvent

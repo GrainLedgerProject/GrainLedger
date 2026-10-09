@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.RateLimiting;
@@ -17,6 +19,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Threading.RateLimiting;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using System.Security.Cryptography;
 
 namespace GrainLedger.Modules.Identity;
 
@@ -25,6 +30,8 @@ internal static class AuthSchemes
     public const string Application = "GrainLedger.Application";
     public const string External = "GrainLedger.External";
     public const string Google = GoogleDefaults.AuthenticationScheme;
+    public const string Bearer = JwtBearerDefaults.AuthenticationScheme;
+    public const string Smart = "GrainLedger.Smart";
 }
 
 public static class IdentityModuleRegistration
@@ -43,6 +50,10 @@ public static class IdentityModuleRegistration
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<ICurrentAccess, CurrentAccess>();
         services.AddScoped<GoogleIdentityProvisioner>();
+        services.AddScoped<LocalAuthService>();
+        services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+        services.AddSingleton<JwtConfiguration>();
+        services.AddScoped<IEmailSender, SmtpEmailSender>();
         services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)));
         services.AddScoped<SessionCookieEvents>();
         services.AddScoped<PermissionAuthorizationHandler>();
@@ -66,16 +77,18 @@ public static class IdentityModuleRegistration
             o.AddPolicy("authentication", http =>
             RateLimitPartition.GetFixedWindowLimiter(http.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0
+                PermitLimit = 100, Window = TimeSpan.FromMinutes(1), QueueLimit = 0
             }));
         });
 
         services.AddAuthentication(o =>
         {
-            o.DefaultAuthenticateScheme = AuthSchemes.Application;
+            o.DefaultAuthenticateScheme = AuthSchemes.Smart;
             o.DefaultSignInScheme = AuthSchemes.Application;
-            o.DefaultChallengeScheme = AuthSchemes.Application;
+            o.DefaultChallengeScheme = AuthSchemes.Smart;
         })
+        .AddPolicyScheme(AuthSchemes.Smart, AuthSchemes.Smart, o => o.ForwardDefaultSelector = http =>
+            http.Request.Headers.ContainsKey("Authorization") ? AuthSchemes.Bearer : AuthSchemes.Application)
         .AddCookie(AuthSchemes.Application, o =>
         {
             o.Cookie.Name = environment.IsDevelopment() ? "GrainLedger.Session" : "__Host-GrainLedger.Session";
@@ -88,6 +101,32 @@ public static class IdentityModuleRegistration
             o.Cookie.Name = environment.IsDevelopment() ? "GrainLedger.External" : "__Host-GrainLedger.External";
             o.Cookie.HttpOnly = true; o.Cookie.SameSite = SameSiteMode.Lax; o.Cookie.SecurePolicy = environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
             o.ExpireTimeSpan = TimeSpan.FromMinutes(5);
+        })
+        .AddJwtBearer(AuthSchemes.Bearer, o =>
+        {
+            var jwt = new JwtConfiguration(configuration);
+            o.MapInboundClaims = false;
+            o.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true, IssuerSigningKey = jwt.SigningKey,
+                ValidateIssuer = true, ValidIssuer = jwt.Issuer, ValidateAudience = true, ValidAudience = jwt.Audience,
+                ValidateLifetime = true, ClockSkew = TimeSpan.FromSeconds(30), NameClaimType = "sub",
+                ValidAlgorithms = [SecurityAlgorithms.HmacSha256]
+            };
+            o.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = async context =>
+                {
+                    if (!jwt.IsConfigured || !Guid.TryParse(context.Principal?.FindFirstValue("sub"), out var userId) ||
+                        !Guid.TryParse(context.Principal?.FindFirstValue("sid"), out var sessionId))
+                    { context.Fail("Invalid bearer session."); return; }
+                    var db = context.HttpContext.RequestServices.GetRequiredService<IdentityDbContext>();
+                    var now = context.HttpContext.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow();
+                    var valid = await db.Sessions.AsNoTracking().AnyAsync(x => x.Id == sessionId && x.UserId == userId &&
+                        x.RevokedAt == null && x.ExpiresAt > now && x.User.IsActive, context.HttpContext.RequestAborted);
+                    if (!valid) context.Fail("Bearer session is no longer active.");
+                }
+            };
         })
         .AddGoogle(AuthSchemes.Google, o =>
         {
@@ -228,6 +267,15 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken)
     {
+        if (exception is EmailDeliveryException delivery)
+        {
+            // Never log the raw SMTP exception: it may contain addresses or server replies.
+            logger.LogWarning("Email delivery failed at {Stage}: {FailureType}; SMTP status {SmtpStatus}",
+                delivery.Stage, delivery.FailureType, delivery.SmtpStatus);
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            await context.Response.WriteAsJsonAsync(new ProblemDetails { Status = 503, Title = "Email delivery is temporarily unavailable" }, cancellationToken);
+            return true;
+        }
         logger.LogError(exception, "Unhandled API exception");
         var problem = new ProblemDetails { Status = 500, Title = "An unexpected error occurred", Type = "https://httpstatuses.com/500" };
         context.Response.StatusCode = 500;

@@ -22,12 +22,13 @@ public sealed record CreateOrganizationRequest([property: Required, StringLength
 public sealed record UpdateAccessRequest([property: JsonRequired] string? Role,
     [property: JsonRequired] Guid? OrganizationId, [property: JsonRequired] bool IsActive);
 
-public static class IdentityEndpoints
+public static partial class IdentityEndpoints
 {
     public static IEndpointRouteBuilder MapIdentityModule(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api").AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>();
-        var auth = group.MapGroup("/auth");
+        var auth = group.MapGroup("/auth").WithTags("Authentication");
+        auth.MapLocalAuthEndpoints();
         auth.MapGet("/csrf", (HttpContext http, IAntiforgery antiforgery) =>
         {
             var tokens = antiforgery.GetAndStoreTokens(http);
@@ -42,16 +43,16 @@ public static class IdentityEndpoints
             {
                 RedirectUri = "/api/auth/google/complete?returnUrl=" + Uri.EscapeDataString(safeReturnUrl)
             }, [AuthSchemes.Google]);
-        }).RequireRateLimiting("authentication");
-        auth.MapGet("/google/complete", CompleteGoogleLoginAsync);
-        auth.MapGet("/session", GetSessionAsync).RequireAuthorization();
-        auth.MapPost("/logout", LogoutAsync).RequireAuthorization();
-        auth.MapPost("/logout-all", LogoutAllAsync).RequireAuthorization();
+        }).RequireRateLimiting("authentication").Produces(StatusCodes.Status302Found).ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+        auth.MapGet("/google/complete", CompleteGoogleLoginAsync).Produces(StatusCodes.Status302Found);
+        auth.MapGet("/session", GetSessionAsync).RequireAuthorization().Produces<SessionUserDto>().Produces(StatusCodes.Status401Unauthorized);
+        auth.MapPost("/logout", LogoutAsync).RequireAuthorization().Produces(StatusCodes.Status204NoContent);
+        auth.MapPost("/logout-all", LogoutAllAsync).RequireAuthorization().Produces(StatusCodes.Status204NoContent);
 
-        group.MapGet("/profile", GetSessionAsync).RequireAuthorization();
-        group.MapPut("/profile", UpdateProfileAsync).RequireAuthorization();
+        group.MapGet("/profile", GetSessionAsync).RequireAuthorization().WithTags("Profile").Produces<SessionUserDto>();
+        group.MapPut("/profile", UpdateProfileAsync).RequireAuthorization().WithTags("Profile").Produces<SessionUserDto>();
 
-        var admin = group.MapGroup("/admin").RequireAuthorization("identity.manage");
+        var admin = group.MapGroup("/admin").RequireAuthorization("identity.manage").WithTags("Administration");
         admin.MapGet("/roles", () => Results.Ok(Roles.All.Values.Select(x => new
         {
             name = x.Name, organizationKind = x.OrganizationKind, permissions = x.Permissions
@@ -124,13 +125,21 @@ public static class IdentityEndpoints
 
     private static async Task<IResult> LogoutAsync(ClaimsPrincipal principal, HttpContext http, IdentityDbContext db, CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var userId = principal.RequiredUserId();
+        var account = await db.Users.Where(x => x.Id == userId).Select(x => new { x.Id, x.NormalizedEmail }).SingleAsync(ct);
+        var accountKey = account.NormalizedEmail ?? account.Id.ToString();
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({accountKey}))", ct);
         if (Guid.TryParse(principal.FindFirstValue("session_id"), out var sid))
         {
             var session = await db.Sessions.SingleOrDefaultAsync(x => x.Id == sid, ct);
-            if (session is not null) session.RevokedAt = DateTimeOffset.UtcNow;
+            if (session is not null)
+                await db.Sessions.Where(x => x.UserId == session.UserId && x.FamilyId == session.FamilyId && x.RevokedAt == null)
+                    .ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow), ct);
             db.AuditEvents.Add(IdentityHelpers.Audit(http, "auth.logout", principal.RequiredUserId(), principal.RequiredUserId(), new { sessionId = sid }));
             await db.SaveChangesAsync(ct);
         }
+        await transaction.CommitAsync(ct);
         await http.SignOutAsync(AuthSchemes.Application);
         return Results.NoContent();
     }
@@ -139,6 +148,9 @@ public static class IdentityEndpoints
     {
         var id = principal.RequiredUserId(); var now = DateTimeOffset.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var account = await db.Users.Where(x => x.Id == id).Select(x => new { x.Id, x.NormalizedEmail }).SingleAsync(ct);
+        var accountKey = account.NormalizedEmail ?? account.Id.ToString();
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({accountKey}))", ct);
         await db.Sessions.Where(x => x.UserId == id && x.RevokedAt == null).ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAt, now), ct);
         db.AuditEvents.Add(IdentityHelpers.Audit(http, "auth.logout_all", id, id, new { })); await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -179,6 +191,8 @@ public static class IdentityEndpoints
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
         var target = await db.Users.SingleOrDefaultAsync(x => x.Id == id, ct); if (target is null) return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "User not found.");
+        var accountKey = target.NormalizedEmail ?? target.Id.ToString();
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({accountKey}))", ct);
         if (target.Version != expected) return Results.Problem(statusCode: StatusCodes.Status412PreconditionFailed, title: "The user was changed concurrently.");
         var actorId = principal.RequiredUserId();
         if (id == actorId && (!request.IsActive || request.Role != Roles.Administrator))
@@ -213,7 +227,7 @@ public static class IdentityEndpoints
         return Results.Ok(new { target.Id, target.Role, target.OrganizationId, target.IsActive, etag = target.Version.ToString("N") });
     }
 
-    private static SessionUserDto ToSessionDto(User user) => new(user.Id, user.Email, user.DisplayName, user.PhoneNumber, user.Role,
+    internal static SessionUserDto ToSessionDto(User user) => new(user.Id, user.Email, user.DisplayName, user.PhoneNumber, user.Role,
         user.OrganizationId, user.Organization?.Name, user.IsActive,
         user.Role is not null && Roles.All.TryGetValue(user.Role, out var role) ? role.Permissions : []);
 
@@ -230,6 +244,11 @@ public sealed class MutationAntiforgeryFilter(IAntiforgery antiforgery) : IEndpo
     {
         if (!HttpMethods.IsGet(context.HttpContext.Request.Method) && !HttpMethods.IsHead(context.HttpContext.Request.Method) && !HttpMethods.IsOptions(context.HttpContext.Request.Method))
         {
+            if (context.HttpContext.GetEndpoint()?.Metadata.GetMetadata<CredentialEndpointMetadata>() is not null)
+                return await next(context);
+            var bearer = await context.HttpContext.AuthenticateAsync(AuthSchemes.Bearer);
+            if (bearer.Succeeded && bearer.Principal?.Identity?.IsAuthenticated == true)
+                return await next(context);
             try { await antiforgery.ValidateRequestAsync(context.HttpContext); }
             catch (AntiforgeryValidationException)
             {
@@ -239,6 +258,8 @@ public sealed class MutationAntiforgeryFilter(IAntiforgery antiforgery) : IEndpo
         return await next(context);
     }
 }
+
+public sealed class CredentialEndpointMetadata;
 
 public sealed class NoStoreFilter : IEndpointFilter
 {
