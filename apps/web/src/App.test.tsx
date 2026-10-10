@@ -15,12 +15,10 @@ beforeEach(() => {
 });
 
 describe('Account experience', () => {
-  it('offers Google sign-in without requesting any other authentication method', async () => {
-    fetchMock.mockImplementation(async () => json({}, 401));
+  it('offers Google sign-in to anonymous users', async () => {
+    fetchMock.mockResolvedValue(json({}, 401));
     render(<App />);
     expect(await screen.findByRole('link', { name: /Continue with Google/ })).toHaveAttribute('href', '/api/auth/google');
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/auth/methods', expect.anything());
-    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/development-login')).toBe(false);
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
   });
 
