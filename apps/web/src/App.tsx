@@ -1,13 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage, roleLabel, type User } from './api';
 import { Administration } from './Administration';
+import { LedgerWorkspace, ledgerSections } from './LedgerWorkspace';
 import { googleLoginError } from './auth-errors';
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'profile' | 'administration'>('profile');
+  const [tab, setTab] = useState<'profile' | 'administration' | 'ledger'>('profile');
   const [signingOut, setSigningOut] = useState(false);
 
   async function loadSession() {
@@ -20,10 +21,13 @@ export function App() {
 
   useEffect(() => {
     void loadSession();
+
     const expired = () => { setUser(null); setTab('profile'); };
     window.addEventListener('session-ended', expired);
     return () => window.removeEventListener('session-ended', expired);
   }, []);
+
+
 
   async function logout(all = false) {
     setSigningOut(true);
@@ -54,6 +58,7 @@ export function App() {
         <h2>Welcome to GrainLedger</h2>
         <p className="muted">Sign in with your work Google account to continue.</p>
         {(error || oauthError) && <div className="notice error" role="alert">{error || oauthError}</div>}
+
         <a className="button google" href="/api/auth/google"><span aria-hidden="true" className="google-mark">G</span> Continue with Google <span aria-hidden="true">↗</span></a>
         {error && <button className="text-button" onClick={() => void loadSession()}>Retry connection</button>}
         <div className="login-note"><strong>First time here?</strong><p>Sign in to create your profile. Your administrator will assign your company and workspace access.</p></div>
@@ -62,21 +67,25 @@ export function App() {
     </section>
   </main>;
 
+  const canOpenLedger = ledgerSections.some(section => section.permissions.some(permission => user.permissions.includes(permission)));
+
   return <div className="workspace">
     <aside className="sidebar">
       <Brand />
       <p className="nav-caption">WORKSPACE</p>
       <nav aria-label="Main navigation">
         <button aria-current={tab === 'profile' ? 'page' : undefined} onClick={() => setTab('profile')}><span aria-hidden="true">◉</span> My profile</button>
+        {canOpenLedger && <button aria-current={tab === 'ledger' ? 'page' : undefined} onClick={() => setTab('ledger')}><span aria-hidden="true">▤</span> Ledger</button>}
         {user.role === 'Administrator' && <button aria-current={tab === 'administration' ? 'page' : undefined} onClick={() => setTab('administration')}><span aria-hidden="true">▦</span> Administration</button>}
       </nav>
       <div className="sidebar-bottom"><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span>{roleLabel(user.role)}</span></div></div>
     </aside>
     <div className="workspace-body">
-      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : 'Administration'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
+      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : 'Ledger'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
       <main className="content">
         {error && <div className="notice error" role="alert">{error}</div>}
         {tab === 'administration' && user.role === 'Administrator' ? <Administration currentUser={user} />
+          : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} />
           : <Profile user={user} onUpdate={setUser} onLogoutAll={() => void logout(true)} signingOut={signingOut} />}
       </main>
     </div>
