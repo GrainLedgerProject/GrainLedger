@@ -23,6 +23,25 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
     }
 
     [Fact]
+    public async Task Logout_does_not_revoke_another_users_session_with_same_family()
+    {
+        var (first, firstSession) = await factory.SeedUserAsync(Roles.ExportStaff);
+        var (second, secondSession) = await factory.SeedUserAsync(Roles.ExportStaff);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.Sessions.Where(x => x.Id == firstSession.Id || x.Id == secondSession.Id)
+                .ExecuteUpdateAsync(x => x.SetProperty(s => s.FamilyId, Guid.Empty));
+        }
+        using var firstClient = factory.CreateRealCookieClient(first, firstSession);
+        using var secondClient = factory.CreateRealCookieClient(second, secondSession);
+        await AddCsrfAsync(firstClient);
+        Assert.Equal(HttpStatusCode.NoContent, (await firstClient.PostAsync("/api/auth/logout", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await firstClient.GetAsync("/api/auth/session")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await secondClient.GetAsync("/api/auth/session")).StatusCode);
+    }
+
+    [Fact]
     public async Task Session_requires_authentication()
     {
         using var client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

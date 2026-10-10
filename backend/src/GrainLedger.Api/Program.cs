@@ -3,6 +3,8 @@ using GrainLedger.Api.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Net;
+using GrainLedger.Api.OpenApi;
+using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 if (!builder.Environment.IsEnvironment("Testing"))
@@ -14,10 +16,26 @@ if (!builder.Environment.IsEnvironment("Testing"))
 }
 
 builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer<BearerDocumentTransformer>();
+    options.AddOperationTransformer<BearerOperationTransformer>();
+});
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddIdentityModule(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
+if (args.Contains("--seed-dev", StringComparer.Ordinal))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var created = await DevelopmentSeed.RunAsync(
+        scope.ServiceProvider.GetRequiredService<IdentityDbContext>(),
+        scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.IPasswordHasher<User>>(),
+        app.Environment.EnvironmentName, builder.Configuration["DevelopmentSeed:Password"]);
+    app.Logger.LogInformation("Development seed completed: {Created} accounts created; existing local accounts unchanged.", created);
+    return;
+}
+
 if (args.Contains("--migrate", StringComparer.Ordinal))
 {
     await using var scope = app.Services.CreateAsyncScope();
@@ -41,7 +59,15 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference("/scalar", options => options
+        .WithTitle("GrainLedger API")
+        .AddPreferredSecuritySchemes("Bearer"));
+}
+
+app.MapGet("/health", () => Results.Ok(new { status = "ok" })).WithTags("Health");
 app.MapIdentityModule();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 if (!app.Environment.IsDevelopment()) app.MapFallbackToFile("index.html");

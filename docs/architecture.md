@@ -27,11 +27,13 @@ Future business endpoints must check **both** the named permission and the resou
 
 ## Authentication
 
+Email/password API authentication is described in [the OTP/JWT and Scalar guide](auth-email-password-scalar.md). It uses JWT access tokens plus rotating opaque refresh tokens, with server-side revocation. Successful Bearer authentication does not require CSRF; the following cookie rules describe the existing Google browser flow.
+
 Google OAuth uses the backend authorization-code flow with PKCE. Google credentials and provider tokens are not exposed to React or stored in local storage. A stable Google subject identifies the account; a different subject with the same email is not automatically linked to an existing account. Verified email is required for provisioning.
 
 The application cookie carries the account/session identifiers and is HttpOnly, SameSite=Lax, and Secure in production. The database validates activity, expiry, and revocation on authenticated requests. Sessions expire after 15 minutes of inactivity; cookie sliding renewal requires continued requests. Logout revokes the current session, and logout-all revokes all the user's sessions. Access changes and account disabling invalidate sessions.
 
-Mutating API calls require `X-CSRF-TOKEN`, fetched from `/api/auth/csrf` for the current identity. OAuth uses the authentication middleware's state/correlation protection. Development supports HTTP only on localhost; production uses HTTPS and an explicitly trusted proxy list.
+Cookie-authenticated mutating API calls require `X-CSRF-TOKEN`, fetched from `/api/auth/csrf` for the current identity. OAuth uses the authentication middleware's state/correlation protection. Development supports HTTP only on localhost; production uses HTTPS and an explicitly trusted proxy list.
 
 ## HTTP contract
 
@@ -55,3 +57,24 @@ Admin endpoints require `identity.manage`. An authenticated user lacking permiss
 ## Remaining integration work
 
 Run a real Google consent flow using your project's client ID and secret, including cancellation, an unverified identity rejection, pending onboarding, first-admin onboarding, logout, and a disabled account. Automated tests substitute provider identities; they cannot verify your Google Cloud consent configuration. Future business modules still need resource-specific authorization tests when their endpoints are implemented. Buyer links, offline synchronization, and domain workflows are outside this authentication/profile slice.
+
+## Identity module layout
+
+```text
+GrainLedger.Modules.Identity/
+├── Domain/                         # Entities, organization kinds and role definitions
+├── Features/
+│   ├── Authentication/             # Local/Google login, OTP, sessions and auth contracts
+│   ├── Profile/                    # Profile endpoints and request contract
+│   └── Administration/             # Organizations and user access management
+├── Infrastructure/
+│   ├── Authentication/             # JWT, cookie validation and CSRF filter
+│   ├── Email/                      # SMTP sender, interface and delivery errors
+│   └── Persistence/                # DbContext, DevelopmentSeed and Migrations/
+├── Authorization/                  # Permission policies and current organization access
+├── Common/                         # API errors, no-store filter and shared helpers
+├── DependencyInjection.cs          # AddIdentityModule service registration
+└── EndpointMapping.cs              # MapIdentityModule route composition
+```
+
+Types keep the `GrainLedger.Modules.Identity` namespace; generated migrations retain their original namespace and contents. Endpoint files share the existing partial `IdentityEndpoints` class so route handlers and shared mappings can move without changing the public API. Contracts live alongside their features. Folder reorganization does not require a database migration or rerunning the development seed.
