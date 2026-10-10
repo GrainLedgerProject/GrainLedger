@@ -46,7 +46,7 @@ export function Evidence({ ownerId, facilityId = '', locationId = '', capture = 
     await action.run(async () => {
       if (!file || !file.size || file.size > 10485760) throw Error('Choose a nonempty evidence file, maximum 10 MiB.');
       const contentBase64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(Error('Evidence file could not be read.')); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(file); });
-      const result = await mutate<{ id: string }>(capture ? '/api/capture/evidence' : '/api/ledger/evidence', capture
+      const result = await mutate<{ id: string }>(capture ? '/api/capture-mock/evidence' : '/api/ledger/evidence', capture
         ? { id: id(), ownerOrganizationId: ownerId, locationId, fileName: file.name, mediaType: file.type || 'application/octet-stream', contentBase64 }
         : { id: id(), ownerId, facilityId, fileName: file.name, contentType: file.type || 'application/octet-stream', contentBase64 });
       onChange(result.id);

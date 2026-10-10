@@ -34,7 +34,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         var descendantPostings = await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE lot_id=@id", descendant);
         // Arrival evidence belongs to original receipt facility A, despite stock/descendants now in B.
         var arrival = await s.ArrivalAsync(receipt, "9");
-        var observation = await GetAsync(s.Manager, $"/api/capture/arrivals/{arrival}");
+        var observation = await GetAsync(s.Manager, $"/api/capture-mock/arrivals/{arrival}");
         Assert.Equal("BLOCKED", observation.GetProperty("status").GetString());
         Assert.Equal(s.EvidenceId, observation.GetProperty("evidenceId").GetGuid());
         Assert.Equal(9m, Decimal(observation.GetProperty("quantityKg"))); Assert.Equal(10m, Decimal(observation.GetProperty("expectedQuantityKg")));
@@ -142,7 +142,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
             await transaction.CommitAsync();
         });
         Assert.Contains(error.SqlState, new[] { PostgresErrorCodes.CheckViolation, PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.RaiseException });
-        var observation = await GetAsync(s.Manager, $"/api/capture/arrivals/{arrival}");
+        var observation = await GetAsync(s.Manager, $"/api/capture-mock/arrivals/{arrival}");
         Assert.Equal("BLOCKED", observation.GetProperty("status").GetString());
         Assert.Equal(9m, Decimal(observation.GetProperty("quantityKg")));
         Assert.Equal(10m, Decimal(observation.GetProperty("expectedQuantityKg")));
@@ -151,7 +151,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(0m, Quantity(await s.LotAsync(lot), "availableKg"));
         Assert.Equal(postingCount, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE lot_id=@id", lot));
         Assert.Equal(postingTotal, await ScalarAsync<decimal>("SELECT coalesce(sum(quantity_kg),0) FROM ledger.postings WHERE lot_id=@id", lot));
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/arrivals/{arrival}/corrections", new { id = Guid.NewGuid(), quantity = "10", unit = "kg", evidenceId = s.EvidenceId, reason = "Synthetic recorded evidence establishes entry error" });
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{arrival}/corrections", new { id = Guid.NewGuid(), quantity = "10", unit = "kg", evidenceId = s.EvidenceId, reason = "Synthetic recorded evidence establishes entry error" });
         Assert.Equal(10m, Quantity(await s.LotAsync(lot), "availableKg"));
         Assert.Equal(postingCount, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE lot_id=@id", lot));
         Assert.Equal(postingTotal, await ScalarAsync<decimal>("SELECT coalesce(sum(quantity_kg),0) FROM ledger.postings WHERE lot_id=@id", lot));
@@ -181,19 +181,19 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     {
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid(); var body = s.ReceiptBody(id, ["5", "7"]);
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/receipts", body);
-        var draft = await GetAsync(s.Purchaser, $"/api/capture/receipts/{id}");
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", body);
+        var draft = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{id}");
         Assert.All(draft.GetProperty("lines").EnumerateArray(), l => Assert.Equal(JsonValueKind.Null, l.GetProperty("lotId").ValueKind));
         var command = Guid.NewGuid();
         var request = new { commandId = command, version = draft.GetProperty("version").GetString() };
-        var replies = await Task.WhenAll(RawAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{id}/commit", request), RawAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{id}/commit", request));
+        var replies = await Task.WhenAll(RawAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{id}/commit", request), RawAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{id}/commit", request));
         foreach (var reply in replies) { Assert.True(reply.IsSuccessStatusCode, await reply.Content.ReadAsStringAsync()); reply.Dispose(); }
-        var receipt = await GetAsync(s.Purchaser, $"/api/capture/receipts/{id}");
+        var receipt = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{id}");
         Assert.Equal(2, Lots(receipt).Distinct().Count());
         Assert.Equal(12m, (await Task.WhenAll(Lots(receipt).Select(l => s.LotAsync(l)))).Sum(l => Quantity(l)));
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture/receipts", s.ReceiptBody(id, ["99"]), HttpStatusCode.Conflict);
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(id, ["99"]), HttpStatusCode.Conflict);
         Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{id}/commit", new { commandId = command, version = Guid.NewGuid() }, HttpStatusCode.Conflict);
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{id}/commit", new { commandId = command, version = Guid.NewGuid() }, HttpStatusCode.Conflict);
         await AssertProjectionAsync();
     }
 
@@ -202,16 +202,16 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     {
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid();
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/receipts", s.ReceiptBody(id, ["5", "7"]));
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(id, ["5", "7"]));
         await WithPostingFailureAsync(async () =>
         {
-            var draft = await GetAsync(s.Purchaser, $"/api/capture/receipts/{id}");
-            using var result = await RawAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{id}/commit", new { commandId = Guid.NewGuid(), version = draft.GetProperty("version").GetString() });
+            var draft = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{id}");
+            using var result = await RawAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{id}/commit", new { commandId = Guid.NewGuid(), version = draft.GetProperty("version").GetString() });
             Assert.False(result.IsSuccessStatusCode);
-            Assert.Equal("DRAFT", (await GetAsync(s.Purchaser, $"/api/capture/receipts/{id}")).GetProperty("status").GetString());
+            Assert.Equal("DRAFT", (await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{id}")).GetProperty("status").GetString());
             Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
             Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE details->>'receiptId'=CAST(@id AS text)", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.receipt_lots m JOIN capture.receipt_lines l ON l.id=m.receipt_line_id WHERE l.receipt_id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture_mock.receipt_lots m JOIN capture_mock.receipt_lines l ON l.id=m.receipt_line_id WHERE l.receipt_id=@id", id));
         });
         var receipt = await s.CommitReceiptAsync(id);
         Assert.Equal(12m, (await Task.WhenAll(Lots(receipt).Select(l => s.LotAsync(l)))).Sum(l => Quantity(l)));
@@ -430,21 +430,21 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         var receipt = await s.ReceiptAsync("10"); var lot = Lots(receipt)[0];
         var arrival = await s.ArrivalAsync(receipt, "9");
         Assert.Equal(10m, Quantity(await s.LotAsync(lot))); Assert.Equal(0m, Quantity(await s.LotAsync(lot), "availableKg"));
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/arrivals/{arrival}/investigations", new { id = Guid.NewGuid(), cause = "REAL_DIFFERENCE", evidenceId = s.EvidenceId, reason = "Synthetic unresolved transport shortage" });
-        var blocked = await GetAsync(s.Manager, $"/api/capture/arrivals/{arrival}");
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{arrival}/investigations", new { id = Guid.NewGuid(), cause = "REAL_DIFFERENCE", evidenceId = s.EvidenceId, reason = "Synthetic unresolved transport shortage" });
+        var blocked = await GetAsync(s.Manager, $"/api/capture-mock/arrivals/{arrival}");
         Assert.Equal(9m, Decimal(blocked.GetProperty("quantityKg"))); Assert.Equal(10m, Decimal(blocked.GetProperty("expectedQuantityKg")));
         Assert.Equal("BLOCKED", blocked.GetProperty("status").GetString());
-        await RejectedAsync(s.Manager, HttpMethod.Post, $"/api/capture/arrivals/{arrival}/corrections", new { id = Guid.NewGuid(), quantity = "10", unit = "kg", evidenceId = s.EvidenceId, reason = "Cannot disguise established real difference as entry correction" }, HttpStatusCode.Conflict);
+        await RejectedAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{arrival}/corrections", new { id = Guid.NewGuid(), quantity = "10", unit = "kg", evidenceId = s.EvidenceId, reason = "Cannot disguise established real difference as entry correction" }, HttpStatusCode.Conflict);
         Assert.Equal(10m, Quantity(await s.LotAsync(lot))); Assert.Equal(0m, Quantity(await s.LotAsync(lot), "availableKg"));
         receipt = await s.ReceiptAsync("10"); lot = Lots(receipt)[0];
         arrival = await s.ArrivalAsync(receipt, "9");
         await s.HoldAsync(lot);
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/arrivals/{arrival}/corrections", new { id = Guid.NewGuid(), quantity = "10", unit = "kg", evidenceId = s.EvidenceId, reason = "Synthetic evidence establishes entry error" });
-        var corrected = await GetAsync(s.Manager, $"/api/capture/arrivals/{arrival}");
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{arrival}/corrections", new { id = Guid.NewGuid(), quantity = "10", unit = "kg", evidenceId = s.EvidenceId, reason = "Synthetic evidence establishes entry error" });
+        var corrected = await GetAsync(s.Manager, $"/api/capture-mock/arrivals/{arrival}");
         Assert.Equal(9m, Decimal(corrected.GetProperty("quantityKg")));
         Assert.Equal(10m, Decimal(corrected.GetProperty("corrections")[0].GetProperty("quantityKg")));
         Assert.Equal(10m, Quantity(await s.LotAsync(lot))); Assert.Equal(0m, Quantity(await s.LotAsync(lot), "availableKg"));
-        var preserved = await GetAsync(s.Purchaser, $"/api/capture/receipts/{receipt.GetProperty("id").GetGuid()}");
+        var preserved = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{receipt.GetProperty("id").GetGuid()}");
         Assert.Equal(receipt.GetProperty("lines").GetRawText(), preserved.GetProperty("lines").GetRawText());
         await AssertProjectionAsync();
     }
@@ -455,7 +455,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         using var s = await CreateAsync(factory);
         var receipt = await s.ReceiptAsync("10"); var lot = Lots(receipt)[0];
         var op = await s.DraftAsync("DRYING", [(lot, "5")], [("DRIED_PADDY", "5")]);
-        var replies = await Task.WhenAll(RawAsync(s.Operator, HttpMethod.Post, "/api/capture/arrivals", new { id = Guid.NewGuid(), receiptLineId = Lines(receipt)[0], quantity = "9", unit = "kg", evidenceId = s.EvidenceId, observedAt = DateTimeOffset.UtcNow }), RawAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{op.GetProperty("id").GetGuid()}/commit", new { }));
+        var replies = await Task.WhenAll(RawAsync(s.Operator, HttpMethod.Post, "/api/capture-mock/arrivals", new { id = Guid.NewGuid(), receiptLineId = Lines(receipt)[0], quantity = "9", unit = "kg", evidenceId = s.EvidenceId, observedAt = DateTimeOffset.UtcNow }), RawAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{op.GetProperty("id").GetGuid()}/commit", new { }));
         Assert.True(replies[0].IsSuccessStatusCode, await replies[0].Content.ReadAsStringAsync());
         Assert.Contains(replies[1].StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.Conflict });
         foreach (var reply in replies) reply.Dispose();
@@ -472,7 +472,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         using var denied = await s.ForeignCustomer.GetAsync($"/api/ledger/lots/{source}"); Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         Assert.DoesNotContain((await GetAsync(s.ForeignCustomer, "/api/ledger/lots")).EnumerateArray(), l => l.GetProperty("id").GetGuid() == source);
         Assert.Empty((await GetAsync(s.Operator, $"/api/ledger/lots?facilityId={s.ForeignFacilityId}&search=SRC")).EnumerateArray());
-        using var captureDenied = await s.Operator.GetAsync("/api/capture/farmers"); Assert.Equal(HttpStatusCode.Forbidden, captureDenied.StatusCode);
+        using var captureDenied = await s.Operator.GetAsync("/api/capture-mock/farmers"); Assert.Equal(HttpStatusCode.Forbidden, captureDenied.StatusCode);
         using var evidenceDenied = await s.ForeignCustomer.GetAsync($"/api/ledger/evidence/{s.EvidenceId}"); Assert.Equal(HttpStatusCode.Forbidden, evidenceDenied.StatusCode);
         var lot = await s.LotAsync(source);
         Assert.False(lot.TryGetProperty("phoneNumber", out _)); Assert.False(lot.TryGetProperty("farmer", out _)); Assert.False(lot.TryGetProperty("evidence", out _));
@@ -530,7 +530,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     public async Task Unsupported_precision_overflow_and_nonpositive_receipts_fail(string quantity)
     {
         using var s = await CreateAsync(factory);
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture/receipts", s.ReceiptBody(Guid.NewGuid(), [quantity]));
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(Guid.NewGuid(), [quantity]));
     }
 
     [Fact]

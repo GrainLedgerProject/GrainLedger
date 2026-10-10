@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace GrainLedger.Modules.Capture;
+namespace GrainLedger.Modules.MockCapture;
 
 public sealed record FarmerRequest(Guid Id, Guid OwnerOrganizationId, string Name, string? PhoneNumber);
 public sealed record PlotRequest(Guid Id, Guid FarmerId, string Name, string Latitude, string Longitude);
@@ -41,12 +41,12 @@ public sealed record ReceiptCorrectionDto(Guid Id, Guid ReceiptId, string Reason
     ReceiptDto Replacement, string Status, Guid? EvidenceId, string? ReconciliationReason,
     VerifiedReceiptLine[] VerifiedLines, DateTimeOffset CreatedAt);
 
-public sealed class CaptureFault(int statusCode, string message) : Exception(message)
+public sealed class MockCaptureFault(int statusCode, string message) : Exception(message)
 {
     public int StatusCode { get; } = statusCode;
 }
 
-public static class CaptureMeasure
+public static class MockCaptureMeasure
 {
     public const decimal MaximumKg = 99999999999999.999999m;
 
@@ -62,12 +62,12 @@ public static class CaptureMeasure
                 "kg" => value,
                 "g" => value / 1000m,
                 "t" => checked(value * 1000m),
-                _ => throw new CaptureFault(400, "Supported measurement units are kg, g and t.")
+                _ => throw new MockCaptureFault(400, "Supported measurement units are kg, g and t.")
             };
         }
-        catch (OverflowException) { throw new CaptureFault(400, "Measurement exceeds numeric(20,6) capacity."); }
+        catch (OverflowException) { throw new MockCaptureFault(400, "Measurement exceeds numeric(20,6) capacity."); }
         if (kg <= 0 || kg > MaximumKg || decimal.Truncate(kg * 1000000m) != kg * 1000000m)
-            throw new CaptureFault(400, "Measurement must be positive and convert exactly to numeric(20,6) kg.");
+            throw new MockCaptureFault(400, "Measurement must be positive and convert exactly to numeric(20,6) kg.");
         return kg;
     }
 
@@ -76,7 +76,7 @@ public static class CaptureMeasure
     public static decimal Coordinate(string value, decimal limit)
     {
         var coordinate = Decimal(value, true);
-        if (coordinate < -limit || coordinate > limit) throw new CaptureFault(400, "Coordinates are outside geographic bounds.");
+        if (coordinate < -limit || coordinate > limit) throw new MockCaptureFault(400, "Coordinates are outside geographic bounds.");
         return coordinate;
     }
 
@@ -86,7 +86,7 @@ public static class CaptureMeasure
             !Regex.IsMatch(value, signed ? @"^-?[0-9]+(?:\.[0-9]{1,6})?$" : @"^[0-9]+(?:\.[0-9]{1,6})?$", RegexOptions.CultureInvariant) ||
             !decimal.TryParse(value, signed ? NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint : NumberStyles.AllowDecimalPoint,
                 CultureInfo.InvariantCulture, out var result))
-            throw new CaptureFault(400, "Decimal strings must have at most six fractional digits; exponent notation is unsupported.");
+            throw new MockCaptureFault(400, "Decimal strings must have at most six fractional digits; exponent notation is unsupported.");
         return result;
     }
 }

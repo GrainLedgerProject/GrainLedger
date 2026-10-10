@@ -1,6 +1,6 @@
 # Ledger implementation and verification
 
-Status: implemented. Identity, Ledger and Capture backend modules, migrations, protected runtime boundary and permission-gated web workflows landed. Final suite/build and actual browser evidence are recorded in section 5. Business policies and evidence used for verification are synthetic; no factory/supervisor approval or live Google consent is claimed.
+Status: ledger and synthetic Development/Testing MockCapture workflows implemented. Identity and Ledger remain normal host modules; MockCapture owns durable synthetic sources, receipts and receiving workflows in isolated `capture_mock`. It is unavailable in Production and has no automatic migration to future real Capture. Earlier verification notes predate this MockCapture cutover; latest cutover verification is recorded in section 5.
 
 ## 1. Scope and sources
 
@@ -40,9 +40,9 @@ Not included: offline capture, pesticide declarations, sampling/lab workflows, r
 
 See `docs/architecture.md` for module structure, role provisioning, UI workflow map, runtime/migration deployment steps, exact numeric and lineage guarantees, and explicit exclusions.
 
-- Identity, Ledger and Capture are host-loaded modules with owned schemas/migrations; no EF entities cross module boundaries.
-- Capture source/receipt records and Ledger lot, posting, package guards share a PostgreSQL transaction; no cross-module commit.
-- Runtime login is pre-created, restricted and non-owner. `--migrate` requires `ConnectionStrings:GrainLedgerMigration`, applies Identity → Ledger → Capture, then grants finite runtime permissions to `Ledger:RuntimeRole`. Ordinary startup uses `ConnectionStrings:GrainLedger`, rejects owner/elevated privileges and never migrates. Never use postgres superuser as app runtime.
+- Identity and Ledger are host modules with owned schemas/migrations; MockCapture is a durable synthetic Development/Testing module with isolated `capture_mock` schema and history table. No EF entities cross module boundaries.
+- MockCapture source/receipt records and Ledger lot, posting, package guards share a PostgreSQL transaction; no cross-module commit.
+- Runtime login is pre-created, restricted and non-owner. Production migration order excludes MockCapture. Development/Testing migration applies its isolated schema only in those environments; ordinary startup never migrates. Never use postgres superuser as app runtime or point Development migration at production/a teammate database.
 - Ledger mutation goes through finite protected PostgreSQL commands; runtime cannot directly mutate Ledger tables/projections. Protected SECURITY DEFINER routines use fixed search path, revoked PUBLIC execute, persisted actor checks and DB-enforced invariants.
 - Source/stock writes acquire transaction advisory lock `714928352` before source/stock rows. READ COMMITTED required so statement snapshots refresh after lock wait; other isolation levels reject. One global lock is intentional serialization/throughput ceiling. Ordered per-lot/location locks only if measured contention warrants complexity.
 - No broker, separate service, generic workflow engine or frontend framework.
@@ -53,9 +53,11 @@ See `docs/architecture.md` for module structure, role provisioning, UI workflow 
 
 Setup configures facilities, locations, equipment, commodities, staff assignments, compartment occupancy/clearance, evidence-backed effective tolerance policies and blend compatibility. Customer/staff safe lookups expose only needed non-sensitive IDs/names. Authorization checks persisted actor, permission, owner and facility; UI gating is not security.
 
-Administrator manages platform/accounts, but has no inherited processing, variance approval, correction/receiving reconciliation, HOLD response or other business authority. Mill Manager and Mill Operator require explicit permission and assigned facility. Operator data excludes farmer contacts and unrelated sensitive Capture/evidence/reconciliation fields. Purchasing Staff owns own-company farmer/purchasing data.
+Administrator manages platform/accounts, but has no inherited processing, variance approval, correction/receiving reconciliation, HOLD response or other business authority. Mill Manager and Mill Operator require explicit permission and assigned facility. Operator data excludes farmer contacts and unrelated sensitive synthetic source/evidence/reconciliation fields. Purchasing Staff owns own-company synthetic farmer/purchasing data in Development/Testing.
 
 ### Receipt and receiving
+
+Synthetic source/receiving routes are `/api/capture-mock/*`, Development/Testing only. `/api/capture-mock/status` returns `{ "synthetic": true }` when enabled. Sources & receiving UI hides when unavailable; Ledger sections remain usable. Committed synthetic receipts create durable receipt-derived Ledger stock. No automatic migration to future real Capture.
 
 - A receipt draft has no stock effect. Commit creates one RAW_PADDY source lot and matching credit per positive line, atomically with persisted source records.
 - Persist original quantity text/unit, including leading zeroes. Normalize exactly: kg = quantity; g = quantity / 1000; t = quantity × 1000. Original text permits at most six fractional digits; normalized kg must fit positive `numeric(20,6)` up to `99999999999999.999999`, without rounding. `0.001 g` converts to `0.000001 kg`; `0.0001 g` is rejected. Reject exponent notation, excess precision, overflow and nonpositive inputs. Decimal strings cross API, never floating-point mass math.
@@ -81,7 +83,7 @@ Administrator manages platform/accounts, but has no inherited processing, varian
 - Independent HOLD/restrictions cannot be cleared by correction. Held original cannot be corrected as a release path; replacement retains applicable HOLD.
 - Evidence bytes, committed source receipt/header/lines, original observations, appended corrections/investigations and postings are durable and immutable; evidence is not a mutable URL. Downloads require current owner/facility scope. Operator event details omit evidence/reconciliation secret payloads.
 
-Exact routes/DTO implementations: [Ledger module](../backend/src/GrainLedger.Modules.Ledger/) and [Capture module](../backend/src/GrainLedger.Modules.Capture/).
+Exact routes/DTO implementations: [Ledger module](../backend/src/GrainLedger.Modules.Ledger/) and [MockCapture module](../backend/src/GrainLedger.Modules.MockCapture/). MockCapture routes/schema are Development/Testing only.
 
 ## 4. Stage matrix — implementation baseline
 
@@ -102,7 +104,7 @@ Milling records positive fractions actually produced, not fabricated four output
 
 ## 5. Verification and acceptance
 
-Required suite coverage: concurrency/overspend and atomic rollback; authorization and facility scope; idempotency/conflict; policy/compatibility fail closed; variance confirmation invalidation; exact lineage rounding; transfer identity; HOLD/correction/receiving races; immutable evidence/history and one-time reversal; unit precision and coherent Capture source; correction lot-code identity chain and copied HOLD; runtime direct-mutation denial; actual byproducts and product identity. Integration tests use PostgreSQL/Testcontainers, not in-memory DB.
+Required suite coverage: concurrency/overspend and atomic rollback; authorization and facility scope; idempotency/conflict; policy/compatibility fail closed; variance confirmation invalidation; exact lineage rounding; transfer identity; HOLD/correction/receiving races; immutable evidence/history and one-time reversal; unit precision and coherent synthetic MockCapture source; correction lot-code identity chain and copied HOLD; runtime direct-mutation denial; actual byproducts and product identity. Integration tests use PostgreSQL/Testcontainers, not in-memory DB. Test results below include latest MockCapture cutover checks; earlier workflow observations predate it.
 
 ### Nine-step smoke/test workflow
 
@@ -126,7 +128,7 @@ Implementation owner reported these completed checks; documentation owner did no
 - Final `dotnet test GrainLedger.slnx --no-build`: **87 passed, 0 failed**.
 - `npm test`: **14 passed**.
 - Final `npm run build`: **passed**.
-- Production deployment smoke on disposable **PostgreSQL 17**: actual host `--migrate` succeeded in Identity → Ledger → Capture order using a separate non-superuser migration owner granted database `CONNECT, CREATE` and `public` schema `USAGE, CREATE`. Actual Production host started using non-superuser/non-owner runtime login; `/health` returned **200**, anonymous Ledger request **401**. Starting the host with migration-owner credentials was rejected with the explicit owner-role error. Identity's existing history mapping stayed unchanged. Compose example uses PostgreSQL 18; this smoke exercised PostgreSQL 17.
+- Historical production deployment smoke predated the MockCapture cutover. It does not verify current migration order or MockCapture Development/Testing behavior; do not use it as evidence for this module.
 
 Actual browser workflows exercised a restricted PostgreSQL runtime API with real app cookies and CSRF through a test-only authentication host:
 
@@ -136,6 +138,8 @@ Actual browser workflows exercised a restricted PostgreSQL runtime API with real
 - Customer HOLD on corrected **88 kg**: manager isolated **88 kg**, uploaded evidence and responded; notification read retained HOLD and available **0**.
 - Foreign customer: empty lists and lot-detail **403**. Operator unassigned facility: list `[]`; farmer contacts **403**. Pending account: **403**, no Ledger navigation. Anonymous: **401**.
 - Latest duplicate-code selector disambiguation was visually verified.
+
+Latest MockCapture cutover verification reported by implementation owner: **113 backend tests and 23 frontend tests passed**; frontend build passed. Browser workflow registered a synthetic farmer and committed a **10 kg** receipt that appeared in Ledger stock; old `/api/capture/farmers` returned **404**. Fresh Production migrations created no `capture_mock` schema and Production `/api/capture-mock/status` returned **404**. A forward upgrade was verified against an isolated initial Ledger database. Incompatible teammate farmers schema/row and Production teammate fixture remained unchanged; `.env` and Supabase were unchanged.
 
 Policies and evidence were explicitly synthetic. Test/browser authentication harness is not a production login bypass. Live Google consent, factory approval and real-stock pilot approval are not established by these checks.
 

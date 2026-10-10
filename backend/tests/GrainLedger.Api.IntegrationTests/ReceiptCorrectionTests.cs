@@ -12,10 +12,10 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
     internal static async Task<(Guid CorrectionId, Guid ReplacementId)> RequestAsync(LedgerScenario s, JsonElement receipt, string quantity)
     {
         var correction = Guid.NewGuid(); var replacement = Guid.NewGuid();
-        await SendAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = correction, reason = "SYNTHETIC evidence-backed procurement-entry correction", replacement = s.ReceiptBody(replacement, [quantity]) });
-        var detail = await GetAsync(s.Purchaser, $"/api/capture/receipt-corrections/{correction}");
+        await SendAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = correction, reason = "SYNTHETIC evidence-backed procurement-entry correction", replacement = s.ReceiptBody(replacement, [quantity]) });
+        var detail = await GetAsync(s.Purchaser, $"/api/capture-mock/receipt-corrections/{correction}");
         var lines = detail.GetProperty("replacement").GetProperty("lines").EnumerateArray().Select(line => new { receiptLineId = line.GetProperty("id").GetGuid(), quantityKg = line.GetProperty("quantityKg").GetString() }).ToArray();
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/receipt-corrections/{correction}/reconcile", new { commandId = Guid.NewGuid(), evidenceId = s.EvidenceId, reason = "Synthetic physical replacement quantity verified", verifiedLines = lines });
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{correction}/reconcile", new { commandId = Guid.NewGuid(), evidenceId = s.EvidenceId, reason = "Synthetic physical replacement quantity verified", verifiedLines = lines });
         return (correction, replacement);
     }
 
@@ -39,17 +39,17 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         await CsrfAsync(currentClient);
         var retry = new { id, ownerOrganizationId = s.OwnerId, locationId = s.LocationId, fileName, mediaType = "text/plain", contentBase64 = encoded };
         // Same actor now lacks facility A authority: old ownership must not authorize replay.
-        await RejectedAsync(currentClient, HttpMethod.Post, "/api/capture/evidence", retry, HttpStatusCode.Forbidden);
+        await RejectedAsync(currentClient, HttpMethod.Post, "/api/capture-mock/evidence", retry, HttpStatusCode.Forbidden);
         await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/assignments", new { userId = actor.Id, facilityId = s.FacilityId });
         // Current authority restored: role/org transition itself must not forbid exact same-actor replay.
-        var replayed = await SendAsync(currentClient, HttpMethod.Post, "/api/capture/evidence", retry);
+        var replayed = await SendAsync(currentClient, HttpMethod.Post, "/api/capture-mock/evidence", retry);
         Assert.Equal(id, replayed.GetProperty("id").GetGuid());
         Assert.Equal(stored.GetProperty("sha256").GetString(), replayed.GetProperty("sha256").GetString());
         Assert.Equal(Convert.FromBase64String(encoded), await s.Customer.GetByteArrayAsync($"/api/ledger/evidence/{id}"));
     }
 
     [Fact]
-    public async Task Capture_evidence_retry_recovers_preexisting_exact_content_without_allowing_actor_or_content_substitution()
+    public async Task MockCapture_evidence_retry_recovers_preexisting_exact_content_without_allowing_actor_or_content_substitution()
     {
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid(); var bytes = "SYNTHETIC durable evidence replay"u8.ToArray();
@@ -64,11 +64,11 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         await using (var runtime = new NpgsqlConnection(factory.RuntimeConnectionString))
         {
             await runtime.OpenAsync();
-            await using var command = new NpgsqlCommand("SELECT count(*) FROM capture.commands WHERE kind='evidence' AND id=$1", runtime);
+            await using var command = new NpgsqlCommand("SELECT count(*) FROM capture_mock.commands WHERE kind='evidence' AND id=$1", runtime);
             command.Parameters.AddWithValue(id);
             Assert.Equal(0L, await command.ExecuteScalarAsync());
         }
-        // Exercise orphaned durable evidence before any successful Capture command memo exists.
+        // Exercise orphaned durable evidence before any successful MockCapture command memo exists.
         foreach (var (field, value) in new[]
         {
             ("contentBase64", Convert.ToBase64String("changed bytes"u8.ToArray())),
@@ -78,19 +78,19 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         })
         {
             var changed = JsonSerializer.SerializeToNode(retry)!.AsObject(); changed[field] = value;
-            await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture/evidence", changed, HttpStatusCode.Forbidden, HttpStatusCode.Conflict);
+            await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/evidence", changed, HttpStatusCode.Forbidden, HttpStatusCode.Conflict);
         }
         var (otherActor, otherSession) = await factory.SeedUserAsync(GrainLedger.Modules.Identity.Roles.PurchasingStaff, s.OwnerId);
         using var otherClient = factory.CreateRealCookieClient(otherActor, otherSession); await CsrfAsync(otherClient);
-        await RejectedAsync(otherClient, HttpMethod.Post, "/api/capture/evidence", retry, HttpStatusCode.Forbidden, HttpStatusCode.Conflict);
-        var recovered = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/evidence", retry);
+        await RejectedAsync(otherClient, HttpMethod.Post, "/api/capture-mock/evidence", retry, HttpStatusCode.Forbidden, HttpStatusCode.Conflict);
+        var recovered = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/evidence", retry);
         Assert.Equal(id, recovered.GetProperty("id").GetGuid());
         Assert.Equal(stored.GetProperty("sha256").GetString(), recovered.GetProperty("sha256").GetString());
-        var repeated = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/evidence", retry);
+        var repeated = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/evidence", retry);
         Assert.Equal(recovered.GetRawText(), repeated.GetRawText());
-        Assert.Equal(bytes, await s.Purchaser.GetByteArrayAsync($"/api/capture/evidence/{id}"));
+        Assert.Equal(bytes, await s.Purchaser.GetByteArrayAsync($"/api/capture-mock/evidence/{id}"));
         Assert.Equal(bytes, await s.Customer.GetByteArrayAsync($"/api/ledger/evidence/{id}"));
-        await RejectedAsync(otherClient, HttpMethod.Post, "/api/capture/evidence", retry, HttpStatusCode.Forbidden, HttpStatusCode.Conflict);
+        await RejectedAsync(otherClient, HttpMethod.Post, "/api/capture-mock/evidence", retry, HttpStatusCode.Forbidden, HttpStatusCode.Conflict);
     }
 
     [Fact]
@@ -100,12 +100,12 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         var receipt = await s.ReceiptAsync("10"); var lot = Lots(receipt)[0]; var arrival = Guid.NewGuid();
         var body = new { id = arrival, receiptLineId = Lines(receipt)[0], quantity = "9", unit = "kg", evidenceId = s.EvidenceId, observedAt = DateTimeOffset.UtcNow };
         await RuntimeMutationRejectedAsync(
-            "INSERT INTO capture.arrivals(id,receipt_line_id,body,quantity_kg,actor_id) VALUES(@id,@line,@body::jsonb,9,@actor)",
+            "INSERT INTO capture_mock.arrivals(id,receipt_line_id,body,quantity_kg,actor_id) VALUES(@id,@line,@body::jsonb,9,@actor)",
             ("id", arrival), ("line", Lines(receipt)[0]), ("body", JsonSerializer.Serialize(body)), ("actor", s.Accounts["operator"].User.Id));
-        Assert.DoesNotContain((await GetAsync(s.Purchaser, "/api/capture/arrivals")).EnumerateArray(), a => a.GetProperty("id").GetGuid() == arrival);
+        Assert.DoesNotContain((await GetAsync(s.Purchaser, "/api/capture-mock/arrivals")).EnumerateArray(), a => a.GetProperty("id").GetGuid() == arrival);
         Assert.Equal(10m, Quantity(await s.LotAsync(lot))); Assert.Equal(10m, Quantity(await s.LotAsync(lot), "availableKg"));
         var recorded = await s.ArrivalAsync(receipt, "9");
-        Assert.Equal("BLOCKED", (await GetAsync(s.Purchaser, $"/api/capture/arrivals/{recorded}")).GetProperty("status").GetString());
+        Assert.Equal("BLOCKED", (await GetAsync(s.Purchaser, $"/api/capture-mock/arrivals/{recorded}")).GetProperty("status").GetString());
         Assert.Equal(10m, Quantity(await s.LotAsync(lot))); Assert.Equal(0m, Quantity(await s.LotAsync(lot), "availableKg"));
     }
 
@@ -116,17 +116,17 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         var original = await s.ReceiptAsync("10"); var source = Lots(original)[0];
         var replacementId = Guid.NewGuid(); var correction = Guid.NewGuid();
         var replacementBody = s.ReceiptBody(replacementId, ["9"]);
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/receipts", replacementBody);
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", replacementBody);
         await RuntimeMutationRejectedAsync(
-            "UPDATE capture.receipts SET replacement_for=@original WHERE id=@replacement; INSERT INTO capture.receipt_corrections(id,receipt_id,replacement_receipt_id,body,created_by) VALUES(@id,@original,@replacement,@body::jsonb,@actor)",
+            "UPDATE capture_mock.receipts SET replacement_for=@original WHERE id=@replacement; INSERT INTO capture_mock.receipt_corrections(id,receipt_id,replacement_receipt_id,body,created_by) VALUES(@id,@original,@replacement,@body::jsonb,@actor)",
             ("id", correction), ("original", original.GetProperty("id").GetGuid()), ("replacement", replacementId),
             ("body", JsonSerializer.Serialize(new { id = correction, reason = "Synthetic standalone correction regression", replacement = replacementBody })), ("actor", s.Accounts["purchaser"].User.Id));
-        Assert.DoesNotContain((await GetAsync(s.Purchaser, "/api/capture/receipt-corrections")).EnumerateArray(), c => c.GetProperty("id").GetGuid() == correction);
-        Assert.Equal(JsonValueKind.Null, (await GetAsync(s.Purchaser, $"/api/capture/receipts/{replacementId}")).GetProperty("replacementForReceiptId").ValueKind);
+        Assert.DoesNotContain((await GetAsync(s.Purchaser, "/api/capture-mock/receipt-corrections")).EnumerateArray(), c => c.GetProperty("id").GetGuid() == correction);
+        Assert.Equal(JsonValueKind.Null, (await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{replacementId}")).GetProperty("replacementForReceiptId").ValueKind);
         Assert.Equal(10m, Quantity(await s.LotAsync(source))); Assert.Equal(10m, Quantity(await s.LotAsync(source), "availableKg"));
         var (validCorrection, validReplacement) = await RequestAsync(s, original, "9");
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/receipt-corrections/{validCorrection}/commit", new { commandId = Guid.NewGuid() });
-        var corrected = await GetAsync(s.Purchaser, $"/api/capture/receipts/{validReplacement}");
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{validCorrection}/commit", new { commandId = Guid.NewGuid() });
+        var corrected = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{validReplacement}");
         Assert.Equal(0m, Quantity(await s.LotAsync(source))); Assert.Equal(9m, Quantity(await s.LotAsync(Lots(corrected)[0])));
     }
 
@@ -150,29 +150,29 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         else
         {
             receiptId = Guid.NewGuid();
-            await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/receipts", s.ReceiptBody(receiptId, ["10"]));
+            await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(receiptId, ["10"]));
         }
-        var draft = await GetAsync(s.Purchaser, $"/api/capture/receipts/{receiptId}"); var line = Lines(draft)[0];
+        var draft = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{receiptId}"); var line = Lines(draft)[0];
         var alternate = Guid.NewGuid();
         if (field == "commodity")
             await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/commodities", new { id = alternate, name = $"Synthetic alternate commodity {alternate:N}" });
         if (field == "plotSeason")
         {
             var plot = Guid.NewGuid();
-            await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/plots", new { id = plot, farmerId = s.FarmerId, name = "Synthetic alternate plot", latitude = "10", longitude = "106" });
-            await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/plot-seasons", new { id = alternate, plotId = plot, seasonId = s.SeasonId });
+            await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/plots", new { id = plot, farmerId = s.FarmerId, name = "Synthetic alternate plot", latitude = "10", longitude = "106" });
+            await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/plot-seasons", new { id = alternate, plotId = plot, seasonId = s.SeasonId });
         }
         var sql = field switch
         {
-            "quantity" => "UPDATE capture.receipt_lines SET quantity_kg=11,body=jsonb_set(body,'{quantity}','\"11\"'::jsonb) WHERE id=@line",
-            "commodity" => "UPDATE capture.receipt_lines SET commodity_id=@alternate,body=jsonb_set(body,'{commodityId}',to_jsonb(CAST(@alternate AS text))) WHERE id=@line",
-            _ => "UPDATE capture.receipt_lines SET plot_season_id=@alternate,body=jsonb_set(body,'{plotSeasonId}',to_jsonb(CAST(@alternate AS text))) WHERE id=@line"
+            "quantity" => "UPDATE capture_mock.receipt_lines SET quantity_kg=11,body=jsonb_set(body,'{quantity}','\"11\"'::jsonb) WHERE id=@line",
+            "commodity" => "UPDATE capture_mock.receipt_lines SET commodity_id=@alternate,body=jsonb_set(body,'{commodityId}',to_jsonb(CAST(@alternate AS text))) WHERE id=@line",
+            _ => "UPDATE capture_mock.receipt_lines SET plot_season_id=@alternate,body=jsonb_set(body,'{plotSeasonId}',to_jsonb(CAST(@alternate AS text))) WHERE id=@line"
         };
         await RuntimeMutationRejectedAsync(sql, ("line", line), ("alternate", alternate));
         if (correctionId is not null)
-            await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/receipt-corrections/{correctionId}/commit", new { commandId = Guid.NewGuid() });
+            await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{correctionId}/commit", new { commandId = Guid.NewGuid() });
         else await s.CommitReceiptAsync(receiptId);
-        var committed = await GetAsync(s.Purchaser, $"/api/capture/receipts/{receiptId}"); var source = Lots(committed)[0];
+        var committed = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{receiptId}"); var source = Lots(committed)[0];
         Assert.Equal(correction ? 9m : 10m, Quantity(await s.LotAsync(source)));
         Assert.Equal(s.CommodityId, committed.GetProperty("lines")[0].GetProperty("commodityId").GetGuid());
         Assert.Equal(s.PlotSeasonId, committed.GetProperty("lines")[0].GetProperty("plotSeasonId").GetGuid());
@@ -202,30 +202,30 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         var correction = Guid.NewGuid(); var replacementId = Guid.NewGuid();
         var replacementBody = JsonSerializer.SerializeToNode(s.ReceiptBody(replacementId, ["9"]))!.AsObject();
         replacementBody["lines"]![0]!["lotCode"] = code;
-        await SendAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{original.GetProperty("id").GetGuid()}/corrections", new { id = correction, reason = "Synthetic quantity-only correction retains original physical lot code", replacement = replacementBody });
-        var detail = await GetAsync(s.Purchaser, $"/api/capture/receipt-corrections/{correction}");
+        await SendAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{original.GetProperty("id").GetGuid()}/corrections", new { id = correction, reason = "Synthetic quantity-only correction retains original physical lot code", replacement = replacementBody });
+        var detail = await GetAsync(s.Purchaser, $"/api/capture-mock/receipt-corrections/{correction}");
         var verifiedLines = detail.GetProperty("replacement").GetProperty("lines").EnumerateArray().Select(line => new { receiptLineId = line.GetProperty("id").GetGuid(), quantityKg = line.GetProperty("quantityKg").GetString() }).ToArray();
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/receipt-corrections/{correction}/reconcile", new { commandId = Guid.NewGuid(), evidenceId = s.EvidenceId, reason = "Synthetic corrected physical stock verified", verifiedLines });
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/receipt-corrections/{correction}/commit", new { commandId = Guid.NewGuid() });
-        var replacement = await GetAsync(s.Purchaser, $"/api/capture/receipts/{replacementId}");
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{correction}/reconcile", new { commandId = Guid.NewGuid(), evidenceId = s.EvidenceId, reason = "Synthetic corrected physical stock verified", verifiedLines });
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{correction}/commit", new { commandId = Guid.NewGuid() });
+        var replacement = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{replacementId}");
         var correctedSource = Lots(replacement)[0];
         Assert.NotEqual(source, correctedSource);
         Assert.Equal(code, replacement.GetProperty("lines")[0].GetProperty("lotCode").GetString());
         Assert.Equal(code, (await s.LotAsync(source)).GetProperty("code").GetString());
         Assert.Equal(0m, Quantity(await s.LotAsync(source)));
         Assert.Equal(9m, Quantity(await s.LotAsync(correctedSource)));
-        Assert.Equal(original.GetProperty("lines").GetRawText(), (await GetAsync(s.Purchaser, $"/api/capture/receipts/{original.GetProperty("id").GetGuid()}")).GetProperty("lines").GetRawText());
+        Assert.Equal(original.GetProperty("lines").GetRawText(), (await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{original.GetProperty("id").GetGuid()}")).GetProperty("lines").GetRawText());
         Assert.NotEmpty((await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}")).EnumerateArray());
         Assert.NotEmpty((await GetAsync(s.Operator, $"/api/ledger/history?lotId={correctedSource}")).EnumerateArray());
         var duplicateId = Guid.NewGuid();
         var duplicate = JsonSerializer.SerializeToNode(s.ReceiptBody(duplicateId, ["99"]))!.AsObject();
         duplicate["lines"]![0]!["lotCode"] = code;
-        using var created = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/capture/receipts", duplicate);
+        using var created = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", duplicate);
         if (created.IsSuccessStatusCode)
         {
-            var draft = await GetAsync(s.Purchaser, $"/api/capture/receipts/{duplicateId}");
-            await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{duplicateId}/commit", new { commandId = Guid.NewGuid(), version = draft.GetProperty("version").GetString() }, HttpStatusCode.Conflict);
-            Assert.Equal("DRAFT", (await GetAsync(s.Purchaser, $"/api/capture/receipts/{duplicateId}")).GetProperty("status").GetString());
+            var draft = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{duplicateId}");
+            await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{duplicateId}/commit", new { commandId = Guid.NewGuid(), version = draft.GetProperty("version").GetString() }, HttpStatusCode.Conflict);
+            Assert.Equal("DRAFT", (await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{duplicateId}")).GetProperty("status").GetString());
         }
         else Assert.Equal(HttpStatusCode.Conflict, created.StatusCode);
         Assert.Equal(9m, Quantity(await s.LotAsync(correctedSource)));
@@ -240,22 +240,22 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         Assert.Equal(10m, Quantity(await s.LotAsync(source))); Assert.Equal(0m, Quantity(await s.LotAsync(source), "availableKg"));
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
         await using (var trigger = new NpgsqlCommand("CREATE FUNCTION ledger.test_receipt_replacement_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.quantity_kg>0 THEN RAISE EXCEPTION 'Test-induced receipt replacement failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER test_receipt_replacement_failure BEFORE INSERT ON ledger.postings FOR EACH ROW EXECUTE FUNCTION ledger.test_receipt_replacement_failure();", owner)) await trigger.ExecuteNonQueryAsync();
-        var route = $"/api/capture/receipt-corrections/{correction}/commit"; var commandId = Guid.NewGuid();
+        var route = $"/api/capture-mock/receipt-corrections/{correction}/commit"; var commandId = Guid.NewGuid();
         try
         {
             using var failed = await RawAsync(s.Manager, HttpMethod.Post, route, new { commandId });
             Assert.Equal(HttpStatusCode.Conflict, failed.StatusCode);
             Assert.Contains("Test-induced receipt replacement failure", await failed.Content.ReadAsStringAsync());
             Assert.Equal(10m, Quantity(await s.LotAsync(source)));
-            Assert.Equal("DRAFT", (await GetAsync(s.Purchaser, $"/api/capture/receipts/{replacementId}")).GetProperty("status").GetString());
+            Assert.Equal("DRAFT", (await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{replacementId}")).GetProperty("status").GetString());
             await using var reversals = new NpgsqlCommand("SELECT count(*) FROM ledger.receipt_reversals WHERE receipt_id=@id", owner); reversals.Parameters.AddWithValue("id", original.GetProperty("id").GetGuid()); Assert.Equal(0L, await reversals.ExecuteScalarAsync());
         }
         finally { await using var drop = new NpgsqlCommand("DROP TRIGGER test_receipt_replacement_failure ON ledger.postings; DROP FUNCTION ledger.test_receipt_replacement_failure();", owner); await drop.ExecuteNonQueryAsync(); }
         await SendAsync(s.Manager, HttpMethod.Post, route, new { commandId });
-        var replacement = await GetAsync(s.Purchaser, $"/api/capture/receipts/{replacementId}");
+        var replacement = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{replacementId}");
         Assert.Equal(0m, Quantity(await s.LotAsync(source))); Assert.Equal(9m, Quantity(await s.LotAsync(Lots(replacement)[0])));
         Assert.Equal(original.GetProperty("id").GetGuid(), replacement.GetProperty("replacementForReceiptId").GetGuid());
-        var retained = await GetAsync(s.Purchaser, $"/api/capture/receipts/{original.GetProperty("id").GetGuid()}");
+        var retained = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{original.GetProperty("id").GetGuid()}");
         Assert.Equal(original.GetProperty("lines").GetRawText(), retained.GetProperty("lines").GetRawText());
         Assert.Equal(original.GetProperty("farmerId").GetGuid(), retained.GetProperty("farmerId").GetGuid());
         Assert.Equal(original.GetProperty("seasonId").GetGuid(), retained.GetProperty("seasonId").GetGuid());
@@ -273,7 +273,7 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         var receipt = await s.ReceiptAsync("10"); var lot = Lots(receipt)[0];
         if (processing) await s.CommitAsync(await s.DraftAsync("DRYING", [(lot, "1")], [("DRIED_PADDY", "1")]));
         else { await s.TransferAsync(lot, "1"); await s.TransferAsync(lot, "1", from: s.SecondLocationId, to: s.LocationId); }
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = Guid.NewGuid(), reason = "Unsupported downstream correction", replacement = s.ReceiptBody(Guid.NewGuid(), ["9"]) });
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = Guid.NewGuid(), reason = "Unsupported downstream correction", replacement = s.ReceiptBody(Guid.NewGuid(), ["9"]) });
         Assert.Equal(processing ? 9m : 10m, Quantity(await s.LotAsync(lot)));
     }
 
@@ -282,9 +282,9 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
     {
         using var s = await CreateAsync(factory);
         var receipt = await s.ReceiptAsync("10");
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = Guid.NewGuid(), reason = "Wrong-owner must not transfer ownership", replacement = s.ReceiptBody(Guid.NewGuid(), ["10"], ownerId: s.ForeignOwnerId) });
-        await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, "/api/capture/receipts", s.ReceiptBody(Guid.NewGuid(), ["10"], ownerId: s.ForeignOwnerId));
-        await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, $"/api/capture/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = Guid.NewGuid(), reason = "Outside customer", replacement = s.ReceiptBody(Guid.NewGuid(), ["10"]) });
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = Guid.NewGuid(), reason = "Wrong-owner must not transfer ownership", replacement = s.ReceiptBody(Guid.NewGuid(), ["10"], ownerId: s.ForeignOwnerId) });
+        await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(Guid.NewGuid(), ["10"], ownerId: s.ForeignOwnerId));
+        await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, $"/api/capture-mock/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = Guid.NewGuid(), reason = "Outside customer", replacement = s.ReceiptBody(Guid.NewGuid(), ["10"]) });
         Assert.Equal(10m, Quantity(await s.LotAsync(Lots(receipt)[0])));
     }
 
@@ -295,7 +295,7 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         var receipt = await s.ReceiptAsync("10"); var lot = Lots(receipt)[0];
         var correction = Guid.NewGuid(); var replacementId = Guid.NewGuid();
         var op = await s.DraftAsync("DRYING", [(lot, "1")], [("DRIED_PADDY", "1")]);
-        var replies = await Task.WhenAll(RawAsync(s.Purchaser, HttpMethod.Post, $"/api/capture/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = correction, reason = "Synthetic correction race", replacement = s.ReceiptBody(replacementId, ["9"]) }), RawAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{op.GetProperty("id").GetGuid()}/commit", new { }));
+        var replies = await Task.WhenAll(RawAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = correction, reason = "Synthetic correction race", replacement = s.ReceiptBody(replacementId, ["9"]) }), RawAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{op.GetProperty("id").GetGuid()}/commit", new { }));
         Assert.Single(replies, reply => reply.IsSuccessStatusCode);
         Assert.Single(replies, reply => reply.StatusCode is HttpStatusCode.Conflict);
         if (replies[0].IsSuccessStatusCode)
@@ -313,8 +313,8 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
         var original = await s.ReceiptAsync("10");
         var hold = await s.HoldAsync(Lots(original)[0]);
         var (correction, replacementId) = await RequestAsync(s, original, "9");
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture/receipt-corrections/{correction}/commit", new { commandId = Guid.NewGuid() });
-        var replacement = await GetAsync(s.Purchaser, $"/api/capture/receipts/{replacementId}");
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{correction}/commit", new { commandId = Guid.NewGuid() });
+        var replacement = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{replacementId}");
         var lot = await s.LotAsync(Lots(replacement)[0]);
         Assert.Equal(9m, Quantity(lot)); Assert.Equal(0m, Quantity(lot, "availableKg"));
         var holds = await GetAsync(s.Customer, "/api/ledger/holds");

@@ -17,7 +17,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset();
   routes = {
     '/api/auth/csrf': { token: 'csrf' }, '/api/ledger/lookups': look, '/api/ledger/lots': [lot], '/api/ledger/holds': [], '/api/ledger/notifications': [], '/api/ledger/operations': [draft], '/api/ledger/corrections': [],
-    '/api/capture/receipts': [receipt], '/api/capture/arrivals': [], '/api/capture/receipt-corrections': [], '/api/capture/farmers': [{ id: 'farmer', name: 'Farmer' }], '/api/capture/plots': [{ id: 'plot', name: 'Plot', farmerId: 'farmer' }], '/api/capture/seasons': [{ id: 'season', name: 'Season' }], '/api/capture/plot-seasons': [{ id: 'plot-season', plotId: 'plot', seasonId: 'season' }],
+    '/api/capture-mock/status': { synthetic: true }, '/api/capture-mock/receipts': [receipt], '/api/capture-mock/arrivals': [], '/api/capture-mock/receipt-corrections': [], '/api/capture-mock/farmers': [{ id: 'farmer', name: 'Farmer' }], '/api/capture-mock/plots': [{ id: 'plot', name: 'Plot', farmerId: 'farmer' }], '/api/capture-mock/seasons': [{ id: 'season', name: 'Season' }], '/api/capture-mock/plot-seasons': [{ id: 'plot-season', plotId: 'plot', seasonId: 'season' }],
   };
   fetchMock.mockImplementation(async (url, init) => {
     const path = String(url).split('?')[0];
@@ -29,7 +29,9 @@ beforeEach(() => {
 it('loads purchasing lookups without restricted setup and preserves receipt correction provenance', async () => {
   render(<LedgerWorkspace user={{ ...actor, role: 'PurchasingStaff', organizationId: 'customer', permissions: ['farms.write', 'purchases.write'] }} />);
   const browser = userEvent.setup();
-  await browser.click(screen.getByRole('button', { name: 'Sources & receiving' }));
+  await browser.click(await screen.findByRole('button', { name: 'Sources & receiving' }));
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/capture-mock/status')).toBe(true);
+  expect(await screen.findByText(/Durable synthetic mock sources/)).toBeInTheDocument();
   await browser.click(await screen.findByText('Procured lot — COMMITTED'));
   await browser.click(screen.getByRole('button', { name: 'Request unused receipt correction' }));
   const editor = within(screen.getByRole('heading', { name: 'Request unused receipt correction' }).closest('section')!);
@@ -39,13 +41,21 @@ it('loads purchasing lookups without restricted setup and preserves receipt corr
   await browser.type(editor.getByLabelText('Original measured quantity'), '9.999999');
   await browser.type(editor.getByLabelText('Correction reason'), 'Verified entry error');
   await browser.click(editor.getByRole('button', { name: 'Request receipt correction' }));
-  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/capture/receipts/receipt/corrections')).toBe(true));
-  const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/capture/receipts/receipt/corrections')!;
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/capture-mock/receipts/receipt/corrections')).toBe(true));
+  const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/capture-mock/receipts/receipt/corrections')!;
   const payload = JSON.parse(String(init?.body));
   expect(payload.replacement).toMatchObject({ ownerOrganizationId: 'customer', farmerId: 'farmer', seasonId: 'season', locationId: 'store', lines: [{ plotSeasonId: 'plot-season', commodityId: 'rice', quantity: '9.999999', unit: 'kg' }] });
   expect(payload.replacement.id).not.toBe('receipt'); expect(payload.replacement.lines[0].id).not.toBe('line');
   expect(new Headers(init?.headers).get('X-CSRF-TOKEN')).toBe('csrf');
   expect(fetchMock.mock.calls.some(([url]) => url === '/api/ledger/setup')).toBe(false);
+});
+it('hides synthetic receiving when mock status is unavailable without blocking ledger stock', async () => {
+  delete routes['/api/capture-mock/status'];
+  render(<LedgerWorkspace user={{ ...actor, permissions: ['lots.read.facility', 'farms.read'] }} />);
+  expect(await screen.findByRole('heading', { name: 'Scoped stock search' })).toBeInTheDocument();
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/capture-mock/status')).toBe(true));
+  expect(screen.queryByRole('button', { name: 'Sources & receiving' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Stock & HOLD inbox' })).toBeInTheDocument();
 });
 
 it('edits processing draft with decimal strings and supports multiple actual output rows', async () => {

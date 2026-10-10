@@ -64,11 +64,11 @@ internal sealed class LedgerScenario : IDisposable
         await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/evidence", new { id = s.EvidenceId, ownerId = s.OwnerId, facilityId = s.FacilityId, fileName = "synthetic-test-policy.txt", contentType = "text/plain", contentBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("SYNTHETIC TEST ONLY. Not factory-approved policy. Physical verification test evidence.")) });
         if (policies)
             foreach (var kind in new[] { "DRYING", "MILLING", "MERGE", "BLENDING", "BAGGING" }) await s.PolicyAsync(kind, "0");
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/farmers", new { id = s.FarmerId, ownerOrganizationId = s.OwnerId, name = "Synthetic source farmer", phoneNumber = "+84000000000" });
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/farmers", new { id = s.FarmerId, ownerOrganizationId = s.OwnerId, name = "Synthetic source farmer", phoneNumber = "+84000000000" });
         var plotId = Guid.NewGuid();
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/plots", new { id = plotId, farmerId = s.FarmerId, name = "Synthetic source plot", latitude = "10.123456", longitude = "106.123456" });
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/seasons", new { id = s.SeasonId, ownerOrganizationId = s.OwnerId, name = "Synthetic season", startsOn = "2026-01-01", endsOn = "2026-12-31" });
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture/plot-seasons", new { id = s.PlotSeasonId, plotId, seasonId = s.SeasonId });
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/plots", new { id = plotId, farmerId = s.FarmerId, name = "Synthetic source plot", latitude = "10.123456", longitude = "106.123456" });
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/seasons", new { id = s.SeasonId, ownerOrganizationId = s.OwnerId, name = "Synthetic season", startsOn = "2026-01-01", endsOn = "2026-12-31" });
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/plot-seasons", new { id = s.PlotSeasonId, plotId, seasonId = s.SeasonId });
         return s;
     }
 
@@ -84,7 +84,7 @@ internal sealed class LedgerScenario : IDisposable
     public async Task<JsonElement> ReceiptAsync(params string[] quantities)
     {
         var id = Guid.NewGuid();
-        await SendAsync(Purchaser, HttpMethod.Post, "/api/capture/receipts", ReceiptBody(id, quantities));
+        await SendAsync(Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", ReceiptBody(id, quantities));
         return await CommitReceiptAsync(id);
     }
 
@@ -92,21 +92,21 @@ internal sealed class LedgerScenario : IDisposable
     {
         var client = Accounts["foreignPurchaser"].Client;
         var farmer = Guid.NewGuid(); var plot = Guid.NewGuid(); var season = Guid.NewGuid(); var plotSeason = Guid.NewGuid(); var receiptId = Guid.NewGuid();
-        await SendAsync(client, HttpMethod.Post, "/api/capture/farmers", new { id = farmer, ownerOrganizationId = ForeignOwnerId, name = "Synthetic foreign farmer" });
-        await SendAsync(client, HttpMethod.Post, "/api/capture/plots", new { id = plot, farmerId = farmer, name = "Synthetic foreign plot", latitude = "10", longitude = "106" });
-        await SendAsync(client, HttpMethod.Post, "/api/capture/seasons", new { id = season, ownerOrganizationId = ForeignOwnerId, name = "Synthetic foreign season", startsOn = "2026-01-01", endsOn = "2026-12-31" });
-        await SendAsync(client, HttpMethod.Post, "/api/capture/plot-seasons", new { id = plotSeason, plotId = plot, seasonId = season });
-        await SendAsync(client, HttpMethod.Post, "/api/capture/receipts", new { id = receiptId, ownerOrganizationId = ForeignOwnerId, farmerId = farmer, seasonId = season, locationId = locationId ?? LocationId, occurredAt = DateTimeOffset.UtcNow, lines = new[] { new { id = Guid.NewGuid(), plotSeasonId = plotSeason, commodityId = CommodityId, lotCode = $"FOREIGN-{Guid.NewGuid():N}", quantity, unit = "kg" } } });
-        var receipt = await GetAsync(client, $"/api/capture/receipts/{receiptId}");
-        await SendAsync(client, HttpMethod.Post, $"/api/capture/receipts/{receiptId}/commit", new { commandId = Guid.NewGuid(), version = receipt.GetProperty("version").GetString() });
-        return await GetAsync(client, $"/api/capture/receipts/{receiptId}");
+        await SendAsync(client, HttpMethod.Post, "/api/capture-mock/farmers", new { id = farmer, ownerOrganizationId = ForeignOwnerId, name = "Synthetic foreign farmer" });
+        await SendAsync(client, HttpMethod.Post, "/api/capture-mock/plots", new { id = plot, farmerId = farmer, name = "Synthetic foreign plot", latitude = "10", longitude = "106" });
+        await SendAsync(client, HttpMethod.Post, "/api/capture-mock/seasons", new { id = season, ownerOrganizationId = ForeignOwnerId, name = "Synthetic foreign season", startsOn = "2026-01-01", endsOn = "2026-12-31" });
+        await SendAsync(client, HttpMethod.Post, "/api/capture-mock/plot-seasons", new { id = plotSeason, plotId = plot, seasonId = season });
+        await SendAsync(client, HttpMethod.Post, "/api/capture-mock/receipts", new { id = receiptId, ownerOrganizationId = ForeignOwnerId, farmerId = farmer, seasonId = season, locationId = locationId ?? LocationId, occurredAt = DateTimeOffset.UtcNow, lines = new[] { new { id = Guid.NewGuid(), plotSeasonId = plotSeason, commodityId = CommodityId, lotCode = $"FOREIGN-{Guid.NewGuid():N}", quantity, unit = "kg" } } });
+        var receipt = await GetAsync(client, $"/api/capture-mock/receipts/{receiptId}");
+        await SendAsync(client, HttpMethod.Post, $"/api/capture-mock/receipts/{receiptId}/commit", new { commandId = Guid.NewGuid(), version = receipt.GetProperty("version").GetString() });
+        return await GetAsync(client, $"/api/capture-mock/receipts/{receiptId}");
     }
 
     public async Task<JsonElement> CommitReceiptAsync(Guid id, Guid? commandId = null)
     {
-        var receipt = await GetAsync(Purchaser, $"/api/capture/receipts/{id}");
-        await SendAsync(Purchaser, HttpMethod.Post, $"/api/capture/receipts/{id}/commit", new { commandId = commandId ?? Guid.NewGuid(), version = receipt.GetProperty("version").GetString() });
-        return await GetAsync(Purchaser, $"/api/capture/receipts/{id}");
+        var receipt = await GetAsync(Purchaser, $"/api/capture-mock/receipts/{id}");
+        await SendAsync(Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{id}/commit", new { commandId = commandId ?? Guid.NewGuid(), version = receipt.GetProperty("version").GetString() });
+        return await GetAsync(Purchaser, $"/api/capture-mock/receipts/{id}");
     }
 
     public static Guid[] Lots(JsonElement receipt) => receipt.GetProperty("lines").EnumerateArray().Select(line => line.GetProperty("lotId").GetGuid()).ToArray();
@@ -144,7 +144,7 @@ internal sealed class LedgerScenario : IDisposable
     public async Task<Guid> ArrivalAsync(JsonElement receipt, string quantity)
     {
         var id = Guid.NewGuid();
-        await SendAsync(Operator, HttpMethod.Post, "/api/capture/arrivals", new { id, receiptLineId = Lines(receipt)[0], quantity, unit = "kg", evidenceId = EvidenceId, observedAt = DateTimeOffset.UtcNow });
+        await SendAsync(Operator, HttpMethod.Post, "/api/capture-mock/arrivals", new { id, receiptLineId = Lines(receipt)[0], quantity, unit = "kg", evidenceId = EvidenceId, observedAt = DateTimeOffset.UtcNow });
         return id;
     }
 

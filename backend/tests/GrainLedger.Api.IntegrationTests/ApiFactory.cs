@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using GrainLedger.Modules.Identity;
 using GrainLedger.Modules.Ledger;
-using GrainLedger.Modules.Capture;
+using GrainLedger.Modules.MockCapture;
 using Npgsql;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -31,6 +31,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public string RuntimeConnectionString { get; private set; } = "";
     public string OwnerConnectionString => _postgres.GetConnectionString();
     public bool BrowserCookies { get; init; }
+    public bool SeedIncompatibleLegacyCapture { get; init; }
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -73,10 +74,21 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
+        if (SeedIncompatibleLegacyCapture)
+        {
+            await using var legacy = new NpgsqlConnection(OwnerConnectionString);
+            await legacy.OpenAsync();
+            await using var command = new NpgsqlCommand("""
+                CREATE SCHEMA capture;
+                CREATE TABLE capture.farmers (legacy_key text PRIMARY KEY, legacy_payload jsonb NOT NULL);
+                INSERT INTO capture.farmers VALUES ('untouched', '{"source":"teammate"}');
+                """, legacy);
+            await command.ExecuteNonQueryAsync();
+        }
         using var scope = Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
         await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
-        await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
+        await scope.ServiceProvider.GetRequiredService<MockCaptureDbContext>().Database.MigrateAsync();
         await using var owner = new NpgsqlConnection(OwnerConnectionString);
         await owner.OpenAsync();
         await using (var command = new NpgsqlCommand("CREATE ROLE grainledger_test_runtime LOGIN PASSWORD 'test-runtime' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT", owner))

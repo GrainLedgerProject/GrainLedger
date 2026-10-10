@@ -66,7 +66,7 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
             Assert.Contains(permission, managerTokens.User.Permissions);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", managerTokens.AccessToken);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ledger/setup")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/capture/farmers")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/capture-mock/farmers")).StatusCode);
 
         var operatorUser = await CreateUserAsync(Roles.MillOperator);
         var operatorTokens = await LoginAsync(client, operatorUser);
@@ -79,15 +79,15 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", purchaserTokens.AccessToken);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ledger/lookups")).StatusCode);
         var farmerId = Guid.NewGuid();
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/capture/farmers",
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/capture-mock/farmers",
             new { id = farmerId, ownerOrganizationId = purchaser.OrganizationId, name = "Bearer farmer" })).StatusCode);
         var foreign = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/capture/farmers",
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/capture-mock/farmers",
             new { id = Guid.NewGuid(), ownerOrganizationId = foreign.Id, name = "Forbidden farmer" })).StatusCode);
 
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/ledger/lookups")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/capture/farmers")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/capture-mock/farmers")).StatusCode);
     }
 
     [Fact]

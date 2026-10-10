@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { type User } from './api';
+import { useEffect, useState } from 'react';
+import { api, type User } from './api';
 import { LedgerOperations } from './LedgerOperations';
 import { LedgerReceiving } from './LedgerReceiving';
 import { LedgerSetup } from './LedgerSetup';
@@ -12,7 +12,9 @@ export const ledgerSections = [
   { id: 'setup', label: 'Facility setup', permissions: ['platform.read', 'platform.configure'] },
 ] as const;
 export function LedgerWorkspace({ user }: { user: User }) {
-  const allowed = ledgerSections.filter(section => section.permissions.some(permission => user.permissions.includes(permission)));
+  const [mockAvailable, setMockAvailable] = useState(false);
+  useEffect(() => { void api<{ synthetic: boolean }>('/api/capture-mock/status').then(status => setMockAvailable(status.synthetic === true)).catch(() => setMockAvailable(false)); }, []);
+  const allowed = ledgerSections.filter(section => (section.id !== 'receiving' || mockAvailable) && section.permissions.some(permission => user.permissions.includes(permission)));
   const [selected, setSelected] = useState<string>(allowed[0]?.id || '');
   const tab = allowed.some(section => section.id === selected) ? selected : allowed[0]?.id;
   return <div className="ledger-workspace"><header className="page-heading"><span className="eyebrow">OPERATIONS</span><h1>Ledger</h1><p className="muted">Immutable stock, source evidence, movements and restrictions.</p></header><nav className="ledger-nav" aria-label="Ledger sections">{allowed.map(section => <button key={section.id} aria-current={tab === section.id ? 'page' : undefined} onClick={() => setSelected(section.id)}>{section.label}</button>)}</nav>

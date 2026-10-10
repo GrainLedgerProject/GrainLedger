@@ -1,6 +1,6 @@
 using GrainLedger.Modules.Identity;
 using GrainLedger.Modules.Ledger;
-using GrainLedger.Modules.Capture;
+using GrainLedger.Modules.MockCapture;
 using GrainLedger.Api.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -17,6 +17,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
     builder.Configuration.AddCommandLine(args);
 }
 var migrating = args.Contains("--migrate", StringComparer.Ordinal);
+var mockCaptureEnabled = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing");
 var migrationConnection = builder.Configuration.GetConnectionString("GrainLedgerMigration");
 if (migrating)
 {
@@ -33,7 +34,7 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddIdentityModule(builder.Configuration, builder.Environment);
 builder.Services.AddLedgerModule(builder.Configuration);
-builder.Services.AddCaptureModule(builder.Configuration);
+if (mockCaptureEnabled) builder.Services.AddMockCaptureModule(builder.Configuration);
 
 var app = builder.Build();
 if (args.Contains("--seed-dev", StringComparer.Ordinal))
@@ -52,7 +53,8 @@ if (migrating)
     await using var scope = app.Services.CreateAsyncScope();
     await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
     await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
-    await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
+    if (mockCaptureEnabled)
+        await scope.ServiceProvider.GetRequiredService<MockCaptureDbContext>().Database.MigrateAsync();
     await LedgerDatabase.ConfigureRuntimeRoleAsync(migrationConnection!, builder.Configuration["Ledger:RuntimeRole"] ?? throw new InvalidOperationException("Ledger:RuntimeRole is required."));
     return;
 }
@@ -87,7 +89,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).WithTags("Health");
 app.MapIdentityModule();
 app.MapLedgerModule();
-app.MapCaptureModule();
+if (mockCaptureEnabled) app.MapMockCaptureModule();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 if (!app.Environment.IsDevelopment()) app.MapFallbackToFile("index.html");
 

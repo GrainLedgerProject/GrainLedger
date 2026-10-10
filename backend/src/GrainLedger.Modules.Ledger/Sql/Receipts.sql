@@ -1,4 +1,4 @@
-CREATE FUNCTION ledger.receipt(a uuid,p jsonb) RETURNS uuid
+CREATE OR REPLACE FUNCTION ledger.receipt(a uuid,p jsonb) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,ledger,identity AS $$
 DECLARE
     destination ledger.locations;
@@ -10,6 +10,10 @@ DECLARE
     original_hold record;
     inherited_hold uuid;
 BEGIN
+    IF to_regnamespace('capture_mock') IS NULL THEN
+        RAISE EXCEPTION 'Synthetic receipt and receiving operations require the capture_mock schema'
+            USING ERRCODE='23514';
+    END IF;
     PERFORM ledger.lock_writes();
     SELECT * INTO STRICT destination FROM ledger.locations
     WHERE id=(p->>'locationId')::uuid FOR UPDATE;
@@ -23,7 +27,7 @@ BEGIN
     END IF;
 
     -- Source records are prerequisites, not client-created opening stock.
-    IF capture.receipt_stock_eligible(a,p) IS DISTINCT FROM true THEN
+    IF capture_mock.receipt_stock_eligible(a,p) IS DISTINCT FROM true THEN
         RAISE EXCEPTION 'Persisted procurement source missing or receipt line stock payload mismatch'
             USING ERRCODE='23514';
     END IF;
@@ -99,9 +103,13 @@ BEGIN
     RETURN (p->>'lotId')::uuid;
 END $$;
 
-CREATE FUNCTION ledger.receipt_correction_request(a uuid,c uuid,r uuid,o uuid) RETURNS void
+CREATE OR REPLACE FUNCTION ledger.receipt_correction_request(a uuid,c uuid,r uuid,o uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,ledger,identity AS $$
 BEGIN
+    IF to_regnamespace('capture_mock') IS NULL THEN
+        RAISE EXCEPTION 'Synthetic receipt and receiving operations require the capture_mock schema'
+            USING ERRCODE='23514';
+    END IF;
     PERFORM ledger.lock_writes();
     IF ledger.role(a) IS DISTINCT FROM 'PurchasingStaff' OR NOT ledger.own(a,o) THEN
         RAISE EXCEPTION 'Receipt correction requester denied' USING ERRCODE='42501';
@@ -119,12 +127,16 @@ BEGIN
     INSERT INTO ledger.receipt_correction_blocks VALUES(c,r,o,false);
 END $$;
 
-CREATE FUNCTION ledger.reverse_receipt(a uuid,c uuid,r uuid,o uuid,ev uuid,reason text) RETURNS void
+CREATE OR REPLACE FUNCTION ledger.reverse_receipt(a uuid,c uuid,r uuid,o uuid,ev uuid,reason text) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,ledger,identity AS $$
 DECLARE
     original_posting record;
     event_id uuid:=gen_random_uuid();
 BEGIN
+    IF to_regnamespace('capture_mock') IS NULL THEN
+        RAISE EXCEPTION 'Synthetic receipt and receiving operations require the capture_mock schema'
+            USING ERRCODE='23514';
+    END IF;
     PERFORM ledger.lock_writes();
     IF NOT EXISTS (
         SELECT 1 FROM ledger.receipt_correction_blocks
@@ -171,12 +183,16 @@ BEGIN
     PERFORM set_config('ledger.reversed_receipt',r::text,true);
 END $$;
 
-CREATE FUNCTION ledger.receiving_block(a uuid,d uuid,l uuid,b boolean,ev uuid,reason text) RETURNS void
+CREATE OR REPLACE FUNCTION ledger.receiving_block(a uuid,d uuid,l uuid,b boolean,ev uuid,reason text) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,ledger,identity AS $$
 DECLARE
     source_lot ledger.lots;
     observation_facility uuid;
 BEGIN
+    IF to_regnamespace('capture_mock') IS NULL THEN
+        RAISE EXCEPTION 'Synthetic receipt and receiving operations require the capture_mock schema'
+            USING ERRCODE='23514';
+    END IF;
     PERFORM ledger.lock_writes();
     SELECT * INTO STRICT source_lot FROM ledger.lots WHERE id=l FOR UPDATE;
     IF source_lot.receipt_id IS NULL THEN

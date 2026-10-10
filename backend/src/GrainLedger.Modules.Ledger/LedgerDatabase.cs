@@ -25,6 +25,23 @@ public sealed class InitialLedger : Migration
     protected override void Down(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("DROP SCHEMA ledger CASCADE;");
 }
 
+[DbContext(typeof(LedgerDbContext))]
+[Migration("20261010000000_UseMockCaptureBoundary")]
+public sealed class UseMockCaptureBoundary : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        foreach (var name in new[] { "Receipts", "ReceiptBoundary" })
+        {
+            using var stream = typeof(UseMockCaptureBoundary).Assembly.GetManifestResourceStream($"GrainLedger.Modules.Ledger.Sql.{name}.sql")!;
+            using var reader = new StreamReader(stream);
+            migrationBuilder.Sql(reader.ReadToEnd());
+        }
+    }
+    protected override void Down(MigrationBuilder migrationBuilder) =>
+        throw new NotSupportedException("The synthetic receipt boundary cannot revert to another module's schema.");
+}
+
 public static class LedgerDatabase
 {
     public static async Task ConfigureRuntimeRoleAsync(string connectionString, string runtimeRole, CancellationToken ct = default)
@@ -42,12 +59,12 @@ public static class LedgerDatabase
                         AND pg_has_role(r.oid,elevated.oid,'MEMBER')
                   )
                   AND NOT EXISTS (
-                      SELECT 1 FROM pg_class c
-                      WHERE c.relnamespace IN ('ledger'::regnamespace,'identity'::regnamespace,'capture'::regnamespace)
+                      SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                      WHERE n.nspname IN ('ledger','identity','capture_mock')
                         AND pg_has_role(r.oid,c.relowner,'MEMBER')
                   )
                   AND NOT EXISTS (
-                      SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture')
+                      SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture_mock')
                         AND pg_has_role(r.oid,n.nspowner,'MEMBER')
                   )
                   AND NOT EXISTS (
@@ -59,14 +76,21 @@ public static class LedgerDatabase
         check.Parameters.AddWithValue(runtimeRole);
         if (!Equals(await check.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("Runtime role missing or has elevated/owner authority.");
         var role = new NpgsqlCommandBuilder().QuoteIdentifier(runtimeRole);
+        await using var mockSchema = new NpgsqlCommand("SELECT to_regnamespace('capture_mock') IS NOT NULL", connection);
+        var mockGrants = Equals(await mockSchema.ExecuteScalarAsync(ct), true) ? $"""
+            GRANT USAGE ON SCHEMA capture_mock TO {role};
+            GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA capture_mock TO {role};
+            GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA capture_mock TO {role};
+            """ : "";
         await using var grant = new NpgsqlCommand($"""
             REVOKE ALL ON SCHEMA ledger FROM {role};
-            GRANT USAGE ON SCHEMA ledger,identity,capture TO {role};
+            GRANT USAGE ON SCHEMA ledger,identity TO {role};
             REVOKE ALL ON ALL TABLES IN SCHEMA ledger FROM {role};
             REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ledger FROM {role};
             GRANT SELECT ON ALL TABLES IN SCHEMA ledger TO {role};
-            GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture TO {role};
-            GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture TO {role};
+            GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity TO {role};
+            GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity TO {role};
+            {mockGrants}
             GRANT EXECUTE ON FUNCTION
                 ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.receipt(uuid,jsonb),
                 ledger.receipt_correction_request(uuid,uuid,uuid,uuid),
@@ -103,11 +127,11 @@ public static class LedgerDatabase
                     )
                     OR EXISTS (
                         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                        WHERE n.nspname IN ('ledger','identity','capture')
+                        WHERE n.nspname IN ('ledger','identity','capture_mock')
                           AND pg_has_role(r.oid,c.relowner,'MEMBER')
                     )
                     OR EXISTS (
-                        SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture')
+                        SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture_mock')
                           AND pg_has_role(r.oid,n.nspowner,'MEMBER')
                     )
                     OR EXISTS (
