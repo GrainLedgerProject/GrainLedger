@@ -2,6 +2,7 @@
   <Folder Name="/backend/">
     <Project Path="backend/src/GrainLedger.Api/GrainLedger.Api.csproj" />
     <Project Path="backend/src/GrainLedger.Modules.Identity/GrainLedger.Modules.Identity.csproj" />
+    <Project Path="backend/src/GrainLedger.Modules.Capture/GrainLedger.Modules.Capture.csproj" />
     <Project Path="backend/tests/GrainLedger.Api.IntegrationTests/GrainLedger.Api.IntegrationTests.csproj" />
   </Folder>
 </Solution>
