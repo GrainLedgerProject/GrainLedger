@@ -1,0 +1,48 @@
+erDiagram
+    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
+    business_events {
+        uuid id PK "NN"
+        uuid company_id FK "NULL"
+        uuid actor_id FK "NULL"
+        varchar(60) event_type "NN"
+        timestamptz occurred_at "NN"
+        timestamptz recorded_at "NN"
+        uuid correlation_id "NN"
+        jsonb payload "NN"
+    }
+    state_changes {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid event_id FK "NN"
+        uuid plan_id FK "NULL"
+        uuid conversion_id FK "NULL"
+        uuid container_id FK "NULL"
+        varchar(32) from_state "NULL"
+        varchar(32) to_state "NN"
+        text reason "NULL"
+    }
+    organizations {
+        uuid Id PK "Reference table; identity.organizations"
+    }
+    users {
+        uuid Id PK "Reference table; identity.users"
+    }
+    blend_plans {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    conversions {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    containers {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    organizations o|..o{ business_events : company
+    users o|..o{ business_events : actor
+    organizations ||..o{ state_changes : company
+    business_events ||..o{ state_changes : event
+    blend_plans o|..o{ state_changes : plan
+    conversions o|..o{ state_changes : conversion
+    containers o|..o{ state_changes : container

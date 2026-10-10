@@ -1,0 +1,140 @@
+erDiagram
+    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
+    farmers {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        varchar(40) code "NN"
+        text name "NN"
+        text contact "NULL"
+        timestamptz created_at "NN"
+    }
+    plots {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid farmer_id FK "NN"
+        varchar(40) code "NN"
+        jsonb boundary_geojson "NN"
+        numeric(24,12) area_ha "NN"
+    }
+    crop_seasons {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        text name "NN"
+        date starts_on "NN"
+        date ends_on "NN"
+    }
+    plot_seasons {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid plot_id FK "NN"
+        uuid season_id FK "NN"
+        text rice_variety "NN"
+    }
+    spray_declarations {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid plot_season_id FK "NN"
+        timestamptz applied_at "NN"
+        uuid recorded_by FK "NN"
+        timestamptz recorded_at "NN"
+        text evidence_ref "NULL"
+    }
+    spray_items {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid declaration_id FK "NN"
+        text product_name "NULL"
+        uuid substance_id FK "NULL"
+        numeric(24,12) rate "NN"
+        varchar(40) rate_unit "NN"
+    }
+    procurements {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        varchar(40) code "NN"
+        uuid farmer_id FK "NN"
+        uuid collection_site_id FK "NN"
+        uuid received_by FK "NN"
+        timestamptz received_at "NN"
+        varchar(32) status "NN; DRAFT COMMITTED"
+        uuid event_id FK,UK "NULL"
+    }
+    procurement_items {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid procurement_id FK "NN"
+        integer line_no "NN"
+        uuid plot_season_id FK "NN"
+        numeric(20,6) net_mass_kg "NN"
+        numeric(24,12) measured_value "NN"
+        varchar(20) measured_unit "NN"
+        numeric(24,12) moisture_percent "NN"
+    }
+    source_lots {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid lot_id FK,UK "NN"
+        uuid procurement_item_id FK,UK "NN"
+    }
+    offline_operations {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid submitted_by FK "NN"
+        varchar(100) device_id "NN"
+        uuid client_operation_id "NN"
+        varchar(128) payload_hash "NN"
+        jsonb payload "NN"
+        timestamptz captured_at "NN"
+        jsonb capture_geojson "NULL"
+        timestamptz received_at "NN"
+        varchar(32) status "NN; PENDING APPLIED CONFLICT REJECTED"
+        uuid applied_event_id FK,UK "NULL"
+        jsonb result_payload "NULL"
+        text conflict_reason "NULL"
+    }
+    organizations {
+        uuid Id PK "Reference table; identity.organizations"
+    }
+    users {
+        uuid Id PK "Reference table; identity.users"
+    }
+    active_substances {
+        uuid id PK "Reference table; defined in another module"
+    }
+    facilities {
+        uuid id PK "Reference table; defined in another module"
+    }
+    business_events {
+        uuid id PK "Reference table; defined in another module"
+    }
+    lots {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    organizations ||..o{ farmers : company
+    organizations ||..o{ plots : company
+    farmers ||..o{ plots : farmer
+    organizations ||..o{ crop_seasons : company
+    organizations ||..o{ plot_seasons : company
+    plots ||..o{ plot_seasons : plot
+    crop_seasons ||..o{ plot_seasons : season
+    organizations ||..o{ spray_declarations : company
+    plot_seasons ||..o{ spray_declarations : plot_season
+    users ||..o{ spray_declarations : recorded_by
+    organizations ||..o{ spray_items : company
+    spray_declarations ||..o{ spray_items : declaration
+    active_substances o|..o{ spray_items : substance
+    organizations ||..o{ procurements : company
+    farmers ||..o{ procurements : farmer
+    facilities ||..o{ procurements : collection_site
+    users ||..o{ procurements : received_by
+    business_events o|..o| procurements : event
+    organizations ||..o{ procurement_items : company
+    procurements ||..o{ procurement_items : procurement
+    plot_seasons ||..o{ procurement_items : plot_season
+    organizations ||..o{ source_lots : company
+    lots ||..o| source_lots : lot
+    procurement_items ||..o| source_lots : procurement_item
+    organizations ||..o{ offline_operations : company
+    users ||..o{ offline_operations : submitted_by
+    business_events o|..o| offline_operations : applied_event

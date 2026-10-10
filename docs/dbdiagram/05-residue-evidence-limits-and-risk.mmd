@@ -1,0 +1,210 @@
+erDiagram
+    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
+    active_substances {
+        uuid id PK "NN"
+        varchar(60) code UK "NN"
+        text name "NN"
+    }
+    commodities {
+        uuid id PK "NN"
+        varchar(40) code UK "NN"
+        text name "NN"
+    }
+    markets {
+        uuid id PK "NN"
+        varchar(40) code UK "NN"
+        text name "NN"
+    }
+    quality_attributes {
+        uuid id PK "NN"
+        varchar(60) code UK "NN"
+        text name "NN"
+        varchar(30) unit "NN"
+    }
+    mrl_versions {
+        uuid id PK "NN"
+        uuid market_id FK "NN"
+        uuid commodity_id FK "NN"
+        integer version_no "NN"
+        varchar(32) status "NN; DRAFT PUBLISHED"
+        timestamptz effective_from "NN"
+        timestamptz effective_to "NULL"
+        uuid published_by FK "NULL"
+        timestamptz published_at "NULL"
+        text source_ref "NN"
+    }
+    mrl_limits {
+        uuid id PK "NN"
+        uuid mrl_version_id FK "NN"
+        uuid substance_id FK "NN"
+        numeric(24,12) limit_value "NN"
+        varchar(20) unit "NN"
+    }
+    safety_margin_policies {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid market_id FK "NN"
+        uuid commodity_id FK "NN"
+        integer version_no "NN"
+        numeric(24,12) margin_value "NN"
+        varchar(32) margin_mode "NN; RELATIVE_FRACTION ABSOLUTE_MG_KG"
+        timestamptz effective_from "NN"
+        timestamptz effective_to "NULL"
+        text evidence_ref "NN"
+        uuid configured_by FK "NN"
+        timestamptz configured_at "NN"
+    }
+    cohort_policies {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        integer version_no "NN"
+        text window_rule "NN"
+        text sampling_rule "NN"
+        text evidence_ref "NN"
+        uuid confirmed_by FK "NN"
+        timestamptz confirmed_at "NN"
+    }
+    cohorts {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid policy_id FK "NN"
+        uuid collection_site_id FK "NN"
+        uuid season_id FK "NN"
+        timestamptz window_start "NN"
+        timestamptz window_end "NN"
+    }
+    cohort_members {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid cohort_id FK "NN"
+        uuid source_lot_id FK "NN"
+    }
+    cohort_bounds {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid cohort_id FK "NN"
+        uuid substance_id FK "NN"
+        integer version_no "NN"
+        numeric(24,12) bound_value "NN"
+        varchar(20) unit "NN"
+        text evidence_ref "NN"
+        text immutable_membership_ref "NN"
+        uuid confirmed_by FK "NN"
+        timestamptz confirmed_at "NN"
+    }
+    propagation_policies {
+        uuid id PK "NN"
+        varchar(60) code "NN"
+        integer version_no "NN"
+        uuid substance_id FK "NULL"
+        uuid commodity_id FK "NN"
+        varchar(40) conversion_type "NN"
+        varchar(32) input_stage "NN"
+        varchar(32) output_stage "NN"
+        jsonb rule_definition "NN"
+        text evidence_ref "NN"
+        uuid confirmed_by FK "NN"
+        timestamptz confirmed_at "NN"
+    }
+    residue_bounds {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid lot_id FK "NN"
+        uuid substance_id FK "NN"
+        integer version_no "NN"
+        numeric(24,12) bound_value "NN"
+        varchar(20) unit "NN"
+        varchar(32) source_kind "NN; LAB COHORT CONVERSION"
+        uuid conversion_id FK "NULL"
+        uuid propagation_policy_id FK "NULL"
+        text calculation_basis_ref "NN"
+        timestamptz calculated_at "NN"
+    }
+    bound_evidence {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid bound_id FK "NN"
+        uuid lab_result_id FK "NULL"
+        uuid cohort_bound_id FK "NULL"
+        uuid input_bound_id FK "NULL"
+        numeric(20,6) input_mass_kg "NULL"
+    }
+    lot_quality_values {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid lot_id FK "NN"
+        uuid attribute_id FK "NN"
+        numeric(24,12) value "NN"
+        varchar(30) unit "NN"
+        timestamptz measured_at "NN"
+        text evidence_ref "NN"
+        uuid recorded_by FK "NN"
+    }
+    users {
+        uuid Id PK "Reference table; identity.users"
+    }
+    organizations {
+        uuid Id PK "Reference table; identity.organizations"
+    }
+    facilities {
+        uuid id PK "Reference table; defined in another module"
+    }
+    crop_seasons {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    source_lots {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    lots {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    conversions {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    lab_results {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    markets ||..o{ mrl_versions : market
+    commodities ||..o{ mrl_versions : commodity
+    users o|..o{ mrl_versions : published_by
+    mrl_versions ||..o{ mrl_limits : mrl_version
+    active_substances ||..o{ mrl_limits : substance
+    organizations ||..o{ safety_margin_policies : company
+    markets ||..o{ safety_margin_policies : market
+    commodities ||..o{ safety_margin_policies : commodity
+    users ||..o{ safety_margin_policies : configured_by
+    organizations ||..o{ cohort_policies : company
+    users ||..o{ cohort_policies : confirmed_by
+    organizations ||..o{ cohorts : company
+    cohort_policies ||..o{ cohorts : policy
+    facilities ||..o{ cohorts : collection_site
+    crop_seasons ||..o{ cohorts : season
+    organizations ||..o{ cohort_members : company
+    cohorts ||..o{ cohort_members : cohort
+    source_lots ||..o{ cohort_members : source_lot
+    organizations ||..o{ cohort_bounds : company
+    cohorts ||..o{ cohort_bounds : cohort
+    active_substances ||..o{ cohort_bounds : substance
+    users ||..o{ cohort_bounds : confirmed_by
+    active_substances o|..o{ propagation_policies : substance
+    commodities ||..o{ propagation_policies : commodity
+    users ||..o{ propagation_policies : confirmed_by
+    organizations ||..o{ residue_bounds : company
+    lots ||..o{ residue_bounds : lot
+    active_substances ||..o{ residue_bounds : substance
+    conversions o|..o{ residue_bounds : conversion
+    propagation_policies o|..o{ residue_bounds : propagation_policy
+    organizations ||..o{ bound_evidence : company
+    residue_bounds ||..o{ bound_evidence : bound
+    lab_results o|..o{ bound_evidence : lab_result
+    cohort_bounds o|..o{ bound_evidence : cohort_bound
+    residue_bounds o|..o{ bound_evidence : input_bound
+    organizations ||..o{ lot_quality_values : company
+    lots ||..o{ lot_quality_values : lot
+    quality_attributes ||..o{ lot_quality_values : attribute
+    users ||..o{ lot_quality_values : recorded_by

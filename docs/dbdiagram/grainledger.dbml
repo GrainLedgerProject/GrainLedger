@@ -1,0 +1,1601 @@
+// GrainLedger V2 business design with the deployed Identity schema. PostgreSQL target.
+Project grainledger_v2 {
+  database_type: 'PostgreSQL'
+  Note: 'Identity tables reflect the current EF migrations; other tables remain a physical design draft. Transaction guards are specified in README.md.'
+}
+
+Table identity.organizations {
+  Id uuid [pk, not null]
+  Name varchar(160) [not null, unique]
+  Kind varchar(20) [not null, note: 'Mill or Customer; current Identity migration enforces at most one Mill']
+  CreatedAt timestamptz [not null]
+  Note: 'Customer organizations are the owners referenced by business company_id. The FK alone does not require Kind = Customer; the business module must check it.'
+}
+
+Table identity.users {
+  Id uuid [pk, not null]
+  Provider varchar(30) [not null]
+  ProviderSubject varchar(255) [not null]
+  Email varchar(320) [not null]
+  DisplayName varchar(120) [not null]
+  PhoneNumber varchar(32) [null]
+  Role varchar(40) [null, note: 'One role per user; permission mapping is defined in Identity code']
+  OrganizationId uuid [null]
+  IsActive boolean [not null]
+  Version uuid [not null, note: 'Optimistic concurrency token']
+  CreatedAt timestamptz [not null]
+  UpdatedAt timestamptz [not null]
+  indexes {
+    (Provider, ProviderSubject) [unique]
+    Email
+    OrganizationId
+  }
+  Note: 'Google OAuth is the current provider. OrganizationId links to either Mill or Customer. Pending users may have no organization and no role.'
+}
+
+Table identity.sessions {
+  Id uuid [pk, not null]
+  UserId uuid [not null]
+  CreatedAt timestamptz [not null]
+  LastSeenAt timestamptz [not null]
+  ExpiresAt timestamptz [not null]
+  RevokedAt timestamptz [null]
+  IpAddress varchar(64) [null]
+  UserAgent varchar(512) [null]
+  indexes {
+    (UserId, RevokedAt)
+  }
+}
+
+Table identity.audit_events {
+  Id bigint [pk, not null]
+  ActorUserId uuid [null]
+  SubjectUserId uuid [null]
+  Action varchar(100) [not null]
+  DetailsJson jsonb [not null]
+  OccurredAt timestamptz [not null]
+  IpAddress text [null]
+  indexes {
+    OccurredAt
+  }
+  Note: 'Identity audit events are separate from planned business_events. The current migration has no actor/subject foreign keys.'
+}
+
+Table facilities {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(40) [not null, unique]
+  name text [not null]
+  kind varchar(32) [not null, note: 'Allowed: MILL, COLLECTION_SITE']
+  address text [not null]
+  is_active boolean [not null]
+}
+
+Table user_facilities {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  user_id uuid [not null]
+  facility_id uuid [not null]
+  indexes {
+    (user_id, facility_id) [unique]
+    facility_id
+  }
+  Note: '''Assigned operating scope of mill staff; customer access still requires company ownership.'''
+}
+
+Table locations {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  facility_id uuid [not null]
+  code varchar(40) [not null]
+  kind varchar(32) [not null, note: 'Allowed: RECEIVING, DRYING, SILO, MILLING, PACKING, QUARANTINE']
+  is_active boolean [not null]
+  indexes {
+    (facility_id, code) [unique]
+  }
+}
+
+Table equipment {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  facility_id uuid [not null]
+  location_id uuid [null]
+  code varchar(40) [not null]
+  kind varchar(32) [not null, note: 'Allowed: DRYER, MILLING_LINE, PACKING_LINE, SCALE']
+  capacity_value numeric(24,12) [null]
+  capacity_unit varchar(30) [null]
+  is_active boolean [not null]
+  indexes {
+    (facility_id, code) [unique]
+    location_id
+  }
+  Note: '''F02 equipment and capacity. Capacity unit distinguishes kg per hour from static storage kg. Guard: when location_id exists, location.facility_id must equal equipment.facility_id.
+CHECK: (capacity_value IS NULL) = (capacity_unit IS NULL)
+CHECK: capacity_value IS NULL OR capacity_value > 0'''
+}
+
+Table silos {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  facility_id uuid [not null]
+  code varchar(40) [not null]
+  indexes {
+    (facility_id, code) [unique]
+  }
+}
+
+Table silo_compartments {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  silo_id uuid [not null]
+  location_id uuid [not null, unique]
+  code varchar(40) [not null]
+  capacity_kg numeric(20,6) [not null]
+  indexes {
+    (silo_id, code) [unique]
+  }
+  Note: '''A silo without physical partitions has one compartment. Guard: location.kind = SILO and location.facility_id must equal silo.facility_id.
+CHECK: capacity_kg > 0'''
+}
+
+Table compartment_occupancies {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  compartment_id uuid [not null]
+  started_at timestamptz [not null]
+  cleared_at timestamptz [null]
+  cleared_by uuid [null]
+  clearance_note text [null]
+  indexes {
+    (company_id, id) [unique]
+    compartment_id
+    cleared_by
+  }
+  Note: '''Partial unique index: one row per compartment with cleared_at IS NULL. Clearance requires zero stock and Mill Operator confirmation; no overlapping occupancy periods.
+CHECK: (cleared_at IS NULL) = (cleared_by IS NULL)
+CHECK: cleared_at IS NULL OR cleared_at >= started_at'''
+}
+
+Table farmers {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code varchar(40) [not null]
+  name text [not null]
+  contact text [null]
+  created_at timestamptz [not null]
+  indexes {
+    (company_id, code) [unique]
+    (company_id, id) [unique]
+  }
+}
+
+Table plots {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  farmer_id uuid [not null]
+  code varchar(40) [not null]
+  boundary_geojson jsonb [not null]
+  area_ha numeric(24,12) [not null]
+  indexes {
+    (farmer_id, code) [unique]
+    (company_id, id) [unique]
+  }
+  Note: '''WGS84 coordinates; GeoJSON geometry validation is required. Avoid assuming PostGIS is installed.
+CHECK: area_ha > 0'''
+}
+
+Table crop_seasons {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  name text [not null]
+  starts_on date [not null]
+  ends_on date [not null]
+  indexes {
+    (company_id, id) [unique]
+  }
+  Note: '''CHECK: ends_on >= starts_on'''
+}
+
+Table plot_seasons {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plot_id uuid [not null]
+  season_id uuid [not null]
+  rice_variety text [not null]
+  indexes {
+    (plot_id, season_id) [unique]
+    (company_id, id) [unique]
+    season_id
+  }
+}
+
+Table spray_declarations {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plot_season_id uuid [not null]
+  applied_at timestamptz [not null]
+  recorded_by uuid [not null]
+  recorded_at timestamptz [not null]
+  evidence_ref text [null]
+  indexes {
+    (company_id, id) [unique]
+    plot_season_id
+    recorded_by
+  }
+}
+
+Table spray_items {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  declaration_id uuid [not null]
+  product_name text [null]
+  substance_id uuid [null]
+  rate numeric(24,12) [not null]
+  rate_unit varchar(40) [not null]
+  indexes {
+    (company_id, id) [unique]
+    declaration_id
+    substance_id
+  }
+  Note: '''CHECK: rate > 0
+CHECK: product_name IS NOT NULL OR substance_id IS NOT NULL'''
+}
+
+Table procurements {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code varchar(40) [not null]
+  farmer_id uuid [not null]
+  collection_site_id uuid [not null]
+  received_by uuid [not null]
+  received_at timestamptz [not null]
+  status varchar(32) [not null, note: 'Allowed: DRAFT, COMMITTED']
+  event_id uuid [null, unique]
+  indexes {
+    (company_id, code) [unique]
+    (company_id, id) [unique]
+    farmer_id
+    collection_site_id
+    received_by
+  }
+  Note: '''COMMITTED requires an event and at least one line; each line creates exactly one source lot.'''
+}
+
+Table procurement_items {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  procurement_id uuid [not null]
+  line_no integer [not null]
+  plot_season_id uuid [not null]
+  net_mass_kg numeric(20,6) [not null]
+  measured_value numeric(24,12) [not null]
+  measured_unit varchar(20) [not null]
+  moisture_percent numeric(24,12) [not null]
+  indexes {
+    (procurement_id, line_no) [unique]
+    (company_id, id) [unique]
+    plot_season_id
+  }
+  Note: '''Plot farmer must equal procurement farmer. PlotSeason gives plot and season; do not duplicate inconsistent source IDs.
+CHECK: net_mass_kg > 0
+CHECK: measured_value > 0
+CHECK: moisture_percent BETWEEN 0 AND 100'''
+}
+
+Table source_lots {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  lot_id uuid [not null, unique]
+  procurement_item_id uuid [not null, unique]
+  indexes {
+    (company_id, id) [unique]
+  }
+  Note: '''Source extension of a lot, not a second stock balance. Exactly one source plot via procurement item.'''
+}
+
+Table offline_operations {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  submitted_by uuid [not null]
+  device_id varchar(100) [not null]
+  client_operation_id uuid [not null]
+  payload_hash varchar(128) [not null]
+  payload jsonb [not null]
+  captured_at timestamptz [not null]
+  capture_geojson jsonb [null]
+  received_at timestamptz [not null]
+  status varchar(32) [not null, note: 'Allowed: PENDING, APPLIED, CONFLICT, REJECTED']
+  applied_event_id uuid [null, unique]
+  result_payload jsonb [null]
+  conflict_reason text [null]
+  indexes {
+    (company_id, device_id, client_operation_id) [unique]
+    (company_id, id) [unique]
+    submitted_by
+  }
+  Note: '''Same key/hash returns prior result. Same key with different payload produces conflict; no duplicate intake. Payload includes client IDs for linked offline records.'''
+}
+
+Table lots {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code varchar(60) [not null]
+  commodity_id uuid [not null]
+  stage varchar(32) [not null, note: 'Allowed: RAW_PADDY, DRIED_PADDY, HEAD_RICE, BROKEN_RICE, BRAN, HUSK, BLENDED_RICE, BAGGED_RICE']
+  created_at timestamptz [not null]
+  indexes {
+    (company_id, code) [unique]
+    (company_id, id) [unique]
+    commodity_id
+  }
+  Note: '''Created by source_lots or conversion_outputs, exactly one origin. No AVAILABLE/RESERVED lot status.'''
+}
+
+Table stock_positions {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  lot_id uuid [not null]
+  location_id uuid [not null]
+  on_hand_kg numeric(20,6) [not null, default: 0]
+  reserved_kg numeric(20,6) [not null, default: 0]
+  updated_at timestamptz [not null]
+  indexes {
+    (lot_id, location_id) [unique]
+    (company_id, id) [unique]
+    location_id
+  }
+  Note: '''Projection; available = on_hand - reserved only if not held and otherwise eligible. Loading stock no longer counts here.
+CHECK: on_hand_kg >= 0
+CHECK: reserved_kg >= 0
+CHECK: reserved_kg <= on_hand_kg'''
+}
+
+Table balance_policies {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  conversion_type varchar(40) [not null]
+  version_no integer [not null]
+  tolerance_mode varchar(32) [not null, note: 'Allowed: PERCENT_INPUT']
+  tolerance_value numeric(20,6) [not null]
+  configured_by uuid [not null]
+  effective_from timestamptz [not null]
+  evidence_ref text [not null]
+  indexes {
+    (conversion_type, version_no) [unique]
+    configured_by
+  }
+  Note: '''Percent input only: 1 means 1 percent; allowed variance = input kg * tolerance_value / 100. Operational values require mill confirmation.
+CHECK: version_no > 0
+CHECK: tolerance_value >= 0'''
+}
+
+Table conversions {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code varchar(60) [not null]
+  kind varchar(32) [not null, note: 'Allowed: DRYING, MILLING, MERGE, BLENDING, BAGGING, COMPENSATION']
+  status varchar(32) [not null, note: 'Allowed: DRAFT, COMMITTED']
+  balance_policy_id uuid [not null]
+  equipment_id uuid [null]
+  plan_id uuid [null]
+  original_conversion_id uuid [null]
+  declared_loss_kg numeric(20,6) [not null, default: 0]
+  declared_loss_value numeric(24,12) [null]
+  declared_loss_unit varchar(20) [null]
+  loss_reason text [null]
+  measurement_variance_kg numeric(20,6) [null]
+  variance_reason varchar(32) [null, note: 'Allowed: SCALE_ROUNDING, MEASUREMENT_ERROR, MOISTURE_ESTIMATION, OTHER_CONFIRMED']
+  variance_confirmed_by uuid [null]
+  recorded_by uuid [not null]
+  occurred_at timestamptz [not null]
+  event_id uuid [null, unique]
+  committed_at timestamptz [null]
+  indexes {
+    (company_id, code) [unique]
+    (company_id, id) [unique]
+    balance_policy_id
+    equipment_id
+    plan_id
+    original_conversion_id
+    variance_confirmed_by
+    recorded_by
+  }
+  Note: '''Committed records immutable. Compensation reverses accounting postings, never adds reverse production lineage. Same-customer inputs and valid stage transitions required. Compensation and replacement commit atomically after physical reconciliation; never expose fictitious restored inputs. Downstream use blocks direct correction. Nonzero committed variance requires reason and Mill Manager confirmation. Variance = input - output - declared loss, within pinned percent tolerance; no invented loss.
+CHECK: declared_loss_kg >= 0
+CHECK: (declared_loss_value IS NULL) = (declared_loss_unit IS NULL)
+CHECK: (kind = 'COMPENSATION') = (original_conversion_id IS NOT NULL)'''
+}
+
+Table conversion_inputs {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  conversion_id uuid [not null]
+  lot_id uuid [not null]
+  mass_kg numeric(20,6) [not null]
+  measured_value numeric(24,12) [null]
+  measured_unit varchar(20) [null]
+  indexes {
+    (conversion_id, lot_id) [unique]
+    (company_id, id) [unique]
+    lot_id
+  }
+  Note: '''mass_kg is normalized ledger mass. When an operator records a physical measurement, retain the original value and unit.
+CHECK: mass_kg > 0
+CHECK: (measured_value IS NULL) = (measured_unit IS NULL)
+CHECK: measured_value IS NULL OR measured_value > 0'''
+}
+
+Table conversion_outputs {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  conversion_id uuid [not null]
+  lot_id uuid [not null, unique]
+  mass_kg numeric(20,6) [not null]
+  measured_value numeric(24,12) [null]
+  measured_unit varchar(20) [null]
+  indexes {
+    (company_id, id) [unique]
+    conversion_id
+  }
+  Note: '''mass_kg is normalized ledger mass. When an operator records a physical measurement, retain the original value and unit.
+CHECK: mass_kg > 0
+CHECK: (measured_value IS NULL) = (measured_unit IS NULL)
+CHECK: measured_value IS NULL OR measured_value > 0'''
+}
+
+Table mass_contributions {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  input_id uuid [not null]
+  output_id uuid [not null]
+  output_mass_kg numeric(20,6) [not null]
+  indexes {
+    (input_id, output_id) [unique]
+    (company_id, id) [unique]
+    output_id
+  }
+  Note: '''Both ends must be in the same conversion. For every output, contribution(input, output) = output mass × input mass / total input mass, with a deterministic rounding residual. Sum by output = output mass. Derived attribution, not physical identity of grains.
+CHECK: output_mass_kg > 0'''
+}
+
+Table stock_postings {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  event_id uuid [not null]
+  line_no integer [not null]
+  position_id uuid [not null]
+  delta_kg numeric(20,6) [not null]
+  reservation_id uuid [null]
+  input_id uuid [null]
+  output_id uuid [null]
+  loading_item_id uuid [null]
+  reverses_posting_id uuid [null, unique]
+  indexes {
+    (event_id, line_no) [unique]
+    (company_id, id) [unique]
+    position_id
+    reservation_id
+    input_id
+    output_id
+    loading_item_id
+  }
+  Note: '''Signed immutable ledger. Transfer uses paired postings with same lot/event; processing uses input/output refs; loading decrements stock once. Sum per position equals on_hand. Reserved consumption must match plan, position, input/loading and ReservationEvent exactly; reversal links original negative posting.
+CHECK: delta_kg <> 0
+CHECK: num_nonnulls(input_id, output_id, loading_item_id) <= 1'''
+}
+
+Table correction_requests {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  original_conversion_id uuid [not null]
+  compensation_id uuid [null, unique]
+  replacement_id uuid [null, unique]
+  requested_by uuid [not null]
+  reconciled_by uuid [null]
+  reconciliation_ref text [null]
+  requested_at timestamptz [not null]
+  resolved_at timestamptz [null]
+  reason text [not null]
+  outcome varchar(32) [not null, note: 'Allowed: PENDING_RECONCILIATION, BLOCKED_DOWNSTREAM, COMPLETED, CANCELLED_VERIFIED']
+  handling_note text [null]
+  indexes {
+    (company_id, id) [unique]
+    original_conversion_id
+    requested_by
+    reconciled_by
+  }
+  Note: '''Pending/blocked correction locks related output use independently of HOLD. Mill Manager verifies physical stock. Compensation, replacement, postings and reservation accounting commit atomically. Block direct correction after downstream consumption/loading. All conversions distinct and same company; compensation.original_conversion_id matches request. CANCELLED_VERIFIED needs evidence original is correct and never releases HOLD.
+CHECK: compensation_id IS NULL OR compensation_id <> original_conversion_id
+CHECK: replacement_id IS NULL OR replacement_id <> original_conversion_id
+CHECK: replacement_id IS NULL OR replacement_id <> compensation_id
+CHECK: outcome <> 'COMPLETED' OR (compensation_id IS NOT NULL AND replacement_id IS NOT NULL AND reconciled_by IS NOT NULL AND reconciliation_ref IS NOT NULL AND resolved_at IS NOT NULL)'''
+}
+
+Table samples {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code varchar(60) [not null]
+  source_lot_id uuid [not null]
+  seal_code varchar(100) [not null]
+  collected_by uuid [not null]
+  collected_at timestamptz [not null]
+  indexes {
+    (company_id, code) [unique]
+    (company_id, id) [unique]
+    source_lot_id
+    collected_by
+  }
+  Note: '''One sample represents one source paddy lot; no composite sample in MVP.'''
+}
+
+Table sample_handovers {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  sample_id uuid [not null]
+  recorded_by uuid [not null]
+  from_party text [not null]
+  to_party text [not null]
+  handed_over_at timestamptz [not null]
+  seal_condition text [not null]
+  evidence_ref text [null]
+  indexes {
+    (company_id, id) [unique]
+    sample_id
+    recorded_by
+  }
+}
+
+Table lab_reports {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  sample_id uuid [not null]
+  certificate_no varchar(100) [not null]
+  laboratory_name text [not null]
+  issued_at timestamptz [not null]
+  registered_by uuid [not null]
+  registered_at timestamptz [null]
+  supersedes_report_id uuid [null, unique]
+  evidence_ref text [not null]
+  status varchar(32) [not null, note: 'Allowed: DRAFT, REGISTERED']
+  indexes {
+    (company_id, id) [unique]
+    sample_id
+    registered_by
+  }
+  Note: '''Laboratory is stored as an evidence source, not an added system actor. REGISTERED requires registered_at. Registered evidence immutable. Supersession stays in same sample/report context, no branch or cycle; registration time records when evidence became known.'''
+}
+
+Table lab_results {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  report_id uuid [not null]
+  substance_id uuid [not null]
+  qualifier varchar(32) [not null, note: 'Allowed: EQ, LT, ND']
+  value numeric(24,12) [null]
+  lod numeric(24,12) [null]
+  loq numeric(24,12) [null]
+  unit varchar(20) [not null]
+  indexes {
+    (report_id, substance_id) [unique]
+    (company_id, id) [unique]
+    substance_id
+  }
+  Note: '''EQ needs a value; LT needs a reporting threshold; ND never means numeric zero. Interpret through a documented bound policy.
+CHECK: value IS NULL OR value >= 0
+CHECK: lod IS NULL OR lod >= 0
+CHECK: loq IS NULL OR loq >= 0'''
+}
+
+Table active_substances {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(60) [not null, unique]
+  name text [not null]
+}
+
+Table commodities {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(40) [not null, unique]
+  name text [not null]
+}
+
+Table markets {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(40) [not null, unique]
+  name text [not null]
+}
+
+Table quality_attributes {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(60) [not null, unique]
+  name text [not null]
+  unit varchar(30) [not null]
+}
+
+Table mrl_versions {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  market_id uuid [not null]
+  commodity_id uuid [not null]
+  version_no integer [not null]
+  status varchar(32) [not null, note: 'Allowed: DRAFT, PUBLISHED']
+  effective_from timestamptz [not null]
+  effective_to timestamptz [null]
+  published_by uuid [null]
+  published_at timestamptz [null]
+  source_ref text [not null]
+  indexes {
+    (market_id, commodity_id, version_no) [unique]
+    commodity_id
+    published_by
+  }
+  Note: '''Published effective intervals must not overlap for market/commodity. PUBLISHED requires published_by and published_at; publication differs from effective time. History remains immutable; version used by each assessment is explicit.
+CHECK: effective_to IS NULL OR effective_to > effective_from'''
+}
+
+Table mrl_limits {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  mrl_version_id uuid [not null]
+  substance_id uuid [not null]
+  limit_value numeric(24,12) [not null]
+  unit varchar(20) [not null]
+  indexes {
+    (mrl_version_id, substance_id) [unique]
+    substance_id
+  }
+  Note: '''CHECK: limit_value >= 0'''
+}
+
+Table safety_margin_policies {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  market_id uuid [not null]
+  commodity_id uuid [not null]
+  version_no integer [not null]
+  margin_value numeric(24,12) [not null]
+  margin_mode varchar(32) [not null, note: 'Allowed: RELATIVE_FRACTION, ABSOLUTE_MG_KG']
+  effective_from timestamptz [not null]
+  effective_to timestamptz [null]
+  evidence_ref text [not null]
+  configured_by uuid [not null]
+  configured_at timestamptz [not null]
+  indexes {
+    (company_id, market_id, commodity_id, version_no) [unique]
+    (company_id, id) [unique]
+    market_id
+    commodity_id
+    configured_by
+  }
+  Note: '''Customer Manager configures versioned safety margin for its company/market/commodity. Decision stores a snapshot and this policy reference. Effective intervals must not overlap for the same company, market and commodity.
+CHECK: margin_value >= 0
+CHECK: margin_mode <> 'RELATIVE_FRACTION' OR margin_value < 1
+CHECK: effective_to IS NULL OR effective_to > effective_from'''
+}
+
+Table cohort_policies {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  version_no integer [not null]
+  window_rule text [not null]
+  sampling_rule text [not null]
+  evidence_ref text [not null]
+  confirmed_by uuid [not null]
+  confirmed_at timestamptz [not null]
+  indexes {
+    (company_id, version_no) [unique]
+    (company_id, id) [unique]
+    confirmed_by
+  }
+}
+
+Table cohorts {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  policy_id uuid [not null]
+  collection_site_id uuid [not null]
+  season_id uuid [not null]
+  window_start timestamptz [not null]
+  window_end timestamptz [not null]
+  indexes {
+    (company_id, policy_id, collection_site_id, season_id, window_start, window_end) [unique]
+    (company_id, id) [unique]
+    policy_id
+    collection_site_id
+    season_id
+  }
+  Note: '''CHECK: window_end > window_start'''
+}
+
+Table cohort_members {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  cohort_id uuid [not null]
+  source_lot_id uuid [not null]
+  indexes {
+    (cohort_id, source_lot_id) [unique]
+    (company_id, id) [unique]
+    source_lot_id
+  }
+  Note: '''At most one cohort per source lot and policy version; enforce membership rule through DB guard.'''
+}
+
+Table cohort_bounds {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  cohort_id uuid [not null]
+  substance_id uuid [not null]
+  version_no integer [not null]
+  bound_value numeric(24,12) [not null]
+  unit varchar(20) [not null]
+  evidence_ref text [not null]
+  immutable_membership_ref text [not null, note: 'Immutable content contract: IMMUTABLE_CONTENT.md. Frozen member IDs and source lot IDs, cohort/policy version, substance coverage, quantities/units, actor and knowledge time; later members never extend this bound.']
+  confirmed_by uuid [not null]
+  confirmed_at timestamptz [not null]
+  indexes {
+    (cohort_id, substance_id, version_no) [unique]
+    (company_id, id) [unique]
+    substance_id
+    confirmed_by
+  }
+  Note: '''CHECK: bound_value >= 0'''
+}
+
+Table propagation_policies {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(60) [not null]
+  version_no integer [not null]
+  substance_id uuid [null]
+  commodity_id uuid [not null]
+  conversion_type varchar(40) [not null]
+  input_stage varchar(32) [not null]
+  output_stage varchar(32) [not null]
+  rule_definition jsonb [not null]
+  evidence_ref text [not null]
+  confirmed_by uuid [not null]
+  confirmed_at timestamptz [not null]
+  indexes {
+    (commodity_id, input_stage, output_stage, conversion_type, version_no) [unique]
+    substance_id
+    confirmed_by
+  }
+  Note: '''One version per commodity/input-stage/output-stage/conversion-type tuple. code is a label; optional substance_id narrows applicability but does not create an independently versioned namespace. Milling processing factors need evidence, not invented defaults.'''
+}
+
+Table residue_bounds {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  lot_id uuid [not null]
+  substance_id uuid [not null]
+  version_no integer [not null]
+  bound_value numeric(24,12) [not null]
+  unit varchar(20) [not null]
+  source_kind varchar(32) [not null, note: 'Allowed: LAB, COHORT, CONVERSION']
+  conversion_id uuid [null]
+  propagation_policy_id uuid [null]
+  calculation_basis_ref text [not null, note: 'Immutable content contract: IMMUTABLE_CONTENT.md. Exact source IDs/versions, substances, input masses, units, conversion, rule/factors, rounding, actor and knowledge time; includes missing-evidence outcomes.']
+  calculated_at timestamptz [not null]
+  indexes {
+    (lot_id, substance_id, version_no) [unique]
+    (company_id, id) [unique]
+    substance_id
+    conversion_id
+    propagation_policy_id
+  }
+  Note: '''Missing valid bound blocks approval; no fake zero. CONVERSION needs policy and input evidence. Earlier bound versions stay available. A new source, lot or rule creates a new version; a relied-on bound is immutable.
+CHECK: bound_value >= 0'''
+}
+
+Table bound_evidence {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  bound_id uuid [not null]
+  lab_result_id uuid [null]
+  cohort_bound_id uuid [null]
+  input_bound_id uuid [null]
+  input_mass_kg numeric(20,6) [null]
+  indexes {
+    (company_id, id) [unique]
+    bound_id
+    lab_result_id
+    cohort_bound_id
+    input_bound_id
+  }
+  Note: '''Source type must match bound.source_kind; bound chains acyclic and substance-compatible. Guard: LAB result must trace through its sample to bound.lot; COHORT bound must contain that source lot under the applicable company/site/season/window policy; CONVERSION bound must use actual input lots of bound.conversion.
+CHECK: num_nonnulls(lab_result_id, cohort_bound_id, input_bound_id) = 1
+CHECK: input_bound_id IS NULL OR input_bound_id <> bound_id'''
+}
+
+Table lot_quality_values {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  lot_id uuid [not null]
+  attribute_id uuid [not null]
+  value numeric(24,12) [not null]
+  unit varchar(30) [not null]
+  measured_at timestamptz [not null]
+  evidence_ref text [not null]
+  recorded_by uuid [not null]
+  indexes {
+    (company_id, id) [unique]
+    lot_id
+    attribute_id
+    recorded_by
+  }
+  Note: '''Append measurements; assessments reference exact rows. Propagation is attribute-specific.'''
+}
+
+Table export_orders {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code varchar(60) [not null]
+  market_id uuid [not null]
+  commodity_id uuid [not null]
+  required_mass_kg numeric(20,6) [not null]
+  shipping_from date [not null]
+  shipping_to date [not null]
+  created_by uuid [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (company_id, code) [unique]
+    (company_id, id) [unique]
+    market_id
+    commodity_id
+    created_by
+  }
+  Note: '''CHECK: required_mass_kg > 0
+CHECK: shipping_to >= shipping_from'''
+}
+
+Table order_specifications {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  order_id uuid [not null]
+  version_no integer [not null]
+  recorded_at timestamptz [not null]
+  indexes {
+    (order_id, version_no) [unique]
+    (company_id, id) [unique]
+  }
+}
+
+Table specification_limits {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  specification_id uuid [not null]
+  attribute_id uuid [not null]
+  min_value numeric(24,12) [null]
+  max_value numeric(24,12) [null]
+  indexes {
+    (specification_id, attribute_id) [unique]
+    (company_id, id) [unique]
+    attribute_id
+  }
+  Note: '''CHECK: num_nonnulls(min_value, max_value) >= 1
+CHECK: min_value IS NULL OR max_value IS NULL OR min_value <= max_value'''
+}
+
+Table containers {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  order_id uuid [not null]
+  internal_code varchar(60) [not null]
+  physical_number varchar(40) [null]
+  seal_number varchar(60) [null]
+  target_mass_kg numeric(20,6) [not null]
+  status varchar(32) [not null, note: 'Allowed: PLANNED, LOADING, CLOSED']
+  closed_at timestamptz [null]
+  indexes {
+    (company_id, internal_code) [unique]
+    (company_id, id) [unique]
+    order_id
+  }
+  Note: '''Represents one shipment use of a physical container; physical_number is not unique forever.
+CHECK: target_mass_kg > 0'''
+}
+
+Table blend_plans {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  container_id uuid [not null]
+  specification_id uuid [not null]
+  version_no integer [not null]
+  status varchar(32) [not null, note: 'Allowed: DRAFT, PROPOSED, APPROVED, REJECTED, IN_EXECUTION, EXECUTED, STALE, CANCELLED']
+  execution_authorized boolean [not null, default: false]
+  search_outcome varchar(32) [not null, note: 'Allowed: PENDING, FOUND, SEARCH_EXHAUSTED, INVALID_INPUT']
+  algorithm_version varchar(100) [not null]
+  requested_by uuid [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (container_id, version_no) [unique]
+    (company_id, id) [unique]
+    specification_id
+    requested_by
+  }
+  Note: '''At most one execution_authorized plan per container via partial unique index, including EXECUTED awaiting loading. Authorization changes require audit event and container lock. STALE/REJECTED/CANCELLED cannot be authorized. Specification must belong to the container order. A committed plan item is immutable; changed order, specification, input stock, evidence or rule makes the plan STALE. SEARCH_EXHAUSTED is not a proof of global infeasibility.'''
+}
+
+Table plan_items {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plan_id uuid [not null]
+  position_id uuid [not null]
+  planned_mass_kg numeric(20,6) [not null]
+  indexes {
+    (plan_id, position_id) [unique]
+    (company_id, id) [unique]
+    position_id
+  }
+  Note: '''CHECK: planned_mass_kg > 0'''
+}
+
+Table plan_findings {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plan_id uuid [not null]
+  assessment_id uuid [null]
+  substance_id uuid [null]
+  attribute_id uuid [null]
+  constraint_code varchar(60) [not null]
+  explanation text [not null]
+  indexes {
+    (company_id, id) [unique]
+    plan_id
+    assessment_id
+    substance_id
+    attribute_id
+  }
+}
+
+Table finding_lots {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  finding_id uuid [not null]
+  lot_id uuid [not null]
+  indexes {
+    (finding_id, lot_id) [unique]
+    (company_id, id) [unique]
+    lot_id
+  }
+}
+
+Table assessments {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  container_id uuid [not null]
+  plan_id uuid [null]
+  loading_id uuid [null]
+  mrl_version_id uuid [null]
+  safety_margin_policy_id uuid [not null]
+  purpose varchar(32) [not null, note: 'Allowed: PROPOSE, REVIEW, LOADING, CLOSE']
+  verdict varchar(32) [not null, note: 'Allowed: PASS, FAIL, INCOMPLETE']
+  safety_margin numeric(24,12) [not null]
+  margin_mode varchar(32) [not null, note: 'Allowed: RELATIVE_FRACTION, ABSOLUTE_MG_KG']
+  assessed_by uuid [null]
+  assessed_at timestamptz [not null]
+  basis_snapshot jsonb [not null, note: 'Immutable inline content under IMMUTABLE_CONTENT.md: schema version, scope, sources/versions, masses/units, substance coverage, rules, actor and knowledge time. CLOSE includes every committed loading and historical authorization.']
+  basis_hash varchar(128) [not null, note: 'SHA-256 of canonical UTF-8 JSON basis_snapshot; verify on retrieval. Retain immutable content and digest for full linked-record lifetime.']
+  explanation text [null]
+  indexes {
+    (company_id, id) [unique]
+    container_id
+    plan_id
+    loading_id
+    mrl_version_id
+    safety_margin_policy_id
+    assessed_by
+  }
+  Note: '''The policy reference and margin fields snapshot the margin used. INCOMPLETE supports rejecting stale/missing evidence. PASS requires all regulated substances and specifications, current limits and no HOLD. CLOSE has no plan/loading FK and covers ALL committed container loadings across historical plans. Immutable basis pins loading IDs, mass, positions, lots, historical authorizations, specification and current evidence. Other purposes require matching plan/container; LOADING also matches loading plan/container.
+CHECK: (purpose = 'CLOSE' AND plan_id IS NULL AND loading_id IS NULL) OR (purpose IN ('PROPOSE','REVIEW') AND plan_id IS NOT NULL AND loading_id IS NULL) OR (purpose = 'LOADING' AND plan_id IS NOT NULL AND loading_id IS NOT NULL)
+CHECK: safety_margin >= 0
+CHECK: margin_mode <> 'RELATIVE_FRACTION' OR safety_margin < 1
+CHECK: verdict <> 'PASS' OR mrl_version_id IS NOT NULL'''
+}
+
+Table assessment_bounds {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  assessment_id uuid [not null]
+  bound_id uuid [not null]
+  evaluated_mass_kg numeric(20,6) [not null]
+  indexes {
+    (assessment_id, bound_id) [unique]
+    (company_id, id) [unique]
+    bound_id
+  }
+  Note: '''CHECK: evaluated_mass_kg > 0'''
+}
+
+Table assessment_quality {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  assessment_id uuid [not null]
+  quality_value_id uuid [not null]
+  evaluated_value numeric(24,12) [not null]
+  unit varchar(30) [not null]
+  calculation_basis jsonb [not null]
+  indexes {
+    (assessment_id, quality_value_id) [unique]
+    (company_id, id) [unique]
+    quality_value_id
+  }
+  Note: '''Snapshot of evaluated quality value and attribute-specific calculation basis; quality_value_id identifies the source measurement.'''
+}
+
+Table plan_reviews {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plan_id uuid [not null]
+  assessment_id uuid [not null]
+  reviewed_by uuid [not null]
+  decision varchar(32) [not null, note: 'Allowed: APPROVE, REJECT']
+  review_scope varchar(32) [not null, note: 'Allowed: ALL_REMAINING, OUTPUT_ONLY']
+  reason text [null]
+  reviewed_at timestamptz [not null]
+  indexes {
+    (company_id, id) [unique]
+    plan_id
+    assessment_id
+    reviewed_by
+  }
+  Note: '''Only Customer Manager for this company. Guard: assessment.plan_id must equal plan_id and assessment purpose must be REVIEW. APPROVE requires that plan assessment to PASS and reserves stock atomically; REJECT can use INCOMPLETE. Fresh assessment/review may reapprove unchanged stale plan. OUTPUT_ONLY evaluates actual remaining outputs and cannot authorize production. Changed inputs need a new plan for unproduced remainder, never relabel old outputs.'''
+}
+
+Table plan_output_allocations {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plan_id uuid [not null]
+  position_id uuid [not null]
+  output_id uuid [not null]
+  assigned_kg numeric(20,6) [not null]
+  indexes {
+    (plan_id, position_id, output_id) [unique]
+    (company_id, id) [unique]
+    position_id
+    output_id
+  }
+  Note: '''Maps PlanOutputAllocation. Output conversion belongs to this plan; position lot equals output lot. Net consumed plus outstanding OUTPUT reservations cannot exceed assigned_kg; total assignments cannot exceed produced output.
+CHECK: assigned_kg > 0'''
+}
+
+Table stock_reservations {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plan_id uuid [not null]
+  position_id uuid [not null]
+  plan_item_id uuid [null]
+  plan_output_id uuid [null]
+  purpose varchar(32) [not null, note: 'Allowed: INPUT, OUTPUT']
+  reserved_kg numeric(20,6) [not null]
+  consumed_kg numeric(20,6) [not null, default: 0]
+  released_kg numeric(20,6) [not null, default: 0]
+  created_at timestamptz [not null]
+  indexes {
+    (company_id, id) [unique]
+    plan_id
+    position_id
+    plan_item_id
+    plan_output_id
+  }
+  Note: '''Direct plan/position FK avoids ambiguous reservation target. Input references selected item; output references plan_output_allocations. Position and plan match source. Projections: reserved=sum RESERVE; consumed=sum CONSUME minus sum REVERSE_CONSUME; released=sum RELEASE. Across all INPUT reservations for one item, net consumed plus outstanding cannot exceed planned_mass_kg.
+CHECK: reserved_kg > 0
+CHECK: consumed_kg >= 0
+CHECK: released_kg >= 0
+CHECK: consumed_kg + released_kg <= reserved_kg
+CHECK: (purpose = 'INPUT' AND plan_item_id IS NOT NULL AND plan_output_id IS NULL) OR (purpose = 'OUTPUT' AND plan_output_id IS NOT NULL AND plan_item_id IS NULL)'''
+}
+
+Table reservation_events {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  reservation_id uuid [not null]
+  event_id uuid [not null]
+  line_no integer [not null]
+  reverses_event_id uuid [null, unique]
+  movement_id uuid [null, unique]
+  correction_request_id uuid [null]
+  kind varchar(32) [not null, note: 'Allowed: RESERVE, CONSUME, RELEASE, REVERSE_CONSUME']
+  mass_kg numeric(20,6) [not null]
+  indexes {
+    (event_id, line_no) [unique]
+    (company_id, id) [unique]
+    reservation_id
+    correction_request_id
+  }
+  Note: '''Append-only. REVERSE_CONSUME undoes one original committed INPUT CONSUME, same reservation/mass, once only; no partial reversal or reversal-of-reversal. Positive movement reverses original negative movement. Original, compensation and replacement movements match correction conversion IDs. Replacement CONSUME carries correction_request_id. Posting, reservation, position, event and mass match atomically. RELEASE removes outstanding quota, never undoes consumption; movement_id and reverses_event_id stay NULL. Correction RELEASE requires correction_request_id and shared correction correlation, committed in the same package. Surplus restored quota is released unless physically present and still authorized. event_id/line_no provides idempotency.
+CHECK: mass_kg > 0
+CHECK: line_no > 0
+CHECK: reverses_event_id IS NULL OR reverses_event_id <> id
+CHECK: (kind IN ('CONSUME','REVERSE_CONSUME')) = (movement_id IS NOT NULL)
+CHECK: (kind = 'REVERSE_CONSUME') = (reverses_event_id IS NOT NULL)
+CHECK: kind <> 'REVERSE_CONSUME' OR correction_request_id IS NOT NULL
+CHECK: kind <> 'RESERVE' OR correction_request_id IS NULL'''
+}
+
+Table loadings {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  container_id uuid [not null]
+  plan_id uuid [not null]
+  recorded_by uuid [not null]
+  status varchar(32) [not null, note: 'Allowed: DRAFT, COMMITTED']
+  loaded_at timestamptz [not null]
+  event_id uuid [null, unique]
+  indexes {
+    (company_id, id) [unique]
+    container_id
+    plan_id
+    recorded_by
+  }
+  Note: '''Export Officer records/commits loading. Container must match approved plan and evidence must be rechecked. CLOSE requires committed loading total = container target mass; sum of CLOSED container quantities may not exceed the export order required mass. Any shipment tolerance requires an explicit, separately versioned rule.'''
+}
+
+Table loading_items {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  loading_id uuid [not null]
+  position_id uuid [not null]
+  reservation_id uuid [not null]
+  mass_kg numeric(20,6) [not null]
+  bag_count integer [null]
+  indexes {
+    (company_id, id) [unique]
+    loading_id
+    position_id
+    reservation_id
+  }
+  Note: '''Consumes matching OUTPUT reservation and warehouse position exactly once; completed conversion lineage must match plan.
+CHECK: mass_kg > 0
+CHECK: bag_count IS NULL OR bag_count > 0'''
+}
+
+Table dossiers {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  container_id uuid [not null, unique]
+  closing_assessment_id uuid [not null, unique]
+  created_by uuid [not null]
+  finalized_at timestamptz [not null]
+  snapshot jsonb [not null]
+  snapshot_hash varchar(128) [not null]
+  indexes {
+    (company_id, id) [unique]
+    created_by
+  }
+  Note: '''Immutable exact references to actual loadings, all historical plans/specifications, limits, bound/quality evidence versions and decision times. Finalize only with CLOSE PASS for the same container (assessment plan_id and loading_id are null) after the target-mass check.'''
+}
+
+Table dossier_supplements {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  dossier_id uuid [not null]
+  added_by uuid [not null]
+  added_at timestamptz [not null]
+  reason text [not null]
+  evidence_ref text [not null]
+  indexes {
+    (company_id, id) [unique]
+    dossier_id
+    added_by
+  }
+}
+
+Table shipment_documents {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  container_id uuid [not null]
+  kind varchar(60) [not null]
+  version_no integer [not null]
+  file_ref text [not null]
+  file_hash varchar(128) [not null]
+  issued_by uuid [not null]
+  issued_at timestamptz [not null]
+  indexes {
+    (container_id, kind, version_no) [unique]
+    (company_id, id) [unique]
+    issued_by
+  }
+}
+
+Table holds {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  lot_id uuid [null]
+  container_id uuid [null]
+  lab_result_id uuid [null]
+  ordered_by uuid [not null]
+  ordered_at timestamptz [not null]
+  reason text [not null]
+  indexes {
+    (company_id, id) [unique]
+    lot_id
+    container_id
+    lab_result_id
+    ordered_by
+  }
+  Note: '''Exactly one target, no silo target. No release/archive flag that silently restores eligibility in MVP. Customer Manager orders hold.
+CHECK: num_nonnulls(lot_id, container_id) = 1'''
+}
+
+Table hold_actions {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  hold_id uuid [not null]
+  recorded_by uuid [not null]
+  kind varchar(32) [not null, note: 'Allowed: ACKNOWLEDGE, ISOLATE, RECORD_RESPONSE']
+  note text [not null]
+  evidence_ref text [null]
+  recorded_at timestamptz [not null]
+  indexes {
+    (company_id, id) [unique]
+    hold_id
+    recorded_by
+  }
+  Note: '''Mill Manager handling does not clear HOLD. Quarantine moves still recorded as stock postings.'''
+}
+
+Table notifications {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  hold_id uuid [not null]
+  recipient_id uuid [not null]
+  message text [not null]
+  created_at timestamptz [not null]
+  read_at timestamptz [null]
+  indexes {
+    (hold_id, recipient_id) [unique]
+    (company_id, id) [unique]
+    recipient_id
+  }
+  Note: '''F19 in-app notification, visibility limited to authorized company or assigned mill staff. No external messaging integration added.'''
+}
+
+Table business_events {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [null]
+  actor_id uuid [null]
+  event_type varchar(60) [not null]
+  occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+  correlation_id uuid [not null]
+  payload jsonb [not null]
+  indexes {
+    company_id
+    actor_id
+  }
+  Note: '''Append-only envelope, global company null only for platform events. Structured target IDs supplement but do not replace business FKs. Failed validation and traceback queries are audited here.'''
+}
+
+Table state_changes {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  event_id uuid [not null]
+  plan_id uuid [null]
+  conversion_id uuid [null]
+  container_id uuid [null]
+  from_state varchar(32) [null]
+  to_state varchar(32) [not null]
+  reason text [null]
+  indexes {
+    (company_id, id) [unique]
+    event_id
+    plan_id
+    conversion_id
+    container_id
+  }
+  Note: '''Target company and allowed state transition checked at DB boundary.
+CHECK: num_nonnulls(plan_id, conversion_id, container_id) = 1'''
+}
+
+Ref: identity.users.OrganizationId > identity.organizations.Id [delete: restrict, update: no action]
+Ref: identity.sessions.UserId > identity.users.Id [delete: cascade, update: no action]
+Ref: user_facilities.user_id > identity.users.Id [delete: restrict, update: no action]
+Ref: user_facilities.facility_id > facilities.id [delete: restrict, update: no action]
+Ref: locations.facility_id > facilities.id [delete: restrict, update: no action]
+Ref: equipment.facility_id > facilities.id [delete: restrict, update: no action]
+Ref: equipment.location_id > locations.id [delete: restrict, update: no action]
+Ref: silos.facility_id > facilities.id [delete: restrict, update: no action]
+Ref: silo_compartments.silo_id > silos.id [delete: restrict, update: no action]
+Ref: silo_compartments.location_id > locations.id [delete: restrict, update: no action]
+Ref: compartment_occupancies.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: compartment_occupancies.compartment_id > silo_compartments.id [delete: restrict, update: no action]
+Ref: compartment_occupancies.cleared_by > identity.users.Id [delete: restrict, update: no action]
+Ref: farmers.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: plots.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: plots.(company_id, farmer_id) > farmers.(company_id, id) [delete: restrict, update: no action]
+Ref: crop_seasons.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: plot_seasons.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: plot_seasons.(company_id, plot_id) > plots.(company_id, id) [delete: restrict, update: no action]
+Ref: plot_seasons.(company_id, season_id) > crop_seasons.(company_id, id) [delete: restrict, update: no action]
+Ref: spray_declarations.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: spray_declarations.(company_id, plot_season_id) > plot_seasons.(company_id, id) [delete: restrict, update: no action]
+Ref: spray_declarations.recorded_by > identity.users.Id [delete: restrict, update: no action]
+Ref: spray_items.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: spray_items.(company_id, declaration_id) > spray_declarations.(company_id, id) [delete: restrict, update: no action]
+Ref: spray_items.substance_id > active_substances.id [delete: restrict, update: no action]
+Ref: procurements.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: procurements.(company_id, farmer_id) > farmers.(company_id, id) [delete: restrict, update: no action]
+Ref: procurements.collection_site_id > facilities.id [delete: restrict, update: no action]
+Ref: procurements.received_by > identity.users.Id [delete: restrict, update: no action]
+Ref: procurements.event_id > business_events.id [delete: restrict, update: no action]
+Ref: procurement_items.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: procurement_items.(company_id, procurement_id) > procurements.(company_id, id) [delete: restrict, update: no action]
+Ref: procurement_items.(company_id, plot_season_id) > plot_seasons.(company_id, id) [delete: restrict, update: no action]
+Ref: source_lots.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: source_lots.(company_id, lot_id) > lots.(company_id, id) [delete: restrict, update: no action]
+Ref: source_lots.(company_id, procurement_item_id) > procurement_items.(company_id, id) [delete: restrict, update: no action]
+Ref: offline_operations.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: offline_operations.submitted_by > identity.users.Id [delete: restrict, update: no action]
+Ref: offline_operations.applied_event_id > business_events.id [delete: restrict, update: no action]
+Ref: lots.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: lots.commodity_id > commodities.id [delete: restrict, update: no action]
+Ref: stock_positions.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: stock_positions.(company_id, lot_id) > lots.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_positions.location_id > locations.id [delete: restrict, update: no action]
+Ref: balance_policies.configured_by > identity.users.Id [delete: restrict, update: no action]
+Ref: conversions.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: conversions.balance_policy_id > balance_policies.id [delete: restrict, update: no action]
+Ref: conversions.equipment_id > equipment.id [delete: restrict, update: no action]
+Ref: conversions.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: conversions.(company_id, original_conversion_id) > conversions.(company_id, id) [delete: restrict, update: no action]
+Ref: conversions.variance_confirmed_by > identity.users.Id [delete: restrict, update: no action]
+Ref: conversions.recorded_by > identity.users.Id [delete: restrict, update: no action]
+Ref: conversions.event_id > business_events.id [delete: restrict, update: no action]
+Ref: conversion_inputs.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: conversion_inputs.(company_id, conversion_id) > conversions.(company_id, id) [delete: restrict, update: no action]
+Ref: conversion_inputs.(company_id, lot_id) > lots.(company_id, id) [delete: restrict, update: no action]
+Ref: conversion_outputs.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: conversion_outputs.(company_id, conversion_id) > conversions.(company_id, id) [delete: restrict, update: no action]
+Ref: conversion_outputs.(company_id, lot_id) > lots.(company_id, id) [delete: restrict, update: no action]
+Ref: mass_contributions.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: mass_contributions.(company_id, input_id) > conversion_inputs.(company_id, id) [delete: restrict, update: no action]
+Ref: mass_contributions.(company_id, output_id) > conversion_outputs.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_postings.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: stock_postings.event_id > business_events.id [delete: restrict, update: no action]
+Ref: stock_postings.(company_id, position_id) > stock_positions.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_postings.(company_id, reservation_id) > stock_reservations.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_postings.(company_id, input_id) > conversion_inputs.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_postings.(company_id, output_id) > conversion_outputs.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_postings.(company_id, loading_item_id) > loading_items.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_postings.(company_id, reverses_posting_id) > stock_postings.(company_id, id) [delete: restrict, update: no action]
+Ref: correction_requests.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: correction_requests.(company_id, original_conversion_id) > conversions.(company_id, id) [delete: restrict, update: no action]
+Ref: correction_requests.(company_id, compensation_id) > conversions.(company_id, id) [delete: restrict, update: no action]
+Ref: correction_requests.(company_id, replacement_id) > conversions.(company_id, id) [delete: restrict, update: no action]
+Ref: correction_requests.requested_by > identity.users.Id [delete: restrict, update: no action]
+Ref: correction_requests.reconciled_by > identity.users.Id [delete: restrict, update: no action]
+Ref: samples.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: samples.(company_id, source_lot_id) > source_lots.(company_id, id) [delete: restrict, update: no action]
+Ref: samples.collected_by > identity.users.Id [delete: restrict, update: no action]
+Ref: sample_handovers.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: sample_handovers.(company_id, sample_id) > samples.(company_id, id) [delete: restrict, update: no action]
+Ref: sample_handovers.recorded_by > identity.users.Id [delete: restrict, update: no action]
+Ref: lab_reports.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: lab_reports.(company_id, sample_id) > samples.(company_id, id) [delete: restrict, update: no action]
+Ref: lab_reports.registered_by > identity.users.Id [delete: restrict, update: no action]
+Ref: lab_reports.(company_id, supersedes_report_id) > lab_reports.(company_id, id) [delete: restrict, update: no action]
+Ref: lab_results.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: lab_results.(company_id, report_id) > lab_reports.(company_id, id) [delete: restrict, update: no action]
+Ref: lab_results.substance_id > active_substances.id [delete: restrict, update: no action]
+Ref: mrl_versions.market_id > markets.id [delete: restrict, update: no action]
+Ref: mrl_versions.commodity_id > commodities.id [delete: restrict, update: no action]
+Ref: mrl_versions.published_by > identity.users.Id [delete: restrict, update: no action]
+Ref: mrl_limits.mrl_version_id > mrl_versions.id [delete: restrict, update: no action]
+Ref: mrl_limits.substance_id > active_substances.id [delete: restrict, update: no action]
+Ref: safety_margin_policies.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: safety_margin_policies.market_id > markets.id [delete: restrict, update: no action]
+Ref: safety_margin_policies.commodity_id > commodities.id [delete: restrict, update: no action]
+Ref: safety_margin_policies.configured_by > identity.users.Id [delete: restrict, update: no action]
+Ref: cohort_policies.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: cohort_policies.confirmed_by > identity.users.Id [delete: restrict, update: no action]
+Ref: cohorts.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: cohorts.(company_id, policy_id) > cohort_policies.(company_id, id) [delete: restrict, update: no action]
+Ref: cohorts.collection_site_id > facilities.id [delete: restrict, update: no action]
+Ref: cohorts.(company_id, season_id) > crop_seasons.(company_id, id) [delete: restrict, update: no action]
+Ref: cohort_members.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: cohort_members.(company_id, cohort_id) > cohorts.(company_id, id) [delete: restrict, update: no action]
+Ref: cohort_members.(company_id, source_lot_id) > source_lots.(company_id, id) [delete: restrict, update: no action]
+Ref: cohort_bounds.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: cohort_bounds.(company_id, cohort_id) > cohorts.(company_id, id) [delete: restrict, update: no action]
+Ref: cohort_bounds.substance_id > active_substances.id [delete: restrict, update: no action]
+Ref: cohort_bounds.confirmed_by > identity.users.Id [delete: restrict, update: no action]
+Ref: propagation_policies.substance_id > active_substances.id [delete: restrict, update: no action]
+Ref: propagation_policies.commodity_id > commodities.id [delete: restrict, update: no action]
+Ref: propagation_policies.confirmed_by > identity.users.Id [delete: restrict, update: no action]
+Ref: residue_bounds.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: residue_bounds.(company_id, lot_id) > lots.(company_id, id) [delete: restrict, update: no action]
+Ref: residue_bounds.substance_id > active_substances.id [delete: restrict, update: no action]
+Ref: residue_bounds.(company_id, conversion_id) > conversions.(company_id, id) [delete: restrict, update: no action]
+Ref: residue_bounds.propagation_policy_id > propagation_policies.id [delete: restrict, update: no action]
+Ref: bound_evidence.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: bound_evidence.(company_id, bound_id) > residue_bounds.(company_id, id) [delete: restrict, update: no action]
+Ref: bound_evidence.(company_id, lab_result_id) > lab_results.(company_id, id) [delete: restrict, update: no action]
+Ref: bound_evidence.(company_id, cohort_bound_id) > cohort_bounds.(company_id, id) [delete: restrict, update: no action]
+Ref: bound_evidence.(company_id, input_bound_id) > residue_bounds.(company_id, id) [delete: restrict, update: no action]
+Ref: lot_quality_values.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: lot_quality_values.(company_id, lot_id) > lots.(company_id, id) [delete: restrict, update: no action]
+Ref: lot_quality_values.attribute_id > quality_attributes.id [delete: restrict, update: no action]
+Ref: lot_quality_values.recorded_by > identity.users.Id [delete: restrict, update: no action]
+Ref: export_orders.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: export_orders.market_id > markets.id [delete: restrict, update: no action]
+Ref: export_orders.commodity_id > commodities.id [delete: restrict, update: no action]
+Ref: export_orders.created_by > identity.users.Id [delete: restrict, update: no action]
+Ref: order_specifications.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: order_specifications.(company_id, order_id) > export_orders.(company_id, id) [delete: restrict, update: no action]
+Ref: specification_limits.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: specification_limits.(company_id, specification_id) > order_specifications.(company_id, id) [delete: restrict, update: no action]
+Ref: specification_limits.attribute_id > quality_attributes.id [delete: restrict, update: no action]
+Ref: containers.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: containers.(company_id, order_id) > export_orders.(company_id, id) [delete: restrict, update: no action]
+Ref: blend_plans.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: blend_plans.(company_id, container_id) > containers.(company_id, id) [delete: restrict, update: no action]
+Ref: blend_plans.(company_id, specification_id) > order_specifications.(company_id, id) [delete: restrict, update: no action]
+Ref: blend_plans.requested_by > identity.users.Id [delete: restrict, update: no action]
+Ref: plan_items.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: plan_items.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_items.(company_id, position_id) > stock_positions.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_findings.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: plan_findings.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_findings.(company_id, assessment_id) > assessments.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_findings.substance_id > active_substances.id [delete: restrict, update: no action]
+Ref: plan_findings.attribute_id > quality_attributes.id [delete: restrict, update: no action]
+Ref: finding_lots.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: finding_lots.(company_id, finding_id) > plan_findings.(company_id, id) [delete: restrict, update: no action]
+Ref: finding_lots.(company_id, lot_id) > lots.(company_id, id) [delete: restrict, update: no action]
+Ref: assessments.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: assessments.(company_id, container_id) > containers.(company_id, id) [delete: restrict, update: no action]
+Ref: assessments.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: assessments.(company_id, loading_id) > loadings.(company_id, id) [delete: restrict, update: no action]
+Ref: assessments.mrl_version_id > mrl_versions.id [delete: restrict, update: no action]
+Ref: assessments.(company_id, safety_margin_policy_id) > safety_margin_policies.(company_id, id) [delete: restrict, update: no action]
+Ref: assessments.assessed_by > identity.users.Id [delete: restrict, update: no action]
+Ref: assessment_bounds.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: assessment_bounds.(company_id, assessment_id) > assessments.(company_id, id) [delete: restrict, update: no action]
+Ref: assessment_bounds.(company_id, bound_id) > residue_bounds.(company_id, id) [delete: restrict, update: no action]
+Ref: assessment_quality.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: assessment_quality.(company_id, assessment_id) > assessments.(company_id, id) [delete: restrict, update: no action]
+Ref: assessment_quality.(company_id, quality_value_id) > lot_quality_values.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_reviews.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: plan_reviews.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_reviews.(company_id, assessment_id) > assessments.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_reviews.reviewed_by > identity.users.Id [delete: restrict, update: no action]
+Ref: plan_output_allocations.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: plan_output_allocations.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_output_allocations.(company_id, position_id) > stock_positions.(company_id, id) [delete: restrict, update: no action]
+Ref: plan_output_allocations.(company_id, output_id) > conversion_outputs.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_reservations.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: stock_reservations.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_reservations.(company_id, position_id) > stock_positions.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_reservations.(company_id, plan_item_id) > plan_items.(company_id, id) [delete: restrict, update: no action]
+Ref: stock_reservations.(company_id, plan_output_id) > plan_output_allocations.(company_id, id) [delete: restrict, update: no action]
+Ref: reservation_events.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: reservation_events.(company_id, reservation_id) > stock_reservations.(company_id, id) [delete: restrict, update: no action]
+Ref: reservation_events.event_id > business_events.id [delete: restrict, update: no action]
+Ref: reservation_events.(company_id, reverses_event_id) > reservation_events.(company_id, id) [delete: restrict, update: no action]
+Ref: reservation_events.(company_id, movement_id) > stock_postings.(company_id, id) [delete: restrict, update: no action]
+Ref: reservation_events.(company_id, correction_request_id) > correction_requests.(company_id, id) [delete: restrict, update: no action]
+Ref: loadings.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: loadings.(company_id, container_id) > containers.(company_id, id) [delete: restrict, update: no action]
+Ref: loadings.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: loadings.recorded_by > identity.users.Id [delete: restrict, update: no action]
+Ref: loadings.event_id > business_events.id [delete: restrict, update: no action]
+Ref: loading_items.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: loading_items.(company_id, loading_id) > loadings.(company_id, id) [delete: restrict, update: no action]
+Ref: loading_items.(company_id, position_id) > stock_positions.(company_id, id) [delete: restrict, update: no action]
+Ref: loading_items.(company_id, reservation_id) > stock_reservations.(company_id, id) [delete: restrict, update: no action]
+Ref: dossiers.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: dossiers.(company_id, container_id) > containers.(company_id, id) [delete: restrict, update: no action]
+Ref: dossiers.(company_id, closing_assessment_id) > assessments.(company_id, id) [delete: restrict, update: no action]
+Ref: dossiers.created_by > identity.users.Id [delete: restrict, update: no action]
+Ref: dossier_supplements.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: dossier_supplements.(company_id, dossier_id) > dossiers.(company_id, id) [delete: restrict, update: no action]
+Ref: dossier_supplements.added_by > identity.users.Id [delete: restrict, update: no action]
+Ref: shipment_documents.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: shipment_documents.(company_id, container_id) > containers.(company_id, id) [delete: restrict, update: no action]
+Ref: shipment_documents.issued_by > identity.users.Id [delete: restrict, update: no action]
+Ref: holds.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: holds.(company_id, lot_id) > lots.(company_id, id) [delete: restrict, update: no action]
+Ref: holds.(company_id, container_id) > containers.(company_id, id) [delete: restrict, update: no action]
+Ref: holds.(company_id, lab_result_id) > lab_results.(company_id, id) [delete: restrict, update: no action]
+Ref: holds.ordered_by > identity.users.Id [delete: restrict, update: no action]
+Ref: hold_actions.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: hold_actions.(company_id, hold_id) > holds.(company_id, id) [delete: restrict, update: no action]
+Ref: hold_actions.recorded_by > identity.users.Id [delete: restrict, update: no action]
+Ref: notifications.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: notifications.(company_id, hold_id) > holds.(company_id, id) [delete: restrict, update: no action]
+Ref: notifications.recipient_id > identity.users.Id [delete: restrict, update: no action]
+Ref: business_events.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: business_events.actor_id > identity.users.Id [delete: restrict, update: no action]
+Ref: state_changes.company_id > identity.organizations.Id [delete: restrict, update: no action]
+Ref: state_changes.event_id > business_events.id [delete: restrict, update: no action]
+Ref: state_changes.(company_id, plan_id) > blend_plans.(company_id, id) [delete: restrict, update: no action]
+Ref: state_changes.(company_id, conversion_id) > conversions.(company_id, id) [delete: restrict, update: no action]
+Ref: state_changes.(company_id, container_id) > containers.(company_id, id) [delete: restrict, update: no action]
+
+TableGroup g_01_platform_and_tenant_administration {
+  identity.organizations
+  identity.users
+  identity.sessions
+  identity.audit_events
+  facilities
+  user_facilities
+  locations
+  equipment
+  silos
+  silo_compartments
+  compartment_occupancies
+}
+
+TableGroup g_02_offline_field_capture {
+  farmers
+  plots
+  crop_seasons
+  plot_seasons
+  spray_declarations
+  spray_items
+  procurements
+  procurement_items
+  source_lots
+  offline_operations
+}
+
+TableGroup g_03_mass_balance_custody_ledger_and_processing {
+  lots
+  stock_positions
+  balance_policies
+  conversions
+  conversion_inputs
+  conversion_outputs
+  mass_contributions
+  stock_postings
+  correction_requests
+}
+
+TableGroup g_04_residue_evidence_laboratory {
+  samples
+  sample_handovers
+  lab_reports
+  lab_results
+}
+
+TableGroup g_05_residue_evidence_limits_and_risk {
+  active_substances
+  commodities
+  markets
+  quality_attributes
+  mrl_versions
+  mrl_limits
+  safety_margin_policies
+  cohort_policies
+  cohorts
+  cohort_members
+  cohort_bounds
+  propagation_policies
+  residue_bounds
+  bound_evidence
+  lot_quality_values
+}
+
+TableGroup g_06_export_order_blend_planning {
+  export_orders
+  order_specifications
+  specification_limits
+  containers
+  blend_plans
+  plan_items
+  plan_findings
+  finding_lots
+  assessments
+  assessment_bounds
+  assessment_quality
+  plan_reviews
+  plan_output_allocations
+  stock_reservations
+  reservation_events
+}
+
+TableGroup g_07_shipment_loading_and_hold {
+  loadings
+  loading_items
+  dossiers
+  dossier_supplements
+  shipment_documents
+  holds
+  hold_actions
+  notifications
+}
+
+TableGroup g_08_traceback_and_event_history {
+  business_events
+  state_changes
+}
