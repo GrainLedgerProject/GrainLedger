@@ -57,14 +57,16 @@ Requires .NET SDK 10, Node.js 24, npm and Docker (or PostgreSQL).
 
    Vite on port 5173 proxies `/api` and `/signin-google` to backend port 5080. Use `localhost` consistently, not `127.0.0.1`. Production redirect: `https://YOUR_HOST/signin-google`. See [ASP.NET Core Google authentication](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/social/google-logins?view=aspnetcore-10.0).
 
-5. Run the one-time Development migration using your existing Development database connection, then start API:
+5. Run Development migrations, then seed local accounts and optional mock stock. Commands are separate; `--seed-mock` requires migration and seed-owner credentials, applied migrations, and `--seed-dev` accounts first:
 
    ```bash
    ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --migrate
+   ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --seed-dev
+   ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --seed-mock
    dotnet run --project backend/src/GrainLedger.Api
    ```
 
-   Keep existing `.env` and connection strings unchanged. Run this Development migration once only after confirming configured database is Development and under your control. MockCapture owns only isolated `capture_mock` schema and distinct migration-history table. Its schema/migrations/routes are Development/Testing-only; Production never seeds or migrates MockCapture and exposes no mock route. Never inspect, grant, repair, alter, or drop teammate `capture` schema. There is no automatic migration from synthetic MockCapture data to future real Capture. Normal startup uses `ConnectionStrings:GrainLedger` only and never migrates.
+   Keep existing `.env` and connection strings unchanged. Before either seed, confirm `ConnectionStrings__GrainLedger` and `ConnectionStrings__GrainLedgerMigration` point to your intended Development database; `--seed-mock` writes through configured migration-owner connection. Commands use configured database and never create/reset a local database. `--seed-dev` needs `DevelopmentSeed__Password` configured as documented in [development accounts](docs/development-accounts.md). Mock seed requires migration-owner credentials but does not migrate; it reuses active seeded actors and does not change credentials. It writes durable synthetic Ledger stock; it does not reset or delete records. Reruns do not overwrite edited sample data. Synthetic stock persists in shared database; ensure you have permission to add it. Seed leaves teammate `capture` schema and captures untouched. Mock seed neither auto-seeds accounts nor approves tolerances or creates operational policies. MockCapture owns isolated `capture_mock` schema and distinct migration-history table. Its schema, migrations, routes, and seed command are Development/Testing-only. Never inspect, grant, repair, alter, or drop teammate `capture` schema. No automatic migration exists from synthetic MockCapture data to future real Capture. Normal startup uses `ConnectionStrings:GrainLedger` only and never migrates or seeds.
 
 6. Start frontend:
 

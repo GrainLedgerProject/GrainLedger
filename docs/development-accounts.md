@@ -21,7 +21,19 @@ dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --enviro
 
 Migration cập nhật schema; seed tạo dữ liệu rồi thoát. Lệnh dùng database trong cấu hình backend. Biến môi trường của process có ưu tiên cao hơn `.env`. Không tự khởi động database local nếu bạn đang dùng Supabase.
 
-## 3. Đăng nhập
+## 3. Seed mock source and stock (optional)
+
+After migrations and development accounts exist, seed one synthetic source, receipt draft, and committed stock sample:
+
+```bash
+dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --environment Development --seed-mock
+```
+
+This separate Development-only command requires `ConnectionStrings__GrainLedgerMigration` with migration-owner credentials, applied migrations, and accounts from `--seed-dev`. It writes durable synthetic Ledger stock through configured `ConnectionStrings__GrainLedgerMigration`; inspect the owner connection and confirm its target is your intended Development database before running. It does not migrate, reset, or delete data. Synthetic stock persists in shared database; ensure you have permission to add it. Seed leaves teammate `capture` schema and captures untouched. Reruns reuse same sample without overwriting edited data; conflicts fail without partial writes.
+
+Mock actors reuse active existing admin, purchasing, mill-manager and mill-operator accounts with expected roles and organization; there is no automatic account seeding or credential change. Configure `DevelopmentSeed__Password` as above, run `--seed-dev` first, and use that configured password when logging in. Mock seed creates a `MOCK-DEV-001` committed synthetic receipt (1,000 kg) and `MOCK-DEV-DRAFT-001` draft (200 kg). It does not approve tolerances or create operational policies.
+
+## 4. Đăng nhập
 
 | Email | Role | Tổ chức |
 |---|---|---|
@@ -49,4 +61,4 @@ Mở Scalar tại `http://localhost:5080/scalar/v1`, gọi `POST /api/auth/login
 - Địa chỉ `@grainledger.local` là định danh test, không phải hộp thư thật. Không dùng forgot-password/OTP qua email cho các tài khoản này.
 - Không commit `.env` hoặc chia sẻ mật khẩu seed công khai.
 
-Đã kiểm thử seed và đăng nhập trên database Testcontainers riêng; chưa chạy seed vào Supabase của bạn.
+Đã kiểm thử seed và đăng nhập trên database Testcontainers riêng; chưa chạy seed vào Supabase của bạn. Xác minh mock seed mới nhất trên database Development cô lập: 114 backend tests passed; migrate → seed-dev → seed-mock hai lần tạo 1.000 kg stock đã commit và draft 200 kg; lệnh bị từ chối trong Production và khi kết hợp flag môi trường không hợp lệ. Browser xác nhận mill.operator đăng nhập được và thấy stock row physical/available 1.000 kg. Smoke test dùng JWT signing key tổng hợp; `.env` và Supabase gốc không bị thay đổi.
