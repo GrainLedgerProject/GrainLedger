@@ -30,6 +30,61 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
     }
 
     [Fact]
+    public async Task Legacy_development_session_is_rejected_without_renewal_and_login_route_is_removed()
+    {
+        var (user, session) = await factory.SeedUserAsync(Roles.Administrator);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.Users.Where(x => x.Id == user.Id).ExecuteUpdateAsync(x => x.SetProperty(u => u.Provider, "development"));
+        }
+
+        DateTimeOffset originalExpiry;
+        DateTimeOffset originalLastSeen;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var persisted = await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+            originalExpiry = persisted.ExpiresAt;
+            originalLastSeen = persisted.LastSeenAt;
+        }
+        using var client = factory.CreateRealCookieClient(user, session);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/session")).StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var persisted = await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+            Assert.Equal(originalExpiry, persisted.ExpiresAt);
+            Assert.Equal(originalLastSeen, persisted.LastSeenAt);
+        }
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.PostAsJsonAsync("/api/auth/development-login", new { email = "old@example.com", password = "old" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/auth/methods")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Google_provisioning_ignores_legacy_development_administrator_for_bootstrap()
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        await db.Sessions.ExecuteDeleteAsync();
+        await db.AuditEvents.ExecuteDeleteAsync();
+        await db.Users.ExecuteDeleteAsync();
+        await db.Organizations.ExecuteDeleteAsync();
+        var legacy = new User
+        {
+            Provider = "development", ProviderSubject = "legacy-admin", Email = "old-admin@example.com",
+            DisplayName = "Legacy Admin", Role = Roles.Administrator
+        };
+        db.Users.Add(legacy);
+        await db.SaveChangesAsync();
+
+        var (admin, created) = await scope.ServiceProvider.GetRequiredService<GoogleIdentityProvisioner>()
+            .ProvisionAsync(new("google-bootstrap", "admin@example.com", "Admin", true));
+        Assert.True(created);
+        Assert.Equal(Roles.Administrator, admin.Role);
+        Assert.Equal("development", legacy.Provider);
+    }
+
+    [Fact]
     public async Task Revoked_server_session_is_rejected()
     {
         var (user, session) = await factory.SeedUserAsync(Roles.CustomerManager);

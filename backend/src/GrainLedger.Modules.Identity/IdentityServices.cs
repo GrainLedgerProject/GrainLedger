@@ -128,7 +128,7 @@ public sealed class GoogleIdentityProvisioner(IdentityDbContext db, IConfigurati
             user = new User { Provider = "google", ProviderSubject = identity.Subject, Email = email, DisplayName = identity.DisplayName.Trim() };
             var bootstrap = configuration["Bootstrap:AdminEmail"]?.Trim().ToLowerInvariant();
             if (!string.IsNullOrEmpty(bootstrap) && string.Equals(bootstrap, email, StringComparison.Ordinal) &&
-                !await db.Users.AnyAsync(x => x.Role == Roles.Administrator, cancellationToken))
+                !await db.Users.AnyAsync(x => x.Role == Roles.Administrator && x.Provider == "google", cancellationToken))
             {
                 var mill = await db.Organizations.SingleOrDefaultAsync(x => x.Kind == OrganizationKind.Mill, cancellationToken);
                 if (mill is null) { mill = new Organization { Name = "Tiền Giang Mill", Kind = OrganizationKind.Mill }; db.Organizations.Add(mill); }
@@ -160,7 +160,7 @@ public sealed class CurrentAccess(IHttpContextAccessor accessor, IdentityDbConte
     {
         var principal = accessor.HttpContext?.User;
         if (principal?.Identity?.IsAuthenticated != true || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var id)) return false;
-        var role = await db.Users.AsNoTracking().Where(x => x.Id == id && x.IsActive).Select(x => x.Role).SingleOrDefaultAsync(cancellationToken);
+        var role = await db.Users.AsNoTracking().Where(x => x.Id == id && x.IsActive && x.Provider == "google").Select(x => x.Role).SingleOrDefaultAsync(cancellationToken);
         return role is not null && Roles.All.TryGetValue(role, out var definition) && definition.Permissions.Contains(permission);
     }
 
@@ -168,7 +168,7 @@ public sealed class CurrentAccess(IHttpContextAccessor accessor, IdentityDbConte
     {
         var principal = accessor.HttpContext?.User;
         if (principal?.Identity?.IsAuthenticated != true || !Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var id)) return false;
-        var access = await db.Users.AsNoTracking().Where(x => x.Id == id && x.IsActive).Select(x => new { x.Role, x.OrganizationId }).SingleOrDefaultAsync(cancellationToken);
+        var access = await db.Users.AsNoTracking().Where(x => x.Id == id && x.IsActive && x.Provider == "google").Select(x => new { x.Role, x.OrganizationId }).SingleOrDefaultAsync(cancellationToken);
         return access?.Role is not null && Roles.All.ContainsKey(access.Role) && access.OrganizationId == organizationId;
     }
 }
@@ -196,14 +196,16 @@ public sealed class SessionCookieEvents(IdentityDbContext db, TimeProvider clock
         var now = clock.GetUtcNow();
         var session = await db.Sessions.Include(x => x.User).SingleOrDefaultAsync(x => x.Id == sessionId, context.HttpContext.RequestAborted);
         var claimedUserId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (session is null || session.UserId.ToString() != claimedUserId || session.RevokedAt is not null || session.ExpiresAt <= now || !session.User.IsActive)
+        if (session is null || session.UserId.ToString() != claimedUserId || session.RevokedAt is not null || session.ExpiresAt <= now || !session.User.IsActive ||
+            session.User.Provider != "google")
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(AuthSchemes.Application);
             return;
         }
         // Renew both clocks together. A conditional update cannot undo concurrent logout.
-        var renewed = await db.Sessions.Where(x => x.Id == sessionId && x.RevokedAt == null && x.ExpiresAt > now && x.User.IsActive)
+        var renewed = await db.Sessions.Where(x => x.Id == sessionId && x.RevokedAt == null && x.ExpiresAt > now && x.User.IsActive &&
+                x.User.Provider == "google")
             .ExecuteUpdateAsync(set => set.SetProperty(x => x.LastSeenAt, now).SetProperty(x => x.ExpiresAt, now.AddMinutes(15)), context.HttpContext.RequestAborted);
         if (renewed == 0) { context.RejectPrincipal(); return; }
         context.ShouldRenew = true;
@@ -218,7 +220,7 @@ public sealed class PermissionAuthorizationHandler(IdentityDbContext db) : Autho
     {
         if (context.User.Identity?.IsAuthenticated != true) return;
         if (!Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id)) return;
-        var access = await db.Users.AsNoTracking().Where(x => x.Id == id && x.IsActive).Select(x => new { x.Role }).SingleOrDefaultAsync();
+        var access = await db.Users.AsNoTracking().Where(x => x.Id == id && x.IsActive && x.Provider == "google").Select(x => new { x.Role }).SingleOrDefaultAsync();
         if (access?.Role is { } role && Roles.All.TryGetValue(role, out var definition) && definition.Permissions.Contains(requirement.Permission))
             context.Succeed(requirement);
     }

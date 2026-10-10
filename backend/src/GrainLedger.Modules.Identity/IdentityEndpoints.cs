@@ -104,9 +104,11 @@ public static class IdentityEndpoints
         return Results.Redirect(IsLocalReturnUrl(returnUrl) ? returnUrl! : "/");
     }
 
+
     private static async Task<IResult> GetSessionAsync(ClaimsPrincipal principal, IdentityDbContext db, CancellationToken ct)
     {
-        var user = await db.Users.AsNoTracking().Include(x => x.Organization).SingleOrDefaultAsync(x => x.Id == principal.RequiredUserId() && x.IsActive, ct);
+        var user = await db.Users.AsNoTracking().Include(x => x.Organization).SingleOrDefaultAsync(x =>
+            x.Id == principal.RequiredUserId() && x.IsActive && x.Provider == "google", ct);
         return user is null ? Results.Unauthorized() : Results.Ok(ToSessionDto(user));
     }
 
