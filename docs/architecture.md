@@ -43,11 +43,11 @@ No role comes from browser, Google domain or email. Only explicitly configured, 
 
 ## Identity and authentication
 
-Google OAuth uses backend authorization-code flow with PKCE. Google credentials and provider tokens never reach React or local storage. Stable Google subject identifies account; same email does not auto-link another subject. Verified email is required for provisioning.
+Email/password API authentication is described in [the OTP/JWT and Scalar guide](auth-email-password-scalar.md). It uses JWT access tokens plus rotating opaque refresh tokens, with server-side revocation. Successful Bearer authentication does not require CSRF.
 
-Session cookie is HttpOnly, SameSite=Lax and Secure in production. Database validates activity, expiry and revocation on authenticated requests. Sessions expire after 15 minutes inactivity; sliding renewal requires continued requests. Logout revokes current session; logout-all revokes all. Access changes and account disabling invalidate sessions.
+Google OAuth uses the backend authorization-code flow with PKCE. Google credentials and provider tokens are not exposed to React or stored in local storage. A stable Google subject identifies the account; a different subject with the same email is not automatically linked to an existing account. Verified email is required for provisioning. Google browser sessions use HttpOnly, SameSite=Lax cookies and Secure in production; the database validates session activity, expiry and revocation on authenticated requests. Sessions expire after 15 minutes inactivity with sliding renewal on continued requests. Logout revokes current session; logout-all revokes all. Access changes and account disabling invalidate sessions.
 
-Mutations require `X-CSRF-TOKEN` fetched from `/api/auth/csrf`. OAuth state/correlation middleware protects callbacks. Development allows HTTP only on localhost; production uses HTTPS and explicitly trusted proxy list.
+Cookie-authenticated mutating API calls require `X-CSRF-TOKEN`, fetched from `/api/auth/csrf` for the current identity. OAuth uses the authentication middleware's state/correlation protection. Development supports HTTP only on localhost; production uses HTTPS and an explicitly trusted proxy list.
 
 ## Implemented module workflow map
 
@@ -82,3 +82,26 @@ Admin endpoints require `identity.manage`. Anonymous/expired gets 401; authentic
 ## Explicit non-scope and fail-closed rules
 
 No HOLD release, generic stock adjustment, transport shortage/gain settlement, byproduct dispatch/disposal, repeated drying/remilling/unpacking, export loading, or downstream receipt-correction cascade exists. No valid policy/compatibility means relevant processing action denied. Physical blending is recorded processing, not export compliance certification. These limits are safe implementation choices, not factory approval.
+
+Run a real Google consent flow using your project's client ID and secret, including cancellation, an unverified identity rejection, pending onboarding, first-admin onboarding, logout, and a disabled account. Automated tests substitute provider identities; they cannot verify your Google Cloud consent configuration. Future business modules still need resource-specific authorization tests when their endpoints are implemented. Buyer links, offline synchronization, and domain workflows are outside this authentication/profile slice.
+
+## Identity module layout
+
+```text
+GrainLedger.Modules.Identity/
+├── Domain/                         # Entities, organization kinds and role definitions
+├── Features/
+│   ├── Authentication/             # Local/Google login, OTP, sessions and auth contracts
+│   ├── Profile/                    # Profile endpoints and request contract
+│   └── Administration/             # Organizations and user access management
+├── Infrastructure/
+│   ├── Authentication/             # JWT, cookie validation and CSRF filter
+│   ├── Email/                      # SMTP sender, interface and delivery errors
+│   └── Persistence/                # DbContext, DevelopmentSeed and Migrations/
+├── Authorization/                  # Permission policies and current organization access
+├── Common/                         # API errors, no-store filter and shared helpers
+├── DependencyInjection.cs          # AddIdentityModule service registration
+└── EndpointMapping.cs              # MapIdentityModule route composition
+```
+
+Types keep the `GrainLedger.Modules.Identity` namespace; generated migrations retain their original namespace and contents. Endpoint files share the existing partial `IdentityEndpoints` class so route handlers and shared mappings can move without changing the public API. Contracts live alongside their features. Folder reorganization does not require a database migration or rerunning the development seed.

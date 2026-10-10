@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
@@ -23,6 +24,7 @@ namespace GrainLedger.Api.IntegrationTests;
 
 public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    public FakeEmailSender Email { get; } = new();
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("grainledger_tests").WithUsername("postgres").WithPassword("postgres").Build();
 
@@ -39,6 +41,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             ["Ledger:RuntimeRole"] = "grainledger_test_runtime",
             ["Authentication:Google:ClientId"] = "tests-client",
             ["Authentication:Google:ClientSecret"] = "tests-secret",
+            ["Authentication:Jwt:SigningKey"] = "tests-only-signing-key-at-least-thirty-two-bytes-long",
+            ["Authentication:Jwt:Issuer"] = "GrainLedger",
+            ["Authentication:Jwt:Audience"] = "GrainLedger.Api",
+            ["Mail:Smtp:Host"] = "fake",
+            ["Mail:FromAddress"] = "no-reply@example.com",
             ["Bootstrap:AdminEmail"] = "admin@example.com"
         }));
         builder.ConfigureServices(services =>
@@ -59,6 +66,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                     options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
                 });
             }
+            services.RemoveAll<IEmailSender>(); services.AddSingleton<IEmailSender>(Email);
         });
     }
 
@@ -128,6 +136,20 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), new AuthenticationProperties { ExpiresUtc = session.ExpiresAt }, "GrainLedger.Application");
         return (options.Cookie.Name!, options.TicketDataFormat.Protect(ticket));
     }
+}
+
+public sealed class FakeEmailSender : IEmailSender
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _verification = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _reset = new(StringComparer.OrdinalIgnoreCase);
+    public bool IsConfigured => true;
+    public bool FailDelivery { get; set; }
+    public Task SendVerificationCodeAsync(string email, string displayName, string code, CancellationToken cancellationToken)
+    { if (FailDelivery) throw new EmailDeliveryException(); _verification[email] = code; return Task.CompletedTask; }
+    public Task SendPasswordResetCodeAsync(string email, string displayName, string code, CancellationToken cancellationToken)
+    { if (FailDelivery) throw new EmailDeliveryException(); _reset[email] = code; return Task.CompletedTask; }
+    public string VerificationCode(string email) => _verification[email];
+    public string ResetCode(string email) => _reset[email];
 }
 
 internal sealed class FakeGoogleBackchannelHandler : HttpMessageHandler
