@@ -3,12 +3,15 @@ services:
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: grainledger
+      # One-time local provisioning administrator, not either app login.
       POSTGRES_USER: grainledger
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
+    # Provision separate migration/runtime roles via README before --migrate.
+    # Host app connections use localhost:5433; containers use postgres:5432.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U grainledger -d grainledger"]
       interval: 5s
