@@ -1,5 +1,8 @@
 using System.Security.Claims;
 using GrainLedger.Modules.Identity;
+using GrainLedger.Modules.Ledger;
+using GrainLedger.Modules.Capture;
+using Npgsql;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -23,20 +26,40 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("grainledger_tests").WithUsername("postgres").WithPassword("postgres").Build();
 
+    public string RuntimeConnectionString { get; private set; } = "";
+    public string OwnerConnectionString => _postgres.GetConnectionString();
+    public bool BrowserCookies { get; init; }
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:GrainLedger"] = _postgres.GetConnectionString(),
+            ["ConnectionStrings:GrainLedgerMigration"] = _postgres.GetConnectionString(),
+            ["Ledger:RuntimeRole"] = "grainledger_test_runtime",
             ["Authentication:Google:ClientId"] = "tests-client",
             ["Authentication:Google:ClientSecret"] = "tests-secret",
             ["Bootstrap:AdminEmail"] = "admin@example.com"
         }));
-        builder.ConfigureServices(services => services.PostConfigure<GoogleOptions>(GoogleDefaults.AuthenticationScheme, options =>
+        builder.ConfigureServices(services =>
         {
-            options.Backchannel = new HttpClient(new FakeGoogleBackchannelHandler());
-        }));
+            services.PostConfigure<GoogleOptions>(GoogleDefaults.AuthenticationScheme, options =>
+                options.Backchannel = new HttpClient(new FakeGoogleBackchannelHandler()));
+            if (BrowserCookies)
+            {
+                // Test-only HTTP bridge. Production session validation and CSRF remain enabled.
+                services.PostConfigure<CookieAuthenticationOptions>("GrainLedger.Application", options =>
+                {
+                    options.Cookie.Name = "GrainLedger.Session";
+                    options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                });
+                services.PostConfigure<Microsoft.AspNetCore.Antiforgery.AntiforgeryOptions>(options =>
+                {
+                    options.Cookie.Name = "GrainLedger.Csrf";
+                    options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                });
+            }
+        });
     }
 
     public async Task InitializeAsync()
@@ -44,6 +67,16 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         await _postgres.StartAsync();
         using var scope = Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
+        await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
+        await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
+        await using var owner = new NpgsqlConnection(OwnerConnectionString);
+        await owner.OpenAsync();
+        await using (var command = new NpgsqlCommand("CREATE ROLE grainledger_test_runtime LOGIN PASSWORD 'test-runtime' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT", owner))
+            await command.ExecuteNonQueryAsync();
+        await LedgerDatabase.ConfigureRuntimeRoleAsync(OwnerConnectionString, "grainledger_test_runtime");
+        RuntimeConnectionString = new NpgsqlConnectionStringBuilder(OwnerConnectionString) { Username = "grainledger_test_runtime", Password = "test-runtime" }.ConnectionString;
+        Services.GetRequiredService<IConfiguration>()["ConnectionStrings:GrainLedger"] = RuntimeConnectionString;
+        await LedgerDatabase.ValidateRuntimeAsync(RuntimeConnectionString);
     }
 
     public new async Task DisposeAsync()
@@ -82,12 +115,18 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public HttpClient CreateRealCookieClient(User user, LoginSession session)
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false, HandleCookies = true });
+        var cookie = ProtectSessionCookie(user, session);
+        client.DefaultRequestHeaders.Add("Cookie", $"{cookie.Name}={cookie.Value}");
+        return client;
+    }
+
+    public (string Name, string Value) ProtectSessionCookie(User user, LoginSession session)
+    {
         using var scope = Services.CreateScope();
         var options = scope.ServiceProvider.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get("GrainLedger.Application");
         var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim("session_id", session.Id.ToString())], "GrainLedger.Application");
         var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), new AuthenticationProperties { ExpiresUtc = session.ExpiresAt }, "GrainLedger.Application");
-        client.DefaultRequestHeaders.Add("Cookie", $"__Host-GrainLedger.Session={options.TicketDataFormat.Protect(ticket)}");
-        return client;
+        return (options.Cookie.Name!, options.TicketDataFormat.Protect(ticket));
     }
 }
 

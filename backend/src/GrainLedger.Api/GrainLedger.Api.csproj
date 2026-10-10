@@ -7,6 +7,8 @@
   <ItemGroup>
     <PackageReference Include="DotNetEnv" Version="3.2.0" />
     <ProjectReference Include="../GrainLedger.Modules.Identity/GrainLedger.Modules.Identity.csproj" />
+    <ProjectReference Include="../GrainLedger.Modules.Ledger/GrainLedger.Modules.Ledger.csproj" />
+    <ProjectReference Include="../GrainLedger.Modules.Capture/GrainLedger.Modules.Capture.csproj" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
