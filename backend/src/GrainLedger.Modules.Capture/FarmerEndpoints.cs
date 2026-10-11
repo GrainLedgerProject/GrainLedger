@@ -39,6 +39,7 @@ public static class CaptureModule
         group.MapPost("", RegisterAsync).RequireAuthorization("farms.write");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
+        endpoints.MapPlotEndpoints();
         return endpoints;
     }
 

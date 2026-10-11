@@ -26,6 +26,7 @@ namespace GrainLedger.Modules.Capture.Migrations
             modelBuilder.Entity("GrainLedger.Modules.Capture.CaptureBusinessEvent", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
@@ -73,6 +74,7 @@ namespace GrainLedger.Modules.Capture.Migrations
             modelBuilder.Entity("GrainLedger.Modules.Capture.CaptureOperation", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
@@ -156,6 +158,7 @@ namespace GrainLedger.Modules.Capture.Migrations
             modelBuilder.Entity("GrainLedger.Modules.Capture.Farmer", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
@@ -196,6 +199,54 @@ namespace GrainLedger.Modules.Capture.Migrations
                     b.HasIndex("CompanyId", "CreatedAt", "Id");
 
                     b.ToTable("farmers", "capture");
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Capture.Plot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<decimal>("AreaHa")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("area_ha");
+
+                    b.Property<string>("BoundaryGeojson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("boundary_geojson");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<Guid>("FarmerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("farmer_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_plots_company_id");
+
+                    b.HasIndex("FarmerId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_plots_farmer_code");
+
+                    b.ToTable("plots", "capture", t =>
+                        {
+                            t.HasCheckConstraint("ck_plots_area_ha_positive", "area_ha > 0");
+                        });
                 });
 #pragma warning restore 612, 618
         }

@@ -45,6 +45,7 @@ public sealed class CaptureBusinessEvent
 public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options) : DbContext(options)
 {
     public DbSet<Farmer> Farmers => Set<Farmer>();
+    public DbSet<Plot> Plots => Set<Plot>();
     public DbSet<CaptureOperation> OfflineOperations => Set<CaptureOperation>();
     public DbSet<CaptureBusinessEvent> BusinessEvents => Set<CaptureBusinessEvent>();
 
@@ -66,6 +67,19 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasDatabaseName("ux_farmers_company_code");
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_farmers_company_id");
             b.HasIndex(x => new { x.CompanyId, x.CreatedAt, x.Id });
+        });
+        modelBuilder.Entity<Plot>(b =>
+        {
+            b.ToTable("plots", table => table.HasCheckConstraint("ck_plots_area_ha_positive", "area_ha > 0"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.FarmerId).HasColumnName("farmer_id");
+            b.Property(x => x.Code).HasColumnName("code").HasMaxLength(40).IsRequired();
+            b.Property(x => x.BoundaryGeojson).HasColumnName("boundary_geojson").HasColumnType("jsonb").IsRequired();
+            b.Property(x => x.AreaHa).HasColumnName("area_ha").HasPrecision(24, 12);
+            b.HasIndex(x => new { x.FarmerId, x.Code }).IsUnique().HasDatabaseName("ux_plots_farmer_code");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_plots_company_id");
         });
         modelBuilder.Entity<CaptureOperation>(b =>
         {
