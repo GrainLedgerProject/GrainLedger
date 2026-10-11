@@ -54,7 +54,9 @@ public static class CaptureModule
         if (errors.Count != 0) return Results.ValidationProblem(errors);
         var payload = request.Payload!;
         var deviceId = request.DeviceId!.Trim();
-        var code = payload.Code!.Trim();
+        var code = payload.Code is null
+            ? $"ND-{payload.EntityId.ToString("N")[..12].ToUpperInvariant()}"
+            : payload.Code.Trim();
         var name = payload.Name!.Trim();
         var contact = string.IsNullOrWhiteSpace(payload.Contact) ? null : payload.Contact.Trim();
         var capturedAt = request.CapturedAt.ToUniversalTime();
@@ -176,7 +178,9 @@ public static class CaptureModule
         if (request.PayloadSchemaVersion != 1) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
         if (request.Payload is null) { errors["payload"] = ["Farmer data is required."]; return errors; }
         if (request.Payload.EntityId == Guid.Empty) errors["payload.entityId"] = ["Farmer ID is required."];
-        if (string.IsNullOrWhiteSpace(request.Payload.Code) || request.Payload.Code.Trim().Length > 40) errors["payload.code"] = ["Code is required and must not exceed 40 characters."];
+        if (request.Payload.Code is not null &&
+            (string.IsNullOrWhiteSpace(request.Payload.Code) || request.Payload.Code.Trim().Length > 40))
+            errors["payload.code"] = ["If supplied, code must not be blank or exceed 40 characters."];
         if (string.IsNullOrWhiteSpace(request.Payload.Name)) errors["payload.name"] = ["Name is required."];
         return errors;
     }

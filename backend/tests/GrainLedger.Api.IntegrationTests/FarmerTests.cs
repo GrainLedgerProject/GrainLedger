@@ -40,15 +40,17 @@ public sealed class FarmerTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var operationId = Guid.NewGuid();
         var capturedAt = DateTimeOffset.UtcNow;
         var input = new { deviceId = "test-device", clientOperationId = operationId, capturedAt,
-            payloadSchemaVersion = 1, payload = new { entityId, code = "F-001", name = "Farmer A" } };
+            payloadSchemaVersion = 1, payload = new { entityId, name = "Farmer A" } };
         var created = await clientA.PostAsJsonAsync("/api/farmers", input);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        Assert.Equal(entityId, (await created.Content.ReadFromJsonAsync<FarmerResponse>())!.Id);
+        var createdFarmer = (await created.Content.ReadFromJsonAsync<FarmerResponse>())!;
+        Assert.Equal(entityId, createdFarmer.Id);
+        Assert.Equal($"ND-{entityId.ToString("N")[..12].ToUpperInvariant()}", createdFarmer.Code);
         Assert.Equal(HttpStatusCode.OK, (await clientA.PostAsJsonAsync("/api/farmers", input)).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await clientA.PostAsJsonAsync("/api/farmers", new
         {
             deviceId = "test-device", clientOperationId = operationId, capturedAt,
-            payloadSchemaVersion = 1, payload = new { entityId, code = "F-002", name = "Farmer A" }
+            payloadSchemaVersion = 1, payload = new { entityId, name = "Farmer B" }
         })).StatusCode);
 
         Assert.Equal(HttpStatusCode.OK, (await clientA.GetAsync($"/api/farmers/{entityId}")).StatusCode);

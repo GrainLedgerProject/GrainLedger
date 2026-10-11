@@ -22,16 +22,17 @@ All routes require authentication. Use a Bearer access token to test them in Sca
   "payloadSchemaVersion": 1,
   "payload": {
     "entityId": "5d7b2e9a-555c-4621-b17a-3fcda0d54ca9",
-    "code": "F001",
     "name": "Nguyễn Văn A",
     "contact": "Optional contact details"
   }
 }
 ```
 
-The client generates both UUIDs. Keep `entityId`, `clientOperationId`, `capturedAt`, `deviceId`, and payload unchanged when retrying a request after a network failure. `entityId` identifies the farmer; `clientOperationId` identifies the write attempt.
+The client generates both UUIDs. Keep `entityId`, `clientOperationId`, `capturedAt`, `deviceId`, and payload unchanged when retrying a request after a network failure. `entityId` identifies the farmer; `clientOperationId` identifies the write attempt. The Collection Agent does not enter these technical identifiers.
 
-On first success the API returns 201 with the farmer. A retry with the same operation key and content returns 200 with the same farmer. A retry with changed content returns 409 `OPERATION_CONFLICT`. A new operation that reuses an existing farmer code returns 409.
+The client normally omits `payload.code`. The API generates a farmer code such as `ND-5D7B2E9A555C` from `entityId` and returns it in the response. Existing integrations may still supply a code; if supplied, it must be nonblank and unique within the customer company. The database keeps the same `farmers.code` column and unique constraint.
+
+On first success the API returns 201 with the farmer and its code. A retry with the same operation key and content returns 200 with the same farmer. A retry with changed content returns 409 `OPERATION_CONFLICT`. A new operation that reuses an existing farmer code returns 409.
 
 The database writes the farmer, business event, and accepted operation in one transaction. A failure rolls them all back. The server derives `company_id`, actor, and creation time.
 
