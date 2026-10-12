@@ -40,6 +40,8 @@ public static class CaptureModule
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         endpoints.MapPlotEndpoints();
+        endpoints.MapCropSeasonEndpoints();
+        endpoints.MapPlotSeasonEndpoints();
         return endpoints;
     }
 

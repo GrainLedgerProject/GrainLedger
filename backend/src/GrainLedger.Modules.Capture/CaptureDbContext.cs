@@ -46,6 +46,8 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
 {
     public DbSet<Farmer> Farmers => Set<Farmer>();
     public DbSet<Plot> Plots => Set<Plot>();
+    public DbSet<CropSeason> CropSeasons => Set<CropSeason>();
+    public DbSet<PlotSeason> PlotSeasons => Set<PlotSeason>();
     public DbSet<CaptureOperation> OfflineOperations => Set<CaptureOperation>();
     public DbSet<CaptureBusinessEvent> BusinessEvents => Set<CaptureBusinessEvent>();
 
@@ -80,6 +82,30 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.AreaHa).HasColumnName("area_ha").HasPrecision(24, 12);
             b.HasIndex(x => new { x.FarmerId, x.Code }).IsUnique().HasDatabaseName("ux_plots_farmer_code");
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_plots_company_id");
+        });
+        modelBuilder.Entity<CropSeason>(b =>
+        {
+            b.ToTable("crop_seasons", table => table.HasCheckConstraint("ck_crop_seasons_dates", "ends_on >= starts_on"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.Name).HasColumnName("name").IsRequired();
+            b.Property(x => x.StartsOn).HasColumnName("starts_on").HasColumnType("date");
+            b.Property(x => x.EndsOn).HasColumnName("ends_on").HasColumnType("date");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_crop_seasons_company_id");
+        });
+        modelBuilder.Entity<PlotSeason>(b =>
+        {
+            b.ToTable("plot_seasons");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.PlotId).HasColumnName("plot_id");
+            b.Property(x => x.SeasonId).HasColumnName("season_id");
+            b.Property(x => x.RiceVariety).HasColumnName("rice_variety").IsRequired();
+            b.HasIndex(x => new { x.PlotId, x.SeasonId }).IsUnique().HasDatabaseName("ux_plot_seasons_plot_season");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_plot_seasons_company_id");
+            b.HasIndex(x => x.SeasonId);
         });
         modelBuilder.Entity<CaptureOperation>(b =>
         {

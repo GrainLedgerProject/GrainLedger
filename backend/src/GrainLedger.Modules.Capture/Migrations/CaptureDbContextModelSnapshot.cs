@@ -155,6 +155,43 @@ namespace GrainLedger.Modules.Capture.Migrations
                     b.ToTable("offline_operations", "capture");
                 });
 
+            modelBuilder.Entity("GrainLedger.Modules.Capture.CropSeason", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<DateOnly>("EndsOn")
+                        .HasColumnType("date")
+                        .HasColumnName("ends_on");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<DateOnly>("StartsOn")
+                        .HasColumnType("date")
+                        .HasColumnName("starts_on");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crop_seasons_company_id");
+
+                    b.ToTable("crop_seasons", "capture", t =>
+                        {
+                            t.HasCheckConstraint("ck_crop_seasons_dates", "ends_on >= starts_on");
+                        });
+                });
+
             modelBuilder.Entity("GrainLedger.Modules.Capture.Farmer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -247,6 +284,46 @@ namespace GrainLedger.Modules.Capture.Migrations
                         {
                             t.HasCheckConstraint("ck_plots_area_ha_positive", "area_ha > 0");
                         });
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Capture.PlotSeason", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<Guid>("PlotId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("plot_id");
+
+                    b.Property<string>("RiceVariety")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("rice_variety");
+
+                    b.Property<Guid>("SeasonId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("season_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SeasonId");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_plot_seasons_company_id");
+
+                    b.HasIndex("PlotId", "SeasonId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_plot_seasons_plot_season");
+
+                    b.ToTable("plot_seasons", "capture");
                 });
 #pragma warning restore 612, 618
         }
