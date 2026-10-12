@@ -1,5 +1,7 @@
 # GrainLedger V2 — DB diagram
 
+Cập nhật 12/10/2026: bổ sung hai danh mục F03 dùng chung: `rice_varieties` và `measurement_units`, cùng `catalog_events` để ghi audit cho danh mục/MRL. Khi công bố phiên bản MRL kế tiếp, được đóng khoảng hiệu lực đang mở của phiên bản cũ trong cùng transaction và ghi audit; giới hạn và nguồn đã công bố không đổi. Admin quản lý danh mục, các module đọc để chọn giống/đơn vị. Các trường `rice_variety`, `unit`, `rate_unit` hiện có giữ giá trị text tại lúc ghi nhận; chưa thêm FK bắt buộc hoặc chuyển đổi dữ liệu cũ. Đây là thay đổi thiết kế, chưa phải migration trên Supabase.
+
 Cập nhật 09/10/2026: phần Identity được vẽ theo code và migration đang có trong `GrainLedger.Modules.Identity` (`identity.organizations`, `identity.users`, `identity.sessions`, `identity.audit_events`). Không thay đổi code auth. Các bảng nghiệp vụ còn lại vẫn là thiết kế V2, không có nghĩa tất cả đã được triển khai. Xem [đối chiếu Identity](./IDENTITY_ALIGNMENT_2026-10-09.md).
 
 Bổ sung ngày 06/10/2026: [kết quả xử lý review A01–A05](./REVIEW_ALIGNMENT_A01_A05.md) và [hợp đồng lưu nội dung bất biến](./IMMUTABLE_CONTENT.md). Plot code unique theo farmer; propagation policy unique theo commodity/input stage/output stage/conversion type/version. Các khóa đầy đủ nằm trong DBML và dictionary.
@@ -43,7 +45,7 @@ Mỗi `.mmd` mở độc lập trong Mermaid editor. File `.dbml` dành cho DBML
 
 ## Quy ước database
 
-- 74 bảng trong 8 nhóm; sơ đồ 00 chỉ là tổng quan. Bốn bảng `identity.*` phản ánh migration đang chạy; các bảng còn lại là thiết kế, không tự khẳng định đã triển khai. Số bảng không bằng số chức năng: các dòng chi tiết, bảng nối, lịch sử và phiên bản có bảng riêng.
+- 77 bảng trong 8 nhóm; sơ đồ 00 chỉ là tổng quan. Bốn bảng `identity.*` phản ánh migration đang chạy; các bảng còn lại là thiết kế, không tự khẳng định đã triển khai. Số bảng không bằng số chức năng: các dòng chi tiết, bảng nối, lịch sử và phiên bản có bảng riêng.
 - `id`: UUID PK, mặc định `gen_random_uuid()`. Các FK đều chỉ rõ bảng đích; mặc định `ON DELETE RESTRICT`, không cascade xoá lịch sử nghiệp vụ.
 - Trong Mermaid, `NN` là NOT NULL và `NULL` là có thể để trống. `PK`, `FK`, `UK` lần lượt là khóa chính, khóa ngoại và unique đơn cột. Unique ghép xem DBML/dictionary.
 - Khối lượng dùng `numeric(20,6)` kg. Giá trị gốc và đơn vị khi cân được giữ ở dòng thu mua và các dòng input/output conversion; độ phân giải thiết bị không được suy ra từ số chữ số lưu trữ.
@@ -81,7 +83,7 @@ Các dẫn chiếu sau là diễn giải nội dung, không phải trích nguyê
 | --- | --- | --- |
 | F01 Công ty, tài khoản | identity.organizations, identity.users, identity.sessions, identity.audit_events; user_facilities là thiết kế chưa triển khai | Mục 4–5, trang 7 |
 | F02 Nhà máy, silo, thiết bị, công suất | facilities, locations, silos, silo_compartments, equipment, compartment_occupancies | Mục 5, trang 8 |
-| F03 Danh mục và MRL phiên bản | active_substances, commodities, markets, quality_attributes, mrl_versions, mrl_limits | Trang 8; quy tắc 7 trang 9 |
+| F03 Danh mục và MRL phiên bản | rice_varieties, measurement_units, active_substances, commodities, markets, quality_attributes, catalog_events, mrl_versions, mrl_limits | V2 F03; Report 3 bản 7 mục 3.8.3; bổ sung thiết kế 12/10/2026 |
 | F04 Nông hộ và thửa có tọa độ | farmers, plots, crop_seasons, plot_seasons | Trang 8 |
 | F05 Khai báo phun thuốc | spray_declarations, spray_items | Trang 8 |
 | F06 Thu mua, lot, mẫu | procurements, procurement_items, lots, source_lots, samples | Trang 8; ví dụ trang 4 |
@@ -114,7 +116,7 @@ DBML đã mô tả PK/FK, nullable, default, unique và index thường. CHECK �
 | Variance | Lưu sai lệch thực tế; không tự tăng declared loss. | measurement_variance_kg = input − output − declared loss; chỉ PERCENT_INPUT. Sai lệch khác 0 cần variance_reason và variance_confirmed_by là Mill Manager |
 | Lineage | Input/output contribution cùng conversion; mỗi contribution = output mass × input mass / tổng input mass, có làm tròn xác định và tổng theo output đúng kg output; không có cycle. | Commit guard và phép phân bổ decimal với quy tắc làm tròn bảo toàn tổng |
 | Correction | Output chưa dùng/loading; đối soát vật lý trước, compensation và replacement phải commit cùng nhau. Request pending/blocked chặn sử dụng output. | Khóa stock/request; transaction chung cho postings, reservation reversal và replacement. Không lộ input ảo, không sửa lịch sử; kiểm tra đúng original/compensation/replacement |
-| MRL | Khoảng hiệu lực PUBLISHED không chồng cho market/commodity. | Exclusion constraint theo khoảng thời gian hoặc publication procedure có khóa; giữ lịch sử và source |
+| MRL | Khoảng hiệu lực PUBLISHED không chồng cho market/commodity. Khi công bố bản kế tiếp, chỉ được đóng `effective_to` của bản cũ đang mở và phải ghi `catalog_events` trong cùng transaction. | Exclusion constraint theo khoảng thời gian hoặc publication procedure có khóa; giữ source/limits của bản cũ và căn cứ quyết định đã lưu |
 | Evidence | Bound links đúng source kind, cùng chất và đơn vị; LAB phải truy về sample của đúng source lot, COHORT phải chứa lot theo policy, CONVERSION phải dùng đúng input lot; evidence đã dùng bất biến. | CHECK XOR, FK và guards; không dùng 0 thay bằng chứng thiếu |
 | Safety margin | Policy version theo company/market/commodity, ngày hiệu lực và mode; assessment snapshot policy, margin, value đánh giá và calculation basis. | Unique version, CHECK range/ngày và selection guard tại assessment |
 | Plan | Specification thuộc order của container; chỉ một plan có execution_authorized=true, kể cả EXECUTED đang chờ loading; đổi order/specification/input/evidence/rule làm plan STALE. | Partial unique index trên container_id WHERE execution_authorized; guard trạng thái và event chuyển quyền; plan item đã commit bất biến |

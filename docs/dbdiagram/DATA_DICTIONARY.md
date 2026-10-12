@@ -2,6 +2,27 @@
 
 NN = NOT NULL; NULL = optional. Mass uses numeric(20,6) kg. Identity tables below match the current EF migrations and retain their PascalCase column names. Other tables remain planned V2 design. FK deletion policy is RESTRICT unless stated otherwise.
 
+## rice_varieties
+
+| Column | PostgreSQL type | Required | Key / Reference | Meaning / allowed values |
+| --- | --- | --- | --- | --- |
+| id | uuid | NN | PK, default gen_random_uuid() | Variety identifier |
+| code | varchar(40) | NN | UK | Stable catalog code |
+| name | text | NN | | Variety name, e.g. ST25 |
+
+Shared F03 catalog. Existing plot_seasons.rice_variety stores the captured name as text, without a mandatory FK. Catalog edits do not rewrite those historical values.
+
+## measurement_units
+
+| Column | PostgreSQL type | Required | Key / Reference | Meaning / allowed values |
+| --- | --- | --- | --- | --- |
+| id | uuid | NN | PK, default gen_random_uuid() | Unit identifier |
+| code | varchar(30) | NN | UK | Stable unit code, e.g. kg, ha, mg/kg |
+| name | text | NN | | Unit display name |
+| quantity_kind | varchar(32) | NN | | Physical quantity, e.g. MASS, AREA, RESIDUE_CONCENTRATION, APPLICATION_RATE, FRACTION |
+
+Shared F03 catalog. Existing unit/rate_unit values remain text snapshots, without new FKs. Each consumer must validate supported units, quantity kind and field length. A catalog entry alone does not define a conversion formula or authorize a unit for every field.
+
 ## identity.organizations
 
 | Column | PostgreSQL type | Required | Key / Reference | Meaning / allowed values |
@@ -608,6 +629,8 @@ Unique: `(report_id, substance_id)`; `(company_id, id)`.
 
 ## active_substances
 
+An Administrator may delete an unused active substance with a catalog audit event. Business references must use restrictive foreign keys and block deletion of a substance already in use.
+
 
 
 | Column | PostgreSQL type | Required | Key / Reference | Meaning / allowed values |
@@ -647,9 +670,28 @@ Unique: `(report_id, substance_id)`; `(company_id, id)`.
 | name | text | NN |  |  |
 | unit | varchar(30) | NN |  |  |
 
+## catalog_events
+
+Append-only audit for F03 changes. The catalog write and its audit row commit in one transaction. For a successor MRL publication, the event records the old and new `effective_to` of the preceding version and identifies the successor in `after_state`. `correlation_id` links events from one publication.
+
+| Column | PostgreSQL type | Required | Key / Reference | Meaning / allowed values |
+| --- | --- | --- | --- | --- |
+| id | uuid | NN | PK |  |
+| actor_id | uuid | NN | FK identity.users.Id | User who performed the change |
+| event_type | varchar(60) | NN |  | Action name |
+| resource_type | varchar(60) | NN |  | Catalog or MRL resource name |
+| resource_id | uuid | NN |  | ID of the changed resource; not a polymorphic FK |
+| occurred_at | timestamptz | NN |  | Server time |
+| correlation_id | uuid | NN |  | Groups events from one operation |
+| before_state | jsonb | NULL |  | Prior state; null on creation |
+| after_state | jsonb | NULL |  | New state; null on deletion |
+
+- CHECK `before_state IS NOT NULL OR after_state IS NOT NULL`
+- Index `(resource_type, resource_id, occurred_at)` and `correlation_id`.
+
 ## mrl_versions
 
-Published effective intervals must not overlap for market/commodity. PUBLISHED requires published_by and published_at; publication differs from effective time. History remains immutable; version used by each assessment is explicit.
+Published effective intervals use `[effective_from, effective_to)` and must not overlap for one market/commodity. PUBLISHED requires `published_by` and `published_at`. Source and limit rows of a published version remain unchanged. When a successor is published, the only allowed update to its open-ended predecessor is setting `effective_to` to the successor's `effective_from`; write an audit event in the same transaction. A successor cannot be published with a backdated effective start. Each assessment keeps its selected version and evidence snapshot.
 
 | Column | PostgreSQL type | Required | Key / Reference | Meaning / allowed values |
 | --- | --- | --- | --- | --- |

@@ -1,6 +1,16 @@
-# Giải thích 74 bảng trong DB diagram GrainLedger
+# Giải thích 77 bảng trong DB diagram GrainLedger
 
-Ngày cập nhật: 09/10/2026.
+Ngày cập nhật: 12/10/2026.
+
+Các bảng bổ sung thuộc F03, được đặt trong nhóm 05:
+
+| # | Bảng | Lưu gì và để làm gì? |
+| --- | --- | --- |
+| 75 | `rice_varieties` | Danh mục giống lúa dùng chung: mã và tên giống. Admin quản lý; nhân viên chọn khi đăng ký thửa–vụ. Giá trị giống đã ghi trong thửa–vụ vẫn là text lịch sử. |
+| 76 | `measurement_units` | Danh mục đơn vị dùng chung: mã, tên và loại đại lượng. Giúp chọn đúng đơn vị theo trường dữ liệu; không tự thực hiện quy đổi. |
+| 77 | `catalog_events` | Nhật ký thay đổi danh mục và bảng MRL: ai sửa, lúc nào, tài nguyên nào và dữ liệu trước/sau. Khi đóng khoảng hiệu lực của bản MRL cũ, event ghi lại thay đổi và ID bản kế tiếp. |
+
+Hai bảng danh mục là nguồn tra cứu, chưa có FK bắt buộc đến các trường text hiện tại. Vì vậy diagram không vẽ đường quan hệ giả đến plot_seasons hoặc các cột unit.
 
 Nguồn đối chiếu: [grainledger.dbml](./grainledger.dbml).
 

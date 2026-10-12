@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using GrainLedger.Modules.Identity;
 using GrainLedger.Modules.Capture;
+using GrainLedger.Modules.Catalogs;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -55,6 +56,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         using var scope = Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
         await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
+        await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.MigrateAsync();
     }
 
     public new async Task DisposeAsync()

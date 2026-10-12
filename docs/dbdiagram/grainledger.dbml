@@ -579,10 +579,29 @@ CHECK: lod IS NULL OR lod >= 0
 CHECK: loq IS NULL OR loq >= 0'''
 }
 
+Table rice_varieties {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(40) [not null, unique]
+  name text [not null]
+  Note: '''F03 shared rice-variety catalog, maintained by Administrator. Code is stable after creation.
+Existing plot_seasons.rice_variety remains a text snapshot; this lookup does not introduce a mandatory FK or rewrite historical variety values.'''
+}
+
+Table measurement_units {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(30) [not null, unique]
+  name text [not null]
+  quantity_kind varchar(32) [not null]
+  Note: '''F03 shared unit catalog. Examples of quantity_kind: MASS, AREA, RESIDUE_CONCENTRATION, APPLICATION_RATE, FRACTION.
+Code and physical meaning must remain stable. Existing unit/rate_unit columns retain their recorded text; no automatic conversion or new FK is implied.
+Each consuming API validates supported units, quantity kind and its target column length.'''
+}
+
 Table active_substances {
   id uuid [pk, not null, default: `gen_random_uuid()`]
   code varchar(60) [not null, unique]
   name text [not null]
+  Note: 'F03 Admin may delete an unused substance with an audit event; references from business records restrict deletion.'
 }
 
 Table commodities {
@@ -604,6 +623,25 @@ Table quality_attributes {
   unit varchar(30) [not null]
 }
 
+Table catalog_events {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  actor_id uuid [not null]
+  event_type varchar(60) [not null]
+  resource_type varchar(60) [not null]
+  resource_id uuid [not null]
+  occurred_at timestamptz [not null]
+  correlation_id uuid [not null]
+  before_state jsonb [null]
+  after_state jsonb [null]
+  indexes {
+    (resource_type, resource_id, occurred_at)
+    correlation_id
+    actor_id
+  }
+  Note: '''Append-only audit for F03 catalog and MRL changes. Write in the same transaction as the change. For a published MRL successor, record the predecessor effective_to before and after, and the successor ID via correlation_id and event data.
+CHECK: before_state IS NOT NULL OR after_state IS NOT NULL'''
+}
+
 Table mrl_versions {
   id uuid [pk, not null, default: `gen_random_uuid()`]
   market_id uuid [not null]
@@ -620,7 +658,7 @@ Table mrl_versions {
     commodity_id
     published_by
   }
-  Note: '''Published effective intervals must not overlap for market/commodity. PUBLISHED requires published_by and published_at; publication differs from effective time. History remains immutable; version used by each assessment is explicit.
+  Note: '''Published effective intervals use [effective_from, effective_to) and must not overlap for market/commodity. PUBLISHED requires published_by and published_at; publication differs from effective time. Source, limits and published decision evidence are immutable. When publishing a successor, only an open-ended predecessor effective_to may be set to the successor effective_from, atomically with a catalog_events audit record. No backdated successor publication. Each assessment retains its chosen version and evidence snapshot.
 CHECK: effective_to IS NULL OR effective_to > effective_from'''
 }
 
@@ -1370,6 +1408,7 @@ Ref: lab_results.substance_id > active_substances.id [delete: restrict, update: 
 Ref: mrl_versions.market_id > markets.id [delete: restrict, update: no action]
 Ref: mrl_versions.commodity_id > commodities.id [delete: restrict, update: no action]
 Ref: mrl_versions.published_by > identity.users.Id [delete: restrict, update: no action]
+Ref: catalog_events.actor_id > identity.users.Id [delete: restrict, update: no action]
 Ref: mrl_limits.mrl_version_id > mrl_versions.id [delete: restrict, update: no action]
 Ref: mrl_limits.substance_id > active_substances.id [delete: restrict, update: no action]
 Ref: safety_margin_policies.company_id > identity.organizations.Id [delete: restrict, update: no action]
@@ -1549,10 +1588,13 @@ TableGroup g_04_residue_evidence_laboratory {
 }
 
 TableGroup g_05_residue_evidence_limits_and_risk {
+  rice_varieties
+  measurement_units
   active_substances
   commodities
   markets
   quality_attributes
+  catalog_events
   mrl_versions
   mrl_limits
   safety_margin_policies

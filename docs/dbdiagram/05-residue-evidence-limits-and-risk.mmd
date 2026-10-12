@@ -1,5 +1,17 @@
 erDiagram
     %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
+    %% F03 lookup catalogs; existing variety/unit values are text snapshots, not FKs.
+    rice_varieties {
+        uuid id PK "NN"
+        varchar(40) code UK "NN"
+        text name "NN"
+    }
+    measurement_units {
+        uuid id PK "NN"
+        varchar(30) code UK "NN"
+        text name "NN"
+        varchar(32) quantity_kind "NN"
+    }
     active_substances {
         uuid id PK "NN"
         varchar(60) code UK "NN"
@@ -20,6 +32,17 @@ erDiagram
         varchar(60) code UK "NN"
         text name "NN"
         varchar(30) unit "NN"
+    }
+    catalog_events {
+        uuid id PK "NN"
+        uuid actor_id FK "NN"
+        varchar(60) event_type "NN"
+        varchar(60) resource_type "NN"
+        uuid resource_id "NN"
+        timestamptz occurred_at "NN"
+        uuid correlation_id "NN"
+        jsonb before_state "NULL"
+        jsonb after_state "NULL"
     }
     mrl_versions {
         uuid id PK "NN"
@@ -172,6 +195,7 @@ erDiagram
     markets ||..o{ mrl_versions : market
     commodities ||..o{ mrl_versions : commodity
     users o|..o{ mrl_versions : published_by
+    users ||..o{ catalog_events : actor
     mrl_versions ||..o{ mrl_limits : mrl_version
     active_substances ||..o{ mrl_limits : substance
     organizations ||..o{ safety_margin_policies : company

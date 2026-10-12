@@ -1,0 +1,63 @@
+using Microsoft.EntityFrameworkCore;
+
+namespace GrainLedger.Modules.Catalogs;
+
+public sealed class ActiveSubstance
+{
+    public Guid Id { get; set; }
+    public required string Code { get; set; }
+    public required string Name { get; set; }
+    public uint Version { get; set; }
+}
+
+public sealed class CatalogEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ActorId { get; set; }
+    public required string EventType { get; set; }
+    public required string ResourceType { get; set; }
+    public Guid ResourceId { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+    public Guid CorrelationId { get; set; }
+    public string? BeforeState { get; set; }
+    public string? AfterState { get; set; }
+}
+
+public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbContext(options)
+{
+    public DbSet<ActiveSubstance> ActiveSubstances => Set<ActiveSubstance>();
+    public DbSet<CatalogEvent> CatalogEvents => Set<CatalogEvent>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.HasDefaultSchema("catalog");
+        modelBuilder.Entity<ActiveSubstance>(b =>
+        {
+            b.ToTable("active_substances");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.Code).HasColumnName("code").HasMaxLength(60).IsRequired();
+            b.Property(x => x.Name).HasColumnName("name").IsRequired();
+            b.Property(x => x.Version).IsRowVersion();
+            b.HasIndex(x => x.Code).IsUnique();
+        });
+        modelBuilder.Entity<CatalogEvent>(b =>
+        {
+            b.ToTable("catalog_events", table => table.HasCheckConstraint("ck_catalog_events_has_state",
+                "before_state IS NOT NULL OR after_state IS NOT NULL"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.ActorId).HasColumnName("actor_id");
+            b.Property(x => x.EventType).HasColumnName("event_type").HasMaxLength(60).IsRequired();
+            b.Property(x => x.ResourceType).HasColumnName("resource_type").HasMaxLength(60).IsRequired();
+            b.Property(x => x.ResourceId).HasColumnName("resource_id");
+            b.Property(x => x.OccurredAt).HasColumnName("occurred_at");
+            b.Property(x => x.CorrelationId).HasColumnName("correlation_id");
+            b.Property(x => x.BeforeState).HasColumnName("before_state").HasColumnType("jsonb");
+            b.Property(x => x.AfterState).HasColumnName("after_state").HasColumnType("jsonb");
+            b.HasIndex(x => new { x.ResourceType, x.ResourceId, x.OccurredAt });
+            b.HasIndex(x => x.CorrelationId);
+            b.HasIndex(x => x.ActorId);
+        });
+    }
+}
