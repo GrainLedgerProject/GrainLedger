@@ -1,6 +1,51 @@
-# F03: API danh mục hoạt chất, thị trường và commodity
+# F03: API danh mục hoạt chất, thị trường, commodity, chỉ tiêu chất lượng, giống lúa và đơn vị đo
 
 Module `GrainLedger.Modules.Catalogs` sở hữu `catalog.active_substances` và `catalog.catalog_events`. Đây là danh mục dùng chung để Capture chọn hoạt chất khi khai báo phun thuốc; giới hạn MRL theo thị trường sẽ nằm ở các API F03 tiếp theo.
+
+## Đơn vị đo (`measurement-units`)
+
+Danh mục này định nghĩa đơn vị và loại đại lượng; không tự quy đổi số đo hoặc thêm FK vào các bản ghi nghiệp vụ cũ.
+
+| Method | Route | Quyền | Kết quả |
+| --- | --- | --- | --- |
+| POST | `/api/measurement-units` | `platform.configure` (Administrator) | Tạo; trả 201, Location và ETag |
+| GET | `/api/measurement-units?q=&page=&pageSize=` | Tài khoản đang hoạt động, role và tổ chức hợp lệ | Tìm mã/tên; mặc định 20 dòng/trang, tối đa 100 |
+| GET | `/api/measurement-units/{id}` | Như GET danh sách | Chi tiết gồm loại đại lượng và ETag; không có trả 404 |
+| PATCH | `/api/measurement-units/{id}` | `platform.configure`, `If-Match` | Chỉ sửa tên; trả ETag mới |
+
+POST body: `{"code":"KG","name":"Kilogram","quantityKind":"MASS"}`. PATCH body: `{"name":"Kilogram (kg)"}`. Mã tối đa 30 ký tự, được trim, viết hoa và phải duy nhất. `quantityKind` được chuẩn hóa chữ hoa và hiện chỉ nhận `MASS`, `AREA`, `RESIDUE_CONCENTRATION`, `APPLICATION_RATE`, `FRACTION`. Mã và loại đại lượng không đổi sau khi tạo; cần ý nghĩa khác thì tạo đơn vị mới. Mã trùng trả 409; PATCH thiếu `If-Match` trả 428, ETag cũ trả 412. Tạo/sửa thành công ghi `catalog_events` cùng giao dịch. Chưa có DELETE.
+
+Migration `20261012175054_AddMeasurementUnits` chỉ tạo `catalog.measurement_units`, CHECK cho `quantity_kind` và unique index cho `code`; không thay Identity hoặc Capture. Migration đã áp dụng lên Supabase dev ngày 13/10/2026. Khởi động lại API để Scalar hiển thị route mới.
+
+## Giống lúa (`rice-varieties`)
+
+Danh mục giống lúa dùng chung để giao diện chọn giống khi ghi thông tin vụ mùa. `plot_seasons.rice_variety` vẫn là bản ghi tên giống dạng text tại thời điểm ghi nhận; API này chưa thêm FK hay viết lại dữ liệu Capture cũ.
+
+| Method | Route | Quyền | Kết quả |
+| --- | --- | --- | --- |
+| POST | `/api/rice-varieties` | `platform.configure` (Administrator) | Tạo; trả 201, Location và ETag |
+| GET | `/api/rice-varieties?q=&page=&pageSize=` | Tài khoản đang hoạt động, role và tổ chức hợp lệ | Tìm mã/tên; mặc định 20 dòng/trang, tối đa 100 |
+| GET | `/api/rice-varieties/{id}` | Như GET danh sách | Chi tiết và ETag; không có trả 404 |
+| PATCH | `/api/rice-varieties/{id}` | `platform.configure`, `If-Match` | Chỉ sửa tên; trả ETag mới |
+
+POST body: `{"code":"ST25","name":"ST25"}`. PATCH body: `{"name":"Tên giống đã hiệu chỉnh"}`. Code được trim, viết hoa, giới hạn 40 ký tự, duy nhất và không đổi sau khi tạo. Mã trùng trả 409; PATCH thiếu `If-Match` trả 428, ETag cũ trả 412. Tạo/sửa thành công ghi `catalog_events` cùng giao dịch. Chưa có DELETE.
+
+Migration `20261012163647_AddRiceVarieties` chỉ tạo `catalog.rice_varieties` và unique index cho `code`; không thay Identity hoặc Capture. Migration đã áp dụng lên Supabase dev ngày 12/10/2026. Khởi động lại API để Scalar hiển thị route mới.
+
+## Chỉ tiêu chất lượng (`quality-attributes`)
+
+Danh mục này định nghĩa tên và đơn vị của chỉ tiêu; không lưu giá trị đo của từng lô và không phải bảng giới hạn MRL.
+
+| Method | Route | Quyền | Kết quả |
+| --- | --- | --- | --- |
+| POST | `/api/quality-attributes` | `platform.configure` (Administrator) | Tạo; trả 201, Location và ETag |
+| GET | `/api/quality-attributes?q=&page=&pageSize=` | Tài khoản đang hoạt động, role và tổ chức hợp lệ | Tìm mã/tên; mặc định 20 dòng/trang, tối đa 100 |
+| GET | `/api/quality-attributes/{id}` | Như GET danh sách | Chi tiết gồm đơn vị và ETag; không có trả 404 |
+| PATCH | `/api/quality-attributes/{id}` | `platform.configure`, `If-Match` | Chỉ sửa tên; trả ETag mới |
+
+POST body: `{"code":"MOISTURE","name":"Moisture content","unit":"%"}`. PATCH body: `{"name":"Moisture content (rice)"}`. Code tối đa 60 ký tự, unit tối đa 30 ký tự; cả hai được trim. Code được viết hoa và phải duy nhất. Code và unit không được sửa sau khi tạo: nếu cần đơn vị khác, tạo chỉ tiêu mới. Mã trùng trả 409; PATCH thiếu `If-Match` trả 428, ETag cũ trả 412. Tạo/sửa thành công ghi `catalog_events` cùng giao dịch. Chưa có DELETE.
+
+Migration `20261012163146_AddQualityAttributes` chỉ tạo `catalog.quality_attributes` và unique index cho `code`; đã áp dụng lên Supabase dev ngày 12/10/2026. Khởi động lại API để Scalar hiển thị route mới.
 
 ## Loại/dạng sản phẩm (`commodities`)
 
@@ -77,4 +122,4 @@ Kiểm thử tích hợp dùng PostgreSQL Testcontainers:
 dotnet test backend/tests/GrainLedger.Api.IntegrationTests/GrainLedger.Api.IntegrationTests.csproj -c Release --filter FullyQualifiedName~ActiveSubstanceTests
 ```
 
-Docker Desktop cần đang chạy. Bốn test `ActiveSubstanceTests`, hai test `MarketTests` và hai test `CommodityTests` đã đạt trên PostgreSQL Testcontainers ngày 12/10/2026. Các API danh mục khác và bảng MRL sẽ được làm ở các bước sau; chưa cần cấp thêm `mrl.read` cho CustomerManager ở bước này.
+Docker Desktop cần đang chạy. Mười bốn test của `ActiveSubstanceTests`, `MarketTests`, `CommodityTests`, `QualityAttributeTests`, `RiceVarietyTests` và `MeasurementUnitTests` đã đạt trên PostgreSQL Testcontainers ngày 13/10/2026. Bảng MRL sẽ được làm ở các bước sau; chưa cần cấp thêm `mrl.read` cho CustomerManager ở bước này.

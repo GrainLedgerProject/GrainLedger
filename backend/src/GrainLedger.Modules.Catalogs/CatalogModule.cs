@@ -25,6 +25,9 @@ public static class CatalogModule
         endpoints.MapActiveSubstanceEndpoints();
         endpoints.MapMarketEndpoints();
         endpoints.MapCommodityEndpoints();
+        endpoints.MapQualityAttributeEndpoints();
+        endpoints.MapRiceVarietyEndpoints();
+        endpoints.MapMeasurementUnitEndpoints();
         return endpoints;
     }
 }
