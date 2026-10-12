@@ -1,6 +1,21 @@
-# F03: API danh mục hoạt chất và thị trường
+# F03: API danh mục hoạt chất, thị trường và commodity
 
 Module `GrainLedger.Modules.Catalogs` sở hữu `catalog.active_substances` và `catalog.catalog_events`. Đây là danh mục dùng chung để Capture chọn hoạt chất khi khai báo phun thuốc; giới hạn MRL theo thị trường sẽ nằm ở các API F03 tiếp theo.
+
+## Loại/dạng sản phẩm (`commodities`)
+
+Commodity là loại hoặc dạng sản phẩm được áp dụng giới hạn MRL; không phải giống lúa. Danh mục này dùng chung cho các công ty.
+
+| Method | Route | Quyền | Kết quả |
+| --- | --- | --- | --- |
+| POST | `/api/commodities` | `platform.configure` (Administrator) | Tạo; trả 201, Location và ETag |
+| GET | `/api/commodities?q=&page=&pageSize=` | Tài khoản đang hoạt động, role và tổ chức hợp lệ | Tìm mã/tên; mặc định 20 dòng/trang, tối đa 100 |
+| GET | `/api/commodities/{id}` | Như GET danh sách | Chi tiết và ETag; không có trả 404 |
+| PATCH | `/api/commodities/{id}` | `platform.configure`, `If-Match` | Chỉ sửa tên; trả ETag mới |
+
+POST body: `{"code":"RICE","name":"Milled rice"}`. PATCH body: `{"name":"Milled white rice"}`. API trim, viết hoa mã và giới hạn 40 ký tự; mã không đổi sau khi tạo. Mã trùng trả 409. PATCH thiếu `If-Match` trả 428, ETag cũ trả 412. Tạo/sửa thành công ghi `catalog_events` cùng giao dịch. Chưa có DELETE cho commodities.
+
+Migration `20261012074031_AddCommodities` chỉ tạo `catalog.commodities` và chỉ mục unique cho `code`; không thay Identity hoặc Capture. Migration đã áp dụng lên Supabase dev ngày 12/10/2026. Khởi động lại API để Scalar hiển thị route mới.
 
 ## Thị trường xuất khẩu (`markets`)
 
@@ -62,4 +77,4 @@ Kiểm thử tích hợp dùng PostgreSQL Testcontainers:
 dotnet test backend/tests/GrainLedger.Api.IntegrationTests/GrainLedger.Api.IntegrationTests.csproj -c Release --filter FullyQualifiedName~ActiveSubstanceTests
 ```
 
-Docker Desktop cần đang chạy. Bốn test `ActiveSubstanceTests` và hai test `MarketTests` đã đạt trên PostgreSQL Testcontainers ngày 12/10/2026. Các API danh mục khác và bảng MRL sẽ được làm ở các bước sau; chưa cần cấp thêm `mrl.read` cho CustomerManager ở bước này.
+Docker Desktop cần đang chạy. Bốn test `ActiveSubstanceTests`, hai test `MarketTests` và hai test `CommodityTests` đã đạt trên PostgreSQL Testcontainers ngày 12/10/2026. Các API danh mục khác và bảng MRL sẽ được làm ở các bước sau; chưa cần cấp thêm `mrl.read` cho CustomerManager ở bước này.

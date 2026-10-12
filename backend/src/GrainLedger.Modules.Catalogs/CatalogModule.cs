@@ -24,6 +24,7 @@ public static class CatalogModule
     {
         endpoints.MapActiveSubstanceEndpoints();
         endpoints.MapMarketEndpoints();
+        endpoints.MapCommodityEndpoints();
         return endpoints;
     }
 }
