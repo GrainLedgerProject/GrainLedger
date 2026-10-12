@@ -23,6 +23,7 @@ public static class CatalogModule
     public static IEndpointRouteBuilder MapCatalogModule(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapActiveSubstanceEndpoints();
+        endpoints.MapMarketEndpoints();
         return endpoints;
     }
 }

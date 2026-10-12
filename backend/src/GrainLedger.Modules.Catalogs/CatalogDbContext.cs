@@ -10,6 +10,14 @@ public sealed class ActiveSubstance
     public uint Version { get; set; }
 }
 
+public sealed class Market
+{
+    public Guid Id { get; set; }
+    public required string Code { get; set; }
+    public required string Name { get; set; }
+    public uint Version { get; set; }
+}
+
 public sealed class CatalogEvent
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -26,6 +34,7 @@ public sealed class CatalogEvent
 public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbContext(options)
 {
     public DbSet<ActiveSubstance> ActiveSubstances => Set<ActiveSubstance>();
+    public DbSet<Market> Markets => Set<Market>();
     public DbSet<CatalogEvent> CatalogEvents => Set<CatalogEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -37,6 +46,16 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             b.HasKey(x => x.Id);
             b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             b.Property(x => x.Code).HasColumnName("code").HasMaxLength(60).IsRequired();
+            b.Property(x => x.Name).HasColumnName("name").IsRequired();
+            b.Property(x => x.Version).IsRowVersion();
+            b.HasIndex(x => x.Code).IsUnique();
+        });
+        modelBuilder.Entity<Market>(b =>
+        {
+            b.ToTable("markets");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.Code).HasColumnName("code").HasMaxLength(40).IsRequired();
             b.Property(x => x.Name).HasColumnName("name").IsRequired();
             b.Property(x => x.Version).IsRowVersion();
             b.HasIndex(x => x.Code).IsUnique();
