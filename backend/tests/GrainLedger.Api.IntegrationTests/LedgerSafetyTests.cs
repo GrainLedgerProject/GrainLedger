@@ -1,3 +1,8 @@
+using System.Security.Claims;
+using GrainLedger.Modules.Identity;
+using GrainLedger.Modules.Ledger;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -8,6 +13,28 @@ namespace GrainLedger.Api.IntegrationTests;
 
 public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
+    [Theory]
+    [InlineData(false, Roles.CustomerManager)]
+    [InlineData(true, null)]
+    public async Task Ledger_reads_reject_persisted_inactive_or_roleless_actors(bool active, string? role)
+    {
+        var (user, _) = await factory.SeedUserAsync(role, active: active);
+        using var scope = factory.Services.CreateScope();
+        var accessor = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>();
+        var previous = accessor.HttpContext;
+        accessor.HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "test"))
+        };
+        try
+        {
+            var error = await Assert.ThrowsAsync<LedgerException>(() =>
+                scope.ServiceProvider.GetRequiredService<LedgerService>().ReadAsync("lookups", new JsonObject()));
+            Assert.Equal(403, error.StatusCode);
+        }
+        finally { accessor.HttpContext = previous; }
+    }
+
     [Theory]
     [InlineData("1", "t", "1000")]
     [InlineData("0.001", "g", "0.000001")]

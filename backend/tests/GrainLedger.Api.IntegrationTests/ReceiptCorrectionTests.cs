@@ -20,6 +20,123 @@ public sealed class ReceiptCorrectionTests(ApiFactory factory) : IClassFixture<A
     }
 
     [Fact]
+    public async Task Capture_lists_match_details_with_owner_or_assigned_scope_and_ordered_receiving_history()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var preciseId = Guid.NewGuid();
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(preciseId, ["10123.456"], unit: "g"));
+        var precise = await s.CommitReceiptAsync(preciseId);
+        var resolved = await s.ReceiptAsync("20");
+        var corrected = await s.ReceiptAsync("30");
+        var blocked = await s.ReceiptAsync("40");
+        var unassignedDraft = Guid.NewGuid();
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts",
+            s.ReceiptBody(unassignedDraft, ["1"], locationId: s.ForeignLocationId));
+        var foreignAssigned = await s.ForeignReceiptAsync("5");
+        var foreignUnassigned = await s.ForeignReceiptAsync("6", s.ForeignLocationId);
+
+        var matchedArrival = await s.ArrivalAsync(precise, "10.123456");
+        var resolvedArrival = await s.ArrivalAsync(resolved, "19");
+        var firstCorrection = Guid.NewGuid(); var lastCorrection = Guid.NewGuid();
+        foreach (var (id, quantity) in new[] { (firstCorrection, "19.5"), (lastCorrection, "20") })
+            await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{resolvedArrival}/corrections",
+                new { id, quantity, unit = "kg", evidenceId = s.EvidenceId, reason = "Synthetic ordered measurement correction" });
+        var correctedArrival = await s.ArrivalAsync(corrected, "28");
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{correctedArrival}/corrections",
+            new { id = Guid.NewGuid(), quantity = "29", unit = "kg", evidenceId = s.EvidenceId, reason = "Synthetic retained correction" });
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{correctedArrival}/investigations",
+            new { id = Guid.NewGuid(), cause = "UNRESOLVED", evidenceId = s.EvidenceId, reason = "Synthetic retained investigation" });
+        var blockedArrival = await s.ArrivalAsync(blocked, "39");
+        var firstInvestigation = Guid.NewGuid(); var lastInvestigation = Guid.NewGuid();
+        foreach (var (id, cause) in new[] { (firstInvestigation, "UNRESOLVED"), (lastInvestigation, "REAL_DIFFERENCE") })
+            await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{blockedArrival}/investigations",
+                new { id, cause, evidenceId = s.EvidenceId, reason = "Synthetic ordered investigation" });
+        var (receiptCorrection, replacement) = await RequestAsync(s, corrected, "29");
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{receiptCorrection}/commit",
+            new { commandId = Guid.NewGuid() });
+
+        var (unassignedOperator, unassignedSession) = await factory.SeedUserAsync(
+            GrainLedger.Modules.Identity.Roles.MillOperator, s.Accounts["operator"].User.OrganizationId);
+        using var unassignedClient = factory.CreateRealCookieClient(unassignedOperator, unassignedSession);
+        await CsrfAsync(unassignedClient);
+        await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/assignments", new { userId = unassignedOperator.Id, facilityId = s.ForeignFacilityId });
+        var foreignAssignedArrival = Guid.NewGuid(); var foreignUnassignedArrival = Guid.NewGuid();
+        foreach (var (client, receipt, facility, arrival) in new[]
+        {
+            (s.Operator, foreignAssigned, s.FacilityId, foreignAssignedArrival),
+            (unassignedClient, foreignUnassigned, s.ForeignFacilityId, foreignUnassignedArrival)
+        })
+        {
+            var evidence = Guid.NewGuid();
+            await SendAsync(client, HttpMethod.Post, "/api/ledger/evidence", new
+            {
+                id = evidence, ownerId = s.ForeignOwnerId, facilityId = facility, fileName = "synthetic-scope.txt",
+                contentType = "text/plain", contentBase64 = Convert.ToBase64String("SYNTHETIC scope evidence"u8.ToArray())
+            });
+            await SendAsync(client, HttpMethod.Post, "/api/capture-mock/arrivals", new
+            {
+                id = arrival, receiptLineId = Lines(receipt)[0], quantity = receipt.GetProperty("lines")[0].GetProperty("quantityKg").GetString(),
+                unit = "kg", evidenceId = evidence, observedAt = DateTimeOffset.UtcNow
+            });
+        }
+
+        var foreignCorrection = Guid.NewGuid(); var foreignReplacement = Guid.NewGuid();
+        await SendAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post,
+            $"/api/capture-mock/receipts/{foreignUnassigned.GetProperty("id").GetGuid()}/corrections",
+            new
+            {
+                id = foreignCorrection, reason = "Synthetic unassigned correction",
+                replacement = new
+                {
+                    id = foreignReplacement, ownerOrganizationId = s.ForeignOwnerId,
+                    farmerId = foreignUnassigned.GetProperty("farmerId").GetGuid(), seasonId = foreignUnassigned.GetProperty("seasonId").GetGuid(),
+                    locationId = s.ForeignLocationId, occurredAt = DateTimeOffset.UtcNow,
+                    lines = foreignUnassigned.GetProperty("lines").EnumerateArray().Select(line => new
+                    {
+                        id = Guid.NewGuid(), plotSeasonId = line.GetProperty("plotSeasonId").GetGuid(),
+                        commodityId = line.GetProperty("commodityId").GetGuid(), lotCode = $"SYNTHETIC-{Guid.NewGuid():N}", quantity = "6", unit = "kg"
+                    }).ToArray()
+                }
+            });
+
+        var ownReceipts = new[] { preciseId, resolved.GetProperty("id").GetGuid(), corrected.GetProperty("id").GetGuid(), blocked.GetProperty("id").GetGuid() };
+        var assignedId = foreignAssigned.GetProperty("id").GetGuid(); var unassignedId = foreignUnassigned.GetProperty("id").GetGuid();
+        var allReceipts = ownReceipts.Concat([unassignedDraft, assignedId, unassignedId, replacement, foreignReplacement]).ToArray();
+        await AssertListAsync(s.Customer, "receipts", allReceipts, ownReceipts.Concat([unassignedDraft, replacement]).ToArray());
+        await AssertListAsync(s.Purchaser, "receipts", allReceipts, ownReceipts.Concat([unassignedDraft, replacement]).ToArray());
+        await AssertListAsync(s.Operator, "receipts", allReceipts, ownReceipts.Concat([assignedId, replacement]).ToArray());
+        await AssertListAsync(s.ForeignCustomer, "receipts", allReceipts, [assignedId, unassignedId, foreignReplacement]);
+        var arrivals = new[] { matchedArrival, resolvedArrival, correctedArrival, blockedArrival };
+        var allArrivals = arrivals.Concat([foreignAssignedArrival, foreignUnassignedArrival]).ToArray();
+        await AssertListAsync(s.Customer, "arrivals", allArrivals, arrivals);
+        var listed = await AssertListAsync(s.Operator, "arrivals", allArrivals, arrivals.Concat([foreignAssignedArrival]).ToArray());
+        await AssertListAsync(s.ForeignCustomer, "arrivals", allArrivals, [foreignAssignedArrival, foreignUnassignedArrival]);
+        Assert.Equal(new[] { "MATCHED", "RESOLVED", "RECEIPT_CORRECTED", "BLOCKED" },
+            listed.Take(arrivals.Length).Select(x => x.GetProperty("status").GetString()).ToArray());
+        Assert.Equal("10.123456", listed[0].GetProperty("expectedQuantityKg").GetString());
+        Assert.Equal(new[] { firstCorrection, lastCorrection },
+            listed[1].GetProperty("corrections").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToArray());
+        Assert.Single(listed[2].GetProperty("corrections").EnumerateArray());
+        Assert.Single(listed[2].GetProperty("investigations").EnumerateArray());
+        Assert.Equal(new[] { firstInvestigation, lastInvestigation },
+            listed[3].GetProperty("investigations").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToArray());
+        var allCorrections = new[] { receiptCorrection, foreignCorrection };
+        await AssertListAsync(s.Customer, "receipt-corrections", allCorrections, [receiptCorrection]);
+        await AssertListAsync(s.Manager, "receipt-corrections", allCorrections, [receiptCorrection]);
+        await AssertListAsync(s.ForeignCustomer, "receipt-corrections", allCorrections, [foreignCorrection]);
+
+        static async Task<JsonElement[]> AssertListAsync(HttpClient client, string resource, Guid[] allIds, Guid[] expected)
+        {
+            var list = (await GetAsync(client, $"/api/capture-mock/{resource}")).EnumerateArray()
+                .Where(row => allIds.Contains(row.GetProperty("id").GetGuid())).ToArray();
+            Assert.Equal(expected, list.Select(row => row.GetProperty("id").GetGuid()).ToArray());
+            foreach (var row in list)
+                Assert.Equal((await GetAsync(client, $"/api/capture-mock/{resource}/{row.GetProperty("id").GetGuid()}")).GetRawText(), row.GetRawText());
+            return list;
+        }
+    }
+
+    [Fact]
     public async Task Orphaned_evidence_retry_rechecks_current_facility_authority_without_freezing_historical_role()
     {
         using var s = await CreateAsync(factory);

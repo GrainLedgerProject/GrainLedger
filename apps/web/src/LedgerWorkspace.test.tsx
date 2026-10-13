@@ -53,7 +53,8 @@ it('hides synthetic receiving when mock status is unavailable without blocking l
   delete routes['/api/capture-mock/status'];
   render(<LedgerWorkspace user={{ ...actor, permissions: ['lots.read.facility', 'farms.read'] }} />);
   expect(await screen.findByRole('heading', { name: 'Scoped stock search' })).toBeInTheDocument();
-  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/capture-mock/status')).toBe(true));
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '/api/ledger/lots').length).toBe(1));
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/capture-mock/status')).toBe(true);
   expect(screen.queryByRole('button', { name: 'Sources & receiving' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Stock & HOLD inbox' })).toBeInTheDocument();
 });

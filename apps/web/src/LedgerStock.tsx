@@ -6,10 +6,16 @@ export function LedgerStock({ user }: { user: User }) {
   const [look, setLook] = useState<Lookup>(emptyLookup), [lots, setLots] = useState<Lot[]>([]), [allLots, setAllLots] = useState<Lot[]>([]), [facility, setFacility] = useState(''), [owner, setOwner] = useState(''), [location, setLocation] = useState(''), [stage, setStage] = useState(''), [search, setSearch] = useState(''), [selected, setSelected] = useState<Lot | null>(null);
   const action = useAction();
   async function load() {
-    const [lookup, stock] = await Promise.all([api<Lookup>('/api/ledger/lookups'), api<Lot[]>('/api/ledger/lots')]); setLook(lookup); setAllLots(stock);
     const query = new URLSearchParams(); if (facility) query.set('facilityId', facility); if (owner) query.set('ownerId', owner); if (search) query.set('search', search);
-    setLots(await api<Lot[]>(`/api/ledger/lots?${query}`));
-    if (selected) setSelected(await api<Lot>(`/api/ledger/lots/${selected.id}`));
+    const filtered = facility || owner || search;
+    const [lookup, stock, filteredLots, detail] = await Promise.all([
+      api<Lookup>('/api/ledger/lookups'),
+      api<Lot[]>('/api/ledger/lots'),
+      filtered ? api<Lot[]>(`/api/ledger/lots?${query}`) : Promise.resolve<Lot[] | undefined>(undefined),
+      selected ? api<Lot>(`/api/ledger/lots/${selected.id}`) : Promise.resolve<Lot | undefined>(undefined),
+    ]);
+    setLook(lookup); setAllLots(stock); setLots(filteredLots ?? stock);
+    if (detail) setSelected(detail);
   }
   useEffect(() => { void action.run(load); }, []);
   const owners = Array.from(new Set(allLots.map(lot => lot.ownerId))).map(ownerId => ({ id: ownerId, name: ownerId === user.organizationId ? user.organizationName || ownerId : `${allLots.filter(lot => lot.ownerId === ownerId).slice(0, 3).map(lot => lot.code).join(', ')} — ${ownerId}` }));

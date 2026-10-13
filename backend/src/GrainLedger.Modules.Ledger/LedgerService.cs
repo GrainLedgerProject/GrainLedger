@@ -56,8 +56,11 @@ public sealed class LedgerService(IConfiguration configuration, IHttpContextAcce
     }
     public async Task<JsonElement> ReadAsync(string action, JsonObject payload, CancellationToken ct = default)
     {
+        if (accessor.HttpContext?.User.Identity?.IsAuthenticated != true || !Guid.TryParse(accessor.HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier), out var actor))
+            throw new LedgerException(403, "Active persisted actor required");
+        // ponytail: ledger.read validates persisted active role and scope in the same database round trip.
         await using var connection = await OpenAsync(ct);
-        var value = await ExecuteAsync(connection, null, "SELECT ledger.read($1,$2,$3)::text", ct, await ActorAsync(ct), action, payload);
+        var value = await ExecuteAsync(connection, null, "SELECT ledger.read($1,$2,$3)::text", ct, actor, action, payload);
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
     public async Task<Guid> PostReceiptAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid actorId, ReceiptStockLine line, CancellationToken ct = default)

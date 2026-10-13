@@ -273,10 +273,25 @@ public sealed class MockCaptureService(IConfiguration configuration, IHttpContex
         await using (var command = Command(connection, transaction, "SELECT l.id,m.lot_id FROM capture_mock.receipt_lines l JOIN capture_mock.receipt_lots m ON m.receipt_line_id=l.id WHERE l.receipt_id=@id", ("id", id)))
         await using (var reader = await command.ExecuteReaderAsync(ct))
             while (await reader.ReadAsync(ct)) lots.Add(reader.GetGuid(0), reader.GetGuid(1));
-        return new(body.Id, body.OwnerOrganizationId, body.FarmerId, body.SeasonId, body.LocationId, body.OccurredAt,
+        return Receipt(body, status, version, original, lots);
+    }
+
+    private static ReceiptDto Receipt(ReceiptRequest body, string status, Guid version, Guid? original, Dictionary<Guid, Guid> lots) =>
+        new(body.Id, body.OwnerOrganizationId, body.FarmerId, body.SeasonId, body.LocationId, body.OccurredAt,
             body.Lines.Select(line => new ReceiptLineDto(line.Id, line.PlotSeasonId, line.CommodityId, line.LotCode, line.Quantity, line.Unit,
                 MockCaptureMeasure.Kg(MockCaptureMeasure.ToKg(line.Quantity, line.Unit)), lots.TryGetValue(line.Id, out var lot) ? lot : null)).ToArray(), status, version, original);
-    }
+
+    // Receipt alias r is always the original source whose scope governs the read.
+    private const string ReadScopeSql = """
+        ((@own AND r.owner_id=@owner) OR (@receive AND EXISTS(
+            SELECT 1 FROM ledger.locations location WHERE location.id=r.location_id
+            AND (ledger.role(@actor)='PurchasingStaff' OR ledger.assigned(@actor,location.facility_id)))))
+        """;
+
+    private static NpgsqlCommand ScopedReadCommand(NpgsqlConnection connection, Actor actor, string sql) =>
+        Command(connection, null, sql, ("actor", actor.Id), ("owner", actor.OrganizationId),
+            ("own", actor.Has("purchases.write") || actor.Has("farms.read") || actor.Has("lots.read.tenant")),
+            ("receive", actor.Has("lots.receive") || actor.Has("corrections.reconcile")));
 
     private async Task ReadScopeAsync(Actor actor, ReceiptDto receipt, CancellationToken ct)
     {
@@ -296,16 +311,20 @@ public sealed class MockCaptureService(IConfiguration configuration, IHttpContex
     public async Task<ReceiptDto[]> ListReceiptsAsync(CancellationToken ct)
     {
         await using var connection = Connection(); await connection.OpenAsync(ct); var actor = await CurrentAsync(connection, null, ct);
-        var ids = new List<Guid>();
-        await using (var command = Command(connection, null, "SELECT id FROM capture_mock.receipts ORDER BY created_at,id"))
-        await using (var reader = await command.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) ids.Add(reader.GetGuid(0));
+        await using var command = ScopedReadCommand(connection, actor, $$"""
+            SELECT r.body::text,r.status,r.version,r.replacement_for,
+                COALESCE(jsonb_object_agg(l.id,m.lot_id) FILTER (WHERE m.lot_id IS NOT NULL),'{}'::jsonb)::text
+            FROM capture_mock.receipts r
+            LEFT JOIN capture_mock.receipt_lines l ON l.receipt_id=r.id
+            LEFT JOIN capture_mock.receipt_lots m ON m.receipt_line_id=l.id
+            WHERE {{ReadScopeSql}}
+            GROUP BY r.id ORDER BY r.created_at,r.id
+            """);
+        await using var reader = await command.ExecuteReaderAsync(ct);
         var receipts = new List<ReceiptDto>();
-        foreach (var id in ids)
-        {
-            var receipt = await ReceiptAsync(connection, null, id, false, ct);
-            try { await ReadScopeAsync(actor, receipt, ct); receipts.Add(receipt); }
-            catch (MockCaptureFault error) when (error.StatusCode == 403) { }
-        }
+        while (await reader.ReadAsync(ct))
+            receipts.Add(Receipt(Decode<ReceiptRequest>(reader.GetString(0)), reader.GetString(1), reader.GetGuid(2),
+                reader.IsDBNull(3) ? null : reader.GetGuid(3), Decode<Dictionary<Guid, Guid>>(reader.GetString(4))));
         return receipts.ToArray();
     }
 
@@ -416,27 +435,33 @@ public sealed class MockCaptureService(IConfiguration configuration, IHttpContex
         await using (var command = Command(connection, transaction, "SELECT body::text,created_at FROM capture_mock.arrival_corrections WHERE arrival_id=@id ORDER BY sequence", ("id", id)))
         await using (var reader = await command.ExecuteReaderAsync(ct))
             while (await reader.ReadAsync(ct))
-            {
-                var correction = Decode<ArrivalCorrectionRequest>(reader.GetString(0));
-                corrections.Add(new(correction.Id, correction.Quantity, correction.Unit, MockCaptureMeasure.Kg(MockCaptureMeasure.ToKg(correction.Quantity, correction.Unit)), correction.EvidenceId, correction.Reason, reader.GetFieldValue<DateTimeOffset>(1)));
-            }
+                corrections.Add(ArrivalCorrection(Decode<ArrivalCorrectionRequest>(reader.GetString(0)), reader.GetFieldValue<DateTimeOffset>(1)));
         var investigations = new List<ArrivalInvestigationDto>();
         await using (var command = Command(connection, transaction, "SELECT body::text,created_at FROM capture_mock.arrival_investigations WHERE arrival_id=@id ORDER BY created_at,id", ("id", id)))
         await using (var reader = await command.ExecuteReaderAsync(ct))
             while (await reader.ReadAsync(ct))
-            {
-                var investigation = Decode<ArrivalInvestigationRequest>(reader.GetString(0));
-                investigations.Add(new(investigation.Id, investigation.Cause, investigation.EvidenceId, investigation.Reason, reader.GetFieldValue<DateTimeOffset>(1)));
-            }
-        var kg = MockCaptureMeasure.Kg(MockCaptureMeasure.ToKg(original.Quantity, original.Unit));
-        var latest = corrections.Count == 0 ? kg : corrections[^1].QuantityKg;
-        var status = latest != line.QuantityKg ? "BLOCKED" : corrections.Count == 0 ? "MATCHED" : "RESOLVED";
+                investigations.Add(ArrivalInvestigation(Decode<ArrivalInvestigationRequest>(reader.GetString(0)), reader.GetFieldValue<DateTimeOffset>(1)));
         var receiptCorrected = await ScalarAsync(connection, transaction,
             "SELECT EXISTS(SELECT 1 FROM capture_mock.receipt_corrections c JOIN capture_mock.receipt_lines l ON l.receipt_id=c.receipt_id WHERE l.id=@line AND c.status='COMMITTED')",
             ct, ("line", original.ReceiptLineId));
-        if (receiptCorrected is true) status = "RECEIPT_CORRECTED";
+        return Arrival(original, line.QuantityKg, corrections.ToArray(), investigations.ToArray(), receiptCorrected is true);
+    }
+
+    private static ArrivalCorrectionDto ArrivalCorrection(ArrivalCorrectionRequest correction, DateTimeOffset created) =>
+        new(correction.Id, correction.Quantity, correction.Unit, MockCaptureMeasure.Kg(MockCaptureMeasure.ToKg(correction.Quantity, correction.Unit)),
+            correction.EvidenceId, correction.Reason, created);
+
+    private static ArrivalInvestigationDto ArrivalInvestigation(ArrivalInvestigationRequest investigation, DateTimeOffset created) =>
+        new(investigation.Id, investigation.Cause, investigation.EvidenceId, investigation.Reason, created);
+
+    private static ArrivalDto Arrival(ArrivalRequest original, string expectedKg, ArrivalCorrectionDto[] corrections,
+        ArrivalInvestigationDto[] investigations, bool receiptCorrected)
+    {
+        var kg = MockCaptureMeasure.Kg(MockCaptureMeasure.ToKg(original.Quantity, original.Unit));
+        var latest = corrections.Length == 0 ? kg : corrections[^1].QuantityKg;
+        var status = receiptCorrected ? "RECEIPT_CORRECTED" : latest != expectedKg ? "BLOCKED" : corrections.Length == 0 ? "MATCHED" : "RESOLVED";
         return new(original.Id, original.ReceiptLineId, original.Quantity, original.Unit, kg, original.EvidenceId, original.ObservedAt,
-            line.QuantityKg, status, corrections.ToArray(), investigations.ToArray());
+            expectedKg, status, corrections, investigations);
     }
 
     private static async Task<ArrivalRequest> LockArrivalAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid id, CancellationToken ct)
@@ -495,16 +520,51 @@ public sealed class MockCaptureService(IConfiguration configuration, IHttpContex
     public async Task<ArrivalDto[]> ListArrivalsAsync(CancellationToken ct)
     {
         await using var connection = Connection(); await connection.OpenAsync(ct); var actor = await CurrentAsync(connection, null, ct);
-        var ids = new List<Guid>();
-        await using (var command = Command(connection, null, "SELECT id FROM capture_mock.arrivals ORDER BY created_at,id"))
-        await using (var reader = await command.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) ids.Add(reader.GetGuid(0));
-        var result = new List<ArrivalDto>();
-        foreach (var id in ids)
-        {
-            var arrival = await ArrivalAsync(connection, null, id, ct); var (receipt, _) = await ReceiptLineAsync(connection, null, arrival.ReceiptLineId, false, ct);
-            try { await ReadScopeAsync(actor, receipt, ct); result.Add(arrival); } catch (MockCaptureFault error) when (error.StatusCode == 403) { }
-        }
-        return result.ToArray();
+        var observations = new List<(ArrivalRequest Body, string ExpectedKg, bool ReceiptCorrected)>();
+        await using (var command = ScopedReadCommand(connection, actor, $"""
+            SELECT a.body::text,l.body::text,r.status,m.lot_id,
+                EXISTS(SELECT 1 FROM capture_mock.receipt_corrections c WHERE c.receipt_id=r.id AND c.status='COMMITTED')
+            FROM capture_mock.arrivals a
+            JOIN capture_mock.receipt_lines l ON l.id=a.receipt_line_id
+            JOIN capture_mock.receipts r ON r.id=l.receipt_id
+            LEFT JOIN capture_mock.receipt_lots m ON m.receipt_line_id=l.id
+            WHERE {ReadScopeSql} ORDER BY a.created_at,a.id
+            """))
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+            while (await reader.ReadAsync(ct))
+            {
+                if (reader.GetString(2) != "COMMITTED") throw new MockCaptureFault(409, "Arrival observations require committed procurement.");
+                if (reader.IsDBNull(3)) throw new MockCaptureFault(409, "Receipt line has no source lot.");
+                var line = Decode<ReceiptLineRequest>(reader.GetString(1));
+                observations.Add((Decode<ArrivalRequest>(reader.GetString(0)),
+                    MockCaptureMeasure.Kg(MockCaptureMeasure.ToKg(line.Quantity, line.Unit)), reader.GetBoolean(4)));
+            }
+        if (observations.Count == 0) return [];
+        var ids = observations.Select(x => x.Body.Id).ToArray();
+        var corrections = new Dictionary<Guid, List<ArrivalCorrectionDto>>();
+        await using (var command = Command(connection, null,
+            "SELECT arrival_id,body::text,created_at FROM capture_mock.arrival_corrections WHERE arrival_id=ANY(@ids) ORDER BY sequence", ("ids", ids)))
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+            while (await reader.ReadAsync(ct))
+            {
+                var id = reader.GetGuid(0);
+                if (!corrections.TryGetValue(id, out var history)) corrections.Add(id, history = []);
+                history.Add(ArrivalCorrection(Decode<ArrivalCorrectionRequest>(reader.GetString(1)), reader.GetFieldValue<DateTimeOffset>(2)));
+            }
+        var investigations = new Dictionary<Guid, List<ArrivalInvestigationDto>>();
+        await using (var command = Command(connection, null,
+            "SELECT arrival_id,body::text,created_at FROM capture_mock.arrival_investigations WHERE arrival_id=ANY(@ids) ORDER BY created_at,id", ("ids", ids)))
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+            while (await reader.ReadAsync(ct))
+            {
+                var id = reader.GetGuid(0);
+                if (!investigations.TryGetValue(id, out var history)) investigations.Add(id, history = []);
+                history.Add(ArrivalInvestigation(Decode<ArrivalInvestigationRequest>(reader.GetString(1)), reader.GetFieldValue<DateTimeOffset>(2)));
+            }
+        return observations.Select(x => Arrival(x.Body, x.ExpectedKg,
+            corrections.TryGetValue(x.Body.Id, out var correctionHistory) ? correctionHistory.ToArray() : [],
+            investigations.TryGetValue(x.Body.Id, out var investigationHistory) ? investigationHistory.ToArray() : [],
+            x.ReceiptCorrected)).ToArray();
     }
 
     public Task<ReceiptCorrectionDto> RequestReceiptCorrectionAsync(Guid id, ReceiptCorrectionRequest request, CancellationToken ct) => MutationAsync("receipt-correction:" + id, request.Id, request, async (connection, transaction, actor) =>
@@ -617,14 +677,29 @@ public sealed class MockCaptureService(IConfiguration configuration, IHttpContex
     public async Task<ReceiptCorrectionDto[]> ListReceiptCorrectionsAsync(CancellationToken ct)
     {
         await using var connection = Connection(); await connection.OpenAsync(ct); var actor = await CurrentAsync(connection, null, ct);
-        var ids = new List<Guid>();
-        await using (var command = Command(connection, null, "SELECT id FROM capture_mock.receipt_corrections ORDER BY created_at,id"))
-        await using (var reader = await command.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) ids.Add(reader.GetGuid(0));
+        await using var command = ScopedReadCommand(connection, actor, $$"""
+            SELECT c.id,c.receipt_id,c.body::text,c.status,c.evidence_id,c.reconciliation::text,c.created_at,
+                replacement.body::text,replacement.status,replacement.version,replacement.replacement_for,
+                COALESCE(jsonb_object_agg(l.id,m.lot_id) FILTER (WHERE m.lot_id IS NOT NULL),'{}'::jsonb)::text
+            FROM capture_mock.receipt_corrections c
+            JOIN capture_mock.receipts r ON r.id=c.receipt_id
+            JOIN capture_mock.receipts replacement ON replacement.id=c.replacement_receipt_id
+            LEFT JOIN capture_mock.receipt_lines l ON l.receipt_id=replacement.id
+            LEFT JOIN capture_mock.receipt_lots m ON m.receipt_line_id=l.id
+            WHERE {{ReadScopeSql}}
+            GROUP BY c.id,replacement.id ORDER BY c.created_at,c.id
+            """);
+        await using var reader = await command.ExecuteReaderAsync(ct);
         var result = new List<ReceiptCorrectionDto>();
-        foreach (var id in ids)
+        while (await reader.ReadAsync(ct))
         {
-            var correction = await CorrectionAsync(connection, null, id, false, ct); var original = await ReceiptAsync(connection, null, correction.ReceiptId, false, ct);
-            try { await ReadScopeAsync(actor, original, ct); result.Add(correction); } catch (MockCaptureFault error) when (error.StatusCode == 403) { }
+            var request = Decode<ReceiptCorrectionRequest>(reader.GetString(2));
+            var reconciliation = reader.IsDBNull(5) ? null : Decode<ReceiptReconciliationRequest>(reader.GetString(5));
+            var replacement = Receipt(Decode<ReceiptRequest>(reader.GetString(7)), reader.GetString(8), reader.GetGuid(9),
+                reader.IsDBNull(10) ? null : reader.GetGuid(10), Decode<Dictionary<Guid, Guid>>(reader.GetString(11)));
+            result.Add(new(reader.GetGuid(0), reader.GetGuid(1), request.Reason, replacement.Id, replacement, reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetGuid(4), reconciliation?.Reason, reconciliation?.VerifiedLines ?? [],
+                reader.GetFieldValue<DateTimeOffset>(6)));
         }
         return result.ToArray();
     }

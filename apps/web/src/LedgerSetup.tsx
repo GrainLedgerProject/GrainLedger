@@ -11,8 +11,12 @@ export function LedgerSetup({ user }: { user: User }) {
   const [owner, setOwner] = useState(''), [evidence, setEvidence] = useState(''), [policyKind, setPolicyKind] = useState('DRYING'), [tolerance, setTolerance] = useState(''), [effective, setEffective] = useState(now());
   const [blendInputs, setBlendInputs] = useState([{ commodityId: '', product: 'HEAD_RICE' }]), [blendOutput, setBlendOutput] = useState(''), [location, setLocation] = useState(''), [clearReason, setClearReason] = useState(''), [clearEvidence, setClearEvidence] = useState('');
   async function load() {
-    setData(await api<Setup>('/api/ledger/setup'));
-    if (configure) { const [u, o] = await Promise.all([api<Row[]>('/api/admin/users'), api<Row[]>('/api/admin/organizations')]); setUsers(u); setOrganizations(o); }
+    const [setup, admin] = await Promise.all([
+      api<Setup>('/api/ledger/setup'),
+      configure ? Promise.all([api<Row[]>('/api/admin/users'), api<Row[]>('/api/admin/organizations')]) : Promise.resolve(undefined),
+    ]);
+    setData(setup);
+    if (admin) { const [u, o] = admin; setUsers(u); setOrganizations(o); }
   }
   useEffect(() => { void action.run(load); }, []);
   async function save(event: FormEvent, path: string, body: Row) { event.preventDefault(); await action.run(async () => { await mutate('/api/ledger/' + path, body); await load(); }, 'Setup record saved.'); }

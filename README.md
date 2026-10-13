@@ -95,6 +95,8 @@ Profiles support display name and optional phone number; editing a profile canno
 
 Permission-gated workspace provides setup/lookups; explicitly synthetic, durable source records, receipts and receiving corrections in Development/Testing; stock search/detail/history; processing drafts, manager confirmation, transfers and corrections; customer HOLD, manager response/isolation and notifications. Committed synthetic receipts create receipt-derived Ledger stock, which remains durable Ledger data and is not automatically migrated to future Capture. The Sources & receiving section appears only when `/api/capture-mock/status` reports `{ "synthetic": true }`; its absence does not block other Ledger sections. UI gates are not authorization boundary; backend checks persisted role, permission, owner and facility.
 
+Data loading uses fresh, scoped reads without a response cache. Unfiltered stock reuses the same lot response; filtered stock, detail, receiving sources and permitted setup lookups load concurrently. MockCapture receipt/arrival/correction lists filter company/facility scope before bulk hydration rather than querying each record separately. Ledger reads validate persisted active role and scope inside `ledger.read`, avoiding a redundant identity query. These fetch changes require no database migration or `.env` changes. Supabase connection/network latency still affects cold loads; React StrictMode also replays mount effects in Development, so compare production builds for user-facing timings.
+
 Nine-step executable smoke scenario uses integration-test host and PostgreSQL, not a production auth bypass:
 
 ```bash

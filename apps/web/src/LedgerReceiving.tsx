@@ -11,9 +11,20 @@ export function LedgerReceiving({ user }: { user: User }) {
   const [editorVersion, setEditorVersion] = useState(0);
   const action = useAction(), purchase = user.permissions.includes('purchases.write'), sourceRead = user.permissions.some(p => ['farms.read', 'farms.write'].includes(p));
   async function load() {
-    const [lookup, receiptRows, arrivalRows, correctionRows] = await Promise.all([api<Lookup>('/api/ledger/lookups'), api<Receipt[]>('/api/capture-mock/receipts'), api<Row[]>('/api/capture-mock/arrivals'), api<Row[]>('/api/capture-mock/receipt-corrections')]);
+    const [lookup, receiptRows, arrivalRows, correctionRows, sourcesResult] = await Promise.all([
+      api<Lookup>('/api/ledger/lookups'),
+      api<Receipt[]>('/api/capture-mock/receipts'),
+      api<Row[]>('/api/capture-mock/arrivals'),
+      api<Row[]>('/api/capture-mock/receipt-corrections'),
+      sourceRead ? Promise.all([
+        api<Row[]>('/api/capture-mock/farmers'),
+        api<Row[]>('/api/capture-mock/plots'),
+        api<Row[]>('/api/capture-mock/seasons'),
+        api<Row[]>('/api/capture-mock/plot-seasons'),
+      ]) : Promise.resolve(undefined),
+    ]);
     setLook(lookup); setReceipts(receiptRows); setArrivals(arrivalRows); setCorrections(correctionRows);
-    if (sourceRead) { const [farmers, plots, seasons, plotSeasons] = await Promise.all([api<Row[]>('/api/capture-mock/farmers'), api<Row[]>('/api/capture-mock/plots'), api<Row[]>('/api/capture-mock/seasons'), api<Row[]>('/api/capture-mock/plot-seasons')]); setSources({ farmers, plots, seasons, plotSeasons }); }
+    if (sourcesResult) { const [farmers, plots, seasons, plotSeasons] = sourcesResult; setSources({ farmers, plots, seasons, plotSeasons }); }
   }
   useEffect(() => { void action.run(load); }, []);
   async function command(path: string, body: Row, method = 'POST') { const result = await mutate<Row>('/api/capture-mock/' + path, body, method); await load(); action.setStatus('Synthetic mock capture change saved. Updated receipts, observations and outcomes appear below.'); return result; }
