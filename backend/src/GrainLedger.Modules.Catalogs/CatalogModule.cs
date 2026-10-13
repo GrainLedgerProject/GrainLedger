@@ -28,6 +28,7 @@ public static class CatalogModule
         endpoints.MapQualityAttributeEndpoints();
         endpoints.MapRiceVarietyEndpoints();
         endpoints.MapMeasurementUnitEndpoints();
+        endpoints.MapMrlVersionEndpoints();
         return endpoints;
     }
 }

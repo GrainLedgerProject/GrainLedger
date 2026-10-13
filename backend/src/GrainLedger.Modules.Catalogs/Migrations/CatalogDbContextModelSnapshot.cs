@@ -222,6 +222,116 @@ namespace GrainLedger.Modules.Catalogs.Migrations
                         });
                 });
 
+            modelBuilder.Entity("GrainLedger.Modules.Catalogs.MrlLimit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<decimal>("LimitValue")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("limit_value");
+
+                    b.Property<Guid>("MrlVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("mrl_version_id");
+
+                    b.Property<Guid>("SubstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("substance_id");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("unit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubstanceId");
+
+                    b.HasIndex("MrlVersionId", "SubstanceId")
+                        .IsUnique();
+
+                    b.ToTable("mrl_limits", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("ck_mrl_limits_nonnegative", "limit_value >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Catalogs.MrlVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("CommodityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("commodity_id");
+
+                    b.Property<DateTimeOffset>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from");
+
+                    b.Property<DateTimeOffset?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_to");
+
+                    b.Property<Guid>("MarketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("market_id");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<Guid?>("PublishedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("published_by");
+
+                    b.Property<string>("SourceRef")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source_ref");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<int>("VersionNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("version_no");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommodityId");
+
+                    b.HasIndex("PublishedBy");
+
+                    b.HasIndex("MarketId", "CommodityId", "VersionNo")
+                        .IsUnique();
+
+                    b.ToTable("mrl_versions", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("ck_mrl_versions_effective_interval", "effective_to IS NULL OR effective_to > effective_from");
+
+                            t.HasCheckConstraint("ck_mrl_versions_publication", "(status = 'DRAFT' AND published_by IS NULL AND published_at IS NULL) OR (status = 'PUBLISHED' AND published_by IS NOT NULL AND published_at IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("GrainLedger.Modules.Catalogs.QualityAttribute", b =>
                 {
                     b.Property<Guid>("Id")
@@ -292,6 +402,36 @@ namespace GrainLedger.Modules.Catalogs.Migrations
                         .IsUnique();
 
                     b.ToTable("rice_varieties", "catalog");
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Catalogs.MrlLimit", b =>
+                {
+                    b.HasOne("GrainLedger.Modules.Catalogs.MrlVersion", null)
+                        .WithMany()
+                        .HasForeignKey("MrlVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GrainLedger.Modules.Catalogs.ActiveSubstance", null)
+                        .WithMany()
+                        .HasForeignKey("SubstanceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Catalogs.MrlVersion", b =>
+                {
+                    b.HasOne("GrainLedger.Modules.Catalogs.Commodity", null)
+                        .WithMany()
+                        .HasForeignKey("CommodityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GrainLedger.Modules.Catalogs.Market", null)
+                        .WithMany()
+                        .HasForeignKey("MarketId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }
