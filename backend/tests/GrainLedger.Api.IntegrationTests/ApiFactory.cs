@@ -55,8 +55,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         await _postgres.StartAsync();
         using var scope = Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
-        await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
         await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.MigrateAsync();
+        await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
     }
 
     public new async Task DisposeAsync()

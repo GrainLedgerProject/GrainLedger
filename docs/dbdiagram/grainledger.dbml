@@ -207,7 +207,7 @@ Table spray_declarations {
   id uuid [pk, not null, default: `gen_random_uuid()`]
   company_id uuid [not null]
   plot_season_id uuid [not null]
-  applied_at timestamptz [not null]
+  applied_on date [not null]
   recorded_by uuid [not null]
   recorded_at timestamptz [not null]
   evidence_ref text [null]

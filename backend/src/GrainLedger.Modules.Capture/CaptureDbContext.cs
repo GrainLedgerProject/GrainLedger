@@ -48,6 +48,8 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
     public DbSet<Plot> Plots => Set<Plot>();
     public DbSet<CropSeason> CropSeasons => Set<CropSeason>();
     public DbSet<PlotSeason> PlotSeasons => Set<PlotSeason>();
+    public DbSet<SprayDeclaration> SprayDeclarations => Set<SprayDeclaration>();
+    public DbSet<SprayItem> SprayItems => Set<SprayItem>();
     public DbSet<CaptureOperation> OfflineOperations => Set<CaptureOperation>();
     public DbSet<CaptureBusinessEvent> BusinessEvents => Set<CaptureBusinessEvent>();
 
@@ -106,6 +108,40 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.HasIndex(x => new { x.PlotId, x.SeasonId }).IsUnique().HasDatabaseName("ux_plot_seasons_plot_season");
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_plot_seasons_company_id");
             b.HasIndex(x => x.SeasonId);
+        });
+        modelBuilder.Entity<SprayDeclaration>(b =>
+        {
+            b.ToTable("spray_declarations");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.PlotSeasonId).HasColumnName("plot_season_id");
+            b.Property(x => x.AppliedOn).HasColumnName("applied_on");
+            b.Property(x => x.RecordedBy).HasColumnName("recorded_by");
+            b.Property(x => x.RecordedAt).HasColumnName("recorded_at");
+            b.Property(x => x.EvidenceRef).HasColumnName("evidence_ref");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_spray_declarations_company_id");
+            b.HasIndex(x => x.PlotSeasonId);
+            b.HasIndex(x => x.RecordedBy);
+        });
+        modelBuilder.Entity<SprayItem>(b =>
+        {
+            b.ToTable("spray_items", table =>
+            {
+                table.HasCheckConstraint("ck_spray_items_rate_positive", "rate > 0");
+                table.HasCheckConstraint("ck_spray_items_product_or_substance", "product_name IS NOT NULL OR substance_id IS NOT NULL");
+            });
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.DeclarationId).HasColumnName("declaration_id");
+            b.Property(x => x.ProductName).HasColumnName("product_name");
+            b.Property(x => x.SubstanceId).HasColumnName("substance_id");
+            b.Property(x => x.Rate).HasColumnName("rate").HasPrecision(24, 12);
+            b.Property(x => x.RateUnit).HasColumnName("rate_unit").HasMaxLength(40).IsRequired();
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_spray_items_company_id");
+            b.HasIndex(x => x.DeclarationId);
+            b.HasIndex(x => x.SubstanceId);
         });
         modelBuilder.Entity<CaptureOperation>(b =>
         {

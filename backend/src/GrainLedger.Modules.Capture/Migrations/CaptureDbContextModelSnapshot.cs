@@ -325,6 +325,104 @@ namespace GrainLedger.Modules.Capture.Migrations
 
                     b.ToTable("plot_seasons", "capture");
                 });
+
+            modelBuilder.Entity("GrainLedger.Modules.Capture.SprayDeclaration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateOnly>("AppliedOn")
+                        .HasColumnType("date")
+                        .HasColumnName("applied_on");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<string>("EvidenceRef")
+                        .HasColumnType("text")
+                        .HasColumnName("evidence_ref");
+
+                    b.Property<Guid>("PlotSeasonId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("plot_season_id");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at");
+
+                    b.Property<Guid>("RecordedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recorded_by");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlotSeasonId");
+
+                    b.HasIndex("RecordedBy");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_spray_declarations_company_id");
+
+                    b.ToTable("spray_declarations", "capture");
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Capture.SprayItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<Guid>("DeclarationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("declaration_id");
+
+                    b.Property<string>("ProductName")
+                        .HasColumnType("text")
+                        .HasColumnName("product_name");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("rate");
+
+                    b.Property<string>("RateUnit")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("rate_unit");
+
+                    b.Property<Guid?>("SubstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("substance_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeclarationId");
+
+                    b.HasIndex("SubstanceId");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_spray_items_company_id");
+
+                    b.ToTable("spray_items", "capture", t =>
+                        {
+                            t.HasCheckConstraint("ck_spray_items_product_or_substance", "product_name IS NOT NULL OR substance_id IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_spray_items_rate_positive", "rate > 0");
+                        });
+                });
 #pragma warning restore 612, 618
         }
     }

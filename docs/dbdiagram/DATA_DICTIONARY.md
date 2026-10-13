@@ -255,7 +255,7 @@ Unique: `(plot_id, season_id)`; `(company_id, id)`.
 | id | uuid | NN | PK |  |
 | company_id | uuid | NN | FK identity.organizations.Id |  |
 | plot_season_id | uuid | NN | FK plot_seasons.id |  |
-| applied_at | timestamptz | NN |  |  |
+| applied_on | date | NN |  | Ngày phun do nông dân khai báo; không tự suy diễn giờ phun. |
 | recorded_by | uuid | NN | FK identity.users.Id |  |
 | recorded_at | timestamptz | NN |  |  |
 | evidence_ref | text | NULL |  |  |

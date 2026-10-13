@@ -42,6 +42,7 @@ public static class CaptureModule
         endpoints.MapPlotEndpoints();
         endpoints.MapCropSeasonEndpoints();
         endpoints.MapPlotSeasonEndpoints();
+        endpoints.MapSprayDeclarationEndpoints();
         return endpoints;
     }
 
