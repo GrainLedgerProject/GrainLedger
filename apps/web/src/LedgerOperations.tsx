@@ -13,7 +13,7 @@ export function LedgerOperations({ user }: { user: User }) {
   function edit(operation: Operation | null, copy = false) { setEditing(operation); setReplacement(copy); setEditorKey(key => key + 1); }
   return <><Feedback {...action} /><button disabled={action.busy} onClick={() => void action.run(load)}>Refresh operations</button>
     {write && <OperationEditor key={editorKey} look={look} lots={lots} operations={operations} operation={editing} replacement={replacement} command={command} onSaved={() => edit(null)} />}
-    <Panel title="Processing drafts"><p>Work in order: save draft, manager review when required, then commit. Declared loss and signed measurement variance are separate. Server checks exact arithmetic, stages and policy before commit. Independent arrival confirmation is not available in this workflow.</p>
+    <Panel title="Processing drafts"><p>Work in order: save draft, manager review when required, then commit. Declared loss and signed measurement variance are separate. Server checks exact arithmetic, stages and policy before commit. Arrival confirmation is handled in Receive stock.</p>
       {user.permissions.includes('conversions.confirm') && <div className="ledger-actions"><button aria-pressed={queueOnly} onClick={() => setQueueOnly(value => !value)}>{queueOnly ? 'Show all operations' : 'Show variance confirmation queue'}</button></div>}
       {operations.filter(operation => !queueOnly || operation.status === 'DRAFT' && operation.confirmedVersion !== operation.version).map(operation => <OperationDetail key={operation.id} operation={operation} lots={lots} look={look} user={user} bound={corrections.some(c => c.replacementOperationId === operation.id && ['REQUESTED', 'RECONCILED'].includes(c.status))} command={command} onEdit={() => edit(operation)} />)}
     </Panel>
@@ -28,38 +28,52 @@ function OperationEditor({ look, lots, operations, operation, replacement, comma
   const action = useAction(), [operationId] = useState(replacement || !operation ? id() : operation.id), [owner, setOwner] = useState(operation?.ownerId || ''), [facility, setFacility] = useState(operation?.facilityId || ''), [kind, setKind] = useState(operation?.kind || 'DRYING'), [equipment, setEquipment] = useState(operation?.equipmentId || ''), [when, setWhen] = useState(operation ? localTime(operation.occurredAt) : now()), [loss, setLoss] = useState(operation?.declaredLossKg || '0');
   const [inputs, setInputs] = useState<Row[]>(operation ? operation.inputs.map(row => ({ ...row })) : [{ lotId: '', locationId: '', quantityKg: '' }]);
   const [outputs, setOutputs] = useState<Row[]>(operation ? operation.outputs.map(row => ({ ...row, id: replacement ? id() : row.id, code: replacement ? `${row.code}-corrected` : row.code, productIdentity: row.productIdentity || row.stage })) : [{ id: id(), code: '', commodityId: '', stage: 'DRIED_PADDY', productIdentity: 'DRIED_PADDY', locationId: '', quantityKg: '' }]);
+  const firstLot = lots.find(lot => lot.id === inputs[0]?.lotId);
+  const fractions = ['HEAD_RICE', 'BROKEN_RICE', 'BRAN', 'HUSK'];
+  function outputRules(row: Row) {
+    const inherited = firstLot?.productIdentity || firstLot?.stage || '';
+    const stage = kind === 'DRYING' ? 'DRIED_PADDY' : kind === 'MILLING' ? (fractions.includes(row.stage) ? row.stage : 'HEAD_RICE') : kind === 'BLENDING' ? 'BLENDED_RICE' : kind === 'BAGGING' ? 'BAGGED_RICE' : kind === 'MERGE' ? firstLot?.stage || '' : '';
+    return { ...row, stage, productIdentity: kind === 'BLENDING' ? 'BLENDED_RICE' : kind === 'BAGGING' || kind === 'MERGE' ? inherited : stage, commodityId: kind === 'BLENDING' ? row.commodityId || '' : firstLot?.commodityId || '' };
+  }
+  function changeKind(value: string) {
+    setKind(value);
+    setOutputs(rows => rows.map(row => ({ ...row, stage: value === 'MILLING' ? (fractions.includes(row.stage) ? row.stage : 'HEAD_RICE') : row.stage })));
+  }
   const owners = look.owners;
   const scopedLots = lots.filter(lot => lot.ownerId === owner && lot.positions.some(position => position.facilityId === facility));
-  function updateInput(index: number, patch: Row) { setInputs(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row)); }
-  function updateOutput(index: number, patch: Row) { setOutputs(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row)); }
+  function updateInput(index: number, patch: Row) {
+    setInputs(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
+    if (index === 0 && patch.lotId !== undefined) setOutputs(rows => rows.map(row => outputRules(row)));
+  }
+  function updateOutput(index: number, patch: Row) { setOutputs(rows => rows.map((row, i) => i === index ? outputRules({ ...row, ...patch }) : row)); }
   async function save(event: FormEvent) { event.preventDefault(); await action.run(async () => {
-    await command(operation && !replacement ? `operations/${operation.id}` : 'operations', { id: operationId, ownerId: owner, facilityId: facility, kind, equipmentId: equipment, occurredAt: iso(when), inputs, outputs: outputs.map(row => ({ ...row, productIdentity: row.productIdentity || null })), declaredLossKg: loss }, operation && !replacement ? 'PUT' : 'POST'); onSaved();
+    await command(operation && !replacement ? `operations/${operation.id}` : 'operations', { id: operationId, ownerId: owner, facilityId: facility, kind, equipmentId: equipment, occurredAt: iso(when), inputs, outputs: outputs.map(row => { const output = outputRules(row); return { ...output, productIdentity: output.productIdentity || null }; }), declaredLossKg: loss }, operation && !replacement ? 'PUT' : 'POST'); onSaved();
   }, 'Processing draft saved.'); }
   return <Panel title={replacement ? 'Prepare correction replacement draft' : operation ? 'Edit processing draft' : 'New processing draft'}><Feedback {...action} />{replacement && <p>Inputs copied from original consumed stock. Commit only through correction package after manager reconciles actual original output positions and this replacement version. Set replacement output locations to verified physical locations; original locations cannot silently override transfers.</p>}<form onSubmit={save}>
     <label>Stock owner<Choice rows={operation ? owners.filter(row => row.id === operation.ownerId) : owners} value={owner} onChange={value => { setOwner(value); setInputs([{ lotId: '', locationId: '', quantityKg: '' }]); }} /></label><label>Processing facility<Choice rows={look.facilities.filter(row => !operation || row.id === operation.facilityId)} value={facility} onChange={value => { setFacility(value); setEquipment(''); setInputs([{ lotId: '', locationId: '', quantityKg: '' }]); setOutputs(rows => rows.map(row => ({ ...row, locationId: '' }))); }} /></label>
-    <label>Processing kind<Enum values={kinds} value={kind} onChange={value => { setKind(value); const stage = value === 'DRYING' ? 'DRIED_PADDY' : value === 'MILLING' ? 'HEAD_RICE' : value === 'BLENDING' ? 'BLENDED_RICE' : value === 'BAGGING' ? 'BAGGED_RICE' : lots.find(lot => lot.id === inputs[0]?.lotId)?.stage || 'DRIED_PADDY'; setOutputs(rows => rows.map(row => ({ ...row, stage, productIdentity: value === 'BAGGING' || value === 'MERGE' ? lots.find(lot => lot.id === inputs[0]?.lotId)?.productIdentity || '' : stage }))); }} /></label><label>Equipment<Choice rows={look.equipment.filter(row => row.facilityId === facility)} value={equipment} onChange={setEquipment} /></label><label>Operation occurred at<input required type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} /></label>
+    <label>Processing kind<Enum values={kinds} value={kind} onChange={changeKind} /></label><label>Equipment<Choice rows={look.equipment.filter(row => row.facilityId === facility)} value={equipment} onChange={setEquipment} /></label><label>Operation occurred at<input required type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} /></label>
     <h3>Input allocations</h3>{inputs.map((input, index) => { const lot = lots.find(l => l.id === input.lotId); return <fieldset key={index}><legend>Input {index + 1}</legend><label>Input lot<Choice rows={scopedLots.map(lot => ({ ...lot, name: lotLabel(lot, look.locations) }))} value={input.lotId} onChange={value => updateInput(index, { lotId: value, locationId: '' })} /></label><label>Input stock position<Choice rows={(lot?.positions || []).filter(p => p.facilityId === facility).map(p => ({ id: p.locationId, name: `${name(look.locations, p.locationId)} — physical ${p.quantityKg} kg; available ${p.availableKg} kg` }))} value={input.locationId} onChange={value => updateInput(index, { locationId: value })} /></label><Mass label="Allocated input (kg)" value={input.quantityKg} onChange={value => updateInput(index, { quantityKg: value })} /><button type="button" disabled={inputs.length === 1} onClick={() => setInputs(rows => rows.filter((_, i) => i !== index))}>Remove input</button></fieldset>; })}<button type="button" onClick={() => setInputs(rows => [...rows, { lotId: '', locationId: '', quantityKg: '' }])}>Add input allocation</button>
     <h3>Actual outputs</h3>
     <p>Milling records every actual positive fraction. Never fabricate missing fractions or hide bran/husk as loss. Bagging retains underlying product identity.</p>
     {outputs.map((output, index) => <fieldset key={output.id}>
       <legend>Output {index + 1}</legend>
       <label>Output lot code<input required value={output.code} onChange={e => updateOutput(index, { code: e.target.value })} /></label>
-      <label>Output commodity<Choice rows={look.commodities} value={output.commodityId} onChange={value => updateOutput(index, { commodityId: value })} /></label>
-      <label>Output stage<Enum values={stages} value={output.stage} onChange={value => updateOutput(index, { stage: value, productIdentity: value === 'BAGGED_RICE' ? lots.find(lot => lot.id === inputs[0]?.lotId)?.productIdentity || '' : value })} /></label>
-      <label>Underlying product identity<Enum values={output.stage === 'BAGGED_RICE' ? products : stages.filter(stage => stage !== 'BAGGED_RICE')} value={output.productIdentity} onChange={value => updateOutput(index, { productIdentity: value })} /></label>
+      {kind === 'BLENDING' ? <label>Output commodity<Choice rows={look.commodities} value={output.commodityId} onChange={value => updateOutput(index, { commodityId: value })} /></label> : <label>Output commodity<input readOnly value={name(look.commodities, firstLot?.commodityId || '')} aria-label="Output commodity (derived from first input)" /></label>}
+      {kind === 'MILLING' ? <label>Produced fraction<Enum values={fractions} value={output.stage} onChange={value => updateOutput(index, { stage: value })} /></label> : <p>Output stage: {outputRules(output).stage}</p>}
+      {kind === 'BAGGING' || kind === 'MERGE' ? <p>Underlying product identity: {outputRules(output).productIdentity || 'Set first input lot to derive'}</p> : null}
       <label>Output physical location<Choice rows={look.locations.filter(row => replacement || row.facilityId === facility)} value={output.locationId} onChange={value => updateOutput(index, { locationId: value })} /></label>
       <Mass label="Actual output (kg)" value={output.quantityKg} onChange={value => updateOutput(index, { quantityKg: value })} />
       <button type="button" disabled={outputs.length === 1} onClick={() => setOutputs(rows => rows.filter((_, i) => i !== index))}>Remove output</button>
     </fieldset>)}
-    <button type="button" onClick={() => setOutputs(rows => [...rows, { id: id(), code: '', commodityId: '', stage: outputs[0]?.stage || 'DRIED_PADDY', productIdentity: outputs[0]?.productIdentity || 'DRIED_PADDY', locationId: '', quantityKg: '' }])}>Add actual output</button>
+    <button type="button" onClick={() => setOutputs(rows => [...rows, outputRules({ id: id(), code: '', commodityId: '', stage: kind === 'BLENDING' ? '' : outputs[0]?.stage || 'DRIED_PADDY', productIdentity: outputs[0]?.productIdentity || 'DRIED_PADDY', locationId: '', quantityKg: '' })])}>Add actual output</button>
     <Mass label="Declared loss (kg, nonnegative)" value={loss} onChange={setLoss} />
     <div className="ledger-actions"><button disabled={action.busy}>{operation && !replacement ? 'Save draft changes' : 'Save processing draft'}</button>{operation && <button type="button" onClick={onSaved}>Close processing editor</button>}</div>
   </form></Panel>;
 }
 function OperationDetail({ operation, lots, look, user, bound, command, onEdit }: { operation: Operation; lots: Lot[]; look: Lookup; user: User; bound: boolean; command: (path: string, body: Row) => Promise<Row>; onEdit: () => void }) {
-  const action = useAction(), [evidence, setEvidence] = useState(''), [reason, setReason] = useState('');
   const outputSummary = operation.outputs.map(row => `${row.quantityKg} kg ${name(look.commodities, row.commodityId)} (${row.stage}) — ${row.code}`).join('; ');
   const inputSummary = operation.inputs.map(row => `${row.quantityKg} kg — ${lots.find(lot => lot.id === row.lotId)?.code || name(look.locations, row.locationId)}`).join('; ');
+  const action = useAction(), [evidence, setEvidence] = useState(''), [reason, setReason] = useState('');
   return <details><summary>{operation.kind}: {outputSummary || 'No recorded outputs'} — {operation.status}</summary><Feedback {...action} />
     <dl>
       <dt>Owner</dt><dd>{look.owners.find(row => row.id === operation.ownerId)?.name || 'Owner name unavailable in current scope'}</dd>
@@ -71,7 +85,7 @@ function OperationDetail({ operation, lots, look, user, bound, command, onEdit }
       <dt>Declared loss (kg)</dt><dd>{operation.declaredLossKg}</dd>
       <dt>Signed measurement variance (kg)</dt><dd>{operation.varianceKg ?? 'Preview unavailable; commit requires server review.'}</dd>
       <dt>Allowed variance (kg)</dt><dd>{operation.allowedVarianceKg ?? 'No applicable confirmed policy; processing commit blocked.'}</dd>
-      <dt>Manager confirmation</dt><dd>{operation.confirmedVersion === operation.version ? 'Current version confirmed' : 'Unconfirmed or stale'}</dd>
+      <dt>Manager confirmation</dt><dd>{operation.confirmedVersion === operation.version ? 'Current version confirmed' : operation.varianceKg != null && /^[-+]?0+(?:\.0+)?$/.test(operation.varianceKg) ? 'Not required (zero variance)' : 'Unconfirmed or stale'}</dd>
     </dl>
     <details><summary>Technical record (IDs and full payload)</summary><Table rows={operation.inputs} /><Table rows={operation.outputs} /><dl><dt>Operation ID</dt><dd>{operation.id}</dd><dt>Version</dt><dd>{operation.version}</dd></dl></details>
     {operation.status === 'DRAFT' && <>{user.permissions.includes('conversions.confirm') && <form onSubmit={e => { e.preventDefault(); void action.run(() => command(`operations/${operation.id}/confirm`, { version: operation.version, evidenceId: evidence, reason }), 'Reviewed version confirmed by authenticated manager.'); }}><h3>Manager review, when required</h3><Evidence ownerId={operation.ownerId} facilityId={operation.facilityId} value={evidence} onChange={setEvidence} /><label>Variance review reason<textarea required value={reason} onChange={e => setReason(e.target.value)} /></label><button disabled={action.busy || !evidence || !reason.trim()}>Confirm reviewed operation version</button></form>}{user.permissions.includes('conversions.write') && <div className="ledger-actions"><button onClick={onEdit}>Edit processing draft</button><button disabled={action.busy || bound} onClick={() => void action.run(() => command(`operations/${operation.id}/commit`, {}), 'Operation committed; stock and lineage posted atomically.')}>Commit processing</button>{bound && <p>Reconciled replacement: use correction package commit.</p>}</div>}</>}

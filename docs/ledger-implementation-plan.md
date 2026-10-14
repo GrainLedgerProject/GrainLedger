@@ -54,6 +54,8 @@ Setup configures facilities, locations, equipment, commodities, staff assignment
 
 Administrator manages platform/accounts, but has no inherited processing, variance approval, processing correction, HOLD response or other business authority. Mill Manager and Mill Operator require explicit permission and assigned facility. Operator data excludes farmer contacts and unrelated sensitive source/evidence fields. Purchasing Staff owns own-company Capture farmer and procurement data.
 
+Balance-policy setup has its own facility selector. Select evidence owner, choose a file and upload it before recording a policy version. Changing policy facility or evidence owner invalidates selected evidence; unrelated basic-facility setup does not. Policy effective time must be at or before operation occurred time. Explicitly confirmed zero tolerance is supported, not assumed.
+
 ### Receipt and receiving
 
 Procurement contract uses `POST /api/procurements` for source registration, `GET /api/ledger/receiving-tasks?facilityId={id}&page=1&pageSize=25` and `GET /api/ledger/receiving/{id}` for assigned-facility task/detail, and `POST /api/ledger/receiving/{id}/measurements` and `/reviews` for operator arrival and manager decisions. Exact DTO fields, status names, and migration marker are in [procurement API](procurement-api.md).
@@ -67,6 +69,7 @@ Procurement contract uses `POST /api/procurements` for source registration, `GET
 
 - Supported: drying, milling actual fractions, merge, compatible blend, bagging preserving product identity, and unchanged-lot transfer. Stage matrix below is adopted implementation baseline, not factory approval.
 - Operation draft supports full edit. Commit checks persisted ownership/permission, facility, positive inputs/outputs, stock, stage, HOLD/correction/receiving restriction, effective policy, compatibility and transfer constraints.
+- Processing form derives non-blending output commodity from first input lot. Drying derives `DRIED_PADDY`; milling selects only actual supported fractions; merge inherits input stage and product identity; bagging derives `BAGGED_RICE` while retaining underlying identity. Blending retains explicit output commodity selection and approved compatibility checks. Deterministic stage/identity fields are not editable; editing an existing draft reapplies these rules without rewriting committed records.
 - Exact signed `variance_kg = input − output − declared_loss`; allowed tolerance = input × confirmed percentage / 100. Missing applicable policy rejects even exactly balanced commit. No silent zero/PDF illustrative percentage.
 - Nonzero variance needs manager confirmation bound to reviewed exact draft version/content and evidence; edit invalidates confirmation. Client `confirmedBy` never authorizes. Declared loss is separate from signed variance; neither variance nor loss hides byproduct stock.
 - Quantities use exact decimal and `numeric(20,6)` kg. Original units/measure remain available. Invalid precision/conversion fails instead of rounding silently.

@@ -1,0 +1,50 @@
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { LedgerSetup } from './LedgerSetup';
+import { type User } from './api';
+
+const user: User = { id: 'admin', email: 'admin@example.com', displayName: 'Admin', phoneNumber: null, role: 'Administrator', organizationId: null, organizationName: null, isActive: true, permissions: ['platform.configure'] };
+const facilities = [{ id: 'facility-a', name: 'Mill A' }, { id: 'facility-b', name: 'Mill B' }];
+const organizations = [{ id: 'owner-a', name: 'Owner A' }];
+const fetchMock = vi.fn<typeof fetch>();
+const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+beforeEach(() => {
+ vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset();
+ fetchMock.mockImplementation(async (url, init) => {
+  const path = String(url).split('?')[0];
+  if (init?.method && init.method !== 'GET') return response(path.endsWith('/evidence') ? { id: 'stored-evidence' } : {});
+  if (path === '/api/auth/csrf') return response({ token: 'csrf' });
+  if (path === '/api/ledger/setup') return response({ owners: [], facilities, locations: [], commodities: [], equipment: [], assignments: [], policies: [], compatibilities: [] });
+  if (path === '/api/admin/users') return response([]);
+  if (path === '/api/admin/organizations') return response(organizations);
+  if (path === '/api/commodities' || path === '/api/measurement-units') return response({ items: [], page: 1, pageSize: 25, hasMore: false });
+  return response({ title: `Unexpected route ${path}` });
+ });
+});
+it('requires uploaded evidence for scoped balance policy and invalidates it when facility changes', async () => {
+ const browser = userEvent.setup();
+ render(<LedgerSetup user={user} />);
+ await browser.click(await screen.findByText('Advanced policy and evidence — configure after basic facility setup'));
+ const panel = screen.getByRole('heading', { name: 'Confirmed balance policy' }).closest('section')!;
+ await browser.selectOptions(panel.querySelectorAll('select')[0], 'facility-a');
+ await browser.selectOptions(panel.querySelectorAll('select')[1], 'owner-a');
+ await browser.type(screen.getByLabelText('Confirmed tolerance (%)'), '0');
+ await browser.click(screen.getByRole('button', { name: 'Record policy version' }));
+ expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/ledger/policies')).toBe(false);
+ const file = new File(['approved evidence'], 'approval.pdf', { type: 'application/pdf' });
+ await browser.upload(within(panel).getByLabelText('Evidence file'), file);
+ const upload = within(panel).getByRole('button', { name: 'Upload evidence' });
+ await browser.click(upload);
+ await waitFor(() => expect(within(panel).getByRole('link', { name: 'View stored evidence' })).toBeInTheDocument());
+ await browser.click(screen.getByRole('button', { name: 'Record policy version' }));
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/ledger/policies')).toBe(true));
+ const write = fetchMock.mock.calls.find(([url]) => String(url) === '/api/ledger/policies')!;
+ expect(JSON.parse(String(write[1]?.body))).toMatchObject({ facilityId: 'facility-a', evidenceId: 'stored-evidence', tolerancePercent: '0' });
+ await browser.selectOptions(screen.getAllByLabelText('Facility for setup')[0], 'facility-b');
+ expect(within(panel).getByRole('button', { name: 'Record policy version' })).toBeEnabled();
+ await browser.selectOptions(within(panel).getByLabelText('Facility for policy'), 'facility-b');
+ await waitFor(() => expect(within(panel).queryByRole('link', { name: 'View stored evidence' })).not.toBeInTheDocument());
+ await browser.click(within(panel).getByRole('button', { name: 'Record policy version' }));
+ expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/ledger/policies')).toHaveLength(1);
+});

@@ -108,8 +108,9 @@ Data loading uses fresh, scoped reads without a response cache. Unfiltered stock
 ## Current verification
 
 - Backend build passed; full suite: **177/177 passed**, none skipped. Focused receiving suite: **7 passed** after analyzer-only assertion cleanup. Existing CS9113 and NU1902/NU1903 package warnings remain.
-- Web: **30 tests passed** and production build passed.
+- Web: **35 tests passed** and production build passed.
 - Isolated browser: source **12** → pending **0 usable** → operator actual **10** mismatch **0 usable** → manager reason + scoped uploaded evidence → shortage approval **10 usable**. Exact-match operator submitted a complete **12 kg + 8 kg** set (**HTTP 200**, `RECEIVED_MATCHED`), confirming **20.000000 kg** usable; customer stock showed physical/available **12.000000 kg** and **8.000000 kg**, without restrictions. Receiving page at **375 px** had no body overflow; wide table overflow stayed local. Historical-data migration regression passed. No code changed during browser smoke; services, tab and manifests cleaned.
+- Processing/policy UI smoke on isolated database: Admin selected policy facility/owner, uploaded evidence and recorded explicit **0%** drying policy; changing policy scope disabled recording again. Operator drying draft automatically retained Paddy commodity and derived `DRIED_PADDY` identity; **10.000000 kg** input → **9.500000 kg** output + **0.500000 kg** declared loss committed, with **9.500000 kg** available output stock and no manager variance approval. Processing page width stayed **375 px** at a 375 px viewport.
 - Migration `20261014190000_PhysicalReceiving` has **not** been applied to the shared database; no shared database modifications were made. Shared migration requires explicit database-owner approval.
 
 ## Deployment
