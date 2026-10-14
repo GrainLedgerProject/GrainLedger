@@ -8,4 +8,7 @@ public sealed class Plot
     public required string Code { get; set; }
     public required string BoundaryGeojson { get; set; }
     public decimal AreaHa { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public int Version { get; set; } = 1;
+    public bool IsDeleted { get; set; }
 }

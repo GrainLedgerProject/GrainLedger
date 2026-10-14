@@ -70,7 +70,7 @@ public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFac
         }, HttpStatusCode.BadRequest, HttpStatusCode.Conflict);
         var lot = await s.LotAsync(source);
         Assert.Equal(10m, Quantity(lot)); Assert.Single(lot.GetProperty("positions").EnumerateArray());
-        Assert.DoesNotContain((await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}")).EnumerateArray(), e => e.GetProperty("kind").GetString() == "TRANSFER");
+        Assert.DoesNotContain((await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}")).GetProperty("items").EnumerateArray(), e => e.GetProperty("kind").GetString() == "TRANSFER");
     }
 
     [Theory]
@@ -112,7 +112,7 @@ public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFac
         })!.AsObject();
         if (!omitted) review["replacementVersion"] = null;
         await RejectedAsync(s.Manager, HttpMethod.Post, $"/api/ledger/corrections/{correction}/reconcile", review);
-        var state = (await GetAsync(s.Operator, "/api/ledger/corrections")).EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == correction);
+        var state = (await GetAsync(s.Operator, "/api/ledger/corrections")).GetProperty("items").EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == correction);
         Assert.Equal("REQUESTED", state.GetProperty("status").GetString());
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/corrections/{correction}/commit", new { replacementOperationId = replacement.GetProperty("id").GetGuid() });
         Assert.Equal(0m, Quantity(await s.LotAsync(source)));
@@ -169,7 +169,7 @@ public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFac
         var replacement = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "9")], "1");
         var correction = await s.CorrectionAsync(original, replacement);
         var replacementId = replacement.GetProperty("id").GetGuid();
-        await SendAsync(s.Operator, HttpMethod.Put, $"/api/ledger/operations/{replacementId}", s.OperationBody(replacementId, "DRYING", [(source, "10")], [("DRIED_PADDY", "8")], "2"));
+        await s.UpdateDraftAsync(replacementId, s.OperationBody(replacementId, "DRYING", [(source, "10")], [("DRIED_PADDY", "8")], "2"));
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/corrections/{correction}/commit", new { replacementOperationId = replacementId });
         Assert.Equal(0m, Quantity(await s.LotAsync(source))); Assert.Equal(10m, Quantity(await s.LotAsync(Output(original))));
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/corrections/{correction}/cancel", new { evidenceId = s.EvidenceId, reason = "Operator has no reconciliation authority" }, HttpStatusCode.Forbidden);

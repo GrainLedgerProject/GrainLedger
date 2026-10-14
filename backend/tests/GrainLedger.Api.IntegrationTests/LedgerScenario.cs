@@ -179,6 +179,14 @@ internal sealed class LedgerScenario : IDisposable
         return await GetAsync(Operator, $"/api/ledger/operations/{id}");
     }
 
+    public async Task<JsonElement> UpdateDraftAsync(Guid id, object body)
+    {
+        var current = await GetAsync(Operator, $"/api/ledger/operations/{id}");
+        var request = JsonSerializer.SerializeToNode(body)!.AsObject();
+        request["version"] = current.GetProperty("version").GetString();
+        return await SendAsync(Operator, HttpMethod.Put, $"/api/ledger/operations/{id}", request);
+    }
+
     public async Task<JsonElement> CommitAsync(JsonElement operation) => await SendAsync(Operator, HttpMethod.Post, $"/api/ledger/operations/{operation.GetProperty("id").GetGuid()}/commit", new { });
     public static Guid Output(JsonElement operation, int index = 0) => operation.GetProperty("outputs")[index].GetProperty("id").GetGuid();
     public async Task<JsonElement> LotAsync(Guid id, HttpClient? client = null) => await GetAsync(client ?? Operator, $"/api/ledger/lots/{id}");

@@ -41,7 +41,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Contains(error.SqlState, new[] { PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.CheckViolation });
         }
         await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/holds/{hold}/respond", new { evidenceId = s.EvidenceId, response = "Synthetic assigned manager validates consumed source history", status = "ACKNOWLEDGED" });
-        var state = (await GetAsync(s.Customer, "/api/ledger/holds")).EnumerateArray().Single(h => h.GetProperty("id").GetGuid() == hold);
+        var state = (await GetAsync(s.Customer, "/api/ledger/holds")).GetProperty("items").EnumerateArray().Single(h => h.GetProperty("id").GetGuid() == hold);
         Assert.Equal("ACKNOWLEDGED", state.GetProperty("status").GetString());
         Assert.Equal(s.EvidenceId, state.GetProperty("evidenceId").GetGuid());
         await AssertProjectionAsync();
@@ -207,10 +207,10 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         var op = await s.DraftAsync("DRYING", [(source, "100")], [("DRIED_PADDY", "99")]);
         var id = op.GetProperty("id").GetGuid(); var version = op.GetProperty("version").GetString();
         await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/operations/{id}/confirm", new { version, evidenceId = s.EvidenceId, reason = "Synthetic review" });
-        await SendAsync(s.Operator, HttpMethod.Put, $"/api/ledger/operations/{id}", s.OperationBody(id, "DRYING", [(source, "100")], [("DRIED_PADDY", "99.5")]));
+        await s.UpdateDraftAsync(id, s.OperationBody(id, "DRYING", [(source, "100")], [("DRIED_PADDY", "99.5")]));
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{id}/commit", new { });
         await RejectedAsync(s.Manager, HttpMethod.Post, $"/api/ledger/operations/{id}/confirm", new { version, evidenceId = s.EvidenceId, reason = "Stale review" });
-        await SendAsync(s.Operator, HttpMethod.Put, $"/api/ledger/operations/{id}", s.OperationBody(id, "DRYING", [(source, "100")], [("DRIED_PADDY", "98.999999")]));
+        await s.UpdateDraftAsync(id, s.OperationBody(id, "DRYING", [(source, "100")], [("DRIED_PADDY", "98.999999")]));
         var edited = await GetAsync(s.Operator, $"/api/ledger/operations/{id}");
         await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/operations/{id}/confirm", new { version = edited.GetProperty("version").GetString(), evidenceId = s.EvidenceId, reason = "Synthetic outside boundary" });
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{id}/commit", new { });
@@ -245,8 +245,8 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(before.GetProperty("contributions").GetRawText(), moved.GetProperty("contributions").GetRawText());
         var hold = await s.HoldAsync(source);
         await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/holds/{hold}/respond", new { evidenceId = s.EvidenceId, response = "Synthetic acknowledged", status = "ACKNOWLEDGED" });
-        var notifications = await GetAsync(s.Manager, "/api/ledger/notifications");
-        var notification = notifications.EnumerateArray().Single(n => n.GetProperty("holdId").GetGuid() == hold);
+        var notifications = await GetAsync(s.Manager, $"/api/ledger/notifications?lotId={source}");
+        var notification = notifications.GetProperty("items").EnumerateArray().Single(n => n.GetProperty("holdId").GetGuid() == hold);
         await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/notifications/{notification.GetProperty("id").GetGuid()}/read", new { });
         await s.TransferAsync(source, "6", to: s.IsolationLocationId, holdId: hold);
         Assert.Equal(0m, Quantity(await s.LotAsync(source), "availableKg"));
@@ -303,7 +303,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         using var s = await CreateAsync(factory);
         var source = Lots(await s.ReceiptAsync("10"))[0];
         var original = await s.CommitAsync(await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "9")], "1"));
-        var oldHistory = await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}");
+        var oldHistory = (await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}&pageSize=100")).GetProperty("items");
         var replacement = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "8")], "2");
         var correctionId = await s.CorrectionAsync(original, replacement);
         var route = $"/api/ledger/corrections/{correctionId}/commit";
@@ -324,7 +324,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         using var duplicate = await RawAsync(s.Operator, HttpMethod.Post, route, body);
         Assert.Contains(duplicate.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.Conflict });
         Assert.Equal(reversals, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE reverses_posting_id IS NOT NULL"));
-        var history = await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}");
+        var history = (await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}&pageSize=100")).GetProperty("items");
         foreach (var old in oldHistory.EnumerateArray()) Assert.Contains(history.EnumerateArray(), current => current.GetProperty("id").GetGuid() == old.GetProperty("id").GetGuid());
         await AssertProjectionAsync();
     }
@@ -355,20 +355,20 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         using var s = await CreateAsync(factory);
         var source = Lots(await s.ReceiptAsync("10"))[0];
         using var denied = await s.ForeignCustomer.GetAsync($"/api/ledger/lots/{source}"); Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        Assert.DoesNotContain((await GetAsync(s.ForeignCustomer, "/api/ledger/lots")).EnumerateArray(), l => l.GetProperty("id").GetGuid() == source);
-        Assert.Empty((await GetAsync(s.Operator, $"/api/ledger/lots?facilityId={s.ForeignFacilityId}&search=SRC")).EnumerateArray());
+        Assert.DoesNotContain((await GetAsync(s.ForeignCustomer, "/api/ledger/lots")).GetProperty("items").EnumerateArray(), l => l.GetProperty("id").GetGuid() == source);
+        Assert.Empty((await GetAsync(s.Operator, $"/api/ledger/lots?facilityId={s.ForeignFacilityId}&search=SRC")).GetProperty("items").EnumerateArray());
         using var captureDenied = await s.Operator.GetAsync("/api/farmers"); Assert.Equal(HttpStatusCode.Forbidden, captureDenied.StatusCode);
         using var evidenceDenied = await s.ForeignCustomer.GetAsync($"/api/ledger/evidence/{s.EvidenceId}"); Assert.Equal(HttpStatusCode.Forbidden, evidenceDenied.StatusCode);
         var lot = await s.LotAsync(source);
         Assert.False(lot.TryGetProperty("phoneNumber", out _)); Assert.False(lot.TryGetProperty("farmer", out _)); Assert.False(lot.TryGetProperty("evidence", out _));
         Assert.False(lot.TryGetProperty("contributions", out _));
-        var searched = await GetAsync(s.Operator, $"/api/ledger/lots?search={lot.GetProperty("code").GetString()}"); Assert.Contains(searched.EnumerateArray(), l => l.GetProperty("id").GetGuid() == source);
+        var searched = await GetAsync(s.Operator, $"/api/ledger/lots?search={lot.GetProperty("code").GetString()}"); Assert.Contains(searched.GetProperty("items").EnumerateArray(), l => l.GetProperty("id").GetGuid() == source);
         var foreignSource = Lots(await s.ForeignReceiptAsync("10"))[0];
         await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", s.OperationBody(Guid.NewGuid(), "DRYING", [(source, "1"), (foreignSource, "1")], [("DRIED_PADDY", "2")]), HttpStatusCode.Forbidden);
         var hiddenSource = Lots(await s.ForeignReceiptAsync("10", s.ForeignLocationId))[0];
         using var hidden = await s.Operator.GetAsync($"/api/ledger/lots/{hiddenSource}"); Assert.Equal(HttpStatusCode.Forbidden, hidden.StatusCode);
-        Assert.DoesNotContain((await GetAsync(s.Operator, "/api/ledger/lots")).EnumerateArray(), l => l.GetProperty("id").GetGuid() == hiddenSource);
-        Assert.Empty((await GetAsync(s.Operator, "/api/ledger/lots?search=FOREIGN&facilityId=" + s.ForeignFacilityId)).EnumerateArray());
+        Assert.DoesNotContain((await GetAsync(s.Operator, "/api/ledger/lots")).GetProperty("items").EnumerateArray(), l => l.GetProperty("id").GetGuid() == hiddenSource);
+        Assert.Empty((await GetAsync(s.Operator, "/api/ledger/lots?search=FOREIGN&facilityId=" + s.ForeignFacilityId)).GetProperty("items").EnumerateArray());
         var cross = s.OperationBody(Guid.NewGuid(), "DRYING", [(source, "10")], [("DRIED_PADDY", "10")], ownerId: s.ForeignOwnerId);
         using var created = await RawAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", cross);
         if (created.IsSuccessStatusCode)

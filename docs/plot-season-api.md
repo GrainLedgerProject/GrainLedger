@@ -5,13 +5,17 @@ This Capture step follows Report 3 §3.3.1, GrainLedger V2 F04–F07, and the ap
 ## Sequence
 
 1. An Administrator with `platform.configure` creates a season: `POST /api/crop-seasons` with `companyId`, `name`, `startsOn`, `endsOn` (`yyyy-MM-dd`). For example, `{"companyId":"ff710fe4-2d7a-4920-92b8-76617a871830","name":"Dong Xuan","startsOn":"2026-11-01","endsOn":"2027-03-31"}`. This online configuration call does not use the offline envelope.
-2. The Administrator can review seasons with `GET /api/crop-seasons?companyId={customerCompanyId}`. A PurchasingStaff user calls `GET /api/crop-seasons` to see only their own company's seasons, then selects a plot from `GET /api/plots`. A customer user cannot select another company's `companyId`.
+2. The Administrator reviews seasons with `GET /api/crop-seasons?companyId={customerCompanyId}`. A PurchasingStaff user calls `GET /api/crop-seasons` to see only their company's seasons, then selects a plot from `GET /api/plots`. A customer user cannot select another company's `companyId`. Season detail is `GET /api/crop-seasons/{id}`.
 
 Do not send `?companyId=` with an empty value. A present but empty or invalid company ID returns HTTP 400 for either role. The Administrator must provide a valid customer company ID; PurchasingStaff can omit the parameter.
 3. The client submits `POST /api/plot-seasons` with the same offline envelope as Farmer and Plot. The user enters only the rice variety and selects the plot and season; the client supplies the UUIDs and capture metadata.
-4. Use `GET /api/plot-seasons?plotId={id}&seasonId={id}` or `GET /api/plot-seasons/{id}` to read the result.
+4. Use `GET /api/plot-seasons?plotId={id}&seasonId={id}` or `GET /api/plot-seasons/{id}` to read the result. Plot-season list and detail responses include `plotCode` and `seasonName`.
 
 In the web Ledger, **Setup** combines the commodity/unit Catalog with facility setup. **Receive stock** exposes source records to `farms.read`/`farms.write` users, source registration to `farms.write`, and procurement entry only with `purchases.write` and source-read access. Administrators select a customer company before creating its crop season there. Source registration steps are farmer, plot, administrator-created crop-season prerequisite, then plot-season link with rice variety; the season does not depend on a plot. Source-record pagination also supplies the current selection options.
+
+All four Capture reference lists use `page` (default 1), `pageSize` (default 25, maximum 100), `totalCount`, and `hasMore`. `search` accepts `q` as alias. Sort direction is `asc` or `desc`; sort fields are farmer `name|code|createdAt`, plot `code|areaHa`, season `name|startsOn`, and plot-season `id`. Plot lists support `farmerId`; plot-season lists support `plotId` and `seasonId`.
+
+Farmers, plots, seasons, and plot-seasons return `createdBy`, `version`, `canEdit`, and `canDelete`. Only creator can edit or soft-delete an unreferenced active record; `PUT` sends the normal fields plus `expectedVersion` (crop-season `companyId` must remain unchanged), and `DELETE` sends `{ "version": 1 }`. Stale versions return 412. Legacy records with no creator remain read-only. Dependent active references and immutable procurement/spray history block mutation. Soft-deleted rows remain stored, disappear from lists and selectors, cannot be restored, and retain reserved unique values.
 
 Example registration request:
 

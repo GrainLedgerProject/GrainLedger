@@ -20,7 +20,7 @@ public sealed class LedgerReadScalingTests(ApiFactory factory) : IClassFixture<A
         var later = await s.CommitAsync(await s.DraftAsync("MILLING", [(target, "2"), (siblingOutput, "1")], [("HEAD_RICE", "2"), ("BROKEN_RICE", "1")], "0"));
         await s.TransferAsync(target, "1");
 
-        var history = (await GetAsync(s.Operator, $"/api/ledger/history?lotId={target}")).EnumerateArray().ToArray();
+        var history = (await GetAsync(s.Operator, $"/api/ledger/history?lotId={target}&pageSize=100")).GetProperty("items").EnumerateArray().ToArray();
         AssertStableOrder(history);
 
         var originalPostings = history.Where(row => row.GetProperty("operationId").ValueKind == JsonValueKind.String && row.GetProperty("operationId").GetGuid() == original.GetProperty("id").GetGuid()).ToArray();

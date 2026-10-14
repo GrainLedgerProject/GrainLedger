@@ -118,6 +118,13 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
 .checkbox-label input { width: 16px; height: 16px; accent-color: #28583b; }
 .loading { min-height: 100dvh; display: grid; place-items: center; }
 .empty { text-align: center; padding: 30px; color: #75826f; }
+.list-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; margin: 14px 0; }
+.list-controls label { flex: 1 1 180px; min-width: 0; margin: 0; }
+.list-controls input, .list-controls select { padding: 9px 10px; }
+.list-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin: 14px 0; }
+.list-pagination .list-control-button { min-width: 38px; min-height: 38px; padding: 6px 9px; background: #fff; color: #42613a; border: 1px solid #dce2d4; font-size: 12px; }
+.list-pagination .list-control-button:hover:not(:disabled), .list-pagination .list-control-button[aria-current='page'] { background: #eaf0e6; color: #21573f; }
+@media (max-width: 375px) { .list-controls { gap: 8px; } .list-controls label { flex-basis: 100%; } .list-pagination { gap: 3px; } .list-pagination .list-control-button { min-width: 34px; min-height: 38px; padding: 5px 7px; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 .ledger-workspace { --ledger-text: #213d31; --ledger-muted: #526557; --ledger-border: #dce2d7; --ledger-surface: #fff; --ledger-soft: #eaf0e6; --ledger-accent: #21573f; }
 .ledger-workspace .page-heading { margin-bottom: 24px; }

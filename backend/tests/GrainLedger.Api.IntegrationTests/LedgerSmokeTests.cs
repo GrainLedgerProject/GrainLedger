@@ -46,7 +46,7 @@ public sealed class LedgerSmokeTests(ApiFactory factory, ITestOutputHelper outpu
         output.WriteLine("6 PASS transfer unchanged lot ID/58,000 kg; HOLD isolation retains 8,000 kg unavailable; eligible separate-stock correction compensates original and replaces atomically.");
         var foreignLot = Lots(await s.ForeignReceiptAsync("1", s.ForeignLocationId))[0];
         using var denied = await s.Operator.GetAsync($"/api/ledger/lots/{foreignLot}"); Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        var operational = await GetAsync(s.Operator, "/api/ledger/lots"); Assert.Contains(operational.EnumerateArray(), lot => lot.GetProperty("id").GetGuid() == Output(milling)); Assert.DoesNotContain(operational.EnumerateArray(), lot => lot.GetProperty("id").GetGuid() == foreignLot);
+        var operational = (await GetAsync(s.Operator, "/api/ledger/lots?pageSize=100")).GetProperty("items"); Assert.Contains(operational.EnumerateArray(), lot => lot.GetProperty("id").GetGuid() == Output(milling)); Assert.DoesNotContain(operational.EnumerateArray(), lot => lot.GetProperty("id").GetGuid() == foreignLot);
         using var sensitive = await s.Operator.GetAsync("/api/farmers"); Assert.Equal(HttpStatusCode.Forbidden, sensitive.StatusCode);
         using var pending = await s.Accounts["pending"].Client.GetAsync($"/api/ledger/lots/{Output(milling)}"); Assert.Equal(HttpStatusCode.Forbidden, pending.StatusCode);
         output.WriteLine("7 PASS operator scoped detail, source contacts and pending-user denials. Unsupported procurement correction/arrival routes removed.");

@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using System.Globalization;
 using GrainLedger.Modules.Capture;
@@ -16,28 +17,120 @@ public sealed class ProcurementLedgerPort(IConfiguration configuration) : IProcu
         return connection;
     }
 
-    public async Task<IReadOnlyList<ProcurementReceivingOption>> ListReceivingOptionsAsync(Guid companyId,
-        Guid? collectionSiteId, int offset, int limit, CancellationToken ct)
+    public async Task<ProcurementReceivingOptionsPage> ListReceivingOptionsAsync(Guid companyId,
+        Guid? collectionSiteId, string? search, string sortBy, bool descending, int offset, int limit, CancellationToken ct)
     {
+        var order = sortBy switch
+        {
+            "collectionSiteName" => "f.name",
+            "receivingLocationCode" => "l.name",
+            _ => throw new ArgumentOutOfRangeException(nameof(sortBy))
+        };
+        var direction = descending ? "DESC" : "ASC";
+        var pattern = string.IsNullOrWhiteSpace(search) ? null :
+            "%" + search.Trim().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
         await using var connection = await OpenAsync(ct);
-        await using var command = new NpgsqlCommand("""
-            SELECT f.id,f.name,l.id,l.name FROM ledger.locations l JOIN ledger.facilities f ON f.id=l.facility_id
-            WHERE l.kind IN ('STORE','SILO','COMPARTMENT')
+        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await using var count = new NpgsqlCommand("""
+            SELECT count(*) FROM ledger.locations l JOIN ledger.facilities f ON f.id=l.facility_id
+            WHERE NOT l.is_deleted AND NOT f.is_deleted AND l.kind IN ('STORE','SILO','COMPARTMENT')
               AND (l.owner_id=$1 OR l.owner_id IS NULL AND (l.kind<>'COMPARTMENT' OR l.cleared))
               AND ($2::uuid IS NULL OR f.id=$2)
               AND EXISTS(SELECT 1 FROM identity.organizations WHERE "Id"=$1 AND "Kind"='Customer')
-            ORDER BY f.name,f.id,l.name,l.id OFFSET $3 LIMIT $4
-            """, connection);
+              AND ($3::text IS NULL OR f.name ILIKE $3 ESCAPE '\' OR l.name ILIKE $3 ESCAPE '\'
+                   OR replace(f.id::text,'-','') ILIKE $3 ESCAPE '\' OR replace(l.id::text,'-','') ILIKE $3 ESCAPE '\')
+            """, connection, transaction);
+        count.Parameters.AddWithValue(companyId);
+        count.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)collectionSiteId ?? DBNull.Value });
+        count.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = (object?)pattern ?? DBNull.Value });
+        var totalCount = Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        await using var command = new NpgsqlCommand($"""
+            SELECT f.id,f.name,l.id,l.name FROM ledger.locations l JOIN ledger.facilities f ON f.id=l.facility_id
+            WHERE NOT l.is_deleted AND NOT f.is_deleted AND l.kind IN ('STORE','SILO','COMPARTMENT')
+              AND (l.owner_id=$1 OR l.owner_id IS NULL AND (l.kind<>'COMPARTMENT' OR l.cleared))
+              AND ($2::uuid IS NULL OR f.id=$2)
+              AND EXISTS(SELECT 1 FROM identity.organizations WHERE "Id"=$1 AND "Kind"='Customer')
+              AND ($3::text IS NULL OR f.name ILIKE $3 ESCAPE '\' OR l.name ILIKE $3 ESCAPE '\'
+                   OR replace(f.id::text,'-','') ILIKE $3 ESCAPE '\' OR replace(l.id::text,'-','') ILIKE $3 ESCAPE '\')
+            ORDER BY {order} {direction}, f.id, l.id OFFSET $4 LIMIT $5
+            """, connection, transaction);
         command.Parameters.AddWithValue(companyId);
         command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)collectionSiteId ?? DBNull.Value });
+        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = (object?)pattern ?? DBNull.Value });
         command.Parameters.AddWithValue(offset);
         command.Parameters.AddWithValue(limit);
-        await using var reader = await command.ExecuteReaderAsync(ct);
         var options = new List<ProcurementReceivingOption>();
-        while (await reader.ReadAsync(ct))
-            options.Add(new(reader.GetGuid(0), reader.GetGuid(0).ToString("N"), reader.GetString(1),
-                reader.GetGuid(2), reader.GetString(3)));
-        return options;
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+                options.Add(new(reader.GetGuid(0), reader.GetGuid(0).ToString("N"), reader.GetString(1),
+                    reader.GetGuid(2), reader.GetString(3)));
+        }
+        await transaction.CommitAsync(ct);
+        return new ProcurementReceivingOptionsPage(options, totalCount);
+    }
+
+    public async Task<ProcurementListPage> ListProcurementPageAsync(Guid companyId, Guid? farmerId,
+        DateTimeOffset? receivedFromInclusive, DateTimeOffset? receivedBeforeExclusive,
+        string? search, string sortBy, bool descending, int offset, int limit, CancellationToken ct)
+    {
+        var order = sortBy switch
+        {
+            "receivedAt" => "p.received_at",
+            "code" => "p.code",
+            "status" => "COALESCE(r.status,p.status)",
+            _ => throw new ArgumentOutOfRangeException(nameof(sortBy))
+        };
+        var direction = descending ? "DESC" : "ASC";
+        var pattern = string.IsNullOrWhiteSpace(search) ? null :
+            "%" + search.Trim().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+        await using var connection = await OpenAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await using var count = new NpgsqlCommand("""
+            SELECT count(*) FROM capture.procurements p
+            JOIN capture.farmers f ON f.company_id=p.company_id AND f.id=p.farmer_id
+            LEFT JOIN ledger.receiving r ON r.procurement_id=p.id
+            WHERE p.company_id=$1 AND p.status='COMMITTED'
+              AND ($2::uuid IS NULL OR p.farmer_id=$2)
+              AND ($3::timestamptz IS NULL OR p.received_at >= $3)
+              AND ($4::timestamptz IS NULL OR p.received_at < $4)
+              AND ($5::text IS NULL OR p.code ILIKE $5 ESCAPE '\' OR f.name ILIKE $5 ESCAPE '\'
+                   OR COALESCE(r.status,p.status) ILIKE $5 ESCAPE '\')
+            """, connection, transaction);
+        AddProcurementFilters(count, companyId, farmerId, receivedFromInclusive, receivedBeforeExclusive, pattern);
+        var totalCount = Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        await using var command = new NpgsqlCommand($"""
+            SELECT p.id,COALESCE(r.status,p.status) FROM capture.procurements p
+            JOIN capture.farmers f ON f.company_id=p.company_id AND f.id=p.farmer_id
+            LEFT JOIN ledger.receiving r ON r.procurement_id=p.id
+            WHERE p.company_id=$1 AND p.status='COMMITTED'
+              AND ($2::uuid IS NULL OR p.farmer_id=$2)
+              AND ($3::timestamptz IS NULL OR p.received_at >= $3)
+              AND ($4::timestamptz IS NULL OR p.received_at < $4)
+              AND ($5::text IS NULL OR p.code ILIKE $5 ESCAPE '\' OR f.name ILIKE $5 ESCAPE '\'
+                   OR COALESCE(r.status,p.status) ILIKE $5 ESCAPE '\')
+            ORDER BY {order} {direction}, p.id OFFSET $6 LIMIT $7
+            """, connection, transaction);
+        AddProcurementFilters(command, companyId, farmerId, receivedFromInclusive, receivedBeforeExclusive, pattern);
+        command.Parameters.AddWithValue(offset);
+        command.Parameters.AddWithValue(limit);
+        var items = new List<ProcurementListPageItem>();
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct)) items.Add(new(reader.GetGuid(0), reader.GetString(1)));
+        }
+        await transaction.CommitAsync(ct);
+        return new ProcurementListPage(items, totalCount);
+    }
+
+    private static void AddProcurementFilters(NpgsqlCommand command, Guid companyId, Guid? farmerId,
+        DateTimeOffset? receivedFromInclusive, DateTimeOffset? receivedBeforeExclusive, string? pattern)
+    {
+        command.Parameters.AddWithValue(companyId);
+        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)farmerId ?? DBNull.Value });
+        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.TimestampTz, Value = (object?)receivedFromInclusive ?? DBNull.Value });
+        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.TimestampTz, Value = (object?)receivedBeforeExclusive ?? DBNull.Value });
+        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = (object?)pattern ?? DBNull.Value });
     }
 
     public async Task<bool> IsValidReceivingOptionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
@@ -45,9 +138,10 @@ public sealed class ProcurementLedgerPort(IConfiguration configuration) : IProcu
     {
         // Reuse caller connection: lock waiters must not exhaust pool while lock holder opens another one.
         await using var command = new NpgsqlCommand("""
-            SELECT EXISTS(SELECT 1 FROM ledger.locations WHERE id=$3 AND facility_id=$2
-                AND kind IN ('STORE','SILO','COMPARTMENT')
-                AND (owner_id=$1 OR owner_id IS NULL AND (kind<>'COMPARTMENT' OR cleared)))
+            SELECT EXISTS(SELECT 1 FROM ledger.locations l JOIN ledger.facilities f ON f.id=l.facility_id
+                WHERE l.id=$3 AND l.facility_id=$2 AND NOT l.is_deleted AND NOT f.is_deleted
+                AND l.kind IN ('STORE','SILO','COMPARTMENT')
+                AND (l.owner_id=$1 OR l.owner_id IS NULL AND (l.kind<>'COMPARTMENT' OR l.cleared)))
             AND EXISTS(SELECT 1 FROM identity.organizations WHERE "Id"=$1 AND "Kind"='Customer')
             """, connection, transaction);
         command.Parameters.AddWithValue(companyId);

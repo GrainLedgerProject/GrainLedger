@@ -11,17 +11,28 @@ public static class LedgerEndpoints
     public static IEndpointRouteBuilder MapLedgerModule(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/ledger").RequireAuthorization().AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>().AddEndpointFilter<LedgerErrorFilter>();
-        foreach (var route in new[] { "setup", "lookups", "operations", "holds", "corrections", "notifications" })
+        foreach (var route in new[] { "setup", "lookups" })
         {
             var action = route;
             group.MapGet('/' + route, async (LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync(action, new JsonObject(), ct)));
         }
-        group.MapGet("/lots", async (Guid? facilityId, Guid? ownerId, string? search, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("lots", new JsonObject { ["facilityId"] = facilityId, ["ownerId"] = ownerId, ["search"] = search }, ct)));
+        foreach (var route in new[] { "lots", "operations", "holds", "corrections", "notifications", "history", "receiving-tasks" })
+        {
+            var action = route;
+            group.MapGet('/' + route, async (HttpRequest request, LedgerService ledger, CancellationToken ct) =>
+            {
+                var query = new JsonObject();
+                foreach (var key in new[] { "page", "pageSize", "search", "sortBy", "sortDirection", "ownerId", "facilityId", "locationId", "lotId", "stage", "status", "kind", "ids", "queueOnly" })
+                {
+                    if (!request.Query.TryGetValue(key, out var value)) continue;
+                    if (value.Count != 1 || string.IsNullOrWhiteSpace(value[0])) throw new LedgerException(400, "Invalid query value");
+                    query[key] = value[0];
+                }
+                return Results.Ok(await ledger.ReadAsync(action, query, ct));
+            });
+        }
         group.MapGet("/lots/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("lot", new JsonObject { ["lotId"] = id }, ct)));
         group.MapGet("/operations/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("operation", new JsonObject { ["id"] = id }, ct)));
-        group.MapGet("/history", async (Guid? lotId, Guid? facilityId, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("history", new JsonObject { ["lotId"] = lotId, ["facilityId"] = facilityId }, ct)));
-        group.MapGet("/receiving-tasks", async (Guid facilityId, int? page, int? pageSize, LedgerService ledger, CancellationToken ct) =>
-            Results.Ok(await ledger.ReceivingAsync("tasks", new JsonObject { ["facilityId"] = facilityId, ["page"] = page ?? 1, ["pageSize"] = pageSize ?? 25 }, ct)));
         group.MapGet("/receiving/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) =>
             Results.Ok(await ledger.ReceivingAsync("detail", new JsonObject { ["id"] = id }, ct)));
         group.MapPost("/receiving/{id:guid}/measurements", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) =>
@@ -41,7 +52,7 @@ public static class LedgerEndpoints
         }
         group.MapPost("/locations/{id:guid}/clearance", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) => { request["id"] = id; return Results.Ok(await ledger.CommandAsync("clearance", request, ct)); }).RequireAuthorization("platform.configure");
         group.MapPost("/operations", async (JsonObject request, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.CommandAsync("draft", request, ct))).RequireAuthorization("conversions.write");
-        group.MapPut("/operations/{id:guid}", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) => { request["id"] = id; return Results.Ok(await ledger.CommandAsync("draft", request, ct)); }).RequireAuthorization("conversions.write");
+        group.MapPut("/operations/{id:guid}", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) => { LedgerManagementEndpoints.RequireVersion(request); request["id"] = id; return Results.Ok(await ledger.CommandAsync("draft", request, ct)); }).RequireAuthorization("conversions.write");
         group.MapPost("/operations/{id:guid}/confirm", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) => { request["id"] = id; return Results.Ok(await ledger.CommandAsync("confirm", request, ct)); }).RequireAuthorization("conversions.confirm");
         group.MapPost("/operations/{id:guid}/commit", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) => { request["id"] = id; return Results.Ok(await ledger.CommandAsync("commit", request, ct)); }).RequireAuthorization("conversions.write");
         group.MapPost("/transfers", async (JsonObject request, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.CommandAsync("transfer", request, ct)));
@@ -62,6 +73,7 @@ public static class LedgerEndpoints
             return Results.Ok(new { request.Id, sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) });
         });
         group.MapGet("/evidence/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => { var evidence = await ledger.ReadEvidenceAsync(id, ct); return Results.File(evidence.Content, evidence.ContentType, evidence.FileName); });
+        LedgerManagementEndpoints.MapManagementRoutes(group);
         return endpoints;
     }
 }

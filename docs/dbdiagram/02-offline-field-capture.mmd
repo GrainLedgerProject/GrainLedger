@@ -7,6 +7,9 @@ erDiagram
         text name "NN"
         text contact "NULL"
         timestamptz created_at "NN"
+        uuid created_by FK "NULL"
+        integer version "NN"
+        boolean is_deleted "NN default false"
     }
     plots {
         uuid id PK "NN"
@@ -15,6 +18,9 @@ erDiagram
         varchar(40) code "NN"
         jsonb boundary_geojson "NN"
         numeric(24,12) area_ha "NN"
+        uuid created_by FK "NULL"
+        integer version "NN"
+        boolean is_deleted "NN default false"
     }
     crop_seasons {
         uuid id PK "NN"
@@ -22,6 +28,9 @@ erDiagram
         text name "NN"
         date starts_on "NN"
         date ends_on "NN"
+        uuid created_by FK "NULL"
+        integer version "NN"
+        boolean is_deleted "NN default false"
     }
     plot_seasons {
         uuid id PK "NN"
@@ -29,6 +38,9 @@ erDiagram
         uuid plot_id FK "NN"
         uuid season_id FK "NN"
         text rice_variety "NN"
+        uuid created_by FK "NULL"
+        integer version "NN"
+        boolean is_deleted "NN default false"
     }
     spray_declarations {
         uuid id PK "NN"

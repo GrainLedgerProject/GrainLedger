@@ -57,6 +57,7 @@ public static class MrlVersionEndpoints
             return Problem(428, "IF_MATCH_REQUIRED", "Send the MRL version ETag in the If-Match header.");
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
         var versionLock = $"mrl-limit-version:{id:N}";
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({versionLock}, 0))", ct);
@@ -274,6 +275,7 @@ public static class MrlVersionEndpoints
         if (errors.Count > 0) return Results.ValidationProblem(errors);
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
         var lockKey = $"mrl-limit-version:{id:N}";
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", ct);
@@ -578,12 +580,12 @@ public static class MrlVersionEndpoints
             errors["effectiveTo"] = ["Effective end must be after effective start."];
         if (errors.Count > 0) return Results.ValidationProblem(errors);
 
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
         if (!await db.Markets.AsNoTracking().AnyAsync(x => x.Id == request.MarketId, ct))
             return Problem(404, "MARKET_NOT_FOUND", "Market not found.");
         if (!await db.Commodities.AsNoTracking().AnyAsync(x => x.Id == request.CommodityId, ct))
             return Problem(404, "COMMODITY_NOT_FOUND", "Commodity not found.");
-
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         // Serialize version number assignment for this market/commodity pair.
         var lockKey = $"mrl-version:{request.MarketId:N}:{request.CommodityId:N}";
         await db.Database.ExecuteSqlInterpolatedAsync(

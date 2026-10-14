@@ -67,10 +67,7 @@ public sealed class LedgerService(IConfiguration configuration, IHttpContextAcce
         var actor = await ActorAsync(ct);
         await using var connection = await OpenAsync(ct);
         object? value;
-        if (action == "tasks")
-            value = await ExecuteAsync(connection, null, "SELECT ledger.receiving_tasks($1,$2,$3,$4)::text", ct,
-                actor, payload["facilityId"]!.GetValue<Guid>(), payload["page"]!.GetValue<int>(), payload["pageSize"]!.GetValue<int>());
-        else if (action == "detail")
+        if (action == "detail")
             value = await ExecuteAsync(connection, null, "SELECT ledger.receiving_detail($1,$2)::text", ct, actor, payload["id"]!.GetValue<Guid>());
         else
         {

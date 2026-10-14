@@ -157,6 +157,9 @@ Table farmers {
   name text [not null]
   contact text [null]
   created_at timestamptz [not null]
+  created_by uuid [null]
+  version integer [not null, default: 1]
+  is_deleted boolean [not null, default: false]
   indexes {
     (company_id, code) [unique]
     (company_id, id) [unique]
@@ -170,6 +173,9 @@ Table plots {
   code varchar(40) [not null]
   boundary_geojson jsonb [not null]
   area_ha numeric(24,12) [not null]
+  created_by uuid [null]
+  version integer [not null, default: 1]
+  is_deleted boolean [not null, default: false]
   indexes {
     (farmer_id, code) [unique]
     (company_id, id) [unique]
@@ -184,6 +190,9 @@ Table crop_seasons {
   name text [not null]
   starts_on date [not null]
   ends_on date [not null]
+  created_by uuid [null]
+  version integer [not null, default: 1]
+  is_deleted boolean [not null, default: false]
   indexes {
     (company_id, id) [unique]
   }
@@ -196,6 +205,9 @@ Table plot_seasons {
   plot_id uuid [not null]
   season_id uuid [not null]
   rice_variety text [not null]
+  created_by uuid [null]
+  version integer [not null, default: 1]
+  is_deleted boolean [not null, default: false]
   indexes {
     (plot_id, season_id) [unique]
     (company_id, id) [unique]
@@ -1328,6 +1340,10 @@ Ref: silo_compartments.location_id > locations.id [delete: restrict, update: no 
 Ref: compartment_occupancies.company_id > identity.organizations.Id [delete: restrict, update: no action]
 Ref: compartment_occupancies.compartment_id > silo_compartments.id [delete: restrict, update: no action]
 Ref: compartment_occupancies.cleared_by > identity.users.Id [delete: restrict, update: no action]
+Ref: farmers.created_by > identity.users.Id [delete: restrict, update: no action]
+Ref: plots.created_by > identity.users.Id [delete: restrict, update: no action]
+Ref: crop_seasons.created_by > identity.users.Id [delete: restrict, update: no action]
+Ref: plot_seasons.created_by > identity.users.Id [delete: restrict, update: no action]
 Ref: farmers.company_id > identity.organizations.Id [delete: restrict, update: no action]
 Ref: plots.company_id > identity.organizations.Id [delete: restrict, update: no action]
 Ref: plots.(company_id, farmer_id) > farmers.(company_id, id) [delete: restrict, update: no action]

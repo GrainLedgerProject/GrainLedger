@@ -12,15 +12,17 @@ The API routes are:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/procurement-reference-data` | PADDY commodity, supported mass units and eligible receiving options. |
+| GET | `/api/procurement-reference-data?collectionSiteId=&search=&page=&pageSize=&sortBy=&sortDirection=` | PADDY commodity, supported mass units and eligible receiving options. |
 | POST | `/api/procurements` | Register source procurement and expected line masses; creates no stock. |
 | GET | `/api/ledger/receiving-tasks?facilityId={id}&page=1&pageSize=25` | Read assigned-facility arrivals needing operator or manager action. |
 | GET | `/api/ledger/receiving/{id}` | Read scoped arrival task and append-only observations/reviews. |
 | POST | `/api/ledger/receiving/{id}/measurements` | Submit complete operator actual-mass set for one arrival. |
 | POST | `/api/ledger/receiving/{id}/reviews` | Submit evidence-backed manager action bound to version and measurement set. |
-| GET | `/api/procurements` | List receipts for authenticated company. |
+| GET | `/api/procurements?farmerId=&from=&to=&search=&page=&pageSize=&sortBy=&sortDirection=` | List receipts for authenticated company. |
 | GET | `/api/procurements/{id}` | Read immutable source snapshot and receiving status. |
 | GET | `/api/source-lots/{id}` | Read source provenance and current stock; pending has zero usable stock. |
+
+Procurement and receiving-option lists default to page 1 with page size 25; maximum page size is 100. Responses include `totalCount` and `hasMore`; `search` also accepts legacy `q`. Procurement sort fields are `receivedAt`, `code`, and outward `status`; receiving-option sort fields are `collectionSiteName` and `receivingLocationCode`. Direction is `asc` or `desc`. Search/filter/count/order happen before paging. Outward status sort uses the current Ledger receiving projection (`COALESCE(receiving.status, procurement.status)`); the immutable Capture source status remains `COMMITTED`.
 
 **States:** `PENDING_ARRIVAL` after registration; `AWAITING_MANAGER_REVIEW` after any mismatch; `REMEASUREMENT_REQUESTED` after manager request; `RECEIVED_MATCHED` after exact operator confirmation; `RECEIVED_SHORTAGE_APPROVED` after eligible manager approval; `BLOCKED_UNRESOLVED` after manager keeps discrepancy blocked. Remeasurement appends a new complete set; prior sets/reviews remain historical. Pending or blocked procurements expose zero usable stock.
 

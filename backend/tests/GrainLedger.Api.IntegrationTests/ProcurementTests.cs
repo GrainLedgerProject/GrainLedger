@@ -21,6 +21,11 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(s.CatalogCommodityId, reference.GetProperty("commodity").GetProperty("id").GetGuid());
         Assert.Contains(reference.GetProperty("receivingOptions").EnumerateArray(), x => x.GetProperty("receivingLocationId").GetGuid() == s.LocationId);
         Assert.DoesNotContain(reference.GetProperty("receivingOptions").EnumerateArray(), x => x.GetProperty("receivingLocationId").GetGuid() == s.IsolationLocationId);
+        var optionsPage = await GetAsync(s.Purchaser,
+            $"/api/procurement-reference-data?collectionSiteId={s.FacilityId}&search=Synthetic&page=1&pageSize=1&sortBy=receivingLocationCode&sortDirection=desc");
+        Assert.Equal(2, optionsPage.GetProperty("totalCount").GetInt32());
+        Assert.True(optionsPage.GetProperty("hasMore").GetBoolean());
+        Assert.Single(optionsPage.GetProperty("receivingOptions").EnumerateArray());
         var id = Guid.NewGuid(); var request = s.ReceiptBody(id, ["600", "400"]);
         using var created = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
@@ -31,6 +36,11 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(receipt.EventId, (await replay.Content.ReadFromJsonAsync<ProcurementResponse>())!.EventId);
         Assert.Equal("PENDING_ARRIVAL", receipt.Status);
         Assert.All(receipt.Items, x => Assert.Equal("0", x.InitialStock.ReceivedKg));
+        var procurementPage = await GetAsync(s.Purchaser,
+            $"/api/procurements?farmerId={s.FarmerId}&search=PENDING_ARRIVAL&page=1&pageSize=1&sortBy=status&sortDirection=desc");
+        Assert.Equal(1, procurementPage.GetProperty("totalCount").GetInt32());
+        Assert.False(procurementPage.GetProperty("hasMore").GetBoolean());
+        Assert.Equal("PENDING_ARRIVAL", procurementPage.GetProperty("items")[0].GetProperty("status").GetString());
         Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
         var pendingSource = await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.Items[0].SourceLotId}");
         Assert.Empty(pendingSource!.CurrentStock);
