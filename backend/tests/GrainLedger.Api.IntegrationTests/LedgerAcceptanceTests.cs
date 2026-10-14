@@ -107,33 +107,38 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     {
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid(); var body = s.ReceiptBody(id, ["5", "7"]);
-        var replies = await Task.WhenAll(RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", body), RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", body));
+        var replies = await Task.WhenAll(RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", body), RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", body));
         foreach (var reply in replies) { Assert.True(reply.IsSuccessStatusCode, await reply.Content.ReadAsStringAsync()); reply.Dispose(); }
         var receipt = await GetAsync(s.Purchaser, $"/api/procurements/{id}");
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        await s.ConfirmArrivalAsync(receipt);
         Assert.Equal(2, Lots(receipt).Distinct().Count());
         Assert.Equal(12m, (await Task.WhenAll(Lots(receipt).Select(l => s.LotAsync(l)))).Sum(l => Quantity(l)));
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(id, ["99"]), HttpStatusCode.Conflict);
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(id, ["99"]), HttpStatusCode.Conflict);
         Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
         await AssertProjectionAsync();
     }
 
     [Fact]
-    public async Task Mid_procurement_posting_failure_rolls_back_capture_lots_events_and_postings()
+    public async Task Mid_arrival_posting_failure_rolls_back_measurements_lots_events_and_postings_preserving_source()
     {
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid(); var body = s.ReceiptBody(id, ["5", "7"]);
+        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", body);
+        var measurement = MeasurementBody(receipt);
         await WithPostingFailureAsync(async () =>
         {
-            using var result = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", body);
+            using var result = await RawAsync(s.Operator, HttpMethod.Post, $"/api/ledger/receiving/{id}/measurements", measurement);
             Assert.False(result.IsSuccessStatusCode);
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurements WHERE id=@id", id));
+            Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurements WHERE id=@id", id));
             Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
             Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE details->>'receiptId'=CAST(@id AS text)", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurement_items WHERE procurement_id=@id", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.business_events WHERE payload->>'procurementId'=CAST(@id AS text)", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.offline_operations WHERE (result_payload->>'Id')::uuid=@id", id));
+            Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurement_items WHERE procurement_id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.arrival_measurement_sets WHERE procurement_id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.arrival_operations WHERE procurement_id=@id", id));
+            Assert.Equal("PENDING_ARRIVAL", await ScalarAsync<string>("SELECT status FROM ledger.receiving WHERE procurement_id=@id", id));
         });
-        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", body);
+        await SendAsync(s.Operator, HttpMethod.Post, $"/api/ledger/receiving/{id}/measurements", measurement);
         Assert.Equal(12m, (await Task.WhenAll(Lots(receipt).Select(l => s.LotAsync(l)))).Sum(l => Quantity(l)));
         await AssertProjectionAsync();
     }
@@ -409,7 +414,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     public async Task Unsupported_precision_overflow_and_nonpositive_receipts_fail(string quantity)
     {
         using var s = await CreateAsync(factory);
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(Guid.NewGuid(), [quantity]));
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), [quantity]));
     }
 
     [Fact]

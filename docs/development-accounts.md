@@ -23,9 +23,9 @@ Migration updates schema; seed creates accounts then exits. Use only database yo
 
 ## 3. Capture và Ledger
 
-Official Capture supports farmer, plot, crop season, plot-season and procurement APIs. Procurement commit records Capture provenance and writes matching Ledger stock in the same transaction through Catalog-to-Ledger commodity mapping. Migration does not convert prior synthetic records. Existing Ledger stock/history remains.
+Official Capture supports farmer, plot, crop season, plot-season and procurement APIs. Procurement registration records source expectation only and creates no usable Ledger stock. Assigned-facility operator records one complete arrival measurement set; exact match posts actual mass, while mismatch stays without stock until manager evidence review. Managers may approve eligible shortages at actual mass, append a remeasurement request, or keep unresolved shortage/surplus blocked. See [procurement API](procurement-api.md) for endpoints and payloads.
 
-No API records arrival or corrects arrival/procurement receipts. Do not use synthetic capture workflows or `--seed-mock`; they are not active. See [procurement API](procurement-api.md) for routes and payload.
+One procurement means one complete arrival; register separate procurement per load. No truck model, customer settlement, tolerance, partial arrival, or surplus acceptance. Zero/full-loss arrival is unsupported and fails closed. Existing historical source evidence and stock are grandfathered unchanged; migration `20261014190000_PhysicalReceiving` does not retroactively freeze or reinterpret legacy stock. Do not use retired synthetic capture workflows or `--seed-mock`.
 
 Trước mọi migration, seed, thay đổi schema/role/grant hoặc kiểm tra có ghi dữ liệu trên Supabase dùng chung, cần phê duyệt rõ ràng từ chủ database. Ưu tiên Testcontainers cô lập; không thay đổi `.env` hay connection string hiện có.
 

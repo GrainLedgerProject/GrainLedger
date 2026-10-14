@@ -44,14 +44,15 @@ public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFac
     {
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid();
-        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(id, [quantity], unit: unit));
+        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(id, [quantity], unit: unit));
+        await s.ConfirmArrivalAsync(receipt);
         var line = receipt.GetProperty("items")[0];
         Assert.Equal(decimal.Parse(quantity, System.Globalization.CultureInfo.InvariantCulture), Decimal(line.GetProperty("measuredValue")));
         Assert.Equal(unit.ToUpperInvariant(), line.GetProperty("measuredUnit").GetString());
         Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), Decimal(line.GetProperty("netMassKg")));
         Assert.Equal(Decimal(line.GetProperty("netMassKg")), Quantity(await s.LotAsync(Lots(receipt)[0])));
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(Guid.NewGuid(), ["0.000001"], unit: "G"), HttpStatusCode.BadRequest);
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(Guid.NewGuid(), ["1"], unit: "LB"), HttpStatusCode.BadRequest);
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), ["0.000001"], unit: "G"), HttpStatusCode.BadRequest);
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), ["1"], unit: "LB"), HttpStatusCode.BadRequest);
     }
 
 

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
 namespace GrainLedger.Modules.Catalogs;
@@ -30,7 +31,7 @@ public static class CommodityEndpoints
     }
 
     private static async Task<IResult> CreateAsync(CreateCommodityRequest request, HttpContext http,
-        IdentityDbContext identityDb, CatalogDbContext db, TimeProvider clock, CancellationToken ct)
+        IdentityDbContext identityDb, CatalogDbContext db, ICommodityLedgerPort ledger, TimeProvider clock, CancellationToken ct)
     {
         var actorId = await GetActiveActorAsync(http.User, identityDb, ct);
         if (actorId is null) return Results.Forbid();
@@ -52,7 +53,14 @@ public static class CommodityEndpoints
             ResourceId = commodity.Id, OccurredAt = clock.GetUtcNow(), CorrelationId = Guid.NewGuid(),
             AfterState = State(commodity)
         });
-        try { await db.SaveChangesAsync(ct); }
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await ledger.ProvisionAsync((NpgsqlConnection)db.Database.GetDbConnection(),
+                (NpgsqlTransaction)transaction.GetDbTransaction(), actorId.Value, ct);
+            await transaction.CommitAsync(ct);
+        }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
             return Problem(409, "COMMODITY_CODE_EXISTS", "Commodity code already exists.");
@@ -90,7 +98,7 @@ public static class CommodityEndpoints
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, UpdateCommodityRequest request, HttpContext http,
-        IdentityDbContext identityDb, CatalogDbContext db, TimeProvider clock, CancellationToken ct)
+        IdentityDbContext identityDb, CatalogDbContext db, ICommodityLedgerPort ledger, TimeProvider clock, CancellationToken ct)
     {
         var actorId = await GetActiveActorAsync(http.User, identityDb, ct);
         if (actorId is null) return Results.Forbid();
@@ -103,9 +111,13 @@ public static class CommodityEndpoints
         if (http.Request.Headers.IfMatch.ToString() != Etag(commodity.Version))
             return Problem(412, "CATALOG_VERSION_STALE", "The catalog entry has changed. Read it again before editing.");
 
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var name = request.Name.Trim();
         if (name == commodity.Name)
         {
+            await ledger.ProvisionAsync((NpgsqlConnection)db.Database.GetDbConnection(),
+                (NpgsqlTransaction)transaction.GetDbTransaction(), actorId.Value, ct);
+            await transaction.CommitAsync(ct);
             SetEtag(http, commodity.Version);
             return Results.Ok(ToResponse(commodity));
         }
@@ -117,7 +129,13 @@ public static class CommodityEndpoints
             ResourceId = commodity.Id, OccurredAt = clock.GetUtcNow(), CorrelationId = Guid.NewGuid(),
             BeforeState = before, AfterState = State(commodity)
         });
-        try { await db.SaveChangesAsync(ct); }
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await ledger.ProvisionAsync((NpgsqlConnection)db.Database.GetDbConnection(),
+                (NpgsqlTransaction)transaction.GetDbTransaction(), actorId.Value, ct);
+            await transaction.CommitAsync(ct);
+        }
         catch (DbUpdateConcurrencyException)
         {
             return Problem(412, "CATALOG_VERSION_STALE", "The catalog entry has changed. Read it again before editing.");

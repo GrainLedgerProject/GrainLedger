@@ -21,7 +21,7 @@ public sealed record ProcurementLineInput(Guid ItemId, int LineNo, Guid PlotSeas
 public sealed record ProcurementInput(Guid EntityId, Guid FarmerId, Guid CollectionSiteId,
     Guid ReceivingLocationId, Guid CommodityId, DateTimeOffset ReceivedAt,
     IReadOnlyList<ProcurementLineInput?>? Items);
-public sealed record CommitProcurementRequest(string? DeviceId, Guid ClientOperationId,
+public sealed record RegisterProcurementRequest(string? DeviceId, Guid ClientOperationId,
     DateTimeOffset CapturedAt, int PayloadSchemaVersion, ProcurementInput? Payload);
 public sealed record ProcurementInitialStock(Guid LocationId, string ReceivedKg);
 public sealed record ProcurementLineResponse(Guid Id, int LineNo, Guid PlotSeasonId, Guid PlotId,
@@ -31,7 +31,7 @@ public sealed record ProcurementLineResponse(Guid Id, int LineNo, Guid PlotSeaso
 public sealed record ProcurementResponse(Guid Id, string Code, Guid FarmerId, Guid CollectionSiteId,
     Guid ReceivingLocationId, Guid CommodityId, string Status, Guid ReceivedBy,
     DateTimeOffset ReceivedAt, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt,
-    Guid EventId, string TotalNetMassKg, IReadOnlyList<ProcurementLineResponse> Items);
+    Guid EventId, string TotalNetMassKg, IReadOnlyList<ProcurementLineResponse> Items, int ReceivingVersion = 0);
 public sealed record ProcurementSummary(Guid Id, string Code, Guid FarmerId, string FarmerName,
     DateTimeOffset ReceivedAt, string Status, int ItemCount, string TotalNetMassKg);
 public sealed record ProcurementListResponse(IReadOnlyList<ProcurementSummary> Items,
@@ -46,7 +46,9 @@ public sealed record SourceLotResponse(Guid Id, Guid LotId, string LotCode, Guid
     Guid PlotId, Guid SeasonId, Guid PlotSeasonId, string RiceVariety,
     DateTimeOffset ReceivedAt, Guid CollectionSiteId, Guid InitialReceivingLocationId,
     string InitialNetMassKg, string MoisturePercent,
-    IReadOnlyList<ProcurementStockPosition> CurrentStock, DateTimeOffset StockAsOf);
+    IReadOnlyList<ProcurementStockPosition> CurrentStock, DateTimeOffset StockAsOf,
+    string ReceivingStatus, string UsableStockKg);
+internal sealed record ReceivingProjection(Guid ProcurementId, string Status, int Version);
 
 public static class ProcurementEndpoints
 {
@@ -61,7 +63,7 @@ public static class ProcurementEndpoints
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>()
             .AddEndpointFilter<ProcurementErrorFilter>()
             .WithTags("Procurements");
-        group.MapPost("/commit", CommitAsync).RequireAuthorization("purchases.write");
+        group.MapPost("", RegisterAsync).RequireAuthorization("purchases.write");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         endpoints.MapGet("/api/source-lots/{id:guid}", GetSourceLotAsync).RequireAuthorization()
@@ -101,7 +103,7 @@ public static class ProcurementEndpoints
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }
 
-    private static async Task<IResult> CommitAsync(CommitProcurementRequest request, ClaimsPrincipal principal,
+    private static async Task<IResult> RegisterAsync(RegisterProcurementRequest request, ClaimsPrincipal principal,
         ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db,
         IProcurementLedgerPort ledger, TimeProvider clock, CancellationToken ct)
     {
@@ -194,11 +196,11 @@ public static class ProcurementEndpoints
             return new ProcurementLineResponse(x.Input.ItemId, x.Input.LineNo, x.Input.PlotSeasonId,
                 source.PlotId, source.SeasonId, source.RiceVariety, Number(x.Measured), x.Unit,
                 Number(x.Kg), Number(x.Moisture), x.Input.SourceLotId, x.Input.LotId,
-                lotCode, "RAW_PADDY", new ProcurementInitialStock(payload.ReceivingLocationId, Number(x.Kg)));
+                lotCode, "RAW_PADDY", new ProcurementInitialStock(payload.ReceivingLocationId, "0"));
         }).ToArray();
         var total = lines.Sum(x => x.Kg);
         var result = new ProcurementResponse(payload.EntityId, code, farmer.Id, payload.CollectionSiteId,
-            payload.ReceivingLocationId, payload.CommodityId, "COMMITTED", actorId, receivedAt,
+            payload.ReceivingLocationId, payload.CommodityId, "PENDING_ARRIVAL", actorId, receivedAt,
             capturedAt, now, businessEvent.Id, Number(total), itemResponses);
         businessEvent.Payload = JsonSerializer.Serialize(new { schemaVersion = 1, procurementId = payload.EntityId,
             result });
@@ -208,7 +210,7 @@ public static class ProcurementEndpoints
             AppliedEventId = businessEvent.Id, ResultPayload = JsonSerializer.Serialize(result) };
         try
         {
-            // FK targets are inserted in dependency order; the transaction remains uncommitted until Ledger succeeds.
+            // Immutable source package is registered atomically; arrival creates stock later.
             db.BusinessEvents.Add(businessEvent);
             await db.SaveChangesAsync(ct);
             db.Procurements.Add(header);
@@ -220,11 +222,7 @@ public static class ProcurementEndpoints
             await db.SaveChangesAsync(ct);
             var connection = (NpgsqlConnection)db.Database.GetDbConnection();
             var dbTransaction = (NpgsqlTransaction)transaction.GetDbTransaction();
-            var stockLines = itemResponses.Select(x => new ProcurementStockLine(x.LotId, x.LotCode,
-                x.SourceLotId, x.Id, decimal.Parse(x.NetMassKg, CultureInfo.InvariantCulture))).ToArray();
-            await ledger.PostReceiptAsync(connection, dbTransaction, companyId.Value, actorId,
-                businessEvent.Id, payload.EntityId, payload.CommodityId, payload.CollectionSiteId,
-                payload.ReceivingLocationId, stockLines, ct);
+            await ledger.RegisterPendingAsync(connection, dbTransaction, actorId, payload.EntityId, ct);
             await transaction.CommitAsync(ct);
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
@@ -264,13 +262,14 @@ public static class ProcurementEndpoints
         var totals = await db.ProcurementItems.AsNoTracking().Where(x => x.CompanyId == companyId && ids.Contains(x.ProcurementId))
             .GroupBy(x => x.ProcurementId).Select(g => new { Id = g.Key, Count = g.Count(), Total = g.Sum(x => x.NetMassKg) })
             .ToDictionaryAsync(x => x.Id, ct);
+        var receiving = await db.Database.SqlQuery<ReceivingProjection>($"SELECT procurement_id AS \"ProcurementId\",status AS \"Status\",version AS \"Version\" FROM ledger.receiving WHERE procurement_id=ANY({ids})").ToDictionaryAsync(x => x.ProcurementId, ct);
         var summaries = rows.Take(size).Select(x => new ProcurementSummary(x.Id, x.Code, x.FarmerId,
-            x.FarmerName, x.ReceivedAt, x.Status, totals[x.Id].Count, Number(totals[x.Id].Total))).ToArray();
+            x.FarmerName, x.ReceivedAt, receiving.TryGetValue(x.Id, out var state) ? state.Status : x.Status, totals[x.Id].Count, Number(totals[x.Id].Total))).ToArray();
         return Results.Ok(new ProcurementListResponse(summaries, page, size, rows.Count > size));
     }
 
     private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal principal, ICurrentAccess access,
-        IdentityDbContext identityDb, CaptureDbContext db, CancellationToken ct)
+        IdentityDbContext identityDb, CaptureDbContext db, IProcurementLedgerPort ledger, CancellationToken ct)
     {
         if (!await CanReadAsync(access, ct)) return Results.Forbid();
         var companyId = await CompanyAsync(principal, access, identityDb, ct);
@@ -281,7 +280,10 @@ public static class ProcurementEndpoints
         if (ev is null) return Problem(500, "PROCUREMENT_EVENT_MISSING", "The procurement history is incomplete.");
         using var json = JsonDocument.Parse(ev.Payload);
         var result = json.RootElement.GetProperty("result").Deserialize<ProcurementResponse>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        return result is null ? Problem(500, "PROCUREMENT_EVENT_INVALID", "The procurement history is incomplete.") : Results.Ok(result);
+        if (result is null) return Problem(500, "PROCUREMENT_EVENT_INVALID", "The procurement history is incomplete.");
+        var state = await ledger.GetReceivingStateAsync(id, ct);
+        if (state is null && result.Status == "PENDING_ARRIVAL") return LedgerUnavailable();
+        return Results.Ok(state is null ? result : result with { Status = state.Status, ReceivingVersion = state.Version });
     }
 
     private static async Task<IResult> GetSourceLotAsync(Guid id, ClaimsPrincipal principal, ICurrentAccess access,
@@ -301,18 +303,22 @@ public static class ProcurementEndpoints
         var line = snapshot.Items.Single(x => x.Id == item.Id);
         try
         {
-            var stock = await ledger.GetCurrentStockAsync(companyId.Value, source.LotId, ct);
+            var state = await ledger.GetReceivingStateAsync(header.Id, ct);
+            if (state is null && snapshot.Status == "PENDING_ARRIVAL") return LedgerUnavailable();
+            var accepted = state is null || state.Status is "RECEIVED_MATCHED" or "RECEIVED_SHORTAGE_APPROVED";
+            IReadOnlyList<ProcurementStockPosition> stock = accepted ? await ledger.GetCurrentStockAsync(companyId.Value, source.LotId, ct) : [];
             return Results.Ok(new SourceLotResponse(source.Id, source.LotId, line.LotCode,
                 snapshot.CommodityId, line.Stage, header.Id, header.Code, item.Id, header.FarmerId,
                 line.PlotId, line.SeasonId, line.PlotSeasonId, line.RiceVariety, header.ReceivedAt,
                 header.CollectionSiteId, snapshot.ReceivingLocationId, line.NetMassKg,
-                line.MoisturePercent, stock, clock.GetUtcNow()));
+                line.MoisturePercent, stock, clock.GetUtcNow(), state?.Status ?? snapshot.Status,
+                Number(stock.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture)))));
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }
 
     internal sealed record ParsedLine(ProcurementLineInput Input, decimal Measured, string Unit, decimal Kg, decimal Moisture);
-    internal static Dictionary<string, string[]> Validate(CommitProcurementRequest request, out ParsedLine[] lines)
+    internal static Dictionary<string, string[]> Validate(RegisterProcurementRequest request, out ParsedLine[] lines)
     {
         var errors = new Dictionary<string, string[]>();
         var parsed = new List<ParsedLine>();

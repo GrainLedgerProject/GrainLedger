@@ -5,9 +5,10 @@ import { LedgerWorkspace } from './LedgerWorkspace';
 import { type User } from './api';
 
 const actor: User = { id: 'actor', email: 'staff@example.com', displayName: 'Staff', phoneNumber: null, role: 'MillOperator', organizationId: 'mill', organizationName: 'Mill', isActive: true, permissions: [] };
-const look = { facilities: [{ id: 'facility', name: 'Mill facility' }], locations: [{ id: 'store', facilityId: 'facility', name: 'Main store', kind: 'STORE' }, { id: 'isolation', facilityId: 'facility', name: 'Isolation', kind: 'ISOLATION' }], commodities: [{ id: 'rice', name: 'Rice' }], equipment: [{ id: 'dryer', facilityId: 'facility', name: 'Dryer' }] };
+const look = { owners: [{ id: 'customer', name: 'Customer Company' }], facilities: [{ id: 'facility', name: 'Mill facility' }], locations: [{ id: 'store', facilityId: 'facility', name: 'Main store', kind: 'STORE' }, { id: 'isolation', facilityId: 'facility', name: 'Isolation', kind: 'ISOLATION' }], commodities: [{ id: 'rice', name: 'Rice' }], equipment: [{ id: 'dryer', facilityId: 'facility', name: 'Dryer' }] };
 const lot = { id: 'source', code: 'Source lot', ownerId: 'customer', commodityId: 'rice', stage: 'RAW_PADDY', productIdentity: 'RAW_PADDY', positions: [{ locationId: 'store', facilityId: 'facility', quantityKg: '10.000001', availableKg: '10.000001' }], restrictions: [] };
 const draft = { id: 'draft', ownerId: 'customer', facilityId: 'facility', kind: 'DRYING', occurredAt: '2026-01-01T00:00:00Z', equipmentId: 'dryer', inputs: [{ lotId: 'source', locationId: 'store', quantityKg: '10.000001' }], outputs: [{ id: 'dried', code: 'Dried lot', commodityId: 'rice', stage: 'DRIED_PADDY', productIdentity: 'DRIED_PADDY', locationId: 'store', quantityKg: '9.000001' }], declaredLossKg: '1', status: 'DRAFT', version: 'version-1', confirmedVersion: 'version-1', varianceKg: '0', allowedVarianceKg: '0' };
+const receivingTask = { id: 'arrival', code: 'ARR-1', ownerCompanyId: 'customer', ownerCompanyName: 'Customer Company', facilityId: 'facility', facilityName: 'Mill facility', receivingLocationId: 'store', receivingLocationName: 'Main store', status: 'PENDING_ARRIVAL', receivingVersion: 0, expectedTotalKg: '10', actualTotalKg: null, usableStockKg: '0', latestMeasurementSetId: null, receivedAt: '2026-10-14T00:00:00Z', items: [{ id: 'item-1', lineNo: 1, sourceLotId: 'source-lot', lotId: 'source', lotCode: 'Source lot', plotSeasonId: 'ps', riceVariety: 'IR', expectedValue: '10', expectedUnit: 'KG', expectedKg: '10', actualValue: null, actualUnit: null, actualKg: null }], measurementSets: [], reviews: [] };
 const fetchMock = vi.fn<typeof fetch>();
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const page = (items: unknown[]) => ({ items, page: 1, pageSize: 25, hasMore: false });
@@ -16,39 +17,78 @@ beforeEach(() => {
  vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset();
  routes = {
   '/api/auth/csrf': { token: 'csrf' }, '/api/ledger/lookups': look, '/api/ledger/lots': [lot], '/api/ledger/holds': [], '/api/ledger/notifications': [], '/api/ledger/operations': [draft], '/api/ledger/corrections': [],
+  '/api/ledger/setup': { ...look, assignments: [], policies: [], compatibilities: [] }, '/api/admin/users': [], '/api/commodities': page([]), '/api/measurement-units': page([]),
   '/api/admin/organizations': [{ id: 'company', name: 'Customer', kind: 'Customer' }],
   '/api/farmers': page([{ id: 'farmer', name: 'Farmer' }]), '/api/plots': page([{ id: 'plot', farmerId: 'farmer', code: 'Plot' }]), '/api/crop-seasons': page([{ id: 'season', name: 'Season' }]), '/api/plot-seasons': page([{ id: 'ps', plotId: 'plot', seasonId: 'season', riceVariety: 'IR' }]),
   '/api/procurement-reference-data': { receivingOptions: [{ collectionSiteId: 'site', collectionSiteCode: 'SITE', collectionSiteName: 'Site', receivingLocationId: 'loc', receivingLocationCode: 'Store' }], commodity: { id: 'paddy' }, massUnits: [{ code: 'KG', name: 'kg' }], page: 1, pageSize: 100, hasMore: false, maxLinesPerReceipt: 100 }, '/api/procurements': page([]),
+  '/api/ledger/receiving-tasks': page([receivingTask]), '/api/ledger/receiving/arrival': receivingTask,
  };
  fetchMock.mockImplementation(async (url, init) => { const path = String(url).split('?')[0]; if (init?.method && init.method !== 'GET') return response(path.endsWith('/commit') ? { id: 'procurement' } : path.endsWith('/evidence') ? { id: 'evidence' } : {}); return path in routes ? response(routes[path]) : response({ title: `Unexpected route ${path}` }, 404); });
 });
-it('registers sources and commits official procurement envelope with exact mass strings', async () => {
+it('registers source procurement with exact expected quantity and states stock remains pending arrival', async () => {
  render(<LedgerWorkspace user={{ ...actor, role: 'PurchasingStaff', organizationId: 'company', permissions: ['farms.write', 'purchases.write'] }} />);
- const browser = userEvent.setup(); await browser.click(await screen.findByRole('button', { name: 'Sources & receiving' }));
+ const browser = userEvent.setup(); await browser.click(await screen.findByRole('button', { name: 'Receive stock' }));
  await browser.type(screen.getByLabelText('Farmer name'), 'Farmer Two'); await browser.click(screen.getByRole('button', { name: 'Register farmer' }));
  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/procurement-reference-data?'))).toBe(true));
- const procurement = within((await screen.findByRole('heading', { name: 'Commit procurement' })).closest('section')!);
+ const procurement = within((await screen.findByRole('heading', { name: 'Register procurement' })).closest('section')!);
  await browser.selectOptions(procurement.getByLabelText('Farmer', { selector: 'select' }), 'farmer');
  await browser.selectOptions(procurement.getByLabelText('Collection site', { selector: 'select' }), 'site');
  await browser.selectOptions(procurement.getByLabelText('Receiving location', { selector: 'select' }), 'loc');
  await browser.selectOptions(procurement.getByLabelText('Plot season', { selector: 'select' }), 'ps');
- await browser.type(procurement.getByLabelText('Measured value (exact decimal string)'), '600.000001');
+ await browser.type(procurement.getByLabelText('Expected source quantity (exact decimal string)'), '600.000001');
  await browser.selectOptions(procurement.getByLabelText('Unit', { selector: 'select' }), 'KG');
  await browser.type(procurement.getByLabelText('Moisture percent'), '22.5');
  await browser.type(procurement.getByLabelText('Received at'), '2026-10-14T03:00');
- await browser.click(screen.getByRole('button', { name: 'Commit procurement' }));
- await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements/commit')).toBe(true));
- const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/procurements/commit')!;
+ await browser.click(screen.getByRole('button', { name: 'Register procurement' }));
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(true));
+ const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/procurements')!;
  const request = JSON.parse(String(init?.body));
  expect(request).toMatchObject({ deviceId: 'grainledger-web', payloadSchemaVersion: 1, payload: { farmerId: 'farmer', collectionSiteId: 'site', receivingLocationId: 'loc', commodityId: 'paddy', items: [{ lineNo: 1, plotSeasonId: 'ps', measuredValue: '600.000001', measuredUnit: 'KG', moisturePercent: '22.5' }] } });
  expect(request.payload.items[0].lotId).toBeTruthy(); expect(request.payload.items[0].sourceLotId).toBeTruthy();
  expect(new Headers(init?.headers).get('X-CSRF-TOKEN')).toBe('csrf');
- expect(screen.getByText(/Arrival and receipt corrections are not available/)).toBeInTheDocument();
+ expect(screen.getByText(/pending mill arrival confirmation; stock is not yet available/i)).toBeInTheDocument();
+ expect(screen.getByText(/pending amounts do not count as available stock/i)).toBeInTheDocument();
+});
+it('submits complete operator measurements with exact decimals and explicit arrival confirmation', async () => {
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['lots.receive'] }} />);
+ const browser = userEvent.setup();
+ await browser.selectOptions(await screen.findByLabelText('Assigned facility'), 'facility');
+ await browser.click(await screen.findByRole('button', { name: /ARR-1.*Pending mill arrival/ }));
+ await browser.type(screen.getByLabelText('Actual received quantity'), '10.000001');
+ await browser.selectOptions(screen.getByLabelText('Actual unit'), 'KG');
+ await browser.click(screen.getByLabelText(/I confirm all actual quantities/));
+ const originalFetch = fetchMock.getMockImplementation()!;
+ let failFirstMeasurement = true;
+ fetchMock.mockImplementation(async (url, init) => {
+  if (failFirstMeasurement && String(url).endsWith('/measurements')) { failFirstMeasurement = false; return response({ title: 'Temporary request failure' }, 503); }
+  return originalFetch(url, init);
+ });
+ await browser.click(screen.getByRole('button', { name: 'Submit arrival measurements' }));
+ expect(await screen.findByRole('alert')).toBeInTheDocument();
+ const firstCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/measurements'))!;
+ const firstRequest = JSON.parse(String(firstCall[1]?.body));
+ await browser.click(screen.getByRole('button', { name: 'Submit arrival measurements' }));
+ await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/measurements'))).toHaveLength(2));
+ const lastCall = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/measurements'))[1];
+ const request = JSON.parse(String(lastCall[1]?.body));
+ expect(request).toMatchObject({ expectedReceivingVersion: 0, observations: '', items: [{ procurementItemId: 'item-1', measuredValue: '10.000001', measuredUnit: 'KG' }] });
+ expect(request.operationId).toBe(firstRequest.operationId);
+ expect(request.capturedAt).toBe(firstRequest.capturedAt);
+});
+it('disables shortage approval whenever any received line has surplus', async () => {
+ const surplusTask = { ...receivingTask, status: 'AWAITING_MANAGER_REVIEW', actualTotalKg: '10.5', latestMeasurementSetId: 'set-1', items: [{ ...receivingTask.items[0], actualValue: '10.5', actualUnit: 'KG', actualKg: '10.5' }], measurementSets: [{ id: 'set-1', operationId: 'op-1', operatorId: 'operator', capturedAt: '2026-10-14T01:00:00Z', recordedAt: '2026-10-14T01:01:00Z', observations: 'Scale checked', items: [{ procurementItemId: 'item-1', measuredValue: '10.5', measuredUnit: 'KG', actualKg: '10.5' }] }], reviews: [] };
+ routes['/api/ledger/receiving-tasks'] = page([surplusTask]); routes['/api/ledger/receiving/arrival'] = surplusTask;
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['receiving.reconcile'] }} />);
+ const browser = userEvent.setup(); await browser.selectOptions(await screen.findByLabelText('Assigned facility'), 'facility');
+ await browser.click(await screen.findByRole('button', { name: /ARR-1.*Awaiting manager review/ }));
+ expect(await screen.findByText(/Surplus detected. Shortage approval unavailable/)).toBeInTheDocument();
+ expect(screen.getByRole('option', { name: /Approve shortage and post actual stock/ })).toBeDisabled();
+ expect(screen.getByRole('option', { name: /Request remeasurement/ })).toBeEnabled();
 });
 it('edits processing draft with decimal strings and supports multiple actual output rows', async () => {
  render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
  const browser = userEvent.setup();
- await browser.click(await screen.findByText('DRYING — Dried lot — DRAFT'));
+ await browser.click(await screen.findByText(/DRYING:.*DRAFT/));
  await browser.click(screen.getByRole('button', { name: 'Edit processing draft' }));
  const editor = screen.getByRole('heading', { name: 'Edit processing draft' }).closest('section')!;
  await browser.clear(within(editor).getByLabelText('Actual output (kg)'));
@@ -85,22 +125,23 @@ it('shows HOLD failures instead of swallowing errors or claiming success', async
 });
 it('shows official receiving tab for read permissions', async () => {
  render(<LedgerWorkspace user={{ ...actor, permissions: ['lots.read.facility', 'farms.read'] }} />);
- expect(await screen.findByRole('heading', { name: 'Scoped stock search' })).toBeInTheDocument();
- expect(screen.getByRole('button', { name: 'Sources & receiving' })).toBeInTheDocument();
+ expect(await screen.findByRole('heading', { name: 'Source records' })).toBeInTheDocument();
+ expect(screen.queryByRole('button', { name: 'Commit procurement' })).not.toBeInTheDocument();
+ expect(screen.getByRole('button', { name: 'Receive stock' })).toBeInTheDocument();
 });
 it('gates Catalog and submits commodity and unit DTOs', async () => {
  const { rerender } = render(<LedgerWorkspace user={{ ...actor, permissions: [] }} />);
- expect(screen.queryByRole('button', { name: 'Catalog' })).not.toBeInTheDocument();
+ expect(screen.queryByRole('button', { name: 'Setup' })).not.toBeInTheDocument();
  rerender(<LedgerWorkspace user={{ ...actor, permissions: ['platform.configure'] }} />);
- await userEvent.setup().click(await screen.findByRole('button', { name: 'Catalog' }));
+ await userEvent.setup().click(await screen.findByRole('button', { name: 'Setup' }));
  await screen.findByLabelText('Search commodities');
- const inputs = screen.getAllByRole('textbox');
- await userEvent.type(inputs[1], 'PADDY');
- await userEvent.type(inputs[2], 'Paddy');
+ const catalog = within(screen.getByRole('heading', { name: 'Commodity catalog' }).closest('section')!);
+ await userEvent.type(catalog.getByLabelText('Code'), 'PADDY');
+ await userEvent.type(catalog.getByLabelText('Name'), 'Paddy');
  await userEvent.click(screen.getByRole('button', { name: 'Create commodity' }));
- const panels = document.querySelectorAll('.panel');
- await userEvent.type(panels[1].querySelectorAll('input')[1], 'MASS');
- await userEvent.type(panels[1].querySelectorAll('input')[2], 'Kilogram');
+ const units = within(screen.getByRole('heading', { name: 'Measurement units' }).closest('section')!);
+ await userEvent.type(units.getByLabelText('Code'), 'MASS');
+ await userEvent.type(units.getByLabelText('Name'), 'Kilogram');
  await userEvent.click(screen.getByRole('button', { name: 'Create measurement unit' }));
  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/commodities')).toBe(true));
  const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
@@ -113,8 +154,8 @@ it('reconciles output positions against selected replacement version with Ledger
  routes['/api/ledger/lots/dried'] = { ...lot, id: 'dried', code: 'Dried lot', positions: [{ locationId: 'isolation', facilityId: 'facility', quantityKg: '9.000001', availableKg: '0' }] };
  render(<LedgerWorkspace user={{ ...actor, role: 'MillManager', permissions: ['corrections.reconcile'] }} />);
  const browser = userEvent.setup();
- await browser.click(await screen.findByText('DRYING: Dried lot — correction REQUESTED'));
- const review = within(screen.getByText('DRYING: Dried lot — correction REQUESTED').closest('details')!);
+ await browser.click(await screen.findByText(/Customer Company — DRYING:.*correction REQUESTED/));
+ const review = within(screen.getByText(/Customer Company — DRYING:.*correction REQUESTED/).closest('details')!);
  await browser.upload(review.getByLabelText('Evidence file'), new File(['weighbridge'], 'physical.txt', { type: 'text/plain' }));
  await browser.click(review.getByRole('button', { name: 'Upload evidence' }));
  await review.findByRole('link', { name: 'View stored evidence' });
@@ -128,10 +169,43 @@ it('reconciles output positions against selected replacement version with Ledger
  const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/ledger/corrections/correction/reconcile')!;
  expect(JSON.parse(String(init?.body))).toEqual({ evidenceId: 'evidence', reason: 'Checked physical stock', reconciliation: [{ lotId: 'dried', locationId: 'isolation', quantityKg: '9.000001' }], replacementOperationId: 'replacement', replacementVersion: 'replacement-v2' });
 });
+it('uses scoped owner lookup names in processing and stock details without admin organization fetches', async () => {
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write', 'lots.read.tenant'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByRole('button', { name: 'Process & correct' }));
+ const operationOwner = await screen.findByLabelText('Stock owner');
+ expect(within(operationOwner).getByRole('option', { name: 'Customer Company' })).toBeInTheDocument();
+ await browser.click(await screen.findByText('DRYING: 9.000001 kg Rice (DRIED_PADDY) — Dried lot — DRAFT'));
+ expect(screen.getByText('Customer Company', { selector: 'dd' })).toBeInTheDocument();
+ await browser.click(screen.getByRole('button', { name: 'Stock & HOLDs' }));
+ expect(await screen.findByLabelText('Company filter')).toHaveValue('');
+ expect(within(screen.getByLabelText('Company filter')).getByRole('option', { name: 'Customer Company' })).toBeInTheDocument();
+ await browser.click(screen.getByRole('button', { name: 'Open lot detail for Source lot' }));
+ expect(await screen.findByText('Customer Company', { selector: 'td' })).toBeInTheDocument();
+ expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/admin/organizations'))).toBe(false);
+});
+it('limits ledger navigation and processing actions to assigned permissions', async () => {
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.confirm'] }} />);
+ const navigation = screen.getByRole('navigation', { name: 'Ledger sections' });
+ expect(within(navigation).getByRole('button', { name: 'Process & correct' })).toHaveAttribute('aria-current', 'page');
+ expect(within(navigation).queryByRole('button', { name: 'Setup' })).not.toBeInTheDocument();
+ expect(within(navigation).queryByRole('button', { name: 'Receive stock' })).not.toBeInTheDocument();
+ expect(within(navigation).queryByRole('button', { name: 'Stock & HOLDs' })).not.toBeInTheDocument();
+ await userEvent.setup().click(await screen.findByText(/DRYING:.*DRAFT/));
+ expect(await screen.findByRole('button', { name: 'Confirm reviewed operation version' })).toBeInTheDocument();
+ expect(screen.queryByRole('button', { name: 'Commit processing' })).not.toBeInTheDocument();
+ expect(screen.queryByRole('button', { name: 'Edit processing draft' })).not.toBeInTheDocument();
+});
+it('shows receiving section to operators and managers through receiving permissions', () => {
+ const { rerender } = render(<LedgerWorkspace user={{ ...actor, permissions: ['lots.receive'] }} />);
+ expect(within(screen.getByRole('navigation', { name: 'Ledger sections' })).getByRole('button', { name: 'Receive stock' })).toBeInTheDocument();
+ rerender(<LedgerWorkspace user={{ ...actor, permissions: ['receiving.reconcile'] }} />);
+ expect(within(screen.getByRole('navigation', { name: 'Ledger sections' })).getByRole('button', { name: 'Receive stock' })).toBeInTheDocument();
+});
 it('requires an explicitly selected customer for admin crop-season creation', async () => {
  render(<LedgerWorkspace user={{ ...actor, permissions: ['platform.configure'] }} />);
  const browser = userEvent.setup();
- await browser.click(await screen.findByRole('button', { name: 'Sources & receiving' }));
+ await browser.click(await screen.findByRole('button', { name: 'Receive stock' }));
  await browser.selectOptions(screen.getByLabelText('Customer company'), 'company');
  await browser.type(screen.getByLabelText('Season name'), 'Wet season');
  await browser.type(screen.getByLabelText('Starts'), '2026-06-01');

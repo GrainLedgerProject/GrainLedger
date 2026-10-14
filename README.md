@@ -1,6 +1,6 @@
 # GrainLedger
 
-GrainLedger is a modular monolith for rice supply-chain traceability. This implementation provides Google sign-in, email/password registration with email OTP, JWT access/refresh tokens, password recovery, user profiles, organization management, server-enforced access control, farmer registration and lookup, and Capture procurement integrated with protected Ledger stock.
+GrainLedger is a modular monolith for rice supply-chain traceability. It provides authentication, access control, Capture procurement source registration, and Ledger receiving, stock, processing and history workflows.
 
 ## Structure
 
@@ -95,28 +95,22 @@ Profiles support display name and optional phone number; editing a profile canno
 
 ## Ledger workflow
 
-Permission-gated workspace provides Catalog setup/lookups; official Capture farmer, plot, season, plot-season and procurement workflows; stock search/detail/history; processing drafts, manager confirmation, transfers and Ledger processing corrections; customer HOLD, manager response/isolation and notifications. Procurement routes: `/api/procurement-reference-data`, `/api/procurements/commit`, `/api/procurements`, `/api/procurements/{id}` and `/api/source-lots/{id}` (see [procurement API](docs/procurement-api.md)). Capture procurement commits protected Ledger stock atomically using persisted Catalog-to-Ledger commodity mapping. Historical Ledger stock/provenance remains; legacy synthetic records are not converted. Retired mock routes, including `/api/capture-mock/status`, are unavailable (404). Official Capture has no arrival-observation or receipt-correction endpoints. UI gates are not authorization boundary; backend checks persisted role, permission, owner and facility.
+Permission-gated workspace follows operational order: **Setup**, **Receive stock**, **Stock & HOLDs**, **Process & correct**. Setup contains Catalog master data (canonical commodity code/name and measurement units) plus facility setup; do not create Ledger commodities separately. Configure PADDY and a MASS unit before procurement. Catalog creation has no automatic seed/default writes; purchaser reference data reads persisted Catalog records. Commodity API: `/api/commodities` (`{ code, name }`); units: `/api/measurement-units` (`{ code, name, quantityKind }`), both with server-side search and 25-row pages.
 
-Catalog tab is restricted to users with `platform.configure`. It lists commodities and measurement units with server-side search and 25-row pagination; create forms use `/api/commodities` (`{ code, name }`) and `/api/measurement-units` (`{ code, name, quantityKind }`). Catalog creation has no automatic seed/default writes. Configure `PADDY` and a `MASS` unit before Capture procurement; purchaser reference data reads persisted Catalog records.
+Purchasers register farmers, plots, crop seasons and plot-season links, then register procurement with source mass, eligible receiving facility/location and exact decimal units. Registration records source expectation only: no usable stock exists until full arrival is recorded and accepted. One procurement represents one complete arrival; register separate procurement for each load. No truck entity/model.
 
-Catalog smoke: isolated BrowserWorkflowHost created `BROWSER-PADDY` and `MASS-SMOKE` (`MASS`) through Catalog UI. Saved rows displayed in Catalog; purchaser reference form remained available and showed configured PADDY plus `G`, `KG`, and `T`. Smoke used disposable Testcontainers database; no shared database or `.env` changes.
-Data loading uses fresh, scoped reads without a response cache. Unfiltered stock reuses the same lot response; filtered stock, detail, source lots and permitted setup lookups load concurrently. Ledger reads validate persisted active role and scope inside `ledger.read`, avoiding a redundant identity query. React StrictMode replays mount effects in Development; compare production builds for user-facing timings.
+Facilities, locations, equipment and staff assignments are basic setup; policies, blend compatibility and compartment clearance require evidence and belong to advanced setup. Stock search/history, processing, transfers, HOLD and processing-correction paths remain permission- and scope-gated. Procurement and receiving routes: `/api/procurement-reference-data`, `/api/procurements`, `/api/ledger/receiving-tasks`, `/api/ledger/receiving/{id}`, `/api/ledger/receiving/{id}/measurements`, `/api/ledger/receiving/{id}/reviews`, `/api/source-lots/{id}` (see [procurement API](docs/procurement-api.md)). Historical Ledger stock/provenance remains; legacy evidence is not converted or dropped. Retired mock routes remain absent.
 
-Single-lot history selects relevant event IDs before joining postings, with indexed restriction, HOLD and reverse-source lookups. This optimization requires explicit `20261014000000_OptimizeLedgerReads` migration; ordinary startup does not apply it. See [read scalability and tracing readiness](docs/architecture.md#read-scalability-and-tracing-readiness) for historical isolated large-data measurements, remaining unbounded-list limits and proposal F18 gaps. Do not apply migrations to shared Supabase without approval.
+No customer settlement workflow is included. Source expectation is not customer settlement authority. Existing historical procurement evidence and stock remain grandfathered and unchanged; new migration does not retroactively freeze or reinterpret legacy stocks. See [procurement API](docs/procurement-api.md).
 
-Current workflow outline (not a test report): configure facilities, locations, commodities and policies; register Capture farmer/plot/season/plot-season and commit procurement; verify stock/provenance; run processing, transfer, HOLD and processing-correction paths with scoped roles. Official Capture lacks arrival-observation and receipt-correction endpoints.
-Latest cutover verification: frontend 24 tests and production build passed. Backend `dotnet build GrainLedger.slnx` passed with existing CS9113 unread access warning; `dotnet test GrainLedger.slnx --no-build` passed 166/166, 0 skipped. Isolated real-browser flow registered a farmer, Point plot and plot-season, committed official procurement for `12.345678 KG`, and observed source `currentStock.onHandKg` as exact string `"12.345678"` with matching Ledger physical and available stock. Retired mock status returned 404. Smoke used isolated PostgreSQL through a test-only cookie bridge; no shared database or `.env` changes.
+Data loading uses fresh, scoped reads without a response cache. Unfiltered stock reuses the same lot response; filtered stock, detail, source lots and permitted setup lookups load concurrently. Ledger reads validate persisted active role and scope inside `ledger.read`, avoiding redundant identity query. React StrictMode replays mount effects in Development; compare production builds for user-facing timings.
 
-Build/test commands (not run for this documentation-only change):
+## Current verification
 
-```bash
-dotnet build GrainLedger.slnx
-dotnet test GrainLedger.slnx --no-build
-npm test
-npm run build
-```
-
-Backend integration tests require Docker/Testcontainers. Browser/auth harness is test-only/local host, never production login bypass. Live Google consent requires your credentials and is separate. Factory approval is not established by synthetic policy or tests.
+- Backend build passed; full suite: **177/177 passed**, none skipped. Focused receiving suite: **7 passed** after analyzer-only assertion cleanup. Existing CS9113 and NU1902/NU1903 package warnings remain.
+- Web: **30 tests passed** and production build passed.
+- Isolated browser: source **12** → pending **0 usable** → operator actual **10** mismatch **0 usable** → manager reason + scoped uploaded evidence → shortage approval **10 usable**. Exact-match operator submitted a complete **12 kg + 8 kg** set (**HTTP 200**, `RECEIVED_MATCHED`), confirming **20.000000 kg** usable; customer stock showed physical/available **12.000000 kg** and **8.000000 kg**, without restrictions. Receiving page at **375 px** had no body overflow; wide table overflow stayed local. Historical-data migration regression passed. No code changed during browser smoke; services, tab and manifests cleaned.
+- Migration `20261014190000_PhysicalReceiving` has **not** been applied to the shared database; no shared database modifications were made. Shared migration requires explicit database-owner approval.
 
 ## Deployment
 

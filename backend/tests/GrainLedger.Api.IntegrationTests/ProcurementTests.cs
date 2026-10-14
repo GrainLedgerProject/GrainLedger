@@ -22,13 +22,20 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Contains(reference.GetProperty("receivingOptions").EnumerateArray(), x => x.GetProperty("receivingLocationId").GetGuid() == s.LocationId);
         Assert.DoesNotContain(reference.GetProperty("receivingOptions").EnumerateArray(), x => x.GetProperty("receivingLocationId").GetGuid() == s.IsolationLocationId);
         var id = Guid.NewGuid(); var request = s.ReceiptBody(id, ["600", "400"]);
-        using var created = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", request);
+        using var created = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var receipt = (await created.Content.ReadFromJsonAsync<ProcurementResponse>())!;
         Assert.Equal("1000", receipt.TotalNetMassKg);
-        using var replay = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", request);
+        using var replay = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
         Assert.Equal(receipt.EventId, (await replay.Content.ReadFromJsonAsync<ProcurementResponse>())!.EventId);
+        Assert.Equal("PENDING_ARRIVAL", receipt.Status);
+        Assert.All(receipt.Items, x => Assert.Equal("0", x.InitialStock.ReceivedKg));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        var pendingSource = await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.Items[0].SourceLotId}");
+        Assert.Empty(pendingSource!.CurrentStock);
+        Assert.Equal("0", pendingSource.UsableStockKg);
+        await s.ConfirmArrivalAsync(JsonSerializer.SerializeToElement(receipt, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         var lotId = receipt.Items[0].LotId;
         var protectedLot = await s.LotAsync(lotId, s.Customer);
         Assert.Equal(600m, Quantity(protectedLot));
@@ -50,7 +57,7 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         using var scope = factory.Services.CreateScope();
         Assert.Empty(await scope.ServiceProvider.GetRequiredService<IProcurementLedgerPort>().GetCurrentStockAsync(s.ForeignOwnerId, lotId, default));
         var wrongSource = s.ReceiptBody(Guid.NewGuid(), ["1"]);
-        await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, "/api/procurements/commit", wrongSource, HttpStatusCode.Conflict);
+        await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, "/api/procurements", wrongSource, HttpStatusCode.Conflict);
     }
 
     [Theory]
@@ -61,12 +68,13 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
     {
         using var s = await CreateAsync(factory);
         var request = s.ReceiptBody(Guid.NewGuid(), [measured], unit: unit);
-        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", request);
+        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
+        await s.ConfirmArrivalAsync(receipt);
         var lot = Lots(receipt)[0];
         Assert.Equal(decimal.Parse(kg, CultureInfo.InvariantCulture), Quantity(await s.LotAsync(lot)));
         Assert.Equal(decimal.Parse(measured, CultureInfo.InvariantCulture), await ScalarAsync<decimal>("SELECT (details->>'originalQuantity')::numeric FROM ledger.events WHERE lot_id=@id AND kind='RECEIPT'", lot));
         Assert.Equal(unit, await ScalarAsync<string>("SELECT details->>'originalUnit' FROM ledger.events WHERE lot_id=@id AND kind='RECEIPT'", lot));
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", request);
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
         Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE lot_id=@id", lot));
     }
 
@@ -78,7 +86,7 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
     {
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid();
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(id, [mass], unit: unit), HttpStatusCode.BadRequest);
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(id, [mass], unit: unit), HttpStatusCode.BadRequest);
         Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurements WHERE id=@id", id));
     }
 
@@ -143,17 +151,16 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         using var scope = factory.Services.CreateScope();
         var port = scope.ServiceProvider.GetRequiredService<IProcurementLedgerPort>();
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
-        foreach (var (company, actor, eventId) in new[]
+        foreach (var (actor, procurementId) in new[]
         {
-            (s.ForeignOwnerId, s.Accounts["foreignPurchaser"].User.Id, receipt.GetProperty("eventId").GetGuid()),
-            (s.OwnerId, s.Accounts["manager"].User.Id, receipt.GetProperty("eventId").GetGuid()),
-            (s.OwnerId, s.Accounts["purchaser"].User.Id, Guid.NewGuid())
+            (s.Accounts["foreignPurchaser"].User.Id, receipt.GetProperty("id").GetGuid()),
+            (s.Accounts["manager"].User.Id, receipt.GetProperty("id").GetGuid()),
+            (s.Accounts["purchaser"].User.Id, Guid.NewGuid())
         })
         {
             await using var transaction = await runtime.BeginTransactionAsync();
-            var error = await Assert.ThrowsAsync<PostgresException>(() => port.PostReceiptAsync(runtime, transaction, company, actor,
-                eventId, receipt.GetProperty("id").GetGuid(), s.CatalogCommodityId, s.FacilityId, s.LocationId,
-                [new(item.GetProperty("lotId").GetGuid(), item.GetProperty("lotCode").GetString()!, item.GetProperty("sourceLotId").GetGuid(), item.GetProperty("id").GetGuid(), 10m)], default));
+            var error = await Assert.ThrowsAsync<PostgresException>(() =>
+                port.RegisterPendingAsync(runtime, transaction, actor, procurementId, default));
             Assert.Contains(error.SqlState, new[] { PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.NoDataFound, PostgresErrorCodes.CheckViolation });
             await transaction.RollbackAsync();
         }
@@ -171,12 +178,13 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         var request = JsonSerializer.SerializeToNode(s.ReceiptBody(Guid.NewGuid(), ["1"]))!.AsObject();
         request["capturedAt"] = clockTime.ToString("O");
         request["payload"]!["receivedAt"] = clockTime.AddSeconds(-1).ToString("O");
-        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", request);
+        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
         var expected = new DateTimeOffset(clockTime.UtcTicks / 10 * 10, TimeSpan.Zero);
         Assert.Equal(expected, receipt.GetProperty("capturedAt").GetDateTimeOffset());
         Assert.Equal(expected, receipt.GetProperty("recordedAt").GetDateTimeOffset());
         Assert.Equal(expected.AddSeconds(-1), receipt.GetProperty("receivedAt").GetDateTimeOffset());
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", request);
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
+        await s.ConfirmArrivalAsync(receipt);
         Assert.Equal(1m, Quantity(await s.LotAsync(Lots(receipt)[0])));
     }
 
@@ -192,7 +200,7 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var requests = new[] { s.ReceiptBody(Guid.NewGuid(), ["1"]), s.ReceiptBody(Guid.NewGuid(), ["2"]) };
-            var replies = await Task.WhenAll(requests.Select(body => s.Purchaser.PostAsJsonAsync("/api/procurements/commit", body, deadline.Token)));
+            var replies = await Task.WhenAll(requests.Select(body => s.Purchaser.PostAsJsonAsync("/api/procurements", body, deadline.Token)));
             foreach (var reply in replies)
             {
                 using (reply) Assert.Equal(HttpStatusCode.Created, reply.StatusCode);

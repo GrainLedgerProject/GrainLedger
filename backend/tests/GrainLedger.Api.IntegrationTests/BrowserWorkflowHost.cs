@@ -18,6 +18,7 @@ public sealed class BrowserWorkflowHost
         await factory.InitializeAsync();
         using var scenario = await LedgerScenario.CreateAsync(factory);
         await scenario.ReceiptAsync("10");
+        var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -86,7 +87,7 @@ public sealed class BrowserWorkflowHost
                 isolationLocationId = scenario.IsolationLocationId, foreignLocationId = scenario.ForeignLocationId,
                 equipmentId = scenario.EquipmentId, commodityId = scenario.CommodityId, catalogCommodityId = scenario.CatalogCommodityId,
                 farmerId = scenario.FarmerId, seasonId = scenario.SeasonId, plotSeasonId = scenario.PlotSeasonId,
-                evidenceId = scenario.EvidenceId, accounts
+                evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(), accounts
             }, new JsonSerializerOptions { WriteIndented = true });
         try { await bridge.StartAsync(); await bridge.WaitForShutdownAsync(); }
         finally { File.Delete(sessionFile); await factory.DisposeAsync(); }

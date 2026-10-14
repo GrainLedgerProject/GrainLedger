@@ -41,7 +41,7 @@ Use `http://localhost:5173`; Vite proxies `/api` and `/signin-google` to backend
 - Treat configured Supabase databases as shared. Obtain explicit approval before running migrations, seeds, schema/role/grant changes, or data-changing smoke scenarios against them. Use isolated test containers for write-based verification.
 - `ConnectionStrings__GrainLedger` is the restricted runtime connection. `ConnectionStrings__GrainLedgerMigration` is migration-owner access, not normal application access. Never bypass runtime-role validation or use elevated credentials to make application startup succeed.
 - Never print or commit credentials, tokens, `.env`, or real evidence files. Never expose backend secrets through `VITE_` variables.
-- Capture owns official source records; it has no arrival-observation or receipt-correction endpoints. Do not convert historical synthetic records automatically or remove existing Ledger stock/history.
+- Capture owns official procurement source records; `POST /api/procurements` registers source expectation, while assigned-facility arrival measurement and review routes live in Ledger. Source status remains immutable `COMMITTED`; Ledger receiving projection supplies outward workflow state. Do not convert historical synthetic records automatically or alter existing Ledger stock/history.
 - Obtain explicit owner approval before shared database migrations, seeds, schema/role/grant changes or data-changing checks.
 
 ## Correctness boundaries

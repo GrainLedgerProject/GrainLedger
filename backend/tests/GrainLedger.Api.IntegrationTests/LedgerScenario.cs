@@ -23,7 +23,7 @@ internal sealed class LedgerScenario : IDisposable
     public Guid IsolationLocationId { get; private set; } = Guid.NewGuid();
     public Guid ForeignLocationId { get; private set; } = Guid.NewGuid();
     public Guid EquipmentId { get; private set; } = Guid.NewGuid();
-    public Guid CommodityId { get; private set; } = Guid.NewGuid();
+    public Guid CommodityId { get; private set; }
     public Guid CatalogCommodityId { get; private set; }
     public Guid FarmerId { get; private set; } = Guid.NewGuid();
     public Guid SeasonId { get; private set; } = Guid.NewGuid();
@@ -66,13 +66,20 @@ internal sealed class LedgerScenario : IDisposable
         {
             var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
             var paddy = await catalog.Commodities.SingleOrDefaultAsync(x => x.Code == "PADDY");
-            if (paddy is null) { paddy = new Commodity { Id = Guid.NewGuid(), Code = "PADDY", Name = "Paddy" }; catalog.Commodities.Add(paddy); }
+            if (paddy is null)
+            {
+                var created = await SendAsync(s.Admin, HttpMethod.Post, "/api/commodities", new { code = "PADDY", name = "Paddy" });
+                s.CatalogCommodityId = created.GetProperty("id").GetGuid();
+            }
+            else s.CatalogCommodityId = paddy.Id;
             foreach (var unit in new[] { "KG", "G", "T" })
                 if (!await catalog.MeasurementUnits.AnyAsync(x => x.Code == unit))
                     catalog.MeasurementUnits.Add(new MeasurementUnit { Id = Guid.NewGuid(), Code = unit, Name = unit, QuantityKind = "MASS" });
             await catalog.SaveChangesAsync();
-            s.CatalogCommodityId = paddy.Id;
         }
+        s.CommodityId = (await GetAsync(s.Admin, "/api/ledger/setup")).GetProperty("commodities").EnumerateArray()
+            .Single(x => x.GetProperty("catalogId").ValueKind == JsonValueKind.String &&
+                x.GetProperty("catalogId").GetGuid() == s.CatalogCommodityId).GetProperty("id").GetGuid();
         foreach (var label in new[] { "operator", "manager" })
             await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/assignments", new { userId = s.Accounts[label].User.Id, facilityId = s.FacilityId });
         await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/evidence", new { id = s.EvidenceId, ownerId = s.OwnerId, facilityId = s.FacilityId, fileName = "synthetic-test-policy.txt", contentType = "text/plain", contentBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("SYNTHETIC TEST ONLY. Not factory-approved policy. Physical verification test evidence.")) });
@@ -114,7 +121,8 @@ internal sealed class LedgerScenario : IDisposable
 
     public async Task<JsonElement> ReceiptAsync(params string[] quantities)
     {
-        var receipt = await SendAsync(Purchaser, HttpMethod.Post, "/api/procurements/commit", ReceiptBody(Guid.NewGuid(), quantities));
+        var receipt = await SendAsync(Purchaser, HttpMethod.Post, "/api/procurements", ReceiptBody(Guid.NewGuid(), quantities));
+        await ConfirmArrivalAsync(receipt);
         CommodityId = (await LotAsync(Lots(receipt)[0], Customer)).GetProperty("commodityId").GetGuid();
         return receipt;
     }
@@ -123,11 +131,35 @@ internal sealed class LedgerScenario : IDisposable
     {
         var client = Accounts["foreignPurchaser"].Client;
         var source = await RegisterSourceAsync(client, ForeignOwnerId);
-        var receipt = await SendAsync(client, HttpMethod.Post, "/api/procurements/commit",
+        var receipt = await SendAsync(client, HttpMethod.Post, "/api/procurements",
             ReceiptBody(Guid.NewGuid(), [quantity], locationId, farmerId: source.Farmer, plotSeasonId: source.PlotSeason));
+        if (locationId == ForeignLocationId)
+        {
+            var (operatorUser, session) = await Factory.SeedUserAsync(Roles.MillOperator, Accounts["operator"].User.OrganizationId);
+            using var foreignOperator = Factory.CreateRealCookieClient(operatorUser, session);
+            await CsrfAsync(foreignOperator);
+            await SendAsync(Admin, HttpMethod.Post, "/api/ledger/assignments", new { userId = operatorUser.Id, facilityId = ForeignFacilityId });
+            await SendAsync(foreignOperator, HttpMethod.Post, $"/api/ledger/receiving/{receipt.GetProperty("id").GetGuid()}/measurements", MeasurementBody(receipt));
+        }
+        else await ConfirmArrivalAsync(receipt);
         CommodityId = (await LotAsync(Lots(receipt)[0], ForeignCustomer)).GetProperty("commodityId").GetGuid();
         return receipt;
     }
+
+    public static object MeasurementBody(JsonElement receipt, int version = 0, string[]? actual = null, Guid? operationId = null, string observations = "Synthetic measured complete arrival") => new
+    {
+        operationId = operationId ?? Guid.NewGuid(), expectedReceivingVersion = version,
+        capturedAt = DateTimeOffset.UtcNow, observations,
+        items = receipt.GetProperty("items").EnumerateArray().Select((line, i) => new
+        {
+            procurementItemId = line.GetProperty("id").GetGuid(),
+            measuredValue = actual is null ? line.GetProperty("measuredValue").GetString()! : actual[i],
+            measuredUnit = actual is null ? line.GetProperty("measuredUnit").GetString()! : "KG"
+        }).ToArray()
+    };
+
+    public async Task<JsonElement> ConfirmArrivalAsync(JsonElement receipt) =>
+        await SendAsync(Operator, HttpMethod.Post, $"/api/ledger/receiving/{receipt.GetProperty("id").GetGuid()}/measurements", MeasurementBody(receipt));
 
     public static Guid[] Lots(JsonElement receipt) => receipt.GetProperty("items").EnumerateArray().Select(line => line.GetProperty("lotId").GetGuid()).ToArray();
     public static Guid[] Lines(JsonElement receipt) => receipt.GetProperty("items").EnumerateArray().Select(line => line.GetProperty("id").GetGuid()).ToArray();

@@ -2,10 +2,10 @@ import { useState, type ReactNode } from 'react';
 import { api, errorMessage } from './api';
 
 export type Row = Record<string, any>;
-export type Lookup = { facilities: Row[]; locations: Row[]; commodities: Row[]; equipment: Row[] };
+export type Lookup = { owners: Row[]; facilities: Row[]; locations: Row[]; commodities: Row[]; equipment: Row[] };
 export type Lot = { id: string; code: string; ownerId: string; commodityId: string; stage: string; productIdentity: string | null; positions: Row[]; restrictions: string[]; contributions?: Row[]; history?: Row[] };
 export type Operation = { id: string; ownerId: string; facilityId: string; kind: string; occurredAt: string; equipmentId: string; inputs: Row[]; outputs: Row[]; declaredLossKg: string; status: string; version: string; confirmedVersion?: string | null; varianceKg?: string | null; allowedVarianceKg?: string | null };
-export const emptyLookup: Lookup = { facilities: [], locations: [], commodities: [], equipment: [] };
+export const emptyLookup: Lookup = { owners: [], facilities: [], locations: [], commodities: [], equipment: [] };
 export const kinds = ['DRYING', 'MILLING', 'MERGE', 'BLENDING', 'BAGGING'];
 export const stages = ['RAW_PADDY', 'DRIED_PADDY', 'HEAD_RICE', 'BROKEN_RICE', 'BRAN', 'HUSK', 'BLENDED_RICE', 'BAGGED_RICE'];
 export const products = ['HEAD_RICE', 'BROKEN_RICE', 'BLENDED_RICE'];

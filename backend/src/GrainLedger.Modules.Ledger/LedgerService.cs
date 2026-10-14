@@ -62,6 +62,24 @@ public sealed class LedgerService(IConfiguration configuration, IHttpContextAcce
         var value = await ExecuteAsync(connection, null, "SELECT ledger.read($1,$2,$3)::text", ct, actor, action, payload);
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
+    public async Task<JsonElement> ReceivingAsync(string action, JsonObject payload, CancellationToken ct = default)
+    {
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        object? value;
+        if (action == "tasks")
+            value = await ExecuteAsync(connection, null, "SELECT ledger.receiving_tasks($1,$2,$3,$4)::text", ct,
+                actor, payload["facilityId"]!.GetValue<Guid>(), payload["page"]!.GetValue<int>(), payload["pageSize"]!.GetValue<int>());
+        else if (action == "detail")
+            value = await ExecuteAsync(connection, null, "SELECT ledger.receiving_detail($1,$2)::text", ct, actor, payload["id"]!.GetValue<Guid>());
+        else
+        {
+            var id = payload["id"]!.GetValue<Guid>();
+            payload.Remove("id");
+            value = await ExecuteAsync(connection, null, "SELECT ledger.arrival_command($1,$2,$3,$4)::text", ct, actor, id, action, payload);
+        }
+        return JsonSerializer.Deserialize<JsonElement>((string)value!);
+    }
     public async Task<bool> CanAccessEvidenceAsync(Guid evidenceId, Guid ownerId, Guid facilityId, CancellationToken ct = default)
     {
         await using var connection = await OpenAsync(ct);

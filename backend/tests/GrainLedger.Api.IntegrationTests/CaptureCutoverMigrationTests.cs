@@ -77,8 +77,39 @@ public sealed class CaptureCutoverMigrationTests
             """;
         await using var history = new NpgsqlCommand(historySql, owner);
         var before = await history.ExecuteScalarAsync();
+        await ledger.GetService<IMigrator>().MigrateAsync("20261014010000_UseOfficialCaptureBoundary");
+        var sameNameCatalog = Guid.NewGuid(); var mappedCatalog = Guid.NewGuid(); var mappedLedger = Guid.NewGuid();
+        catalog.Commodities.AddRange(
+            new Commodity { Id = sameNameCatalog, Code = "HISTORY", Name = "Historical commodity" },
+            new Commodity { Id = mappedCatalog, Code = "MAPPED", Name = "Canonical existing mapping" });
+        await catalog.SaveChangesAsync();
+        await using (var existingCommodity = new NpgsqlCommand("INSERT INTO ledger.commodities VALUES($1,'Old generated Catalog label')", owner))
+        {
+            existingCommodity.Parameters.AddWithValue(mappedLedger);
+            await existingCommodity.ExecuteNonQueryAsync();
+        }
+        await using (var existingMapping = new NpgsqlCommand("INSERT INTO ledger.catalog_commodities VALUES($1,$2)", owner))
+        {
+            existingMapping.Parameters.AddWithValue(mappedCatalog);
+            existingMapping.Parameters.AddWithValue(mappedLedger);
+            await existingMapping.ExecuteNonQueryAsync();
+        }
         await ledger.Database.MigrateAsync();
         Assert.Equal(before, await history.ExecuteScalarAsync());
+        await using (var mappings = new NpgsqlCommand("""
+            SELECT EXISTS(SELECT 1 FROM ledger.catalog_commodities WHERE catalog_commodity_id=$1 AND ledger_commodity_id<>$2)
+                AND EXISTS(SELECT 1 FROM ledger.catalog_commodities WHERE catalog_commodity_id=$3 AND ledger_commodity_id=$4)
+                AND NOT EXISTS(SELECT 1 FROM ledger.catalog_commodities WHERE ledger_commodity_id=$2)
+                AND EXISTS(SELECT 1 FROM ledger.commodities WHERE id=$2 AND name='Historical commodity')
+                AND EXISTS(SELECT 1 FROM jsonb_array_elements(ledger.read($5,'lookups','{}')->'commodities') c
+                    WHERE (c->>'id')::uuid=$4 AND c->>'name'='Canonical existing mapping' AND c->>'code'='MAPPED')
+            """, owner))
+        {
+            mappings.Parameters.AddWithValue(sameNameCatalog); mappings.Parameters.AddWithValue(commodity);
+            mappings.Parameters.AddWithValue(mappedCatalog); mappings.Parameters.AddWithValue(mappedLedger);
+            mappings.Parameters.AddWithValue(actor.Id);
+            Assert.Equal(true, await mappings.ExecuteScalarAsync());
+        }
         await using var retained = new NpgsqlCommand("SELECT payload FROM capture_mock.retained_history WHERE id=1", owner);
         Assert.Equal("retain exactly", await retained.ExecuteScalarAsync());
         await using var restrictions = new NpgsqlCommand("SELECT ledger.blocked(@lot),ledger.receiving_restricted(@lot)", owner);

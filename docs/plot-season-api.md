@@ -11,6 +11,8 @@ Do not send `?companyId=` with an empty value. A present but empty or invalid co
 3. The client submits `POST /api/plot-seasons` with the same offline envelope as Farmer and Plot. The user enters only the rice variety and selects the plot and season; the client supplies the UUIDs and capture metadata.
 4. Use `GET /api/plot-seasons?plotId={id}&seasonId={id}` or `GET /api/plot-seasons/{id}` to read the result.
 
+In the web Ledger, **Setup** combines the commodity/unit Catalog with facility setup. **Receive stock** exposes source records to `farms.read`/`farms.write` users, source registration to `farms.write`, and procurement entry only with `purchases.write` and source-read access. Administrators select a customer company before creating its crop season there. Source registration steps are farmer, plot, administrator-created crop-season prerequisite, then plot-season link with rice variety; the season does not depend on a plot. Source-record pagination also supplies the current selection options.
+
 Example registration request:
 
 ```json

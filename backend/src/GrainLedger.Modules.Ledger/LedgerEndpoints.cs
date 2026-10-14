@@ -20,7 +20,21 @@ public static class LedgerEndpoints
         group.MapGet("/lots/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("lot", new JsonObject { ["lotId"] = id }, ct)));
         group.MapGet("/operations/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("operation", new JsonObject { ["id"] = id }, ct)));
         group.MapGet("/history", async (Guid? lotId, Guid? facilityId, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("history", new JsonObject { ["lotId"] = lotId, ["facilityId"] = facilityId }, ct)));
-        foreach (var route in new[] { "facilities", "locations", "equipment", "commodities", "assignments", "policies", "compatibilities" })
+        group.MapGet("/receiving-tasks", async (Guid facilityId, int? page, int? pageSize, LedgerService ledger, CancellationToken ct) =>
+            Results.Ok(await ledger.ReceivingAsync("tasks", new JsonObject { ["facilityId"] = facilityId, ["page"] = page ?? 1, ["pageSize"] = pageSize ?? 25 }, ct)));
+        group.MapGet("/receiving/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) =>
+            Results.Ok(await ledger.ReceivingAsync("detail", new JsonObject { ["id"] = id }, ct)));
+        group.MapPost("/receiving/{id:guid}/measurements", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) =>
+        {
+            request["id"] = id;
+            return Results.Ok(await ledger.ReceivingAsync("measurements", request, ct));
+        }).RequireAuthorization("lots.receive");
+        group.MapPost("/receiving/{id:guid}/reviews", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) =>
+        {
+            request["id"] = id;
+            return Results.Ok(await ledger.ReceivingAsync("reviews", request, ct));
+        }).RequireAuthorization("receiving.reconcile");
+        foreach (var route in new[] { "facilities", "locations", "equipment", "assignments", "policies", "compatibilities" })
         {
             var action = route;
             group.MapPost('/' + route, async (JsonObject request, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.CommandAsync(action, request, ct))).RequireAuthorization("platform.configure");

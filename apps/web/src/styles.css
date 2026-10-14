@@ -148,3 +148,16 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
 @media (max-width: 1100px) { .sidebar { width: 213px; padding: 24px 15px; } .content { padding: 32px 24px; } .topbar { padding: 15px 24px; } .panel { padding: 22px; } .login-story { padding: 38px; } }
 @media (max-width: 850px) { .profile-grid { grid-template-columns: 1fr; } .stack { grid-template-columns: 1fr 1fr; } .sidebar { width: 185px; } .sidebar .brand { font-size: 17px; } .sidebar .brand-icon { font-size: 29px; } .organization-form { grid-template-columns: 1fr; } .login-story { padding: 32px; } .login-form { padding: 32px; } .login-story h1 { letter-spacing: -2px; } .story-footer span { display: none; } }
 @media (max-width: 620px) { .login-layout { grid-template-columns: 1fr; } .login-story { min-height: auto; gap: 36px; padding: 25px; } .login-story h1 { font-size: 43px; } .login-story .story-footer { display: none; } .login-form { padding: 38px 25px; } .workspace { flex-direction: column; } .sidebar { width: 100%; padding: 12px 20px; flex-direction: row; justify-content: space-between; align-items: center; gap: 10px; } .nav-caption, .sidebar-bottom { display: none; } nav { display: flex; } nav button { font-size: 11px; padding: 9px 7px; } nav button span { display: none; } .topbar { min-height: 61px; padding: 12px 20px; font-size: 10px; } .content { padding: 28px 20px; } .stack { grid-template-columns: 1fr; } .section-toolbar { align-items: start; } .form-columns { grid-template-columns: 1fr; gap: 0; } .separator { margin: 0 5px; } h1 { font-size: 28px; } }
+@media (max-width: 620px) {
+  .workspace, .workspace-body, .content, .ledger-workspace { min-width: 0; max-width: 100%; }
+  .sidebar { min-width: 0; overflow: hidden; }
+  nav { min-width: 0; max-width: 100%; overflow-x: auto; flex: 1; scrollbar-width: thin; }
+  nav button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
+  .content { padding: 20px 14px; }
+  .ledger-workspace .panel { padding: 16px; }
+  .ledger-workspace form, .ledger-workspace fieldset { min-width: 0; }
+  .ledger-workspace button { min-height: 44px; }
+  .ledger-workspace .table-scroll { max-width: 100%; overflow-x: auto; }
+  .ledger-workspace table { min-width: 620px; }
+  .ledger-workspace summary { padding: 8px 0; }
+}

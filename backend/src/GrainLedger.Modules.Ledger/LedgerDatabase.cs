@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using GrainLedger.Modules.Capture;
+using GrainLedger.Modules.Catalogs;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
@@ -72,6 +73,35 @@ public sealed class UseOfficialCaptureBoundary : Migration
         throw new NotSupportedException("Official Capture cutover preserves immutable history and cannot be reversed.");
 }
 
+[DbContext(typeof(LedgerDbContext))]
+[Migration("20261014020000_CanonicalCatalogCommodities")]
+public sealed class CanonicalCatalogCommodities : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        using var stream = typeof(CanonicalCatalogCommodities).Assembly.GetManifestResourceStream("GrainLedger.Modules.Ledger.Sql.CanonicalCatalog.sql")!;
+        using var reader = new StreamReader(stream);
+        migrationBuilder.Sql(reader.ReadToEnd());
+    }
+
+    protected override void Down(MigrationBuilder migrationBuilder) =>
+        throw new NotSupportedException("Canonical Catalog mapping preserves immutable stock identities and cannot be reversed.");
+}
+
+[DbContext(typeof(LedgerDbContext))]
+[Migration("20261014190000_PhysicalReceiving")]
+public sealed class PhysicalReceiving : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        using var stream = typeof(PhysicalReceiving).Assembly.GetManifestResourceStream("GrainLedger.Modules.Ledger.Sql.PhysicalReceiving.sql")!;
+        using var reader = new StreamReader(stream);
+        migrationBuilder.Sql(reader.ReadToEnd());
+    }
+    protected override void Down(MigrationBuilder migrationBuilder) =>
+        throw new NotSupportedException("Physical receiving preserves immutable source and arrival history and cannot be reversed.");
+}
+
 public static class LedgerDatabase
 {
     public static async Task ConfigureRuntimeRoleAsync(string connectionString, string runtimeRole, CancellationToken ct = default)
@@ -124,7 +154,11 @@ public static class LedgerDatabase
             {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
                 ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.lock_writes(),
-                ledger.procurement_receipt(uuid,uuid,uuid,uuid,uuid,uuid,uuid,jsonb),
+                ledger.provision_catalog_commodities(uuid),
+                ledger.register_pending_procurement(uuid,uuid),
+                ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
+                ledger.procurement_stock(uuid,uuid),
+                ledger.arrival_command(uuid,uuid,text,jsonb),
                 ledger.can_read_lot(uuid,uuid),ledger.assigned(uuid,uuid),
                 ledger.own(uuid,uuid),ledger.role(uuid)
             TO {role};
@@ -138,6 +172,7 @@ public static class LedgerDatabase
             ) OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
                 AND has_schema_privilege($1,n.oid,'CREATE'))
               OR has_function_privilege($1,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
+              OR has_function_privilege($1,'ledger.provision_catalog_commodity(uuid)','EXECUTE')
             """, connection);
         inherited.Parameters.AddWithValue(runtimeRole);
         if (Equals(await inherited.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("Runtime role inherits unsafe module mutation authority; remove inherited grants before deployment.");
@@ -178,13 +213,16 @@ public static class LedgerDatabase
                     OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
                         AND has_schema_privilege(r.oid,n.oid,'CREATE'))
                     OR has_function_privilege(r.oid,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
+                    OR has_function_privilege(r.oid,'ledger.provision_catalog_commodity(uuid)','EXECUTE')
                 )
             )
             """, connection);
         if (Equals(await command.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("API database role must not be superuser, schema/table owner or owner-role member. Configure separate migration and runtime credentials.");
         await using var required = new NpgsqlCommand("""
-            SELECT has_function_privilege(current_user,'ledger.procurement_receipt(uuid,uuid,uuid,uuid,uuid,uuid,uuid,jsonb)','EXECUTE')
+            SELECT has_function_privilege(current_user,'ledger.register_pending_procurement(uuid,uuid)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.arrival_command(uuid,uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.lock_writes()','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.provision_catalog_commodities(uuid)','EXECUTE')
                AND has_schema_privilege(current_user,'capture','USAGE')
                AND has_schema_privilege(current_user,'catalog','USAGE')
                AND has_table_privilege(current_user,'capture.procurements','SELECT,INSERT')
@@ -204,6 +242,7 @@ public static class LedgerModuleRegistration
             n => n.MigrationsAssembly(typeof(LedgerDbContext).Assembly.FullName).MigrationsHistoryTable("__EFMigrationsHistory", "ledger")));
         services.AddScoped<LedgerService>();
         services.AddScoped<IProcurementLedgerPort, ProcurementLedgerPort>();
+        services.AddScoped<ICommodityLedgerPort, CommodityLedgerPort>();
         return services;
     }
 }

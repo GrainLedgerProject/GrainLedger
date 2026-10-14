@@ -1,6 +1,6 @@
 # Ledger implementation and verification
 
-Status: Ledger supports protected stock, processing, history and evidence; official Capture farmer and procurement workflows are integrated with Ledger stock. Capture route contract is in [procurement-api.md](procurement-api.md). No automatic migration or conversion of prior synthetic source records/history occurs; existing Ledger stock/history remains. Official Capture has no arrival-observation, receiving-correction or receipt-correction endpoints. Shared-database migrations, seeds and schema/role/grant changes require explicit database-owner approval.
+Status: Procurement registers source expectation without creating usable Ledger stock; arrival becomes stock only after assigned MillOperator exact-match confirmation or assigned MillManager evidence-backed shortage approval. Capture route contract is in [procurement-api.md](procurement-api.md). Existing historical source evidence and stock are grandfathered and unchanged; receiving migration applies to new workflow records and does not retroactively freeze or reinterpret legacy stock. Shared-database migrations, seeds and schema/role/grant changes require explicit database-owner approval.
 
 ## 1. Scope and sources
 
@@ -10,8 +10,7 @@ Confirmed decisions:
 - Deliver usable ledger with real prerequisites and basic working UI.
 - Adopt qualified stage matrix as implementation baseline, not factory approval.
 - Keep operational tolerance unconfigured until confirmed; synthetic values only for clearly labeled tests/demo.
-- Record and block receiving discrepancies only where approved Capture endpoints exist; current official Capture has no arrival-observation or receiving-correction API.
-- Correct unused procurement receipts with immutable evidence and provenance only when correction endpoint and approved workflow exist; current Capture has no receipt-correction API.
+- One procurement represents one complete arrival; use separate procurement per load. No truck model, partial arrivals, customer settlement, tolerance, or surplus acceptance.
 - Give Mill Operators task-scoped reads in assigned facilities, never customer-wide access.
 - Fail closed where approved business rules or API contracts are absent.
 - Preserve accepted deferred reservation-correction contract: correction `RELEASE` requires correction correlation but no movement linkage; only `CONSUME` and `REVERSE_CONSUME` require movement linkage. Reservation implementation remains excluded from this milestone.
@@ -57,13 +56,12 @@ Administrator manages platform/accounts, but has no inherited processing, varian
 
 ### Receipt and receiving
 
-Official Capture source routes include `/api/farmers`, `/api/plots`, `/api/crop-seasons`, `/api/plot-seasons`; procurement contract is `/api/procurement-reference-data`, `/api/procurements/commit`, `/api/procurements`, `/api/procurements/{id}`, and `/api/source-lots/{id}`. Procurement commit persists Capture source records and writes corresponding Ledger stock atomically using persisted Catalog-to-Ledger commodity mapping. Historical synthetic records are not converted; existing Ledger stock/history remains.
+Procurement contract uses `POST /api/procurements` for source registration, `GET /api/ledger/receiving-tasks?facilityId={id}&page=1&pageSize=25` and `GET /api/ledger/receiving/{id}` for assigned-facility task/detail, and `POST /api/ledger/receiving/{id}/measurements` and `/reviews` for operator arrival and manager decisions. Exact DTO fields, status names, and migration marker are in [procurement API](procurement-api.md).
 
-- Procurement lines commit one RAW_PADDY source lot and matching protected initial stock per accepted line, atomically with source records.
-- Persist measurement as decimal strings with supported catalog mass units KG, G, T and exact positive `numeric(20,6)` kg normalization; inexact conversion, precision excess and overflow fail.
-- Farmer, plot, season, owner, plot-season, commodity and lot provenance agree. Receipt items and normalized rows stay coherent at commit.
-- Same operation ID and content returns prior result; changed content returns conflict.
-- Official Capture currently has no arrival-observation, receiving-correction/investigation or procurement-receipt-correction endpoints. No corresponding UI/API workflow is available; fail closed.
+- One procurement is one complete arrival, with separate procurement per load and no truck model. Operator submits a complete actual-mass set for every line. Exact normalized match confirms arrival and posts actual mass; any mismatch remains pending review with no stock.
+- Manager review requires reason and evidence scoped to procurement owner and assigned facility. `APPROVE_SHORTAGE` is valid only if every line is at or below expected and at least one is short; it posts actual mass only. `REQUEST_REMEASUREMENT` appends request/observations; `KEEP_BLOCKED` leaves unexplained shortage/surplus without stock. No tolerance or surplus acceptance.
+- Persist exact decimal strings and normalize supported catalog mass units to positive `numeric(20,6)` kg without rounding. Preserve immutable source expectation separately from actual measurements and append-only measurement/review history.
+- Registration, complete measurements, manager decision and accepted stock posting use one shared transaction and Ledger advisory lock `714928352` at `READ COMMITTED`; accepted actual mass and receiving transition are atomic. `receivingVersion` begins at 0 and increments on mutation; stale version/set conflicts. Same operation ID, canonical payload and actor replays saved result; changed payload conflicts.
 
 ### Operations, variance, units and lineage
 
@@ -102,18 +100,15 @@ Milling records positive fractions actually produced, not fabricated four output
 
 ## 5. Verification and acceptance
 
-Required current-suite coverage: concurrency/overspend and atomic rollback; authorization and facility scope; idempotency/conflict; policy/compatibility fail closed; variance confirmation invalidation; exact lineage rounding; transfer identity; HOLD and processing-correction races; immutable evidence/history and one-time reversal; unit precision and coherent Capture procurement; runtime direct-mutation denial; actual byproducts and product identity. Integration tests use PostgreSQL/Testcontainers, not in-memory DB. Arrival/reconciliation/receipt-correction workflow tests are not current supported acceptance because official Capture lacks those endpoints.
+Required current-suite coverage: concurrency/overspend and atomic rollback; authorization and facility scope; idempotency/conflict; policy/compatibility fail closed; variance confirmation invalidation; exact lineage rounding; transfer identity; HOLD and processing-correction races; immutable evidence/history and one-time reversal; unit precision and procurement registration without stock; exact arrival, mismatch block, shortage approval, append-only remeasurement, unresolved discrepancy, stale version/set, scoped evidence, and runtime direct-mutation denial. Integration tests use PostgreSQL/Testcontainers, not in-memory DB.
 
-Historical nine-step synthetic workflow: prior test description, not current official Capture acceptance. It included synthetic setup, receipt, processing, mass-balance/lineage and scope assertions; arrival observation and receipt correction are unsupported by official Capture and are not active workflows.
-
-Previously reported verification below is historical only and does not establish current unsupported workflows or current migration acceptance.
+Historical synthetic workflow descriptions and earlier arrival/correction browser reports are historical only; they do not establish current receiving behavior or migration acceptance. Historical Capture rows with `receiving_workflow IS NULL` and existing Ledger stock remain grandfathered unchanged; migration does not retrofit workflow freezes.
 
 Earlier implementation owner reported completed checks; documentation owner did not rerun them. Historical results:
 
 - Initial `dotnet build GrainLedger.slnx` succeeded; earlier `dotnet test GrainLedger.slnx --no-build`: 87 passed, 0 failed.
 - Earlier `npm test`: 14 passed; `npm run build` passed.
-- Earlier synthetic browser workflows exercised receipts, arrival discrepancy, receipt correction, processing correction, HOLD and scope denials. Arrival and receipt-correction flows are historical and unavailable through official Capture.
-- Earlier synthetic Capture cutover reports included synthetic receipt tests/browser actions; they are historical only and do not establish current official Capture corrections or current migration acceptance.
+- Earlier synthetic browser and cutover reports are historical only; they do not verify current physical receiving behavior or its migration.
 
 No current checks were run by documentation owner. Live Google consent, factory approval and real-stock pilot approval are not established by historical checks.
 
@@ -134,7 +129,7 @@ Backend integration tests require Docker/Testcontainers. Browser test host is te
 | --- | --- | --- |
 | Tolerance | No confirmed effective policy → no processing commit, even exact balance. Synthetic values only in test/demo. | Confirmed operation percentage/effective date/evidence. |
 | Compatibility | No explicit compatible input-product rule → no blend. | Approved combinations/output identity. |
-| Receiving shortage/gain | No current arrival-observation or correction endpoint; no balance adjustment. | Approved Capture contract, evidence, authority and accounting treatment. |
+| Receiving discrepancy | Exact match posts measured actual; manager shortage approval posts actual only; remeasurement appends; unexplained mismatch/surplus stays blocked without stock. | No tolerance, customer settlement, partial arrival, or surplus approval. |
 | Byproduct dispatch/disposal | Outputs remain stock, no fabricated outbound posting or hiding in loss. | Approved dispatch/disposal workflow. |
 | HOLD release | No release action; response/isolation/read/correction do not clear it. | Explicit authority/evidence/audit/multi-HOLD rule. |
 | Receipt correction | No current correction endpoint; existing stock/source history remains unchanged. | Approved endpoint and reviewed provenance workflow. |

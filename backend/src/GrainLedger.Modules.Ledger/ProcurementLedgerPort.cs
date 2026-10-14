@@ -9,7 +9,6 @@ namespace GrainLedger.Modules.Ledger;
 
 public sealed class ProcurementLedgerPort(IConfiguration configuration) : IProcurementLedgerPort
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken ct)
     {
         var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
@@ -57,33 +56,29 @@ public sealed class ProcurementLedgerPort(IConfiguration configuration) : IProcu
         return Equals(await command.ExecuteScalarAsync(ct), true);
     }
 
-    public async Task PostReceiptAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
-        Guid companyId, Guid actorId, Guid eventId, Guid procurementId, Guid commodityId,
-        Guid collectionSiteId, Guid receivingLocationId, IReadOnlyList<ProcurementStockLine> lines, CancellationToken ct)
+    public async Task RegisterPendingAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid actorId, Guid procurementId, CancellationToken ct)
     {
         if (transaction.Connection != connection) throw new InvalidOperationException("Caller-owned transaction required.");
-        await using var command = new NpgsqlCommand("SELECT ledger.procurement_receipt($1,$2,$3,$4,$5,$6,$7,$8)", connection, transaction);
+        await using var command = new NpgsqlCommand("SELECT ledger.register_pending_procurement($1,$2)", connection, transaction);
         command.Parameters.AddWithValue(actorId);
-        command.Parameters.AddWithValue(companyId);
-        command.Parameters.AddWithValue(eventId);
         command.Parameters.AddWithValue(procurementId);
-        command.Parameters.AddWithValue(commodityId);
-        command.Parameters.AddWithValue(collectionSiteId);
-        command.Parameters.AddWithValue(receivingLocationId);
-        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Jsonb,
-            Value = JsonSerializer.Serialize(lines, JsonOptions) });
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<ProcurementReceivingState?> GetReceivingStateAsync(Guid procurementId, CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct);
+        await using var command = new NpgsqlCommand("SELECT status,version FROM ledger.receiving WHERE procurement_id=$1", connection);
+        command.Parameters.AddWithValue(procurementId);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? new(reader.GetString(0), reader.GetInt32(1)) : null;
     }
 
     public async Task<IReadOnlyList<ProcurementStockPosition>> GetCurrentStockAsync(Guid companyId, Guid lotId, CancellationToken ct)
     {
         await using var connection = await OpenAsync(ct);
-        await using var command = new NpgsqlCommand("""
-            SELECT p.location_id,p.quantity_kg FROM capture.source_lots s
-            LEFT JOIN ledger.lots l ON l.id=s.lot_id AND l.owner_id=s.company_id
-            LEFT JOIN ledger.positions p ON p.lot_id=l.id
-            WHERE s.lot_id=$2 AND s.company_id=$1 ORDER BY p.location_id
-            """, connection);
+        await using var command = new NpgsqlCommand("SELECT location_id,on_hand_kg,available_kg FROM ledger.procurement_stock($1,$2) ORDER BY location_id", connection);
         command.Parameters.AddWithValue(companyId);
         command.Parameters.AddWithValue(lotId);
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -91,7 +86,8 @@ public sealed class ProcurementLedgerPort(IConfiguration configuration) : IProcu
         while (await reader.ReadAsync(ct))
         {
             if (reader.IsDBNull(0)) throw new ProcurementLedgerUnavailableException();
-            positions.Add(new(reader.GetGuid(0), reader.GetDecimal(1).ToString("0.######", CultureInfo.InvariantCulture)));
+            positions.Add(new(reader.GetGuid(0), reader.GetDecimal(1).ToString("0.######", CultureInfo.InvariantCulture),
+                reader.GetDecimal(2).ToString("0.######", CultureInfo.InvariantCulture)));
         }
         return positions;
     }
