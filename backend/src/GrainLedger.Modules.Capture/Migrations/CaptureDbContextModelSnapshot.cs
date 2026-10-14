@@ -326,6 +326,175 @@ namespace GrainLedger.Modules.Capture.Migrations
                     b.ToTable("plot_seasons", "capture");
                 });
 
+            modelBuilder.Entity("GrainLedger.Modules.Capture.Procurement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<Guid>("CollectionSiteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("collection_site_id");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<Guid?>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<Guid>("FarmerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("farmer_id");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received_at");
+
+                    b.Property<Guid>("ReceivedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("received_by");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_procurements_company_code");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_procurements_company_id");
+
+                    b.HasIndex("CompanyId", "ReceivedAt", "Id");
+
+                    b.ToTable("procurements", "capture", t =>
+                        {
+                            t.HasCheckConstraint("ck_procurements_status", "status IN ('DRAFT', 'COMMITTED')");
+                        });
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Capture.ProcurementItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<int>("LineNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("line_no");
+
+                    b.Property<string>("MeasuredUnit")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("measured_unit");
+
+                    b.Property<decimal>("MeasuredValue")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("measured_value");
+
+                    b.Property<decimal>("MoisturePercent")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("moisture_percent");
+
+                    b.Property<decimal>("NetMassKg")
+                        .HasPrecision(20, 6)
+                        .HasColumnType("numeric(20,6)")
+                        .HasColumnName("net_mass_kg");
+
+                    b.Property<Guid>("PlotSeasonId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("plot_season_id");
+
+                    b.Property<Guid>("ProcurementId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("procurement_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlotSeasonId");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_procurement_items_company_id");
+
+                    b.HasIndex("ProcurementId", "LineNo")
+                        .IsUnique()
+                        .HasDatabaseName("ux_procurement_items_receipt_line");
+
+                    b.ToTable("procurement_items", "capture", t =>
+                        {
+                            t.HasCheckConstraint("ck_procurement_items_line_no", "line_no > 0");
+
+                            t.HasCheckConstraint("ck_procurement_items_measured", "measured_value > 0");
+
+                            t.HasCheckConstraint("ck_procurement_items_moisture", "moisture_percent >= 0 AND moisture_percent <= 100");
+
+                            t.HasCheckConstraint("ck_procurement_items_net_mass", "net_mass_kg > 0");
+                        });
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Capture.SourceLot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<Guid>("LotId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lot_id");
+
+                    b.Property<Guid>("ProcurementItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("procurement_item_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LotId")
+                        .IsUnique();
+
+                    b.HasIndex("ProcurementItemId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_source_lots_company_id");
+
+                    b.ToTable("source_lots", "capture");
+                });
+
             modelBuilder.Entity("GrainLedger.Modules.Capture.SprayDeclaration", b =>
                 {
                     b.Property<Guid>("Id")

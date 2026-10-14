@@ -29,6 +29,7 @@ public static class CaptureModule
             if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("ConnectionStrings:GrainLedger is required.");
             options.UseNpgsql(connection, n => n.MigrationsAssembly(typeof(CaptureDbContext).Assembly.FullName));
         });
+        services.AddScoped<IProcurementLedgerPort, UnconfiguredProcurementLedgerPort>();
         return services;
     }
 
@@ -43,6 +44,7 @@ public static class CaptureModule
         endpoints.MapCropSeasonEndpoints();
         endpoints.MapPlotSeasonEndpoints();
         endpoints.MapSprayDeclarationEndpoints();
+        endpoints.MapProcurementEndpoints();
         return endpoints;
     }
 

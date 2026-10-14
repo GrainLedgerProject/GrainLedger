@@ -50,6 +50,9 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
     public DbSet<PlotSeason> PlotSeasons => Set<PlotSeason>();
     public DbSet<SprayDeclaration> SprayDeclarations => Set<SprayDeclaration>();
     public DbSet<SprayItem> SprayItems => Set<SprayItem>();
+    public DbSet<Procurement> Procurements => Set<Procurement>();
+    public DbSet<ProcurementItem> ProcurementItems => Set<ProcurementItem>();
+    public DbSet<SourceLot> SourceLots => Set<SourceLot>();
     public DbSet<CaptureOperation> OfflineOperations => Set<CaptureOperation>();
     public DbSet<CaptureBusinessEvent> BusinessEvents => Set<CaptureBusinessEvent>();
 
@@ -142,6 +145,59 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_spray_items_company_id");
             b.HasIndex(x => x.DeclarationId);
             b.HasIndex(x => x.SubstanceId);
+        });
+        modelBuilder.Entity<Procurement>(b =>
+        {
+            b.ToTable("procurements", table => table.HasCheckConstraint("ck_procurements_status", "status IN ('DRAFT', 'COMMITTED')"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.Code).HasColumnName("code").HasMaxLength(40).IsRequired();
+            b.Property(x => x.FarmerId).HasColumnName("farmer_id");
+            b.Property(x => x.CollectionSiteId).HasColumnName("collection_site_id");
+            b.Property(x => x.ReceivedBy).HasColumnName("received_by");
+            b.Property(x => x.ReceivedAt).HasColumnName("received_at");
+            b.Property(x => x.Status).HasColumnName("status").HasMaxLength(32).IsRequired();
+            b.Property(x => x.EventId).HasColumnName("event_id");
+            b.HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasDatabaseName("ux_procurements_company_code");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_procurements_company_id");
+            b.HasIndex(x => x.EventId).IsUnique();
+            b.HasIndex(x => new { x.CompanyId, x.ReceivedAt, x.Id });
+        });
+        modelBuilder.Entity<ProcurementItem>(b =>
+        {
+            b.ToTable("procurement_items", table =>
+            {
+                table.HasCheckConstraint("ck_procurement_items_net_mass", "net_mass_kg > 0");
+                table.HasCheckConstraint("ck_procurement_items_measured", "measured_value > 0");
+                table.HasCheckConstraint("ck_procurement_items_moisture", "moisture_percent >= 0 AND moisture_percent <= 100");
+                table.HasCheckConstraint("ck_procurement_items_line_no", "line_no > 0");
+            });
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.ProcurementId).HasColumnName("procurement_id");
+            b.Property(x => x.LineNo).HasColumnName("line_no");
+            b.Property(x => x.PlotSeasonId).HasColumnName("plot_season_id");
+            b.Property(x => x.NetMassKg).HasColumnName("net_mass_kg").HasPrecision(20, 6);
+            b.Property(x => x.MeasuredValue).HasColumnName("measured_value").HasPrecision(24, 12);
+            b.Property(x => x.MeasuredUnit).HasColumnName("measured_unit").HasMaxLength(20).IsRequired();
+            b.Property(x => x.MoisturePercent).HasColumnName("moisture_percent").HasPrecision(24, 12);
+            b.HasIndex(x => new { x.ProcurementId, x.LineNo }).IsUnique().HasDatabaseName("ux_procurement_items_receipt_line");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_procurement_items_company_id");
+            b.HasIndex(x => x.PlotSeasonId);
+        });
+        modelBuilder.Entity<SourceLot>(b =>
+        {
+            b.ToTable("source_lots");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.LotId).HasColumnName("lot_id");
+            b.Property(x => x.ProcurementItemId).HasColumnName("procurement_item_id");
+            b.HasIndex(x => x.LotId).IsUnique();
+            b.HasIndex(x => x.ProcurementItemId).IsUnique();
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_source_lots_company_id");
         });
         modelBuilder.Entity<CaptureOperation>(b =>
         {
