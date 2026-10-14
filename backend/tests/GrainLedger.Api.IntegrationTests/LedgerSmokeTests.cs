@@ -9,7 +9,7 @@ namespace GrainLedger.Api.IntegrationTests;
 public sealed class LedgerSmokeTests(ApiFactory factory, ITestOutputHelper output) : IClassFixture<ApiFactory>
 {
     [Fact]
-    public async Task Pdf_nine_step_smoke_proves_real_stock_and_authorization()
+    public async Task Official_capture_to_ledger_smoke_proves_stock_lineage_and_authorization()
     {
         using var s = await CreateAsync(factory);
         output.WriteLine("1 PASS source farmer, geolocated plot, season, plot-season registered. Policies SYNTHETIC TEST ONLY: explicit zero tolerance, evidence-backed; not factory approval.");
@@ -44,27 +44,11 @@ public sealed class LedgerSmokeTests(ApiFactory factory, ITestOutputHelper outpu
         await SendAsync(s.Operator, HttpMethod.Post, $"/api/ledger/corrections/{correction}/commit", new { replacementOperationId = replacement.GetProperty("id").GetGuid() });
         Assert.Equal(0m, Quantity(await s.LotAsync(correctionSource))); Assert.Equal(0m, Quantity(await s.LotAsync(Output(correctedOriginal)))); Assert.Equal(8m, Quantity(await s.LotAsync(Output(replacement))));
         output.WriteLine("6 PASS transfer unchanged lot ID/58,000 kg; HOLD isolation retains 8,000 kg unavailable; eligible separate-stock correction compensates original and replaces atomically.");
-        var arrivalReceipt = await s.ReceiptAsync("20"); var arrival = await s.ArrivalAsync(arrivalReceipt, "19");
-        Assert.Equal(20m, Quantity(await s.LotAsync(Lots(arrivalReceipt)[0]))); Assert.Equal(0m, Quantity(await s.LotAsync(Lots(arrivalReceipt)[0]), "availableKg"));
-        await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/transfers", new { id = Guid.NewGuid(), lotId = Lots(arrivalReceipt)[0], fromLocationId = s.LocationId, toLocationId = s.SecondLocationId, quantityKg = "1", occurredAt = DateTimeOffset.UtcNow });
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{arrival}/corrections", new { id = Guid.NewGuid(), quantity = "20", unit = "kg", evidenceId = s.EvidenceId, reason = "Synthetic evidence confirms arrival entry error" });
-        var observation = await GetAsync(s.Manager, $"/api/capture-mock/arrivals/{arrival}");
-        Assert.Equal(19m, Decimal(observation.GetProperty("quantityKg"))); Assert.Equal(20m, Decimal(observation.GetProperty("corrections")[0].GetProperty("quantityKg"))); Assert.Equal(20m, Quantity(await s.LotAsync(Lots(arrivalReceipt)[0]), "availableKg"));
-        output.WriteLine("7 PASS mismatch preserves procurement 20 / arrival 19 kg; stock unchanged/unavailable; evidence-backed arrival correction retains original and restores eligibility only.");
-        var unused = await s.ReceiptAsync("30"); var (receiptCorrection, receiptReplacement) = await ReceiptCorrectionTests.RequestAsync(s, unused, "29");
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{receiptCorrection}/commit", new { commandId = Guid.NewGuid() });
-        var replacementReceipt = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{receiptReplacement}"); var replacedSource = Lots(replacementReceipt)[0];
-        Assert.Equal(0m, Quantity(await s.LotAsync(Lots(unused)[0]))); Assert.Equal(29m, Quantity(await s.LotAsync(replacedSource)));
-        await s.TransferAsync(replacedSource, "1");
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{receiptReplacement}/corrections", new { id = Guid.NewGuid(), reason = "Blocked after transfer", replacement = s.ReceiptBody(Guid.NewGuid(), ["28"]) });
-        output.WriteLine("8 PASS unused receipt original credit reversed, replacement 29 kg; provenance retained; subsequent transfer blocks further simple receipt correction.");
-        var foreignReceiptId = Guid.NewGuid();
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(foreignReceiptId, ["1"], locationId: s.ForeignLocationId));
-        var foreignLot = Lots(await s.CommitReceiptAsync(foreignReceiptId))[0];
+        var foreignLot = Lots(await s.ForeignReceiptAsync("1", s.ForeignLocationId))[0];
         using var denied = await s.Operator.GetAsync($"/api/ledger/lots/{foreignLot}"); Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         var operational = await GetAsync(s.Operator, "/api/ledger/lots"); Assert.Contains(operational.EnumerateArray(), lot => lot.GetProperty("id").GetGuid() == Output(milling)); Assert.DoesNotContain(operational.EnumerateArray(), lot => lot.GetProperty("id").GetGuid() == foreignLot);
-        using var sensitive = await s.Operator.GetAsync("/api/capture-mock/farmers"); Assert.Equal(HttpStatusCode.Forbidden, sensitive.StatusCode);
+        using var sensitive = await s.Operator.GetAsync("/api/farmers"); Assert.Equal(HttpStatusCode.Forbidden, sensitive.StatusCode);
         using var pending = await s.Accounts["pending"].Client.GetAsync($"/api/ledger/lots/{Output(milling)}"); Assert.Equal(HttpStatusCode.Forbidden, pending.StatusCode);
-        output.WriteLine("9 PASS operator task-scoped list/detail allowed assigned facility only; other facility + sensitive farmer data + pending user denied. No export/loading claims.");
+        output.WriteLine("7 PASS operator scoped detail, source contacts and pending-user denials. Unsupported procurement correction/arrival routes removed.");
     }
 }

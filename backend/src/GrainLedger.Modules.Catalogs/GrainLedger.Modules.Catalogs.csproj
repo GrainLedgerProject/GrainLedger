@@ -8,6 +8,5 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <ProjectReference Include="../GrainLedger.Modules.Identity/GrainLedger.Modules.Identity.csproj" />
-    <ProjectReference Include="../GrainLedger.Modules.Ledger/GrainLedger.Modules.Ledger.csproj" />
   </ItemGroup>
 </Project>

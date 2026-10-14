@@ -1,6 +1,6 @@
 # Ledger implementation and verification
 
-Status: ledger and synthetic Development/Testing MockCapture workflows implemented. Identity and Ledger remain normal host modules; MockCapture owns durable synthetic sources, receipts and receiving workflows in isolated `capture_mock`. It is unavailable in Production and has no automatic migration to future real Capture. Earlier verification notes predate this MockCapture cutover; latest cutover verification is recorded in section 5.
+Status: Ledger supports protected stock, processing, history and evidence; official Capture farmer and procurement workflows are integrated with Ledger stock. Capture route contract is in [procurement-api.md](procurement-api.md). No automatic migration or conversion of prior synthetic source records/history occurs; existing Ledger stock/history remains. Official Capture has no arrival-observation, receiving-correction or receipt-correction endpoints. Shared-database migrations, seeds and schema/role/grant changes require explicit database-owner approval.
 
 ## 1. Scope and sources
 
@@ -10,11 +10,11 @@ Confirmed decisions:
 - Deliver usable ledger with real prerequisites and basic working UI.
 - Adopt qualified stage matrix as implementation baseline, not factory approval.
 - Keep operational tolerance unconfigured until confirmed; synthetic values only for clearly labeled tests/demo.
-- Record and block receiving discrepancies without generic stock adjustment.
-- Correct unused procurement receipts with immutable evidence and provenance.
+- Record and block receiving discrepancies only where approved Capture endpoints exist; current official Capture has no arrival-observation or receiving-correction API.
+- Correct unused procurement receipts with immutable evidence and provenance only when correction endpoint and approved workflow exist; current Capture has no receipt-correction API.
 - Give Mill Operators task-scoped reads in assigned facilities, never customer-wide access.
-- Fail closed where approved business rules are absent.
-- Preserve the accepted deferred reservation-correction contract: correction `RELEASE` requires correction correlation but no movement linkage; only `CONSUME` and `REVERSE_CONSUME` require movement linkage. Reservation implementation remains excluded from this milestone.
+- Fail closed where approved business rules or API contracts are absent.
+- Preserve accepted deferred reservation-correction contract: correction `RELEASE` requires correction correlation but no movement linkage; only `CONSUME` and `REVERSE_CONSUME` require movement linkage. Reservation implementation remains excluded from this milestone.
 
 Sources in `/home/asemika/Documents/ObsidianVault/MyVault/captone/`:
 - `docs/GrainLedger_V2.pdf`, pp. 3–9: balance, immutable history, ownership, F08–F10.
@@ -27,9 +27,8 @@ These source revisions were inspected. Diagram design is not proof of factory/su
 ### Included
 
 - Facilities, locations, equipment, commodities, occupancy/clearance, staff assignments, evidence-backed policy and compatibility setup.
-- Farmer, plot, season, receipt and source lot creation; processing, transfer, mass balance and lineage.
-- HOLD handling, notifications, immutable evidence, processing and unused-receipt corrections.
-- Arrival observations, correction/investigation and restriction propagation.
+- Catalog-backed farmer, plot, season, procurement and source-lot creation; processing, transfer, mass balance and lineage.
+- HOLD handling, notifications, immutable evidence, and processing corrections.
 - Scoped stock, composition, history and operational UI.
 
 ### Separate milestones
@@ -40,11 +39,12 @@ Not included: offline capture, pesticide declarations, sampling/lab workflows, r
 
 See `docs/architecture.md` for module structure, role provisioning, UI workflow map, runtime/migration deployment steps, exact numeric and lineage guarantees, and explicit exclusions.
 
-- Identity and Ledger are host modules with owned schemas/migrations; MockCapture is a durable synthetic Development/Testing module with isolated `capture_mock` schema and history table. No EF entities cross module boundaries.
-- MockCapture source/receipt records and Ledger lot, posting, package guards share a PostgreSQL transaction; no cross-module commit.
-- Runtime login is pre-created, restricted and non-owner. Production migration order excludes MockCapture. Development/Testing migration applies its isolated schema only in those environments; ordinary startup never migrates. Never use postgres superuser as app runtime or point Development migration at production/a teammate database.
-- Ledger mutation goes through finite protected PostgreSQL commands; runtime cannot directly mutate Ledger tables/projections. Protected SECURITY DEFINER routines use fixed search path, revoked PUBLIC execute, persisted actor checks and DB-enforced invariants.
-- Source/stock writes acquire transaction advisory lock `714928352` before source/stock rows. READ COMMITTED required so statement snapshots refresh after lock wait; other isolation levels reject. One global lock is intentional serialization/throughput ceiling. Ordered per-lot/location locks only if measured contention warrants complexity.
+- Identity, Catalog, Capture and Ledger are host modules with owned schemas/migrations. No EF entities cross module boundaries. Official Capture procurement is integrated with Ledger; no synthetic Capture module, route or seed command is active.
+- Capture procurement and Ledger lot/posting/package writes share one PostgreSQL transaction; module routines never commit caller transaction.
+- Migration order is Identity → Catalog → Capture → Ledger. Preserve generated migration history and historical Ledger data. No automatic conversion of legacy synthetic records. Migration/seed on shared database requires explicit owner approval.
+- Runtime login is pre-created, restricted and non-owner; ordinary startup never migrates. Never use postgres superuser as runtime or point Development migration at production/a teammate database.
+- Ledger mutation goes through finite protected PostgreSQL commands; runtime cannot directly mutate Ledger tables/projections. Protected routines enforce persisted actor checks and accounting invariants.
+- Source/stock writes acquire advisory lock `714928352` before source/stock rows; `READ COMMITTED` required. One global lock intentionally serializes operations.
 - No broker, separate service, generic workflow engine or frontend framework.
 
 ## 3. Implemented workflow contracts
@@ -53,19 +53,17 @@ See `docs/architecture.md` for module structure, role provisioning, UI workflow 
 
 Setup configures facilities, locations, equipment, commodities, staff assignments, compartment occupancy/clearance, evidence-backed effective tolerance policies and blend compatibility. Customer/staff safe lookups expose only needed non-sensitive IDs/names. Authorization checks persisted actor, permission, owner and facility; UI gating is not security.
 
-Administrator manages platform/accounts, but has no inherited processing, variance approval, correction/receiving reconciliation, HOLD response or other business authority. Mill Manager and Mill Operator require explicit permission and assigned facility. Operator data excludes farmer contacts and unrelated sensitive synthetic source/evidence/reconciliation fields. Purchasing Staff owns own-company synthetic farmer/purchasing data in Development/Testing.
+Administrator manages platform/accounts, but has no inherited processing, variance approval, processing correction, HOLD response or other business authority. Mill Manager and Mill Operator require explicit permission and assigned facility. Operator data excludes farmer contacts and unrelated sensitive source/evidence fields. Purchasing Staff owns own-company Capture farmer and procurement data.
 
 ### Receipt and receiving
 
-Synthetic source/receiving routes are `/api/capture-mock/*`, Development/Testing only. `/api/capture-mock/status` returns `{ "synthetic": true }` when enabled. Sources & receiving UI hides when unavailable; Ledger sections remain usable. Committed synthetic receipts create durable receipt-derived Ledger stock. No automatic migration to future real Capture.
+Official Capture source routes include `/api/farmers`, `/api/plots`, `/api/crop-seasons`, `/api/plot-seasons`; procurement contract is `/api/procurement-reference-data`, `/api/procurements/commit`, `/api/procurements`, `/api/procurements/{id}`, and `/api/source-lots/{id}`. Procurement commit persists Capture source records and writes corresponding Ledger stock atomically using persisted Catalog-to-Ledger commodity mapping. Historical synthetic records are not converted; existing Ledger stock/history remains.
 
-- A receipt draft has no stock effect. Commit creates one RAW_PADDY source lot and matching credit per positive line, atomically with persisted source records.
-- Persist original quantity text/unit, including leading zeroes. Normalize exactly: kg = quantity; g = quantity / 1000; t = quantity × 1000. Original text permits at most six fractional digits; normalized kg must fit positive `numeric(20,6)` up to `99999999999999.999999`, without rounding. `0.001 g` converts to `0.000001 kg`; `0.0001 g` is rejected. Reject exponent notation, excess precision, overflow and nonpositive inputs. Decimal strings cross API, never floating-point mass math.
-- Farmer, plot, season, owner, plot-season and lot provenance agree. Durable receipt header/document and normalized rows must remain coherent at transaction commit.
-- Mill Operator with `lots.receive` records actual arrival measurement/time/evidence, never overwrites procurement quantity. Mismatch blocks source and descendants against use/transfer under same lock.
-- Mill Manager with `receiving.reconcile` appends immutable measurement corrections or investigation. Exact match can remove only receiving restriction; independent HOLD/correction stays. `REAL_DIFFERENCE` remains blocked. No receiving balance adjustment or tolerance.
-- Purchasing receipt correction request is restricted to unused same-owner source: exact owner/location/farmer/season/ordered source identities and line count remain fixed. Fresh receipt/line/lot UUIDs; corrected time/measure/code allowed. Any committed subsequent movement, including transfer, processing or downstream use, rejects this simple path. Request blocks original stock; any existing current arrival measurement must match replacement quantity, and `REAL_DIFFERENCE` cannot be bypassed. Replacement is immutable after request. Manager with `corrections.reconcile` submits durable evidence and exact physical quantities for every replacement line; the same permission is required for replacement commit. Commit rechecks under the shared lock and atomically reverses original credit, creates replacement source lots/credits and completes Capture state.
-- Human lot code stays unique to immutable provenance chain. Explicit reviewed correction may retain code with a new lot UUID; unrelated duplicate reuse is rejected. HOLD copies to replacement; duplicate reversal and wrong-owner correction are forbidden.
+- Procurement lines commit one RAW_PADDY source lot and matching protected initial stock per accepted line, atomically with source records.
+- Persist measurement as decimal strings with supported catalog mass units KG, G, T and exact positive `numeric(20,6)` kg normalization; inexact conversion, precision excess and overflow fail.
+- Farmer, plot, season, owner, plot-season, commodity and lot provenance agree. Receipt items and normalized rows stay coherent at commit.
+- Same operation ID and content returns prior result; changed content returns conflict.
+- Official Capture currently has no arrival-observation, receiving-correction/investigation or procurement-receipt-correction endpoints. No corresponding UI/API workflow is available; fail closed.
 
 ### Operations, variance, units and lineage
 
@@ -81,9 +79,9 @@ Synthetic source/receiving routes are `/api/capture-mock/*`, Development/Testing
 - Customer Manager creates own-company HOLD. Manager assigned facility can acknowledge, isolate, respond with scoped evidence; notification creation/read does not release. No HOLD release action exists.
 - Operator requests processing correction; request blocks original output. Manager reconciliation evidence binds exact current physical positions and reviewed complete replacement draft version/content/output locations, including transferred positions. Commit rechecks; editing replacement invalidates reconciliation. Transfer history is preserved and explicitly compensated, not auto-unwound. Original postings remain; each reversal is unique. Downstream consumption rejects direct correction; cancellation needs evidence that original was correct.
 - Independent HOLD/restrictions cannot be cleared by correction. Held original cannot be corrected as a release path; replacement retains applicable HOLD.
-- Evidence bytes, committed source receipt/header/lines, original observations, appended corrections/investigations and postings are durable and immutable; evidence is not a mutable URL. Downloads require current owner/facility scope. Operator event details omit evidence/reconciliation secret payloads.
+- Evidence bytes, committed source receipt/header/items and postings remain durable and immutable; downloads require current owner/facility scope. Official Capture does not expose arrival observations or receipt corrections.
 
-Exact routes/DTO implementations: [Ledger module](../backend/src/GrainLedger.Modules.Ledger/) and [MockCapture module](../backend/src/GrainLedger.Modules.MockCapture/). MockCapture routes/schema are Development/Testing only.
+Exact routes/DTO implementations: [Capture module](../backend/src/GrainLedger.Modules.Capture/), [Catalog module](../backend/src/GrainLedger.Modules.Catalogs/), and [Ledger module](../backend/src/GrainLedger.Modules.Ledger/). See [procurement API](procurement-api.md). Retired `/api/capture-mock/*` routes return 404.
 
 ## 4. Stage matrix — implementation baseline
 
@@ -104,44 +102,20 @@ Milling records positive fractions actually produced, not fabricated four output
 
 ## 5. Verification and acceptance
 
-Required suite coverage: concurrency/overspend and atomic rollback; authorization and facility scope; idempotency/conflict; policy/compatibility fail closed; variance confirmation invalidation; exact lineage rounding; transfer identity; HOLD/correction/receiving races; immutable evidence/history and one-time reversal; unit precision and coherent synthetic MockCapture source; correction lot-code identity chain and copied HOLD; runtime direct-mutation denial; actual byproducts and product identity. Integration tests use PostgreSQL/Testcontainers, not in-memory DB. Test results below include latest MockCapture cutover checks; earlier workflow observations predate it.
+Required current-suite coverage: concurrency/overspend and atomic rollback; authorization and facility scope; idempotency/conflict; policy/compatibility fail closed; variance confirmation invalidation; exact lineage rounding; transfer identity; HOLD and processing-correction races; immutable evidence/history and one-time reversal; unit precision and coherent Capture procurement; runtime direct-mutation denial; actual byproducts and product identity. Integration tests use PostgreSQL/Testcontainers, not in-memory DB. Arrival/reconciliation/receipt-correction workflow tests are not current supported acceptance because official Capture lacks those endpoints.
 
-### Nine-step smoke/test workflow
+Historical nine-step synthetic workflow: prior test description, not current official Capture acceptance. It included synthetic setup, receipt, processing, mass-balance/lineage and scope assertions; arrival observation and receipt correction are unsupported by official Capture and are not active workflows.
 
-The executable `Pdf_nine_step_smoke_proves_real_stock_and_authorization` test covers:
+Previously reported verification below is historical only and does not establish current unsupported workflows or current migration acceptance.
 
-1. Configure facility, locations, commodities, assignments and evidence-backed synthetic policies; register farmer, plot, season and plot-season. Production policy remains unconfigured until confirmed.
-2. Commit receipt lines: 50,000, 30,000, 20,000 kg.
-3. Dry 100,000 → 88,000 kg with declared loss 12,000 kg and variance 0.
-4. Mill into actual head rice 58,000, broken rice 8,000, bran 6,000 and husk 15,700 kg; declared loss 300 kg and variance 0. Byproducts remain stock.
-5. Verify every milling output's exact 50/30/20 source contribution and total.
-6. Transfer 1,000 kg head rice with unchanged identity; isolate held 8,000 kg broken rice without release; atomically compensate/replace a separate drying operation.
-7. Separate receipt: record 20 kg source / 19 kg arrival; verify unchanged stock but unavailable and transfer blocked, correct measurement to 20 kg and preserve original 19.
-8. Correct unused receipt 30→29 with manager evidence reconciliation and atomic reversal/replacement; verify subsequent transfer prevents further simple receipt correction.
-9. Verify assigned-facility operator reads and foreign-facility, farmer-contact and pending-user denials. Other integration tests cover foreign-company scope, `REAL_DIFFERENCE`, correction identity chains and independent HOLD/restriction retention.
+Earlier implementation owner reported completed checks; documentation owner did not rerun them. Historical results:
 
-### Final observed verification
+- Initial `dotnet build GrainLedger.slnx` succeeded; earlier `dotnet test GrainLedger.slnx --no-build`: 87 passed, 0 failed.
+- Earlier `npm test`: 14 passed; `npm run build` passed.
+- Earlier synthetic browser workflows exercised receipts, arrival discrepancy, receipt correction, processing correction, HOLD and scope denials. Arrival and receipt-correction flows are historical and unavailable through official Capture.
+- Earlier synthetic Capture cutover reports included synthetic receipt tests/browser actions; they are historical only and do not establish current official Capture corrections or current migration acceptance.
 
-Implementation owner reported these completed checks; documentation owner did not rerun them:
-
-- Initial `dotnet build GrainLedger.slnx` succeeded. Test owner fixed warnings; later test builds succeeded.
-- Final `dotnet test GrainLedger.slnx --no-build`: **87 passed, 0 failed**.
-- `npm test`: **14 passed**.
-- Final `npm run build`: **passed**.
-- Historical production deployment smoke predated the MockCapture cutover. It does not verify current migration order or MockCapture Development/Testing behavior; do not use it as evidence for this module.
-
-Actual browser workflows exercised a restricted PostgreSQL runtime API with real app cookies and CSRF through a test-only authentication host:
-
-- Purchaser committed source receipt **100 kg**; operator dried to **88 kg**, declared loss **12 kg**, then transferred **88 kg** without changing lot identity. Operator requested correction; manager uploaded file evidence and reconciled current physical positions against the reviewed replacement version; operator atomically committed corrected **88 kg**.
-- Separate receipt **20 kg**, arrival observed **19 kg**: available stock became **0**. Evidence-backed manager measurement correction to **20 kg** retained original **19 kg** observation and restored available **20 kg**.
-- Unused receipt **30→29 kg** correction preserved human lot code with a distinct replacement UUID and provenance chain; original remained visible at **0**, superseded.
-- Customer HOLD on corrected **88 kg**: manager isolated **88 kg**, uploaded evidence and responded; notification read retained HOLD and available **0**.
-- Foreign customer: empty lists and lot-detail **403**. Operator unassigned facility: list `[]`; farmer contacts **403**. Pending account: **403**, no Ledger navigation. Anonymous: **401**.
-- Latest duplicate-code selector disambiguation was visually verified.
-
-Latest MockCapture cutover verification reported by implementation owner: **113 backend tests and 23 frontend tests passed**; frontend build passed. Browser workflow registered a synthetic farmer and committed a **10 kg** receipt that appeared in Ledger stock; old `/api/capture/farmers` returned **404**. Fresh Production migrations created no `capture_mock` schema and Production `/api/capture-mock/status` returned **404**. A forward upgrade was verified against an isolated initial Ledger database. Incompatible teammate farmers schema/row and Production teammate fixture remained unchanged; `.env` and Supabase were unchanged.
-
-Policies and evidence were explicitly synthetic. Test/browser authentication harness is not a production login bypass. Live Google consent, factory approval and real-stock pilot approval are not established by these checks.
+No current checks were run by documentation owner. Live Google consent, factory approval and real-stock pilot approval are not established by historical checks.
 
 Useful commands:
 
@@ -160,10 +134,10 @@ Backend integration tests require Docker/Testcontainers. Browser test host is te
 | --- | --- | --- |
 | Tolerance | No confirmed effective policy → no processing commit, even exact balance. Synthetic values only in test/demo. | Confirmed operation percentage/effective date/evidence. |
 | Compatibility | No explicit compatible input-product rule → no blend. | Approved combinations/output identity. |
-| Receiving shortage/gain | Preserve both evidence-backed measurements; block affected stock; no balance adjustment. | Approved evidence, authority and accounting treatment. |
+| Receiving shortage/gain | No current arrival-observation or correction endpoint; no balance adjustment. | Approved Capture contract, evidence, authority and accounting treatment. |
 | Byproduct dispatch/disposal | Outputs remain stock, no fabricated outbound posting or hiding in loss. | Approved dispatch/disposal workflow. |
 | HOLD release | No release action; response/isolation/read/correction do not clear it. | Explicit authority/evidence/audit/multi-HOLD rule. |
-| Receipt correction after movement | Reject simple correction; no cascade/rewrite/automatic transfer reversal. | Approved downstream reconciliation. |
+| Receipt correction | No current correction endpoint; existing stock/source history remains unchanged. | Approved endpoint and reviewed provenance workflow. |
 | Wrong owner | Reject source/owner change in this workflow. | Explicit controlled provenance workflow. |
 | Reprocessing | Undefined repeated stages/actions rejected. | Explicit operation/stage/product/mass-balance rules. |
 

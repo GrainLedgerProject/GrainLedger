@@ -1,6 +1,6 @@
 # Tài khoản local mẫu cho Development
 
-Lệnh seed tạo 6 tài khoản local, không cần gửi OTP, dùng backend .NET để login. Đây là dữ liệu trong schema `identity`, không phải Supabase Auth. Chỉ chạy lệnh trên database dành cho development/test. Môi trường Development không tự chứng minh database là database test: hãy kiểm tra `ConnectionStrings__GrainLedger` trước khi chạy.
+This command seeds six local Identity accounts without OTP. Use only a development/test database you own and control; Development environment alone does not prove database is isolated. Confirm `ConnectionStrings__GrainLedger` before running. Accounts are in `identity`, not Supabase Auth.
 
 ## 1. Cấu hình
 
@@ -19,19 +19,15 @@ dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --enviro
 dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --environment Development --seed-dev
 ```
 
-Migration cập nhật schema; seed tạo dữ liệu rồi thoát. Lệnh dùng database trong cấu hình backend. Biến môi trường của process có ưu tiên cao hơn `.env`. Không tự khởi động database local nếu bạn đang dùng Supabase.
+Migration updates schema; seed creates accounts then exits. Use only database you own/control. Process environment overrides `.env`. Do not silently start replacement local database or alter existing connection strings.
 
-## 3. Seed mock source and stock (optional)
+## 3. Capture và Ledger
 
-After migrations and development accounts exist, seed one synthetic source, receipt draft, and committed stock sample:
+Official Capture supports farmer, plot, crop season, plot-season and procurement APIs. Procurement commit records Capture provenance and writes matching Ledger stock in the same transaction through Catalog-to-Ledger commodity mapping. Migration does not convert prior synthetic records. Existing Ledger stock/history remains.
 
-```bash
-dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --environment Development --seed-mock
-```
+No API records arrival or corrects arrival/procurement receipts. Do not use synthetic capture workflows or `--seed-mock`; they are not active. See [procurement API](procurement-api.md) for routes and payload.
 
-This separate Development-only command requires `ConnectionStrings__GrainLedgerMigration` with migration-owner credentials, applied migrations, and accounts from `--seed-dev`. It writes durable synthetic Ledger stock through configured `ConnectionStrings__GrainLedgerMigration`; inspect the owner connection and confirm its target is your intended Development database before running. It does not migrate, reset, or delete data. Synthetic stock persists in shared database; ensure you have permission to add it. Seed leaves teammate `capture` schema and captures untouched. Reruns reuse same sample without overwriting edited data; conflicts fail without partial writes.
-
-Mock actors reuse active existing admin, purchasing, mill-manager and mill-operator accounts with expected roles and organization; there is no automatic account seeding or credential change. Configure `DevelopmentSeed__Password` as above, run `--seed-dev` first, and use that configured password when logging in. Mock seed creates a `MOCK-DEV-001` committed synthetic receipt (1,000 kg) and `MOCK-DEV-DRAFT-001` draft (200 kg). It does not approve tolerances or create operational policies.
+Trước mọi migration, seed, thay đổi schema/role/grant hoặc kiểm tra có ghi dữ liệu trên Supabase dùng chung, cần phê duyệt rõ ràng từ chủ database. Ưu tiên Testcontainers cô lập; không thay đổi `.env` hay connection string hiện có.
 
 ## 4. Đăng nhập
 
@@ -61,4 +57,4 @@ Mở Scalar tại `http://localhost:5080/scalar/v1`, gọi `POST /api/auth/login
 - Địa chỉ `@grainledger.local` là định danh test, không phải hộp thư thật. Không dùng forgot-password/OTP qua email cho các tài khoản này.
 - Không commit `.env` hoặc chia sẻ mật khẩu seed công khai.
 
-Đã kiểm thử seed và đăng nhập trên database Testcontainers riêng; chưa chạy seed vào Supabase của bạn. Xác minh mock seed mới nhất trên database Development cô lập: 114 backend tests passed; migrate → seed-dev → seed-mock hai lần tạo 1.000 kg stock đã commit và draft 200 kg; lệnh bị từ chối trong Production và khi kết hợp flag môi trường không hợp lệ. Browser xác nhận mill.operator đăng nhập được và thấy stock row physical/available 1.000 kg. Smoke test dùng JWT signing key tổng hợp; `.env` và Supabase gốc không bị thay đổi.
+Historical report only: earlier seed/browser checks used a previous implementation and do not establish current Capture, arrival or correction behavior. Documentation owner ran no tests or seed and made no shared Supabase change.

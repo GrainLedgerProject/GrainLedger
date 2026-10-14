@@ -40,17 +40,15 @@ export function Table({ rows }: { rows: Row[] }) {
   const columns = Array.from(new Set(rows.flatMap(row => Object.keys(row))));
   return <div className="table-scroll"><table><thead><tr>{columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={row.id || index}>{columns.map(column => <td key={column}>{row[column] == null ? '—' : typeof row[column] === 'object' ? <pre>{JSON.stringify(row[column], null, 2)}</pre> : String(row[column])}</td>)}</tr>)}</tbody></table></div>;
 }
-export function Evidence({ ownerId, facilityId = '', locationId = '', capture = false, value, onChange }: { ownerId: string; facilityId?: string; locationId?: string; capture?: boolean; value: string; onChange: (value: string) => void }) {
+export function Evidence({ ownerId, facilityId = '', value, onChange }: { ownerId: string; facilityId?: string; value: string; onChange: (value: string) => void }) {
   const [file, setFile] = useState<File | null>(null), action = useAction();
   async function upload() {
     await action.run(async () => {
       if (!file || !file.size || file.size > 10485760) throw Error('Choose a nonempty evidence file, maximum 10 MiB.');
       const contentBase64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(Error('Evidence file could not be read.')); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(file); });
-      const result = await mutate<{ id: string }>(capture ? '/api/capture-mock/evidence' : '/api/ledger/evidence', capture
-        ? { id: id(), ownerOrganizationId: ownerId, locationId, fileName: file.name, mediaType: file.type || 'application/octet-stream', contentBase64 }
-        : { id: id(), ownerId, facilityId, fileName: file.name, contentType: file.type || 'application/octet-stream', contentBase64 });
+      const result = await mutate<{ id: string }>('/api/ledger/evidence', { id: id(), ownerId, facilityId, fileName: file.name, contentType: file.type || 'application/octet-stream', contentBase64 });
       onChange(result.id);
     }, 'Evidence stored immutably.');
   }
-  return <fieldset className="evidence"><legend>Immutable evidence</legend><label>Evidence file<input type="file" onChange={e => { setFile(e.target.files?.[0] || null); onChange(''); }} /></label><button type="button" disabled={action.busy || !file || !ownerId || !(capture ? locationId : facilityId)} onClick={() => void upload()}>{action.busy ? 'Uploading…' : 'Upload evidence'}</button>{value && <p><a href={`${capture ? '/api/capture' : '/api/ledger'}/evidence/${value}`} target="_blank" rel="noreferrer">View stored evidence</a></p>}<Feedback {...action} /></fieldset>;
+  return <fieldset className="evidence"><legend>Immutable evidence</legend><label>Evidence file<input type="file" onChange={e => { setFile(e.target.files?.[0] || null); onChange(''); }} /></label><button type="button" disabled={action.busy || !file || !ownerId || !facilityId} onClick={() => void upload()}>{action.busy ? 'Uploading…' : 'Upload evidence'}</button>{value && <p><a href={`/api/ledger/evidence/${value}`} target="_blank" rel="noreferrer">View stored evidence</a></p>}<Feedback {...action} /></fieldset>;
 }

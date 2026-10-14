@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using GrainLedger.Modules.Capture;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
@@ -57,6 +58,20 @@ public sealed class OptimizeLedgerReads : Migration
         throw new NotSupportedException("Ledger read scaling migration cannot restore the prior function bodies.");
 }
 
+[DbContext(typeof(LedgerDbContext))]
+[Migration("20261014010000_UseOfficialCaptureBoundary")]
+public sealed class UseOfficialCaptureBoundary : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        using var stream = typeof(UseOfficialCaptureBoundary).Assembly.GetManifestResourceStream("GrainLedger.Modules.Ledger.Sql.OfficialCapture.sql")!;
+        using var reader = new StreamReader(stream);
+        migrationBuilder.Sql(reader.ReadToEnd());
+    }
+    protected override void Down(MigrationBuilder migrationBuilder) =>
+        throw new NotSupportedException("Official Capture cutover preserves immutable history and cannot be reversed.");
+}
+
 public static class LedgerDatabase
 {
     public static async Task ConfigureRuntimeRoleAsync(string connectionString, string runtimeRole, CancellationToken ct = default)
@@ -75,11 +90,11 @@ public static class LedgerDatabase
                   )
                   AND NOT EXISTS (
                       SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                      WHERE n.nspname IN ('ledger','identity','capture_mock')
+                      WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
                         AND pg_has_role(r.oid,c.relowner,'MEMBER')
                   )
                   AND NOT EXISTS (
-                      SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture_mock')
+                      SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
                         AND pg_has_role(r.oid,n.nspowner,'MEMBER')
                   )
                   AND NOT EXISTS (
@@ -91,26 +106,25 @@ public static class LedgerDatabase
         check.Parameters.AddWithValue(runtimeRole);
         if (!Equals(await check.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("Runtime role missing or has elevated/owner authority.");
         var role = new NpgsqlCommandBuilder().QuoteIdentifier(runtimeRole);
-        await using var mockSchema = new NpgsqlCommand("SELECT to_regnamespace('capture_mock') IS NOT NULL", connection);
-        var mockGrants = Equals(await mockSchema.ExecuteScalarAsync(ct), true) ? $"""
-            GRANT USAGE ON SCHEMA capture_mock TO {role};
-            GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA capture_mock TO {role};
-            GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA capture_mock TO {role};
+        await using var legacySchema = new NpgsqlCommand("SELECT to_regnamespace('capture_mock') IS NOT NULL", connection);
+        var legacyRevoke = Equals(await legacySchema.ExecuteScalarAsync(ct), true) ? $"""
+            REVOKE ALL ON SCHEMA capture_mock FROM {role};
+            REVOKE ALL ON ALL TABLES IN SCHEMA capture_mock FROM {role};
+            REVOKE ALL ON ALL FUNCTIONS IN SCHEMA capture_mock FROM {role};
+            REVOKE ALL ON ALL SEQUENCES IN SCHEMA capture_mock FROM {role};
             """ : "";
         await using var grant = new NpgsqlCommand($"""
             REVOKE ALL ON SCHEMA ledger FROM {role};
-            GRANT USAGE ON SCHEMA ledger,identity TO {role};
+            GRANT USAGE ON SCHEMA ledger,identity,capture,catalog TO {role};
             REVOKE ALL ON ALL TABLES IN SCHEMA ledger FROM {role};
             REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ledger FROM {role};
             GRANT SELECT ON ALL TABLES IN SCHEMA ledger TO {role};
-            GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity TO {role};
-            GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity TO {role};
-            {mockGrants}
+            GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
+            GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
+            {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
-                ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.receipt(uuid,jsonb),
-                ledger.receipt_correction_request(uuid,uuid,uuid,uuid),
-                ledger.reverse_receipt(uuid,uuid,uuid,uuid,uuid,text),
-                ledger.receiving_block(uuid,uuid,uuid,boolean,uuid,text),
+                ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.lock_writes(),
+                ledger.procurement_receipt(uuid,uuid,uuid,uuid,uuid,uuid,uuid,jsonb),
                 ledger.can_read_lot(uuid,uuid),ledger.assigned(uuid,uuid),
                 ledger.own(uuid,uuid),ledger.role(uuid)
             TO {role};
@@ -118,13 +132,15 @@ public static class LedgerDatabase
         await grant.ExecuteNonQueryAsync(ct);
         await using var inherited = new NpgsqlCommand("""
             SELECT EXISTS (
-                SELECT 1 FROM pg_class c WHERE c.relnamespace='ledger'::regnamespace AND c.relkind IN ('r','p')
-                  AND has_table_privilege($1,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-            ) OR has_schema_privilege($1,'ledger','CREATE')
+                SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p')
+                  AND (n.nspname IN ('ledger','capture_mock') AND has_table_privilege($1,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                    OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER'))
+            ) OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
+                AND has_schema_privilege($1,n.oid,'CREATE'))
               OR has_function_privilege($1,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
             """, connection);
         inherited.Parameters.AddWithValue(runtimeRole);
-        if (Equals(await inherited.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("Runtime role inherits unsafe ledger mutation authority; remove inherited grants before deployment.");
+        if (Equals(await inherited.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("Runtime role inherits unsafe module mutation authority; remove inherited grants before deployment.");
     }
 
     public static async Task ValidateRuntimeAsync(string connectionString, CancellationToken ct = default)
@@ -142,11 +158,11 @@ public static class LedgerDatabase
                     )
                     OR EXISTS (
                         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                        WHERE n.nspname IN ('ledger','identity','capture_mock')
+                        WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
                           AND pg_has_role(r.oid,c.relowner,'MEMBER')
                     )
                     OR EXISTS (
-                        SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture_mock')
+                        SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
                           AND pg_has_role(r.oid,n.nspowner,'MEMBER')
                     )
                     OR EXISTS (
@@ -155,15 +171,27 @@ public static class LedgerDatabase
                     )
                     OR EXISTS (
                         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                        WHERE n.nspname='ledger' AND c.relkind IN ('r','p')
-                          AND has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                        WHERE c.relkind IN ('r','p')
+                          AND (n.nspname IN ('ledger','capture_mock') AND has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                            OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER'))
                     )
-                    OR has_schema_privilege(r.oid,'ledger','CREATE')
+                    OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
+                        AND has_schema_privilege(r.oid,n.oid,'CREATE'))
                     OR has_function_privilege(r.oid,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
                 )
             )
             """, connection);
         if (Equals(await command.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("API database role must not be superuser, schema/table owner or owner-role member. Configure separate migration and runtime credentials.");
+        await using var required = new NpgsqlCommand("""
+            SELECT has_function_privilege(current_user,'ledger.procurement_receipt(uuid,uuid,uuid,uuid,uuid,uuid,uuid,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.lock_writes()','EXECUTE')
+               AND has_schema_privilege(current_user,'capture','USAGE')
+               AND has_schema_privilege(current_user,'catalog','USAGE')
+               AND has_table_privilege(current_user,'capture.procurements','SELECT,INSERT')
+               AND has_table_privilege(current_user,'catalog.commodities','SELECT')
+            """, connection);
+        if (!Equals(await required.ExecuteScalarAsync(ct), true))
+            throw new InvalidOperationException("Official Capture/Catalog runtime grants missing. Run explicit owner migrations and runtime-role configuration.");
     }
 }
 
@@ -175,6 +203,7 @@ public static class LedgerModuleRegistration
             provider.GetRequiredService<IConfiguration>().GetConnectionString("GrainLedger"),
             n => n.MigrationsAssembly(typeof(LedgerDbContext).Assembly.FullName).MigrationsHistoryTable("__EFMigrationsHistory", "ledger")));
         services.AddScoped<LedgerService>();
+        services.AddScoped<IProcurementLedgerPort, ProcurementLedgerPort>();
         return services;
     }
 }

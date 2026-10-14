@@ -1,20 +1,23 @@
 # GrainLedger
 
-GrainLedger is a modular monolith for rice supply-chain traceability. It provides Google sign-in and local email/password registration with email OTP, JWT access/refresh tokens, and password recovery. Identity supports session management, user profiles and organization administration with server-enforced access control. Ledger provides protected stock accounting and provenance. Development and Testing hosts also expose explicitly synthetic, durable MockCapture workflows for source registration and receipt/receiving corrections.
+GrainLedger is a modular monolith for rice supply-chain traceability. This implementation provides Google sign-in, email/password registration with email OTP, JWT access/refresh tokens, password recovery, user profiles, organization management, server-enforced access control, farmer registration and lookup, and Capture procurement integrated with protected Ledger stock.
 
 ## Structure
 
 ```text
 backend/src/GrainLedger.Api/                 Single ASP.NET Core 10 host
-backend/src/GrainLedger.Modules.Identity/    Identity schema, authorization, migrations
+backend/src/GrainLedger.Modules.Identity/    Identity module, PostgreSQL schema, migrations
+backend/src/GrainLedger.Modules.Catalogs/    Catalog module, PostgreSQL schema, migrations
+backend/src/GrainLedger.Modules.Capture/     Farmer and procurement APIs, PostgreSQL schema, migrations
 backend/src/GrainLedger.Modules.Ledger/      Protected stock, processing, history and evidence
-backend/src/GrainLedger.Modules.MockCapture/   Development/Testing synthetic source and receipt workflows
 backend/tests/GrainLedger.Api.IntegrationTests/
 apps/web/                                     React + TypeScript + Vite
 docs/architecture.md                        Module boundaries and authorization rules
 ```
 
-All modules run in one host and own separate PostgreSQL schemas/contracts. Mobile workspace remains placeholder; React web app works on mobile screens.
+Identity, Catalog, Capture and Ledger run in one host and own separate schemas/contracts. Mobile workspace remains placeholder; React web app works on mobile screens. Capture contracts: [farmer API](docs/farmer-api.md) and [procurement API](docs/procurement-api.md).
+
+In Development, API serves Scalar at `http://localhost:5080/scalar/v1` and OpenAPI at `http://localhost:5080/openapi/v1.json`. Use an access token in Scalar's Bearer field to test authenticated APIs.
 
 ## Run locally
 
@@ -57,16 +60,15 @@ Requires .NET SDK 10, Node.js 24, npm and Docker (or PostgreSQL).
 
    Vite on port 5173 proxies `/api` and `/signin-google` to backend port 5080. Use `localhost` consistently, not `127.0.0.1`. Production redirect: `https://YOUR_HOST/signin-google`. See [ASP.NET Core Google authentication](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/social/google-logins?view=aspnetcore-10.0).
 
-5. Run Development migrations, then seed local accounts and optional mock stock. Commands are separate; `--seed-mock` requires migration and seed-owner credentials, applied migrations, and `--seed-dev` accounts first:
+5. Run migrations and seed local accounts. Migration updates Identity, Catalog, Capture and Ledger in order; it does not convert or seed historical records:
 
    ```bash
    ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --migrate
    ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --seed-dev
-   ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --seed-mock
    dotnet run --project backend/src/GrainLedger.Api
    ```
 
-   Keep existing `.env` and connection strings unchanged. Before either seed, confirm `ConnectionStrings__GrainLedger` and `ConnectionStrings__GrainLedgerMigration` point to your intended Development database; `--seed-mock` writes through configured migration-owner connection. Commands use configured database and never create/reset a local database. `--seed-dev` needs `DevelopmentSeed__Password` configured as documented in [development accounts](docs/development-accounts.md). Mock seed requires migration-owner credentials but does not migrate; it reuses active seeded actors and does not change credentials. It writes durable synthetic Ledger stock; it does not reset or delete records. Reruns do not overwrite edited sample data. Synthetic stock persists in shared database; ensure you have permission to add it. Seed leaves teammate `capture` schema and captures untouched. Mock seed neither auto-seeds accounts nor approves tolerances or creates operational policies. MockCapture owns isolated `capture_mock` schema and distinct migration-history table. Its schema, migrations, routes, and seed command are Development/Testing-only. Never inspect, grant, repair, alter, or drop teammate `capture` schema. No automatic migration exists from synthetic MockCapture data to future real Capture. Normal startup uses `ConnectionStrings:GrainLedger` only and never migrates or seeds.
+   Keep existing `.env` and connection strings unchanged. Before migration or seed, confirm `ConnectionStrings__GrainLedger` and `ConnectionStrings__GrainLedgerMigration` target your intended Development database. `--seed-dev` needs `DevelopmentSeed__Password` as documented in [development accounts](docs/development-accounts.md). Migration preserves existing Ledger stock/history; no automatic conversion of prior synthetic source records into official Capture records occurs. Do not run migrations or seeds against shared Supabase without explicit database-owner approval.
 
 6. Start frontend:
 
@@ -93,31 +95,15 @@ Profiles support display name and optional phone number; editing a profile canno
 
 ## Ledger workflow
 
-Permission-gated workspace provides setup/lookups; explicitly synthetic, durable source records, receipts and receiving corrections in Development/Testing; stock search/detail/history; processing drafts, manager confirmation, transfers and corrections; customer HOLD, manager response/isolation and notifications. Committed synthetic receipts create receipt-derived Ledger stock, which remains durable Ledger data and is not automatically migrated to future Capture. The Sources & receiving section appears only when `/api/capture-mock/status` reports `{ "synthetic": true }`; its absence does not block other Ledger sections. UI gates are not authorization boundary; backend checks persisted role, permission, owner and facility.
+Permission-gated workspace provides Catalog setup/lookups; official Capture farmer, plot, season, plot-season and procurement workflows; stock search/detail/history; processing drafts, manager confirmation, transfers and Ledger processing corrections; customer HOLD, manager response/isolation and notifications. Procurement routes: `/api/procurement-reference-data`, `/api/procurements/commit`, `/api/procurements`, `/api/procurements/{id}` and `/api/source-lots/{id}` (see [procurement API](docs/procurement-api.md)). Capture procurement commits protected Ledger stock atomically using persisted Catalog-to-Ledger commodity mapping. Historical Ledger stock/provenance remains; legacy synthetic records are not converted. Retired mock routes, including `/api/capture-mock/status`, are unavailable (404). Official Capture has no arrival-observation or receipt-correction endpoints. UI gates are not authorization boundary; backend checks persisted role, permission, owner and facility.
+Data loading uses fresh, scoped reads without a response cache. Unfiltered stock reuses the same lot response; filtered stock, detail, source lots and permitted setup lookups load concurrently. Ledger reads validate persisted active role and scope inside `ledger.read`, avoiding a redundant identity query. React StrictMode replays mount effects in Development; compare production builds for user-facing timings.
 
-Data loading uses fresh, scoped reads without a response cache. Unfiltered stock reuses the same lot response; filtered stock, detail, receiving sources and permitted setup lookups load concurrently. MockCapture receipt/arrival/correction lists filter company/facility scope before bulk hydration rather than querying each record separately. Ledger reads validate persisted active role and scope inside `ledger.read`, avoiding a redundant identity query. These fetch changes require no database migration or `.env` changes. Supabase connection/network latency still affects cold loads; React StrictMode also replays mount effects in Development, so compare production builds for user-facing timings.
+Single-lot history selects relevant event IDs before joining postings, with indexed restriction, HOLD and reverse-source lookups. This optimization requires explicit `20261014000000_OptimizeLedgerReads` migration; ordinary startup does not apply it. See [read scalability and tracing readiness](docs/architecture.md#read-scalability-and-tracing-readiness) for historical isolated large-data measurements, remaining unbounded-list limits and proposal F18 gaps. Do not apply migrations to shared Supabase without approval.
 
-Single-lot history now selects relevant event IDs before joining postings, with indexed restriction, HOLD and reverse-source lookups. This additional optimization requires the explicit `20261014000000_OptimizeLedgerReads` migration; ordinary startup does not apply it. See [read scalability and tracing readiness](docs/architecture.md#read-scalability-and-tracing-readiness) for isolated large-data measurements, remaining unbounded-list limits and proposal F18 gaps. Do not apply migrations to shared Supabase without approval.
+Current workflow outline (not a test report): configure facilities, locations, commodities and policies; register Capture farmer/plot/season/plot-season and commit procurement; verify stock/provenance; run processing, transfer, HOLD and processing-correction paths with scoped roles. Official Capture lacks arrival-observation and receipt-correction endpoints.
+Latest cutover verification: frontend 24 tests and production build passed. Backend `dotnet build GrainLedger.slnx` passed with existing CS9113 unread access warning; `dotnet test GrainLedger.slnx --no-build` passed 166/166, 0 skipped. Isolated real-browser flow registered a farmer, Point plot and plot-season, committed official procurement for `12.345678 KG`, and observed source `currentStock.onHandKg` as exact string `"12.345678"` with matching Ledger physical and available stock. Retired mock status returned 404. Smoke used isolated PostgreSQL through a test-only cookie bridge; no shared database or `.env` changes.
 
-Nine-step executable smoke scenario uses integration-test host and PostgreSQL, not a production auth bypass:
-
-```bash
-dotnet test backend/tests/GrainLedger.Api.IntegrationTests --filter FullyQualifiedName~Pdf_nine_step_smoke_proves_real_stock_and_authorization
-```
-
-1. Configure facility/location/commodity/assignments, labeled synthetic policies/evidence, farmer, plot, season and plot-season.
-2. Commit receipt lines of 50,000, 30,000 and 20,000 kg.
-3. Dry 100,000 → 88,000 kg; declared loss 12,000 kg, variance 0.
-4. Mill into actual head rice 58,000, broken rice 8,000, bran 6,000 and husk 15,700 kg; declared loss 300 kg, variance 0. Byproducts remain stock.
-5. Verify every milling output's exact 50/30/20 source attribution and contribution total.
-6. Transfer 1,000 kg head rice without changing lot identity; isolate held 8,000 kg broken rice without release; atomically correct a separate drying operation.
-7. On separate receipt, record 19 kg arrival against 20 kg source; verify unavailable, evidence-correct measurement to 20 kg, retain original 19 kg.
-8. Correct unused 30 kg receipt to 29 kg with evidence and atomic reversal/replacement. Verify subsequent transfer prevents further simple receipt correction.
-9. Verify assigned-facility operator reads; foreign-facility, farmer-contact and pending-user denials.
-
-Historical pre-cutover verification reported by implementation owner: `dotnet test GrainLedger.slnx --no-build` passed 87 tests, `npm test` passed 14 tests, and backend/frontend builds passed. Latest MockCapture cutover verification reported by implementation owner: 113 backend and 23 frontend tests passed, frontend build passed; a real browser workflow registered a synthetic farmer and committed a 10 kg receipt that appeared in Ledger stock. The old `/api/capture/farmers` route returned 404. Fresh Production migrations created no `capture_mock`, Production status returned 404, and a forward upgrade was verified against an isolated initial Ledger database. An incompatible teammate farmers schema/row and a Production teammate fixture remained unchanged. `.env` and Supabase were unchanged.
-
-Build/test commands:
+Build/test commands (not run for this documentation-only change):
 
 ```bash
 dotnet build GrainLedger.slnx
@@ -134,7 +120,7 @@ Backend integration tests require Docker/Testcontainers. Browser/auth harness is
 docker build -t grainledger:local .
 ```
 
-`.env` excluded from image. Store runtime and migration-owner secrets in protected secret storage. Provision separate PostgreSQL roles before migration. Run one-shot image `--migrate` with migration-owner credentials and `Ledger:RuntimeRole`; Production migration order excludes MockCapture, which is Development/Testing-only. Long-running app receives runtime credential only. Do not put migration-owner secret in normal app environment. Back up before migrations. Never migrate or modify a teammate/production Supabase database for MockCapture.
+`.env` excluded from image. Store runtime and migration-owner secrets in protected secret storage. Provision separate PostgreSQL roles before migration. Run one-shot image `--migrate` with migration-owner credentials and `Ledger:RuntimeRole`; migration order is Identity → Catalog → Capture → Ledger. Long-running app receives runtime credential only. Do not put migration-owner secret in normal app environment. Back up before migrations. Shared database migration, seed or schema/role/grant changes require explicit database-owner approval. Migrations preserve existing Ledger stock/history; no automatic synthetic-record conversion occurs.
 
 Serve UI/API from one origin behind HTTPS reverse proxy. Configure:
 

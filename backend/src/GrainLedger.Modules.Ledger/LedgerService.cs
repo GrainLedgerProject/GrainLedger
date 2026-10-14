@@ -11,7 +11,6 @@ using NpgsqlTypes;
 
 namespace GrainLedger.Modules.Ledger;
 
-public sealed record ReceiptStockLine(Guid ReceiptId, Guid ReceiptLineId, Guid LotId, string Code, Guid OwnerId, Guid CommodityId, Guid LocationId, string QuantityKg, string OriginalQuantity, string OriginalUnit, DateTimeOffset OccurredAt, Guid? ReplacementForReceiptId = null);
 public sealed record LedgerEvidence(Guid Id, string FileName, string ContentType, byte[] Content, string Sha256);
 public sealed class LedgerException(int statusCode, string message) : Exception(message)
 {
@@ -62,45 +61,6 @@ public sealed class LedgerService(IConfiguration configuration, IHttpContextAcce
         await using var connection = await OpenAsync(ct);
         var value = await ExecuteAsync(connection, null, "SELECT ledger.read($1,$2,$3)::text", ct, actor, action, payload);
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
-    }
-    public async Task<Guid> PostReceiptAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid actorId, ReceiptStockLine line, CancellationToken ct = default)
-    {
-        if (actorId != await ActorAsync(ct)) throw new LedgerException(403, "Receipt actor mismatch");
-        var payload = JsonSerializer.SerializeToNode(line, JsonOptions)!;
-        return (Guid)(await ExecuteAsync(connection, transaction, "SELECT ledger.receipt($1,$2)", ct, actorId, payload))!;
-    }
-    public async Task SetReceiptCorrectionBlockAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid actorId, Guid correctionId, Guid receiptId, Guid ownerId, CancellationToken ct = default)
-    {
-        if (actorId != await ActorAsync(ct)) throw new LedgerException(403, "Correction actor mismatch");
-        await ExecuteAsync(connection, transaction, "SELECT ledger.receipt_correction_request($1,$2,$3,$4)", ct, actorId, correctionId, receiptId, ownerId);
-    }
-    public async Task ReverseUnusedReceiptAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid actorId, Guid correctionId, Guid receiptId, Guid ownerId, Guid evidenceId, string reason, CancellationToken ct = default)
-    {
-        if (actorId != await ActorAsync(ct)) throw new LedgerException(403, "Correction actor mismatch");
-        await ExecuteAsync(connection, transaction, "SELECT ledger.reverse_receipt($1,$2,$3,$4,$5,$6)", ct, actorId, correctionId, receiptId, ownerId, evidenceId, reason);
-    }
-    public async Task SetReceivingBlockAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid actorId, Guid discrepancyId, Guid lotId, bool blocked, Guid evidenceId, string reason, CancellationToken ct = default)
-    {
-        if (actorId != await ActorAsync(ct)) throw new LedgerException(403, "Receiving actor mismatch");
-        await ExecuteAsync(connection, transaction, "SELECT ledger.receiving_block($1,$2,$3,$4,$5,$6)", ct, actorId, discrepancyId, lotId, blocked, evidenceId, reason);
-    }
-    public async Task<Guid> GetLocationFacilityAsync(Guid locationId, CancellationToken ct = default)
-    {
-        await using var connection = await OpenAsync(ct);
-        var facility = await ExecuteAsync(connection, null, "SELECT facility_id FROM ledger.locations WHERE id=$1", ct, locationId);
-        return facility is Guid id ? id : throw new LedgerException(400, "Unknown location");
-    }
-    public async Task<bool> CanAccessLocationAsync(Guid locationId, string permission, CancellationToken ct = default)
-    {
-        if (!await access.HasPermissionAsync(permission, ct)) return false;
-        var actor = await ActorAsync(ct);
-        await using var connection = await OpenAsync(ct);
-        return Equals(await ExecuteAsync(connection, null, "SELECT EXISTS(SELECT 1 FROM ledger.locations l WHERE l.id=$2 AND (ledger.role($1)='PurchasingStaff' OR ledger.assigned($1,l.facility_id)))", ct, actor, locationId), true);
-    }
-    public async Task<bool> CanReadLotAsync(Guid lotId, CancellationToken ct = default)
-    {
-        await using var connection = await OpenAsync(ct);
-        return Equals(await ExecuteAsync(connection, null, "SELECT ledger.can_read_lot($1,$2)", ct, await ActorAsync(ct), lotId), true);
     }
     public async Task<bool> CanAccessEvidenceAsync(Guid evidenceId, Guid ownerId, Guid facilityId, CancellationToken ct = default)
     {

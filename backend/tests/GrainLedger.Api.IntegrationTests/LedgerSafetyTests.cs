@@ -44,46 +44,19 @@ public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFac
     {
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid();
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(id, [quantity], unit: unit));
-        var receipt = await s.CommitReceiptAsync(id); var line = receipt.GetProperty("lines")[0];
-        Assert.Equal(quantity, line.GetProperty("quantity").GetString()); Assert.Equal(unit, line.GetProperty("unit").GetString());
-        Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), Decimal(line.GetProperty("quantityKg")));
-        Assert.Equal(Decimal(line.GetProperty("quantityKg")), Quantity(await s.LotAsync(Lots(receipt)[0])));
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(Guid.NewGuid(), ["0.000001"], unit: "g"), HttpStatusCode.BadRequest);
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(Guid.NewGuid(), ["1"], unit: "lb"), HttpStatusCode.BadRequest);
+        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(id, [quantity], unit: unit));
+        var line = receipt.GetProperty("items")[0];
+        Assert.Equal(decimal.Parse(quantity, System.Globalization.CultureInfo.InvariantCulture), Decimal(line.GetProperty("measuredValue")));
+        Assert.Equal(unit.ToUpperInvariant(), line.GetProperty("measuredUnit").GetString());
+        Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), Decimal(line.GetProperty("netMassKg")));
+        Assert.Equal(Decimal(line.GetProperty("netMassKg")), Quantity(await s.LotAsync(Lots(receipt)[0])));
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(Guid.NewGuid(), ["0.000001"], unit: "G"), HttpStatusCode.BadRequest);
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements/commit", s.ReceiptBody(Guid.NewGuid(), ["1"], unit: "LB"), HttpStatusCode.BadRequest);
     }
+
 
     [Fact]
-    public async Task Unsupported_original_measurement_length_rejects_before_persisting_receipt_draft()
-    {
-        using var s = await CreateAsync(factory); var id = Guid.NewGuid();
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(id, [new string('0', 40) + "1"]), HttpStatusCode.BadRequest);
-        Assert.DoesNotContain((await GetAsync(s.Purchaser, "/api/capture-mock/receipts")).EnumerateArray(), r => r.GetProperty("id").GetGuid() == id);
-        var acceptedId = Guid.NewGuid(); var acceptedOriginal = new string('0', 39) + "1";
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/receipts", s.ReceiptBody(acceptedId, [acceptedOriginal]));
-        var accepted = await s.CommitReceiptAsync(acceptedId);
-        Assert.Equal(acceptedOriginal, accepted.GetProperty("lines")[0].GetProperty("quantity").GetString());
-        Assert.Equal(1m, Quantity(await s.LotAsync(Lots(accepted)[0])));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NUL_in_source_name_or_phone_returns_client_error_without_persisted_record(bool phone)
-    {
-        using var s = await CreateAsync(factory); var id = Guid.NewGuid();
-        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/farmers", new
-        {
-            id, ownerOrganizationId = s.OwnerId,
-            name = phone ? "Valid synthetic farmer" : "Invalid synthetic farmer\0",
-            phoneNumber = phone ? "+840000\0" : null
-        }, HttpStatusCode.BadRequest);
-        Assert.DoesNotContain((await GetAsync(s.Purchaser, "/api/capture-mock/farmers")).EnumerateArray(), f => f.GetProperty("id").GetGuid() == id);
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/capture-mock/farmers", new { id, ownerOrganizationId = s.OwnerId, name = "Valid synthetic farmer", phoneNumber = "+84000000000" });
-    }
-
-    [Fact]
-    public async Task Transfer_rejects_same_UUID_location_with_different_text_case_without_blocking_receipt_correction()
+    public async Task Transfer_rejects_same_UUID_location_with_different_text_case_without_changing_stock()
     {
         using var s = await CreateAsync(factory);
         var receipt = await s.ReceiptAsync("10"); var source = Lots(receipt)[0];
@@ -97,11 +70,6 @@ public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFac
         var lot = await s.LotAsync(source);
         Assert.Equal(10m, Quantity(lot)); Assert.Single(lot.GetProperty("positions").EnumerateArray());
         Assert.DoesNotContain((await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}")).EnumerateArray(), e => e.GetProperty("kind").GetString() == "TRANSFER");
-        var (correction, replacementId) = await ReceiptCorrectionTests.RequestAsync(s, receipt, "9");
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/receipt-corrections/{correction}/commit", new { commandId = Guid.NewGuid() });
-        var replacement = await GetAsync(s.Purchaser, $"/api/capture-mock/receipts/{replacementId}");
-        Assert.Equal(0m, Quantity(await s.LotAsync(source)));
-        Assert.Equal(9m, Quantity(await s.LotAsync(Lots(replacement)[0])));
     }
 
     [Theory]
@@ -224,20 +192,6 @@ public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFac
         Assert.Equal(0m, Quantity(await s.LotAsync(Output(original)), "availableKg"));
     }
 
-    [Fact]
-    public async Task Receiving_resolution_does_not_clear_independent_correction_lock()
-    {
-        using var s = await CreateAsync(factory);
-        var receipt = await s.ReceiptAsync("10"); var lot = Lots(receipt)[0];
-        var correction = Guid.NewGuid();
-        await SendAsync(s.Purchaser, HttpMethod.Post, $"/api/capture-mock/receipts/{receipt.GetProperty("id").GetGuid()}/corrections", new { id = correction, reason = "Synthetic independent procurement investigation", replacement = s.ReceiptBody(Guid.NewGuid(), ["10"]) });
-        var arrival = await s.ArrivalAsync(receipt, "9");
-        await SendAsync(s.Manager, HttpMethod.Post, $"/api/capture-mock/arrivals/{arrival}/corrections", new { id = Guid.NewGuid(), quantity = "10", unit = "kg", evidenceId = s.EvidenceId, reason = "Synthetic arrival entry evidence" });
-        Assert.Equal("RESOLVED", (await GetAsync(s.Manager, $"/api/capture-mock/arrivals/{arrival}")).GetProperty("status").GetString());
-        var pending = (await GetAsync(s.Purchaser, "/api/capture-mock/receipt-corrections")).EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == correction);
-        Assert.Equal("REQUESTED", pending.GetProperty("status").GetString());
-        Assert.Equal(10m, Quantity(await s.LotAsync(lot))); Assert.Equal(0m, Quantity(await s.LotAsync(lot), "availableKg"));
-    }
 
     [Fact]
     public async Task Blending_requires_exact_explicit_products_and_merge_never_changes_stage()

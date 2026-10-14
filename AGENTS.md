@@ -8,8 +8,8 @@ GrainLedger is a modular monolith: ASP.NET Core 10, PostgreSQL, and React/TypeSc
 
 - `backend/src/GrainLedger.Api/`: application host and module composition.
 - `backend/src/GrainLedger.Modules.Identity/`: authentication, sessions, organizations, permissions, and `identity` schema.
-- `backend/src/GrainLedger.Modules.Ledger/`: protected stock accounting, provenance, evidence, and `ledger` schema.
-- `backend/src/GrainLedger.Modules.MockCapture/`: Development/Testing-only synthetic workflows in `capture_mock`.
+- `backend/src/GrainLedger.Modules.Catalogs/`: Catalog APIs and catalog schema.
+- `backend/src/GrainLedger.Modules.Capture/`: official farmer/procurement APIs and `capture` schema.
 - `backend/tests/GrainLedger.Api.IntegrationTests/`: backend integration tests using isolated Docker/Testcontainers PostgreSQL.
 - `apps/web/`: working web UI; `apps/mobile/` remains a placeholder.
 
@@ -41,7 +41,8 @@ Use `http://localhost:5173`; Vite proxies `/api` and `/signin-google` to backend
 - Treat configured Supabase databases as shared. Obtain explicit approval before running migrations, seeds, schema/role/grant changes, or data-changing smoke scenarios against them. Use isolated test containers for write-based verification.
 - `ConnectionStrings__GrainLedger` is the restricted runtime connection. `ConnectionStrings__GrainLedgerMigration` is migration-owner access, not normal application access. Never bypass runtime-role validation or use elevated credentials to make application startup succeed.
 - Never print or commit credentials, tokens, `.env`, or real evidence files. Never expose backend secrets through `VITE_` variables.
-- MockCapture must remain Development/Testing-only and confined to `capture_mock`. Never alter the teammate-owned `capture` schema or imply synthetic data is production Capture data.
+- Capture owns official source records; it has no arrival-observation or receipt-correction endpoints. Do not convert historical synthetic records automatically or remove existing Ledger stock/history.
+- Obtain explicit owner approval before shared database migrations, seeds, schema/role/grant changes or data-changing checks.
 
 ## Correctness boundaries
 

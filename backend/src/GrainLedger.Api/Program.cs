@@ -1,6 +1,7 @@
 using GrainLedger.Modules.Identity;
 using GrainLedger.Modules.Ledger;
-using GrainLedger.Modules.MockCapture;
+using GrainLedger.Modules.Capture;
+using GrainLedger.Modules.Catalogs;
 using GrainLedger.Api.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -11,11 +12,8 @@ using Scalar.AspNetCore;
 var builder = WebApplication.CreateBuilder(args);
 var migrating = args.Contains("--migrate", StringComparer.Ordinal);
 var seedDevelopment = args.Contains("--seed-dev", StringComparer.Ordinal);
-var seedMock = args.Contains("--seed-mock", StringComparer.Ordinal);
-if ((migrating ? 1 : 0) + (seedDevelopment ? 1 : 0) + (seedMock ? 1 : 0) > 1)
-    throw new InvalidOperationException("Run --migrate, --seed-dev and --seed-mock separately; these commands cannot be combined.");
-if (seedMock && !builder.Environment.IsDevelopment())
-    throw new InvalidOperationException("--seed-mock is only available in Development.");
+if (migrating && seedDevelopment)
+    throw new InvalidOperationException("Run --migrate and --seed-dev separately.");
 if (!builder.Environment.IsEnvironment("Testing"))
 {
     builder.Configuration.AddLocalEnvironmentFile(builder.Environment.ContentRootPath, builder.Environment.IsDevelopment());
@@ -23,10 +21,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
     builder.Configuration.AddEnvironmentVariables();
     builder.Configuration.AddCommandLine(args);
 }
-var mockCaptureEnabled = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing");
 var migrationConnection = builder.Configuration.GetConnectionString("GrainLedgerMigration");
-if (seedMock && string.IsNullOrWhiteSpace(migrationConnection))
-    throw new InvalidOperationException("ConnectionStrings:GrainLedgerMigration is required for explicit owner mock seeding.");
 if (migrating)
 {
     if (string.IsNullOrWhiteSpace(migrationConnection)) throw new InvalidOperationException("ConnectionStrings:GrainLedgerMigration is required for explicit owner migrations.");
@@ -41,16 +36,11 @@ builder.Services.AddOpenApi(options =>
 });
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddIdentityModule(builder.Configuration, builder.Environment);
+builder.Services.AddCaptureModule();
+builder.Services.AddCatalogModule();
 builder.Services.AddLedgerModule(builder.Configuration);
-if (mockCaptureEnabled) builder.Services.AddMockCaptureModule(builder.Configuration);
 
 var app = builder.Build();
-if (seedMock)
-{
-    await MockCaptureSeed.RunAsync(migrationConnection!, app.Environment.EnvironmentName);
-    app.Logger.LogInformation("Synthetic mock seed completed; existing seeded records and stock unchanged on replay.");
-    return;
-}
 if (seedDevelopment)
 {
     await using var scope = app.Services.CreateAsyncScope();
@@ -66,9 +56,9 @@ if (migrating)
 {
     await using var scope = app.Services.CreateAsyncScope();
     await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
+    await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.MigrateAsync();
+    await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
     await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
-    if (mockCaptureEnabled)
-        await scope.ServiceProvider.GetRequiredService<MockCaptureDbContext>().Database.MigrateAsync();
     await LedgerDatabase.ConfigureRuntimeRoleAsync(migrationConnection!, builder.Configuration["Ledger:RuntimeRole"] ?? throw new InvalidOperationException("Ledger:RuntimeRole is required."));
     return;
 }
@@ -91,7 +81,6 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
-
 if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 {
     app.MapOpenApi();
@@ -103,7 +92,8 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).WithTags("Health");
 app.MapIdentityModule();
 app.MapLedgerModule();
-if (mockCaptureEnabled) app.MapMockCaptureModule();
+app.MapCaptureModule();
+app.MapCatalogModule();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 if (!app.Environment.IsDevelopment()) app.MapFallbackToFile("index.html");
 

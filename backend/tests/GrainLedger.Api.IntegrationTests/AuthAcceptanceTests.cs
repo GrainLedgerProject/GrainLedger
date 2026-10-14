@@ -66,7 +66,7 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
             Assert.Contains(permission, managerTokens.User.Permissions);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", managerTokens.AccessToken);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ledger/setup")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/capture-mock/farmers")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/farmers")).StatusCode);
 
         var operatorUser = await CreateUserAsync(Roles.MillOperator);
         var operatorTokens = await LoginAsync(client, operatorUser);
@@ -79,15 +79,16 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", purchaserTokens.AccessToken);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ledger/lookups")).StatusCode);
         var farmerId = Guid.NewGuid();
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/capture-mock/farmers",
-            new { id = farmerId, ownerOrganizationId = purchaser.OrganizationId, name = "Bearer farmer" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/farmers",
+            LedgerScenario.CaptureCommand(new { entityId = farmerId, name = "Bearer farmer" }))).StatusCode);
         var foreign = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/capture-mock/farmers",
-            new { id = Guid.NewGuid(), ownerOrganizationId = foreign.Id, name = "Forbidden farmer" })).StatusCode);
+        var (foreignUser, foreignSession) = await factory.SeedUserAsync(Roles.PurchasingStaff, foreign.Id);
+        using var foreignClient = factory.CreateRealCookieClient(foreignUser, foreignSession);
+        Assert.Equal(HttpStatusCode.NotFound, (await foreignClient.GetAsync($"/api/farmers/{farmerId}")).StatusCode);
 
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/ledger/lookups")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/capture-mock/farmers")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/farmers")).StatusCode);
     }
 
     [Fact]

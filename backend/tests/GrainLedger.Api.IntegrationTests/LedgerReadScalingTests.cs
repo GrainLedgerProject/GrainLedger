@@ -47,38 +47,6 @@ public sealed class LedgerReadScalingTests(ApiFactory factory) : IClassFixture<A
             Assert.Equal(HttpStatusCode.Forbidden, unassigned.StatusCode);
     }
 
-    [Fact]
-    public async Task Receiving_restriction_event_without_posting_is_unfiltered_only_and_redacted_for_operator()
-    {
-        using var s = await CreateAsync(factory);
-        var receipt = await s.ReceiptAsync("10");
-        var lot = Lots(receipt)[0];
-        var arrival = await s.ArrivalAsync(receipt, "9");
-
-        var history = (await GetAsync(s.Operator, $"/api/ledger/history?lotId={lot}")).EnumerateArray().ToArray();
-        var restriction = Assert.Single(history, row => row.GetProperty("kind").GetString() == "RECEIVING_RESTRICTION");
-        Assert.Equal(lot, restriction.GetProperty("lotId").GetGuid());
-        Assert.Equal(JsonValueKind.Null, restriction.GetProperty("postingId").ValueKind);
-        Assert.Equal(JsonValueKind.Null, restriction.GetProperty("quantityKg").ValueKind);
-        Assert.Equal(JsonValueKind.Null, restriction.GetProperty("locationId").ValueKind);
-        var details = restriction.GetProperty("details");
-        Assert.Equal(JsonValueKind.Null, details.GetProperty("declaredLossKg").ValueKind);
-        Assert.Equal(JsonValueKind.Null, details.GetProperty("varianceKg").ValueKind);
-        Assert.False(details.TryGetProperty("evidenceId", out _));
-        Assert.False(details.TryGetProperty("discrepancyId", out _));
-
-        var facilityHistory = (await GetAsync(s.Operator, $"/api/ledger/history?lotId={lot}&facilityId={s.FacilityId}")).EnumerateArray().ToArray();
-        Assert.DoesNotContain(facilityHistory, row => row.GetProperty("id").GetGuid() == restriction.GetProperty("id").GetGuid());
-        Assert.Contains(facilityHistory, row => row.GetProperty("kind").GetString() == "RECEIPT" && row.GetProperty("lotId").GetGuid() == lot);
-
-        var managerRestriction = (await GetAsync(s.Manager, $"/api/ledger/history?lotId={lot}")).EnumerateArray()
-            .Single(row => row.GetProperty("id").GetGuid() == restriction.GetProperty("id").GetGuid());
-        var managerDetails = managerRestriction.GetProperty("details");
-        Assert.Equal(arrival, managerDetails.GetProperty("discrepancyId").GetGuid());
-        Assert.True(managerDetails.GetProperty("blocked").GetBoolean());
-        Assert.Equal("ARRIVAL_MISMATCH", managerDetails.GetProperty("reason").GetString());
-        Assert.Equal(s.EvidenceId, managerDetails.GetProperty("evidenceId").GetGuid());
-    }
 
     private static decimal Kg(JsonElement row) => decimal.Parse(row.GetProperty("quantityKg").GetString()!, CultureInfo.InvariantCulture);
     private static string IdKey(Guid id) => id.ToString("N");

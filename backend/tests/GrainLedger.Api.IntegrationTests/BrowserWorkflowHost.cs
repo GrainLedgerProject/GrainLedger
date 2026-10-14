@@ -17,6 +17,7 @@ public sealed class BrowserWorkflowHost
         var factory = new ApiFactory { BrowserCookies = true };
         await factory.InitializeAsync();
         using var scenario = await LedgerScenario.CreateAsync(factory);
+        await scenario.ReceiptAsync("10");
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -78,12 +79,12 @@ public sealed class BrowserWorkflowHost
         await using (var file = new FileStream(sessionFile, options))
             await JsonSerializer.SerializeAsync(file, new
             {
-                api = "http://localhost:5080", ui = "http://localhost:5173", synthetic = true,
+                api = "http://localhost:5080", ui = "http://localhost:5173", isolatedTestData = true,
                 customerOrganizationId = scenario.OwnerId, foreignCustomerOrganizationId = scenario.ForeignOwnerId,
                 facilityId = scenario.FacilityId, foreignFacilityId = scenario.ForeignFacilityId,
                 locationId = scenario.LocationId, secondLocationId = scenario.SecondLocationId,
                 isolationLocationId = scenario.IsolationLocationId, foreignLocationId = scenario.ForeignLocationId,
-                equipmentId = scenario.EquipmentId, commodityId = scenario.CommodityId,
+                equipmentId = scenario.EquipmentId, commodityId = scenario.CommodityId, catalogCommodityId = scenario.CatalogCommodityId,
                 farmerId = scenario.FarmerId, seasonId = scenario.SeasonId, plotSeasonId = scenario.PlotSeasonId,
                 evidenceId = scenario.EvidenceId, accounts
             }, new JsonSerializerOptions { WriteIndented = true });
