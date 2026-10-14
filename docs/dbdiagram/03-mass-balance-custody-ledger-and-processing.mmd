@@ -1,0 +1,171 @@
+erDiagram
+    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
+    lots {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        varchar(60) code "NN"
+        uuid commodity_id FK "NN"
+        varchar(32) stage "NN; RAW_PADDY DRIED_PADDY HEAD_RICE BROKEN_RICE BRAN HUSK BLENDED_RICE BAGGED_RICE"
+        timestamptz created_at "NN"
+    }
+    stock_positions {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid lot_id FK "NN"
+        uuid location_id FK "NN"
+        numeric(20,6) on_hand_kg "NN"
+        numeric(20,6) reserved_kg "NN"
+        timestamptz updated_at "NN"
+    }
+    balance_policies {
+        uuid id PK "NN"
+        varchar(40) conversion_type "NN"
+        integer version_no "NN"
+        varchar(32) tolerance_mode "NN; PERCENT_INPUT"
+        numeric(20,6) tolerance_value "NN"
+        uuid configured_by FK "NN"
+        timestamptz effective_from "NN"
+        text evidence_ref "NN"
+    }
+    conversions {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        varchar(60) code "NN"
+        varchar(32) kind "NN; DRYING MILLING MERGE BLENDING BAGGING COMPENSATION"
+        varchar(32) status "NN; DRAFT COMMITTED"
+        uuid balance_policy_id FK "NN"
+        uuid equipment_id FK "NULL"
+        uuid plan_id FK "NULL"
+        uuid original_conversion_id FK "NULL"
+        numeric(20,6) declared_loss_kg "NN"
+        numeric(24,12) declared_loss_value "NULL"
+        varchar(20) declared_loss_unit "NULL"
+        text loss_reason "NULL"
+        numeric(20,6) measurement_variance_kg "NULL"
+        varchar(32) variance_reason "NULL; SCALE_ROUNDING MEASUREMENT_ERROR MOISTURE_ESTIMATION OTHER_CONFIRMED"
+        uuid variance_confirmed_by FK "NULL"
+        uuid recorded_by FK "NN"
+        timestamptz occurred_at "NN"
+        uuid event_id FK,UK "NULL"
+        timestamptz committed_at "NULL"
+    }
+    conversion_inputs {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid conversion_id FK "NN"
+        uuid lot_id FK "NN"
+        numeric(20,6) mass_kg "NN"
+        numeric(24,12) measured_value "NULL"
+        varchar(20) measured_unit "NULL"
+    }
+    conversion_outputs {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid conversion_id FK "NN"
+        uuid lot_id FK,UK "NN"
+        numeric(20,6) mass_kg "NN"
+        numeric(24,12) measured_value "NULL"
+        varchar(20) measured_unit "NULL"
+    }
+    mass_contributions {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid input_id FK "NN"
+        uuid output_id FK "NN"
+        numeric(20,6) output_mass_kg "NN"
+    }
+    stock_postings {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid event_id FK "NN"
+        integer line_no "NN"
+        uuid position_id FK "NN"
+        numeric(20,6) delta_kg "NN"
+        uuid reservation_id FK "NULL"
+        uuid input_id FK "NULL"
+        uuid output_id FK "NULL"
+        uuid loading_item_id FK "NULL"
+        uuid reverses_posting_id FK,UK "NULL"
+    }
+    correction_requests {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid original_conversion_id FK "NN"
+        uuid compensation_id FK,UK "NULL"
+        uuid replacement_id FK,UK "NULL"
+        uuid requested_by FK "NN"
+        uuid reconciled_by FK "NULL"
+        text reconciliation_ref "NULL"
+        timestamptz requested_at "NN"
+        timestamptz resolved_at "NULL"
+        text reason "NN"
+        varchar(32) outcome "NN; PENDING_RECONCILIATION BLOCKED_DOWNSTREAM COMPLETED CANCELLED_VERIFIED"
+        text handling_note "NULL"
+    }
+    organizations {
+        uuid Id PK "Reference table; identity.organizations"
+    }
+    commodities {
+        uuid id PK "Reference table; defined in another module"
+    }
+    locations {
+        uuid id PK "Reference table; defined in another module"
+    }
+    users {
+        uuid Id PK "Reference table; identity.users"
+    }
+    equipment {
+        uuid id PK "Reference table; defined in another module"
+    }
+    blend_plans {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    business_events {
+        uuid id PK "Reference table; defined in another module"
+    }
+    stock_reservations {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    loading_items {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    organizations ||..o{ lots : company
+    commodities ||..o{ lots : commodity
+    organizations ||..o{ stock_positions : company
+    lots ||..o{ stock_positions : lot
+    locations ||..o{ stock_positions : location
+    users ||..o{ balance_policies : configured_by
+    organizations ||..o{ conversions : company
+    balance_policies ||..o{ conversions : balance_policy
+    equipment o|..o{ conversions : equipment
+    blend_plans o|..o{ conversions : plan
+    conversions o|..o{ conversions : original_conversion
+    users o|..o{ conversions : variance_confirmed_by
+    users ||..o{ conversions : recorded_by
+    business_events o|..o| conversions : event
+    organizations ||..o{ conversion_inputs : company
+    conversions ||..o{ conversion_inputs : conversion
+    lots ||..o{ conversion_inputs : lot
+    organizations ||..o{ conversion_outputs : company
+    conversions ||..o{ conversion_outputs : conversion
+    lots ||..o| conversion_outputs : lot
+    organizations ||..o{ mass_contributions : company
+    conversion_inputs ||..o{ mass_contributions : input
+    conversion_outputs ||..o{ mass_contributions : output
+    organizations ||..o{ stock_postings : company
+    business_events ||..o{ stock_postings : event
+    stock_positions ||..o{ stock_postings : position
+    stock_reservations o|..o{ stock_postings : reservation
+    conversion_inputs o|..o{ stock_postings : input
+    conversion_outputs o|..o{ stock_postings : output
+    loading_items o|..o{ stock_postings : loading_item
+    stock_postings o|..o| stock_postings : reverses_posting
+    organizations ||..o{ correction_requests : company
+    conversions ||..o{ correction_requests : original_conversion
+    conversions o|..o| correction_requests : compensation
+    conversions o|..o| correction_requests : replacement
+    users ||..o{ correction_requests : requested_by
+    users o|..o{ correction_requests : reconciled_by

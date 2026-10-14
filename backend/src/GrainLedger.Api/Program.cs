@@ -1,4 +1,6 @@
 using GrainLedger.Modules.Identity;
+using GrainLedger.Modules.Capture;
+using GrainLedger.Modules.Catalogs;
 using GrainLedger.Api.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -23,6 +25,8 @@ builder.Services.AddOpenApi(options =>
 });
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddIdentityModule(builder.Configuration, builder.Environment);
+builder.Services.AddCaptureModule();
+builder.Services.AddCatalogModule();
 
 var app = builder.Build();
 if (args.Contains("--seed-dev", StringComparer.Ordinal))
@@ -40,6 +44,15 @@ if (args.Contains("--migrate", StringComparer.Ordinal))
 {
     await using var scope = app.Services.CreateAsyncScope();
     await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
+    await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.MigrateAsync();
+    await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
+    return;
+}
+
+if (args.Contains("--migrate-catalog", StringComparer.Ordinal))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.MigrateAsync();
     return;
 }
 
@@ -58,7 +71,6 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
-
 if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 {
     app.MapOpenApi();
@@ -69,6 +81,8 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).WithTags("Health");
 app.MapIdentityModule();
+app.MapCaptureModule();
+app.MapCatalogModule();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 if (!app.Environment.IsDevelopment()) app.MapFallbackToFile("index.html");
 

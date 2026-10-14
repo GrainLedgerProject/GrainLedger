@@ -1,18 +1,21 @@
 # GrainLedger
 
-GrainLedger is a modular monolith for rice supply-chain traceability. This implementation provides Google sign-in, email/password registration with email OTP, JWT access/refresh tokens, password recovery, user profiles, organization management, and server-enforced access control.
+GrainLedger is a modular monolith for rice supply-chain traceability. This implementation provides Google sign-in, email/password registration with email OTP, JWT access/refresh tokens, password recovery, user profiles, organization management, server-enforced access control, and farmer registration and lookup APIs.
 
 ## Structure
 
 ```text
 backend/src/GrainLedger.Api/                 Single ASP.NET Core 10 host
 backend/src/GrainLedger.Modules.Identity/    Identity module, PostgreSQL schema, migrations
+backend/src/GrainLedger.Modules.Capture/     Farmer API, PostgreSQL schema, migrations
 backend/tests/GrainLedger.Api.IntegrationTests/
 apps/web/                                  React + TypeScript + Vite
 docs/architecture.md                        Module boundaries and authorization rules
 ```
 
-The original six `Hello World` API projects have been replaced by one deployable backend. Future business modules run in this same process. The mobile workspace remains a placeholder; the React web app works on mobile screens.
+The original six `Hello World` API projects have been replaced by one deployable backend. Future business modules run in this same process. The mobile workspace remains a placeholder; the React web app works on mobile screens. The farmer API contract is in [docs/farmer-api.md](docs/farmer-api.md).
+
+In Development, the API serves Scalar at `http://localhost:5080/scalar/v1` and its OpenAPI document at `http://localhost:5080/openapi/v1.json`. Use an access token in Scalar's Bearer authentication field to test the farmer API.
 
 ## Run locally
 

@@ -9,6 +9,8 @@
     <PackageReference Include="Scalar.AspNetCore" Version="2.17.14" />
     <PackageReference Include="DotNetEnv" Version="3.2.0" />
     <ProjectReference Include="../GrainLedger.Modules.Identity/GrainLedger.Modules.Identity.csproj" />
+    <ProjectReference Include="../GrainLedger.Modules.Capture/GrainLedger.Modules.Capture.csproj" />
+    <ProjectReference Include="../GrainLedger.Modules.Catalogs/GrainLedger.Modules.Catalogs.csproj" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

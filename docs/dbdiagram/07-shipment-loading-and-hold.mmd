@@ -1,0 +1,147 @@
+erDiagram
+    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
+    loadings {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid container_id FK "NN"
+        uuid plan_id FK "NN"
+        uuid recorded_by FK "NN"
+        varchar(32) status "NN; DRAFT COMMITTED"
+        timestamptz loaded_at "NN"
+        uuid event_id FK,UK "NULL"
+    }
+    loading_items {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid loading_id FK "NN"
+        uuid position_id FK "NN"
+        uuid reservation_id FK "NN"
+        numeric(20,6) mass_kg "NN"
+        integer bag_count "NULL"
+    }
+    dossiers {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid container_id FK,UK "NN"
+        uuid closing_assessment_id FK,UK "NN"
+        uuid created_by FK "NN"
+        timestamptz finalized_at "NN"
+        jsonb snapshot "NN"
+        varchar(128) snapshot_hash "NN"
+    }
+    dossier_supplements {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid dossier_id FK "NN"
+        uuid added_by FK "NN"
+        timestamptz added_at "NN"
+        text reason "NN"
+        text evidence_ref "NN"
+    }
+    shipment_documents {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid container_id FK "NN"
+        varchar(60) kind "NN"
+        integer version_no "NN"
+        text file_ref "NN"
+        varchar(128) file_hash "NN"
+        uuid issued_by FK "NN"
+        timestamptz issued_at "NN"
+    }
+    holds {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid lot_id FK "NULL"
+        uuid container_id FK "NULL"
+        uuid lab_result_id FK "NULL"
+        uuid ordered_by FK "NN"
+        timestamptz ordered_at "NN"
+        text reason "NN"
+    }
+    hold_actions {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid hold_id FK "NN"
+        uuid recorded_by FK "NN"
+        varchar(32) kind "NN; ACKNOWLEDGE ISOLATE RECORD_RESPONSE"
+        text note "NN"
+        text evidence_ref "NULL"
+        timestamptz recorded_at "NN"
+    }
+    notifications {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid hold_id FK "NN"
+        uuid recipient_id FK "NN"
+        text message "NN"
+        timestamptz created_at "NN"
+        timestamptz read_at "NULL"
+    }
+    organizations {
+        uuid Id PK "Reference table; identity.organizations"
+    }
+    containers {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    blend_plans {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    users {
+        uuid Id PK "Reference table; identity.users"
+    }
+    business_events {
+        uuid id PK "Reference table; defined in another module"
+    }
+    stock_positions {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    stock_reservations {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    assessments {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    lots {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    lab_results {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    organizations ||..o{ loadings : company
+    containers ||..o{ loadings : container
+    blend_plans ||..o{ loadings : plan
+    users ||..o{ loadings : recorded_by
+    business_events o|..o| loadings : event
+    organizations ||..o{ loading_items : company
+    loadings ||..o{ loading_items : loading
+    stock_positions ||..o{ loading_items : position
+    stock_reservations ||..o{ loading_items : reservation
+    organizations ||..o{ dossiers : company
+    containers ||..o| dossiers : container
+    assessments ||..o| dossiers : closing_assessment
+    users ||..o{ dossiers : created_by
+    organizations ||..o{ dossier_supplements : company
+    dossiers ||..o{ dossier_supplements : dossier
+    users ||..o{ dossier_supplements : added_by
+    organizations ||..o{ shipment_documents : company
+    containers ||..o{ shipment_documents : container
+    users ||..o{ shipment_documents : issued_by
+    organizations ||..o{ holds : company
+    lots o|..o{ holds : lot
+    containers o|..o{ holds : container
+    lab_results o|..o{ holds : lab_result
+    users ||..o{ holds : ordered_by
+    organizations ||..o{ hold_actions : company
+    holds ||..o{ hold_actions : hold
+    users ||..o{ hold_actions : recorded_by
+    organizations ||..o{ notifications : company
+    holds ||..o{ notifications : hold
+    users ||..o{ notifications : recipient

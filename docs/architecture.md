@@ -6,9 +6,9 @@ This implementation follows `Week1_report/GrainLedger_V2.pdf` (September 30, 202
 
 ## One application, explicit modules
 
-`GrainLedger.Api` is the composition root. It registers and maps the Identity class library. Identity owns the `identity` PostgreSQL schema, its EF Core context, migrations, session records, and audit records. React communicates with the same application origin using cookies. No service discovery, message broker, gateway, or distributed identity service is needed.
+`GrainLedger.Api` is the composition root. It registers and maps the Identity and Capture class libraries. Identity owns the `identity` PostgreSQL schema, its EF Core context, migrations, session records, and audit records. Capture owns the `capture` schema and currently provides farmer registration and lookup. React uses the same application origin with session cookies or Bearer access tokens. No service discovery, message broker, gateway, or distributed identity service is needed.
 
-Future Capture, Ledger, Compliance, Orders, and Traceback modules should be class libraries loaded by this host, with their own tables and application interfaces. Cross-module operations use in-process interfaces. Do not expose another module's EF entities as its public API or add another independently deployed API project. Only the Identity module is implemented in this change; business permission names provide the foundation for future endpoints.
+Future Ledger, Compliance, Orders, and Traceback modules should be class libraries loaded by this host, with their own tables and application interfaces. Cross-module operations use in-process interfaces. Do not expose another module's EF entities as its public API or add another independently deployed API project. Capture currently covers only the farmer API; its remaining field and procurement functions are future work.
 
 ## Roles
 

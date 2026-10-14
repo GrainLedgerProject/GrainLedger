@@ -1,0 +1,72 @@
+erDiagram
+    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
+    samples {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        varchar(60) code "NN"
+        uuid source_lot_id FK "NN"
+        varchar(100) seal_code "NN"
+        uuid collected_by FK "NN"
+        timestamptz collected_at "NN"
+    }
+    sample_handovers {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid sample_id FK "NN"
+        uuid recorded_by FK "NN"
+        text from_party "NN"
+        text to_party "NN"
+        timestamptz handed_over_at "NN"
+        text seal_condition "NN"
+        text evidence_ref "NULL"
+    }
+    lab_reports {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid sample_id FK "NN"
+        varchar(100) certificate_no "NN"
+        text laboratory_name "NN"
+        timestamptz issued_at "NN"
+        uuid registered_by FK "NN"
+        timestamptz registered_at "NULL"
+        uuid supersedes_report_id FK,UK "NULL"
+        text evidence_ref "NN"
+        varchar(32) status "NN; DRAFT REGISTERED"
+    }
+    lab_results {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid report_id FK "NN"
+        uuid substance_id FK "NN"
+        varchar(32) qualifier "NN; EQ LT ND"
+        numeric(24,12) value "NULL"
+        numeric(24,12) lod "NULL"
+        numeric(24,12) loq "NULL"
+        varchar(20) unit "NN"
+    }
+    organizations {
+        uuid Id PK "Reference table; identity.organizations"
+    }
+    source_lots {
+        uuid id PK "Reference table; defined in another module"
+        uuid company_id FK "Reference table"
+    }
+    users {
+        uuid Id PK "Reference table; identity.users"
+    }
+    active_substances {
+        uuid id PK "Reference table; defined in another module"
+    }
+    organizations ||..o{ samples : company
+    source_lots ||..o{ samples : source_lot
+    users ||..o{ samples : collected_by
+    organizations ||..o{ sample_handovers : company
+    samples ||..o{ sample_handovers : sample
+    users ||..o{ sample_handovers : recorded_by
+    organizations ||..o{ lab_reports : company
+    samples ||..o{ lab_reports : sample
+    users ||..o{ lab_reports : registered_by
+    lab_reports o|..o| lab_reports : supersedes_report
+    organizations ||..o{ lab_results : company
+    lab_reports ||..o{ lab_results : report
+    active_substances ||..o{ lab_results : substance

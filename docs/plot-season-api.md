@@ -1,0 +1,33 @@
+# Crop season and plot-season API
+
+This Capture step follows Report 3 §3.3.1, GrainLedger V2 F04–F07, and the approved DB diagram. A crop season belongs to one customer company. A plot-season links one plot to one crop season and records its rice variety. A plot can have different varieties in different seasons.
+
+## Sequence
+
+1. An Administrator with `platform.configure` creates a season: `POST /api/crop-seasons` with `companyId`, `name`, `startsOn`, `endsOn` (`yyyy-MM-dd`). For example, `{"companyId":"ff710fe4-2d7a-4920-92b8-76617a871830","name":"Dong Xuan","startsOn":"2026-11-01","endsOn":"2027-03-31"}`. This online configuration call does not use the offline envelope.
+2. The Administrator can review seasons with `GET /api/crop-seasons?companyId={customerCompanyId}`. A PurchasingStaff user calls `GET /api/crop-seasons` to see only their own company's seasons, then selects a plot from `GET /api/plots`. A customer user cannot select another company's `companyId`.
+
+Do not send `?companyId=` with an empty value. A present but empty or invalid company ID returns HTTP 400 for either role. The Administrator must provide a valid customer company ID; PurchasingStaff can omit the parameter.
+3. The client submits `POST /api/plot-seasons` with the same offline envelope as Farmer and Plot. The user enters only the rice variety and selects the plot and season; the client supplies the UUIDs and capture metadata.
+4. Use `GET /api/plot-seasons?plotId={id}&seasonId={id}` or `GET /api/plot-seasons/{id}` to read the result.
+
+Example registration request:
+
+```json
+{
+  "deviceId": "web-test-01",
+  "clientOperationId": "e22ee714-2759-4eaa-91c2-71ea287a73ef",
+  "capturedAt": "2026-10-11T09:00:00Z",
+  "payloadSchemaVersion": 1,
+  "payload": {
+    "entityId": "6178312b-7c52-43e1-972d-944e4e5c31d1",
+    "plotId": "11408862-f173-49d8-9f02-fe57483bd6e6",
+    "seasonId": "d2f3a912-e0a4-4bf3-8ef8-df0f64477662",
+    "riceVariety": "ST25"
+  }
+}
+```
+
+The plot and season must already exist in the signed-in customer's company. Re-send exactly the same request with the same operation ID after an uncertain network result; the API returns the saved result without creating a second link. A different request with the same operation ID is rejected. A plot-season pair may occur only once.
+
+The migration `AddCaptureCropAndPlotSeasons` adds `capture.crop_seasons` and `capture.plot_seasons` with company-scoped foreign keys, date CHECK, and unique plot-season pair. Apply only the Capture migration to a verified target database; do not run the API-wide `--migrate` command for this step. The API process already running on port 5080 must be restarted after building to expose the new routes.

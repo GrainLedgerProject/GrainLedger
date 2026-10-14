@@ -1,0 +1,106 @@
+erDiagram
+    %% Identity tables reflect current EF migrations. Other tables remain planned V2 design.
+    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
+    organizations {
+        uuid Id PK "NN; identity schema"
+        varchar(160) Name UK "NN"
+        varchar(20) Kind "NN; Mill Customer"
+        timestamptz CreatedAt "NN"
+    }
+    users {
+        uuid Id PK "NN; identity schema"
+        varchar(30) Provider "NN"
+        varchar(255) ProviderSubject "NN"
+        varchar(320) Email "NN"
+        varchar(120) DisplayName "NN"
+        varchar(32) PhoneNumber "NULL"
+        varchar(40) Role "NULL; one role"
+        uuid OrganizationId FK "NULL"
+        boolean IsActive "NN"
+        uuid Version "NN"
+        timestamptz CreatedAt "NN"
+        timestamptz UpdatedAt "NN"
+    }
+    sessions {
+        uuid Id PK "NN; identity schema"
+        uuid UserId FK "NN"
+        timestamptz CreatedAt "NN"
+        timestamptz LastSeenAt "NN"
+        timestamptz ExpiresAt "NN"
+        timestamptz RevokedAt "NULL"
+        varchar(64) IpAddress "NULL"
+        varchar(512) UserAgent "NULL"
+    }
+    audit_events {
+        bigint Id PK "NN; identity schema"
+        uuid ActorUserId "NULL"
+        uuid SubjectUserId "NULL"
+        varchar(100) Action "NN"
+        jsonb DetailsJson "NN"
+        timestamptz OccurredAt "NN"
+        text IpAddress "NULL"
+    }
+    facilities {
+        uuid id PK "NN"
+        varchar(40) code UK "NN"
+        text name "NN"
+        varchar(32) kind "NN; MILL COLLECTION_SITE"
+        text address "NN"
+        boolean is_active "NN"
+    }
+    user_facilities {
+        uuid id PK "NN"
+        uuid user_id FK "NN"
+        uuid facility_id FK "NN"
+    }
+    locations {
+        uuid id PK "NN"
+        uuid facility_id FK "NN"
+        varchar(40) code "NN"
+        varchar(32) kind "NN; RECEIVING DRYING SILO MILLING PACKING QUARANTINE"
+        boolean is_active "NN"
+    }
+    equipment {
+        uuid id PK "NN"
+        uuid facility_id FK "NN"
+        uuid location_id FK "NULL"
+        varchar(40) code "NN"
+        varchar(32) kind "NN; DRYER MILLING_LINE PACKING_LINE SCALE"
+        numeric(24,12) capacity_value "NULL"
+        varchar(30) capacity_unit "NULL"
+        boolean is_active "NN"
+    }
+    silos {
+        uuid id PK "NN"
+        uuid facility_id FK "NN"
+        varchar(40) code "NN"
+    }
+    silo_compartments {
+        uuid id PK "NN"
+        uuid silo_id FK "NN"
+        uuid location_id FK,UK "NN"
+        varchar(40) code "NN"
+        numeric(20,6) capacity_kg "NN"
+    }
+    compartment_occupancies {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid compartment_id FK "NN"
+        timestamptz started_at "NN"
+        timestamptz cleared_at "NULL"
+        uuid cleared_by FK "NULL"
+        text clearance_note "NULL"
+    }
+    organizations o|..o{ users : OrganizationId
+    users ||..o{ sessions : UserId
+    users ||..o{ user_facilities : user
+    facilities ||..o{ user_facilities : facility
+    facilities ||..o{ locations : facility
+    facilities ||..o{ equipment : facility
+    locations o|..o{ equipment : location
+    facilities ||..o{ silos : facility
+    silos ||..o{ silo_compartments : silo
+    locations ||..o| silo_compartments : location
+    organizations ||..o{ compartment_occupancies : company
+    silo_compartments ||..o{ compartment_occupancies : compartment
+    users o|..o{ compartment_occupancies : cleared_by
