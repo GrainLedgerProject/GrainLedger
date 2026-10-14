@@ -88,6 +88,25 @@ it('shows official receiving tab for read permissions', async () => {
  expect(await screen.findByRole('heading', { name: 'Scoped stock search' })).toBeInTheDocument();
  expect(screen.getByRole('button', { name: 'Sources & receiving' })).toBeInTheDocument();
 });
+it('gates Catalog and submits commodity and unit DTOs', async () => {
+ const { rerender } = render(<LedgerWorkspace user={{ ...actor, permissions: [] }} />);
+ expect(screen.queryByRole('button', { name: 'Catalog' })).not.toBeInTheDocument();
+ rerender(<LedgerWorkspace user={{ ...actor, permissions: ['platform.configure'] }} />);
+ await userEvent.setup().click(await screen.findByRole('button', { name: 'Catalog' }));
+ await screen.findByLabelText('Search commodities');
+ const inputs = screen.getAllByRole('textbox');
+ await userEvent.type(inputs[1], 'PADDY');
+ await userEvent.type(inputs[2], 'Paddy');
+ await userEvent.click(screen.getByRole('button', { name: 'Create commodity' }));
+ const panels = document.querySelectorAll('.panel');
+ await userEvent.type(panels[1].querySelectorAll('input')[1], 'MASS');
+ await userEvent.type(panels[1].querySelectorAll('input')[2], 'Kilogram');
+ await userEvent.click(screen.getByRole('button', { name: 'Create measurement unit' }));
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/commodities')).toBe(true));
+ const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
+ expect(JSON.parse(String(writes.find(([url]) => url === '/api/commodities')?.[1]?.body))).toEqual({ code: 'PADDY', name: 'Paddy' });
+ expect(JSON.parse(String(writes.find(([url]) => url === '/api/measurement-units')?.[1]?.body))).toEqual({ code: 'MASS', name: 'Kilogram', quantityKind: 'MASS' });
+});
 it('reconciles output positions against selected replacement version with Ledger evidence', async () => {
  routes['/api/ledger/operations'] = [{ ...draft, id: 'original', status: 'COMMITTED' }, { ...draft, id: 'replacement', outputs: [{ ...draft.outputs[0], id: 'new-dried', code: 'Replacement lot' }], version: 'replacement-v2' }];
  routes['/api/ledger/corrections'] = [{ id: 'correction', operationId: 'original', reason: 'Entry error', status: 'REQUESTED', evidenceId: null, reconciliation: null, replacementOperationId: null }];
