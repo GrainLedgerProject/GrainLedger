@@ -1,27 +1,35 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
 import { Choice, Enum, Evidence, Feedback, Mass, Panel, Table, emptyLookup, id, iso, kinds, localTime, lotLabel, mutate, name, now, positive, products, stages, useAction, type Lookup, type Lot, type Operation, type Row } from './ledger-ui';
 import { TransferForm } from './LedgerStock';
 
-export function LedgerOperations({ user }: { user: User }) {
+export function LedgerOperations({ user, active = true }: { user: User; active?: boolean }) {
   const [look, setLook] = useState<Lookup>(emptyLookup), [lots, setLots] = useState<Lot[]>([]), [operations, setOperations] = useState<Operation[]>([]), [corrections, setCorrections] = useState<Row[]>([]), [editing, setEditing] = useState<Operation | null>(null), [replacement, setReplacement] = useState(false), [editorKey, setEditorKey] = useState(0);
-  const [queueOnly, setQueueOnly] = useState(false);
+  const [queueOnly, setQueueOnly] = useState(false), [task, setTask] = useState<'processing' | 'transfers' | 'corrections'>('processing');
   const action = useAction(), write = user.permissions.includes('conversions.write');
   async function load() { const [l, stock, ops, corr] = await Promise.all([api<Lookup>('/api/ledger/lookups'), api<Lot[]>('/api/ledger/lots'), api<Operation[]>('/api/ledger/operations'), api<Row[]>('/api/ledger/corrections')]); setLook(l); setLots(stock); setOperations(ops); setCorrections(corr); }
-  useEffect(() => { void action.run(load); }, []);
+  useEffect(() => { if (active) void action.run(load); }, [active]);
+  const editorRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { if (editing || replacement) { editorRef.current?.scrollIntoView?.({ block: 'center' }); editorRef.current?.querySelector('summary')?.focus(); } }, [editorKey]);
   async function command(path: string, body: Row, method = 'POST') { const result = await mutate<Row>('/api/ledger/' + path, body, method); await load(); action.setStatus('Ledger change saved. Updated operations and correction outcomes appear below.'); return result; }
-  function edit(operation: Operation | null, copy = false) { setEditing(operation); setReplacement(copy); setEditorKey(key => key + 1); }
-  return <><Feedback {...action} /><button disabled={action.busy} onClick={() => void action.run(load)}>Refresh operations</button>
-    {write && <OperationEditor key={editorKey} look={look} lots={lots} operations={operations} operation={editing} replacement={replacement} command={command} onSaved={() => edit(null)} />}
-    <Panel title="Processing drafts"><p>Work in order: save draft, manager review when required, then commit. Declared loss and signed measurement variance are separate. Server checks exact arithmetic, stages and policy before commit. Arrival confirmation is handled in Receive stock.</p>
-      {user.permissions.includes('conversions.confirm') && <div className="ledger-actions"><button aria-pressed={queueOnly} onClick={() => setQueueOnly(value => !value)}>{queueOnly ? 'Show all operations' : 'Show variance confirmation queue'}</button></div>}
-      {operations.filter(operation => !queueOnly || operation.status === 'DRAFT' && operation.confirmedVersion !== operation.version).map(operation => <OperationDetail key={operation.id} operation={operation} lots={lots} look={look} user={user} bound={corrections.some(c => c.replacementOperationId === operation.id && ['REQUESTED', 'RECONCILED'].includes(c.status))} command={command} onEdit={() => edit(operation)} />)}
-    </Panel>
-    {write && <details><summary>Transfers</summary><TransferForm lots={lots} look={look} onChanged={load} /></details>}
-    <Panel title="Corrections"><p>Request blocks original outputs immediately. Compensation and replacement commit together. No automatic downstream reversal. Independent HOLD or receiving blocks remain effective.</p>
+  function edit(operation: Operation | null, copy = false) { setEditing(operation); setReplacement(copy); setEditorKey(key => key + 1); setTask('processing'); }
+  return <><Feedback {...action} /><nav className="ledger-task-nav" aria-label="Operations tasks">{([['processing', 'Processing'], ['transfers', 'Transfers'], ['corrections', 'Corrections']] as const).filter(([key]) => key !== 'transfers' || write).map(([key, label]) => <button key={key} aria-pressed={task === key} onClick={() => setTask(key)}>{label}</button>)}</nav>
+    <section hidden={task !== 'processing'}><div className="ledger-task-intro"><h2>Processing</h2><p>Draft, confirm variance, manager review, then commit. Declared loss and signed measurement variance are separate. Server checks exact arithmetic, stages and policy before commit. Arrival confirmation is handled in Receive stock.</p></div>
+      <button disabled={action.busy} onClick={() => void action.run(load)}>Refresh operations</button>
+      <Panel title="Processing queue">
+        {user.permissions.includes('conversions.confirm') && <div className="ledger-actions"><button aria-pressed={queueOnly} onClick={() => setQueueOnly(value => !value)}>{queueOnly ? 'Show all operations' : 'Show variance confirmation queue'}</button></div>}
+        {operations.filter(operation => !queueOnly || operation.status === 'DRAFT' && operation.confirmedVersion !== operation.version).map(operation => <OperationDetail key={operation.id} operation={operation} lots={lots} look={look} user={user} bound={corrections.some(c => c.replacementOperationId === operation.id && ['REQUESTED', 'RECONCILED'].includes(c.status))} command={command} onEdit={() => edit(operation)} />)}
+        {!operations.length && <p className="empty">No processing drafts or committed operations yet.</p>}
+        {!!operations.length && queueOnly && !operations.some(operation => operation.status === 'DRAFT' && operation.confirmedVersion !== operation.version) && <p className="empty">No operations need variance confirmation.</p>}
+      </Panel>
+      {write && <details ref={editorRef} className="ledger-disclosure" open={!!editing || replacement}><summary>{replacement ? 'Correction replacement draft' : editing ? 'Edit processing draft' : 'Create processing draft'}</summary><OperationEditor key={editorKey} look={look} lots={lots} operations={operations} operation={editing} replacement={replacement} command={command} onSaved={() => edit(null)} /></details>}
+    </section>
+    {write && <section hidden={task !== 'transfers'}><div className="ledger-task-intro"><h2>Transfers</h2><p>Move unchanged lot stock between eligible locations.</p></div><TransferForm lots={lots} look={look} onChanged={load} /></section>}
+    <section hidden={task !== 'corrections'}><div className="ledger-task-intro"><h2>Corrections</h2><p>Request blocks original outputs immediately. Compensation and replacement commit together. No automatic downstream reversal. Independent HOLD or receiving blocks remain effective.</p></div>
       {write && <CorrectionRequest operations={operations} look={look} command={command} />}
       {corrections.map(correction => <ProcessingReview key={correction.id} correction={correction} original={operations.find(o => o.id === correction.operationId)} operations={operations} lots={lots} look={look} user={user} command={command} onReplacement={original => edit(original, true)} />)}
-    </Panel>
+      {!corrections.length && <p className="empty">No processing corrections requested.</p>}
+    </section>
   </>;
 }
 function OperationEditor({ look, lots, operations, operation, replacement, command, onSaved }: { look: Lookup; lots: Lot[]; operations: Operation[]; operation: Operation | null; replacement: boolean; command: (path: string, body: Row, method?: string) => Promise<Row>; onSaved: () => void }) {

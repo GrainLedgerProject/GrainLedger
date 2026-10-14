@@ -4,7 +4,7 @@ import { Feedback, Panel, Table, useAction, type Row } from './ledger-ui';
 
 type Page = { items: Row[]; page: number; pageSize: number; hasMore: boolean };
 const kinds = ['MASS', 'AREA', 'RESIDUE_CONCENTRATION', 'APPLICATION_RATE', 'FRACTION'];
-export function CatalogScreen() {
+export function CatalogScreen({ active = true }: { active?: boolean }) {
   const action = useAction();
   const [commodities, setCommodities] = useState<Page>({ items: [], page: 1, pageSize: 25, hasMore: false });
   const [units, setUnits] = useState<Page>({ items: [], page: 1, pageSize: 25, hasMore: false });
@@ -16,7 +16,7 @@ export function CatalogScreen() {
     const [cs, us] = await Promise.all([api<Page>(`/api/commodities?${params(commodityQuery, commodityPage)}`), api<Page>(`/api/measurement-units?${params(unitQuery, unitPage)}`)]);
     setCommodities(cs); setUnits(us);
   }
-  useEffect(() => { void action.run(load); }, [commodityQuery, commodityPage, unitQuery, unitPage]);
+  useEffect(() => { if (active) void action.run(load); }, [active, commodityQuery, commodityPage, unitQuery, unitPage]);
   async function create(event: FormEvent, path: string, body: Row) {
     event.preventDefault();
     await action.run(async () => { await api(path, { method: 'POST', body: JSON.stringify(body) }); await load(); }, 'Catalog record saved.');

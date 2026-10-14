@@ -25,7 +25,7 @@ beforeEach(() => {
 it('requires uploaded evidence for scoped balance policy and invalidates it when facility changes', async () => {
  const browser = userEvent.setup();
  render(<LedgerSetup user={user} />);
- await browser.click(await screen.findByText('Advanced policy and evidence — configure after basic facility setup'));
+ await browser.click(await screen.findByText(/Advanced policy/, { selector: 'summary' }));
  const panel = screen.getByRole('heading', { name: 'Confirmed balance policy' }).closest('section')!;
  await browser.selectOptions(panel.querySelectorAll('select')[0], 'facility-a');
  await browser.selectOptions(panel.querySelectorAll('select')[1], 'owner-a');
