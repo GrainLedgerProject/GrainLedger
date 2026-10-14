@@ -21,7 +21,7 @@ Shared F03 catalog. Existing plot_seasons.rice_variety stores the captured name 
 | name | text | NN | | Unit display name |
 | quantity_kind | varchar(32) | NN | | Physical quantity, e.g. MASS, AREA, RESIDUE_CONCENTRATION, APPLICATION_RATE, FRACTION |
 
-Shared F03 catalog. Existing unit/rate_unit values remain text snapshots, without new FKs. Each consumer must validate supported units, quantity kind and field length. A catalog entry alone does not define a conversion formula or authorize a unit for every field.
+Shared F03 catalog. Existing unit values remain text snapshots, without new FKs. Historical spray `rate_unit` values are retained, but new F05 declarations do not collect rate or rate unit. Each active consumer must validate supported units, quantity kind and field length. A catalog entry alone does not define a conversion formula or authorize a unit for every field.
 
 ## identity.organizations
 
@@ -273,12 +273,11 @@ Unique: `(company_id, id)`.
 | declaration_id | uuid | NN | FK spray_declarations.id |  |
 | product_name | text | NULL |  |  |
 | substance_id | uuid | NULL | FK active_substances.id |  |
-| rate | numeric(24,12) | NN |  |  |
-| rate_unit | varchar(40) | NN |  |  |
+| rate | numeric(24,12) | NULL |  | Historical value only; new declarations leave NULL. |
+| rate_unit | varchar(40) | NULL |  | Historical value only; new declarations leave NULL. |
 
 Unique: `(company_id, id)`.
 
-- CHECK `rate > 0`
 - CHECK `product_name IS NOT NULL OR substance_id IS NOT NULL`
 
 ## procurements

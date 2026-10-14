@@ -131,7 +131,6 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
         {
             b.ToTable("spray_items", table =>
             {
-                table.HasCheckConstraint("ck_spray_items_rate_positive", "rate > 0");
                 table.HasCheckConstraint("ck_spray_items_product_or_substance", "product_name IS NOT NULL OR substance_id IS NOT NULL");
             });
             b.HasKey(x => x.Id);
@@ -141,7 +140,7 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.ProductName).HasColumnName("product_name");
             b.Property(x => x.SubstanceId).HasColumnName("substance_id");
             b.Property(x => x.Rate).HasColumnName("rate").HasPrecision(24, 12);
-            b.Property(x => x.RateUnit).HasColumnName("rate_unit").HasMaxLength(40).IsRequired();
+            b.Property(x => x.RateUnit).HasColumnName("rate_unit").HasMaxLength(40);
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_spray_items_company_id");
             b.HasIndex(x => x.DeclarationId);
             b.HasIndex(x => x.SubstanceId);

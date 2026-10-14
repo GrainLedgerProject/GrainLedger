@@ -95,7 +95,7 @@ Các số thứ tự giữ theo bản giải thích cũ để dễ đối chiế
 
 | # | Bảng | Lưu gì và để làm gì? |
 |---|---|---|
-| 42 | `spray_items` | **Chi tiết thuốc hoặc hoạt chất của một lần phun:** tên sản phẩm, hoạt chất, liều lượng và đơn vị. Tách riêng vì một lần phun có thể khai báo nhiều thuốc/hoạt chất. |
+| 42 | `spray_items` | **Chi tiết thuốc hoặc hoạt chất của một lần phun:** tên sản phẩm và hoạt chất. Tách riêng vì một lần phun có thể khai báo nhiều thuốc/hoạt chất. Hai cột liều lượng cũ chỉ giữ dữ liệu lịch sử, không thu thập mới. |
 | 43 | `source_lots` | **Liên kết lot lúa đầu vào với dòng thu mua đã tạo ra nó.** Từ đây truy được về nông hộ, thửa và vụ. Đây là thông tin nguồn bổ sung cho `lots`, không phải một kho tồn thứ hai. |
 | 44 | `conversions` | **Thông tin chung của công đoạn:** sấy, xay, gộp, phối trộn, đóng bao hoặc bút toán bù; cùng thiết bị, hao hụt, người ghi và thời gian. Dùng để ghi lịch sử xử lý và kiểm tra cân bằng đầu vào–đầu ra. |
 | 45 | `cohort_members` | **Danh sách source lot thuộc từng cohort.** Dùng để xác định một lot có được áp dụng bound của nhóm đó hay không. |

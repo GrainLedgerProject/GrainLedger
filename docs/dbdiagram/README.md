@@ -1,6 +1,6 @@
 # GrainLedger V2 — DB diagram
 
-Cập nhật 12/10/2026: bổ sung hai danh mục F03 dùng chung: `rice_varieties` và `measurement_units`, cùng `catalog_events` để ghi audit cho danh mục/MRL. Khi công bố phiên bản MRL kế tiếp, được đóng khoảng hiệu lực đang mở của phiên bản cũ trong cùng transaction và ghi audit; giới hạn và nguồn đã công bố không đổi. Admin quản lý danh mục, các module đọc để chọn giống/đơn vị. Các trường `rice_variety`, `unit`, `rate_unit` hiện có giữ giá trị text tại lúc ghi nhận; chưa thêm FK bắt buộc hoặc chuyển đổi dữ liệu cũ. Đây là thay đổi thiết kế, chưa phải migration trên Supabase.
+Cập nhật 14/10/2026: F05 không còn thu thập liều lượng phun. `spray_items.rate` và `rate_unit` nullable để giữ bản ghi cũ; bản ghi mới để NULL. Các danh mục F03 vẫn được quản lý độc lập. Migration F05 đã áp dụng lên Supabase dev; migration thu mua P3 vẫn pending.
 
 Cập nhật 09/10/2026: phần Identity được vẽ theo code và migration đang có trong `GrainLedger.Modules.Identity` (`identity.organizations`, `identity.users`, `identity.sessions`, `identity.audit_events`). Không thay đổi code auth. Các bảng nghiệp vụ còn lại vẫn là thiết kế V2, không có nghĩa tất cả đã được triển khai. Xem [đối chiếu Identity](./IDENTITY_ALIGNMENT_2026-10-09.md).
 

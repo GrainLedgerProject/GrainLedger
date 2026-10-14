@@ -560,13 +560,12 @@ namespace GrainLedger.Modules.Capture.Migrations
                         .HasColumnType("text")
                         .HasColumnName("product_name");
 
-                    b.Property<decimal>("Rate")
+                    b.Property<decimal?>("Rate")
                         .HasPrecision(24, 12)
                         .HasColumnType("numeric(24,12)")
                         .HasColumnName("rate");
 
                     b.Property<string>("RateUnit")
-                        .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)")
                         .HasColumnName("rate_unit");
@@ -588,8 +587,6 @@ namespace GrainLedger.Modules.Capture.Migrations
                     b.ToTable("spray_items", "capture", t =>
                         {
                             t.HasCheckConstraint("ck_spray_items_product_or_substance", "product_name IS NOT NULL OR substance_id IS NOT NULL");
-
-                            t.HasCheckConstraint("ck_spray_items_rate_positive", "rate > 0");
                         });
                 });
 #pragma warning restore 612, 618
