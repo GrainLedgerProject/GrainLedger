@@ -53,6 +53,8 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
     public DbSet<Procurement> Procurements => Set<Procurement>();
     public DbSet<ProcurementItem> ProcurementItems => Set<ProcurementItem>();
     public DbSet<SourceLot> SourceLots => Set<SourceLot>();
+    public DbSet<Sample> Samples => Set<Sample>();
+    public DbSet<SampleHandover> SampleHandovers => Set<SampleHandover>();
     public DbSet<CaptureOperation> OfflineOperations => Set<CaptureOperation>();
     public DbSet<CaptureBusinessEvent> BusinessEvents => Set<CaptureBusinessEvent>();
 
@@ -197,6 +199,39 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.HasIndex(x => x.LotId).IsUnique();
             b.HasIndex(x => x.ProcurementItemId).IsUnique();
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_source_lots_company_id");
+        });
+        modelBuilder.Entity<Sample>(b =>
+        {
+            b.ToTable("samples");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.Code).HasColumnName("code").HasMaxLength(60).IsRequired();
+            b.Property(x => x.SourceLotId).HasColumnName("source_lot_id");
+            b.Property(x => x.SealCode).HasColumnName("seal_code").HasMaxLength(100).IsRequired();
+            b.Property(x => x.CollectedBy).HasColumnName("collected_by");
+            b.Property(x => x.CollectedAt).HasColumnName("collected_at");
+            b.HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasDatabaseName("ux_samples_company_code");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_samples_company_id");
+            b.HasIndex(x => x.SourceLotId);
+            b.HasIndex(x => x.CollectedBy);
+        });
+        modelBuilder.Entity<SampleHandover>(b =>
+        {
+            b.ToTable("sample_handovers");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.SampleId).HasColumnName("sample_id");
+            b.Property(x => x.RecordedBy).HasColumnName("recorded_by");
+            b.Property(x => x.FromParty).HasColumnName("from_party").IsRequired();
+            b.Property(x => x.ToParty).HasColumnName("to_party").IsRequired();
+            b.Property(x => x.HandedOverAt).HasColumnName("handed_over_at");
+            b.Property(x => x.SealCondition).HasColumnName("seal_condition").IsRequired();
+            b.Property(x => x.EvidenceRef).HasColumnName("evidence_ref");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_sample_handovers_company_id");
+            b.HasIndex(x => x.SampleId);
+            b.HasIndex(x => x.RecordedBy);
         });
         modelBuilder.Entity<CaptureOperation>(b =>
         {

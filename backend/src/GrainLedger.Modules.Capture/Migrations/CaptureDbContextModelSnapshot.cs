@@ -460,6 +460,115 @@ namespace GrainLedger.Modules.Capture.Migrations
                         });
                 });
 
+            modelBuilder.Entity("GrainLedger.Modules.Capture.Sample", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CollectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("collected_at");
+
+                    b.Property<Guid>("CollectedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("collected_by");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<string>("SealCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("seal_code");
+
+                    b.Property<Guid>("SourceLotId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_lot_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectedBy");
+
+                    b.HasIndex("SourceLotId");
+
+                    b.HasIndex("CompanyId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_samples_company_code");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_samples_company_id");
+
+                    b.ToTable("samples", "capture");
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Capture.SampleHandover", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<string>("EvidenceRef")
+                        .HasColumnType("text")
+                        .HasColumnName("evidence_ref");
+
+                    b.Property<string>("FromParty")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("from_party");
+
+                    b.Property<DateTimeOffset>("HandedOverAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("handed_over_at");
+
+                    b.Property<Guid>("RecordedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recorded_by");
+
+                    b.Property<Guid>("SampleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sample_id");
+
+                    b.Property<string>("SealCondition")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("seal_condition");
+
+                    b.Property<string>("ToParty")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("to_party");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecordedBy");
+
+                    b.HasIndex("SampleId");
+
+                    b.HasIndex("CompanyId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sample_handovers_company_id");
+
+                    b.ToTable("sample_handovers", "capture");
+                });
+
             modelBuilder.Entity("GrainLedger.Modules.Capture.SourceLot", b =>
                 {
                     b.Property<Guid>("Id")
