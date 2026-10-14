@@ -42,6 +42,21 @@ public sealed class UseMockCaptureBoundary : Migration
         throw new NotSupportedException("The synthetic receipt boundary cannot revert to another module's schema.");
 }
 
+[DbContext(typeof(LedgerDbContext))]
+[Migration("20261014000000_OptimizeLedgerReads")]
+public sealed class OptimizeLedgerReads : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        using var stream = typeof(OptimizeLedgerReads).Assembly.GetManifestResourceStream("GrainLedger.Modules.Ledger.Sql.ReadScaling.sql")!;
+        using var reader = new StreamReader(stream);
+        migrationBuilder.Sql(reader.ReadToEnd());
+    }
+
+    protected override void Down(MigrationBuilder migrationBuilder) =>
+        throw new NotSupportedException("Ledger read scaling migration cannot restore the prior function bodies.");
+}
+
 public static class LedgerDatabase
 {
     public static async Task ConfigureRuntimeRoleAsync(string connectionString, string runtimeRole, CancellationToken ct = default)

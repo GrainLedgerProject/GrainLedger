@@ -97,6 +97,8 @@ Permission-gated workspace provides setup/lookups; explicitly synthetic, durable
 
 Data loading uses fresh, scoped reads without a response cache. Unfiltered stock reuses the same lot response; filtered stock, detail, receiving sources and permitted setup lookups load concurrently. MockCapture receipt/arrival/correction lists filter company/facility scope before bulk hydration rather than querying each record separately. Ledger reads validate persisted active role and scope inside `ledger.read`, avoiding a redundant identity query. These fetch changes require no database migration or `.env` changes. Supabase connection/network latency still affects cold loads; React StrictMode also replays mount effects in Development, so compare production builds for user-facing timings.
 
+Single-lot history now selects relevant event IDs before joining postings, with indexed restriction, HOLD and reverse-source lookups. This additional optimization requires the explicit `20261014000000_OptimizeLedgerReads` migration; ordinary startup does not apply it. See [read scalability and tracing readiness](docs/architecture.md#read-scalability-and-tracing-readiness) for isolated large-data measurements, remaining unbounded-list limits and proposal F18 gaps. Do not apply migrations to shared Supabase without approval.
+
 Nine-step executable smoke scenario uses integration-test host and PostgreSQL, not a production auth bypass:
 
 ```bash

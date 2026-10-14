@@ -60,6 +60,24 @@ Cookie-authenticated mutating API calls require `X-CSRF-TOKEN`, fetched from `/a
 
 Route/DTO implementations live in the [Ledger module](../backend/src/GrainLedger.Modules.Ledger/) and [MockCapture module](../backend/src/GrainLedger.Modules.MockCapture/); API contract errors use ProblemDetails. MockCapture's routes and schema exist only in Development/Testing. Test-only cookie/auth/browser harness belongs to integration tests, not production bypass.
 
+## Read scalability and tracing readiness
+
+`20261014000000_OptimizeLedgerReads` is an explicit forward migration. It adds indexes for active receiving blocks, HOLD lookup, reverse source contributions, event/posting lookup and originating-operation events. Single-lot history first selects candidate event IDs from the lot, its originating operation and its postings, then applies the original row-level visibility and facility filters. Originating-operation sibling postings remain visible where authorized; unrelated postings from later operations remain excluded. Ordering and operator redaction are unchanged. Receiving checks retain direct and inherited restrictions, including zero-rounded source contributions and multiple active observations. No response cache or write-lock change is introduced.
+
+Observed verification used disposable PostgreSQL 17.11 and the actual forward migration on populated databases, plus real HTTP requests through the restricted-runtime test host. Both 10k and 100k core-row fixtures passed exact before/after response, quantity, history, restriction and scope assertions. The larger fixture contained 100,010 lots, 115,020 events, 100,014 postings, 100,012 contribution rows and 10,006 receiving blocks. Warm median measurements:
+
+| Path | Before | After |
+| --- | ---: | ---: |
+| Processed-lot detail HTTP | 147.763 ms | 10.070 ms |
+| Single-lot history SQL | 150.876 ms | 2.215 ms |
+| Reverse source-contribution SQL | 4.598 ms | 0.119 ms |
+
+The reverse-source measurement is a database query, not a new tracing API. Timings exclude Supabase network latency, cold connections and whole-page rendering; they are not a concurrent-throughput guarantee. Seven indexes added approximately 19.8 MiB in the larger fixture; production migration locks and write-throughput overhead were not measured. The backend suite passed 119 tests, including two focused history regressions. The throwaway scale harness was removed after verification.
+
+Collection reads remain unbounded: stock, operations, history, HOLD, corrections, notifications and synthetic receiving still need server-side pagination and scoped search before large-data rollout. UI selectors must not obtain their choices by fetching every lot. Large source fan-in/output counts and concurrent writes need separate workload measurements; the global stock-write lock remains intentional.
+
+Proposal F18 (PDF pp. 5, 9) requires bad-test-to-container and container-to-plot tracing with complete affected sets and exact proportions. Current root-source contribution rows support indexed source lookup and source proportions; intermediate ancestry is recoverable from committed operation inputs and each lot's `operation_id`. Lab/residue, export and container-loading workflows are not implemented. Future tracing must join durable source/plot and container-loading records, distinguish historical attribution from remaining stock, and process the complete affected set independently of paged presentation. Current HOLD applies to the specified lot, with explicit receipt-replacement inheritance; it does not automatically cascade to processing descendants. Descendant/container HOLD policy must be defined rather than assumed.
+
 ## HTTP Identity contract
 
 | Method | Path | Access / behavior |
