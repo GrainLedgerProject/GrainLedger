@@ -23,6 +23,8 @@ public sealed class Commodity
     public Guid Id { get; set; }
     public required string Code { get; set; }
     public required string Name { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public bool IsArchived { get; set; }
     public uint Version { get; set; }
 }
 
@@ -49,6 +51,8 @@ public sealed class MeasurementUnit
     public required string Code { get; set; }
     public required string Name { get; set; }
     public required string QuantityKind { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public bool IsDeleted { get; set; }
     public uint Version { get; set; }
 }
 
@@ -131,8 +135,11 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             b.Property(x => x.Code).HasColumnName("code").HasMaxLength(40).IsRequired();
             b.Property(x => x.Name).HasColumnName("name").IsRequired();
+            b.Property(x => x.CreatedBy).HasColumnName("created_by");
+            b.Property(x => x.IsArchived).HasColumnName("is_archived");
             b.Property(x => x.Version).IsRowVersion();
             b.HasIndex(x => x.Code).IsUnique();
+            b.HasQueryFilter(x => !x.IsArchived);
         });
         modelBuilder.Entity<QualityAttribute>(b =>
         {
@@ -164,8 +171,11 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             b.Property(x => x.Code).HasColumnName("code").HasMaxLength(30).IsRequired();
             b.Property(x => x.Name).HasColumnName("name").IsRequired();
             b.Property(x => x.QuantityKind).HasColumnName("quantity_kind").HasMaxLength(32).IsRequired();
+            b.Property(x => x.CreatedBy).HasColumnName("created_by");
+            b.Property(x => x.IsDeleted).HasColumnName("is_deleted");
             b.Property(x => x.Version).IsRowVersion();
             b.HasIndex(x => x.Code).IsUnique();
+            b.HasQueryFilter(x => !x.IsDeleted);
         });
         modelBuilder.Entity<MrlVersion>(b =>
         {

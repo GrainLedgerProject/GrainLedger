@@ -7,4 +7,7 @@ public sealed class CropSeason
     public required string Name { get; set; }
     public DateOnly StartsOn { get; set; }
     public DateOnly EndsOn { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public int Version { get; set; } = 1;
+    public bool IsDeleted { get; set; }
 }

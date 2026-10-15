@@ -8,11 +8,13 @@ import { SprayDetail } from './Spray';
 import { Procurements, ProcurementDetail, SourceLotDetail } from './Procurement';
 import { ProcurementForm } from './ProcurementForm';
 import { SampleDetail, SampleList } from './Samples';
+import { LedgerWorkspace, ledgerSections } from './LedgerWorkspace';
 import { googleLoginError } from './auth-errors';
 import { LocalAuth } from './LocalAuth';
 
-type Tab = 'profile' | 'administration' | 'farmers' | 'procurements' | 'samples';
+type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples';
 function tabForPath(path: string): Tab {
+  if (path.startsWith('/ledger')) return 'ledger';
   if (path.startsWith('/capture/procurements') || path.startsWith('/capture/source-lots/')) return 'procurements';
   if (path.startsWith('/capture/samples')) return 'samples';
   if (path.startsWith('/capture/')) return 'farmers';
@@ -48,7 +50,7 @@ export function App() {
   }, []);
 
   function openTab(next: Tab) {
-    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : '/';
+    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'ledger' ? '/ledger' : '/';
     window.history.pushState({}, '', nextPath);
     setPath(nextPath);
     setTab(next);
@@ -127,6 +129,7 @@ export function App() {
   const procurementPathId = path.match(/^\/capture\/procurements\/([^/]+)\/?$/)?.[1] ?? null;
   const selectedSourceLotId = path.match(/^\/capture\/source-lots\/([^/]+)\/?$/)?.[1] ?? null;
   const samplePathId = path.match(/^\/capture\/samples\/([^/]+)\/?$/)?.[1] ?? null;
+  const canOpenLedger = ledgerSections.some(section => section.permissions.some(permission => user.permissions.includes(permission)));
 
   return <div className="workspace">
     <aside className="sidebar">
@@ -134,6 +137,7 @@ export function App() {
       <p className="nav-caption">WORKSPACE</p>
       <nav aria-label="Main navigation">
         <button aria-current={tab === 'profile' ? 'page' : undefined} onClick={() => openTab('profile')}><span aria-hidden="true">◉</span> My profile</button>
+        {canOpenLedger && <button aria-current={tab === 'ledger' ? 'page' : undefined} onClick={() => openTab('ledger')}><span aria-hidden="true">▤</span> Ledger</button>}
         {user.role === 'Administrator' && <button aria-current={tab === 'administration' ? 'page' : undefined} onClick={() => openTab('administration')}><span aria-hidden="true">▦</span> Administration</button>}
         {canReadFarmers && <button aria-current={tab === 'farmers' ? 'page' : undefined} onClick={() => openTab('farmers')}><span aria-hidden="true">▤</span> Farmers</button>}
         {canReadPurchases && <button aria-current={tab === 'procurements' ? 'page' : undefined} onClick={() => openTab('procurements')}><span aria-hidden="true">▣</span> Paddy intake</button>}
@@ -142,10 +146,11 @@ export function App() {
       <div className="sidebar-bottom"><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span>{roleLabel(user.role)}</span></div></div>
     </aside>
     <div className="workspace-body">
-      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'farmers' ? 'Farmers' : tab === 'procurements' ? 'Paddy intake' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
+      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'procurements' ? 'Paddy intake' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
       <main className="content">
         {error && <div className="notice error" role="alert">{error}</div>}
         {tab === 'administration' && user.role === 'Administrator' ? <Administration currentUser={user} />
+          : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} />
           : tab === 'procurements' && selectedSourceLotId ? (canReadPurchases
             ? <SourceLotDetail id={selectedSourceLotId} canWriteSamples={canWritePurchases} userId={user.id} companyId={user.organizationId || ''} onBack={id => id ? openCapturePath(`/capture/procurements/${id}`, 'procurements') : openTab('procurements')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} />
             : <div className="notice error" role="alert">Your account cannot view source lots.</div>)

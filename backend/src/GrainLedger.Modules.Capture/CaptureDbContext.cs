@@ -10,6 +10,9 @@ public sealed class Farmer
     public required string Name { get; set; }
     public string? Contact { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public int Version { get; set; } = 1;
+    public bool IsDeleted { get; set; }
 }
 
 public sealed class CaptureOperation
@@ -73,9 +76,13 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.Name).HasColumnName("name").IsRequired();
             b.Property(x => x.Contact).HasColumnName("contact");
             b.Property(x => x.CreatedAt).HasColumnName("created_at");
+            b.Property(x => x.CreatedBy).HasColumnName("created_by");
+            b.Property(x => x.Version).HasColumnName("version").HasDefaultValue(1).IsConcurrencyToken();
             b.HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasDatabaseName("ux_farmers_company_code");
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_farmers_company_id");
             b.HasIndex(x => new { x.CompanyId, x.CreatedAt, x.Id });
+            b.Property(x => x.IsDeleted).HasColumnName("is_deleted").HasDefaultValue(false);
+            b.HasQueryFilter(x => !x.IsDeleted);
         });
         modelBuilder.Entity<Plot>(b =>
         {
@@ -87,6 +94,10 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.Code).HasColumnName("code").HasMaxLength(40).IsRequired();
             b.Property(x => x.BoundaryGeojson).HasColumnName("boundary_geojson").HasColumnType("jsonb").IsRequired();
             b.Property(x => x.AreaHa).HasColumnName("area_ha").HasPrecision(24, 12);
+            b.Property(x => x.CreatedBy).HasColumnName("created_by");
+            b.Property(x => x.Version).HasColumnName("version").HasDefaultValue(1).IsConcurrencyToken();
+            b.Property(x => x.IsDeleted).HasColumnName("is_deleted").HasDefaultValue(false);
+            b.HasQueryFilter(x => !x.IsDeleted);
             b.HasIndex(x => new { x.FarmerId, x.Code }).IsUnique().HasDatabaseName("ux_plots_farmer_code");
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_plots_company_id");
         });
@@ -99,6 +110,10 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.Name).HasColumnName("name").IsRequired();
             b.Property(x => x.StartsOn).HasColumnName("starts_on").HasColumnType("date");
             b.Property(x => x.EndsOn).HasColumnName("ends_on").HasColumnType("date");
+            b.Property(x => x.CreatedBy).HasColumnName("created_by");
+            b.Property(x => x.Version).HasColumnName("version").HasDefaultValue(1).IsConcurrencyToken();
+            b.Property(x => x.IsDeleted).HasColumnName("is_deleted").HasDefaultValue(false);
+            b.HasQueryFilter(x => !x.IsDeleted);
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_crop_seasons_company_id");
         });
         modelBuilder.Entity<PlotSeason>(b =>
@@ -110,6 +125,10 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.PlotId).HasColumnName("plot_id");
             b.Property(x => x.SeasonId).HasColumnName("season_id");
             b.Property(x => x.RiceVariety).HasColumnName("rice_variety").IsRequired();
+            b.Property(x => x.CreatedBy).HasColumnName("created_by");
+            b.Property(x => x.Version).HasColumnName("version").HasDefaultValue(1).IsConcurrencyToken();
+            b.Property(x => x.IsDeleted).HasColumnName("is_deleted").HasDefaultValue(false);
+            b.HasQueryFilter(x => !x.IsDeleted);
             b.HasIndex(x => new { x.PlotId, x.SeasonId }).IsUnique().HasDatabaseName("ux_plot_seasons_plot_season");
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_plot_seasons_company_id");
             b.HasIndex(x => x.SeasonId);

@@ -45,7 +45,7 @@ public static class SprayDeclarationEndpoints
     }
 
     private static async Task<IResult> RecordAsync(RecordSprayDeclarationRequest request, ClaimsPrincipal principal,
-        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, CatalogDbContext catalogDb,
+        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db,
         TimeProvider clock, CancellationToken ct)
     {
         var companyId = await CaptureActor.GetCustomerCompanyAsync(principal, identityDb, ct);
@@ -67,6 +67,10 @@ public static class SprayDeclarationEndpoints
         var lockKey = $"{companyId.Value:N}:{deviceId}:{request.ClientOperationId:N}";
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
+        if (!await CropSeasonEndpoints.HasPermissionInTransactionAsync(db, actorId,
+                "farms.write", companyId.Value, ct: ct))
+            return Results.Forbid();
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", ct);
         var prior = await db.OfflineOperations.AsNoTracking().SingleOrDefaultAsync(x =>
             x.CompanyId == companyId.Value && x.DeviceId == deviceId && x.ClientOperationId == request.ClientOperationId, ct);
@@ -86,8 +90,9 @@ public static class SprayDeclarationEndpoints
             return Problem(409, "ENTITY_ALREADY_EXISTS", "The spray declaration ID already exists.");
 
         var substanceIds = inputs.Where(x => x.SubstanceId.HasValue).Select(x => x.SubstanceId!.Value).Distinct().ToArray();
-        var knownSubstances = await catalogDb.ActiveSubstances.AsNoTracking()
-            .Where(x => substanceIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+        var knownSubstances = await db.Database
+            .SqlQuery<Guid>($"SELECT id AS \"Value\" FROM catalog.active_substances WHERE id=ANY({substanceIds})")
+            .ToListAsync(ct);
         if (knownSubstances.Count != substanceIds.Length)
             return Results.ValidationProblem(new Dictionary<string, string[]> {
                 ["payload.items"] = ["An active substance does not exist in the catalog."] });

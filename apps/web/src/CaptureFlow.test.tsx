@@ -48,11 +48,11 @@ describe('Capture journey', () => {
     expect(JSON.stringify(request)).not.toMatch(/rateUnit|"rate"/);
   });
 
-  it('shows the Ledger blocker without pretending a receipt was committed', async () => {
+  it('shows the Ledger blocker without pretending a source registration was accepted', async () => {
     fetchMock.mockImplementation(async url => {
       if (url === '/api/auth/session') return json(staff);
       if (String(url).startsWith('/api/procurements?')) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
-      if (String(url).startsWith('/api/procurement-reference-data?')) return json({ title: 'Ledger integration unavailable', status: 503, code: 'LEDGER_INTEGRATION_UNAVAILABLE' }, 503);
+      if (String(url).startsWith('/api/procurement-reference-data?')) return json({ title: 'Ledger integration unavailable', status: 503, code: 'LEDGER_STOCK_UNAVAILABLE' }, 503);
       if (String(url).startsWith('/api/farmers?')) return json({ items: [], page: 1, pageSize: 100, hasMore: false });
       return json({}, 404);
     });
@@ -60,8 +60,8 @@ describe('Capture journey', () => {
     await browser.click(await screen.findByRole('button', { name: /Paddy intake/ }));
     await browser.click(await screen.findByRole('button', { name: /Record intake/ }));
     expect(await screen.findByText(/Receiving options are unavailable/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Commit procurement' })).toBeDisabled();
-    expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements/commit')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Register procurement' })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(false);
   });
 
   it('connects procurement, source lot, sample, and handover when the backend accepts them', async () => {
@@ -81,13 +81,13 @@ describe('Capture journey', () => {
       if (path.startsWith('/api/farmers?')) return json({ items: [{ id: farmerId, code: 'ND-1', name: 'Farmer A' }], page: 1, pageSize: 100, hasMore: false });
       if (path.startsWith('/api/plots?')) return json({ items: [{ id: plotId, farmerId, code: 'TR-1' }], page: 1, pageSize: 100, hasMore: false });
       if (path.startsWith('/api/plot-seasons?')) return json({ items: [{ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25' }], page: 1, pageSize: 100, hasMore: false });
-      if (path === '/api/procurements/commit') {
+      if (path === '/api/procurements') {
         const request = JSON.parse(String(init?.body)); const p = request.payload; sourceLotId = p.items[0].sourceLotId;
-        receipt = { id: p.entityId, code: 'PN-001', farmerId, collectionSiteId: siteId, receivingLocationId: locationId, commodityId, status: 'COMMITTED', receivedAt: p.receivedAt, capturedAt: request.capturedAt, recordedAt: request.capturedAt, totalNetMassKg: '600', items: [{ id: p.items[0].itemId, lineNo: 1, plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25', measuredValue: '600', measuredUnit: 'KG', netMassKg: '600', moisturePercent: '22.5', sourceLotId, lotId: p.items[0].lotId, lotCode: 'LOT-1', stage: 'RAW_PADDY', initialStock: { locationId, receivedKg: '600' } }] };
+        receipt = { id: p.entityId, code: 'PN-001', farmerId, collectionSiteId: siteId, receivingLocationId: locationId, commodityId, status: 'PENDING_ARRIVAL', receivedAt: p.receivedAt, capturedAt: request.capturedAt, recordedAt: request.capturedAt, totalNetMassKg: '600', items: [{ id: p.items[0].itemId, lineNo: 1, plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25', measuredValue: '600', measuredUnit: 'KG', netMassKg: '600', moisturePercent: '22.5', sourceLotId, lotId: p.items[0].lotId, lotCode: 'LOT-1', stage: 'RAW_PADDY', initialStock: { locationId, receivedKg: '0' } }] };
         return json(receipt, 201);
       }
       if (path.startsWith('/api/procurements/')) return json(receipt);
-      if (path.startsWith('/api/source-lots/')) return json({ id: sourceLotId, lotId: 'lot-id', lotCode: 'LOT-1', procurementId: receipt?.id, procurementCode: 'PN-001', farmerId, plotId, plotSeasonId, riceVariety: 'ST25', receivedAt: receipt?.receivedAt, initialNetMassKg: '600', moisturePercent: '22.5', currentStock: [{ locationId, onHandKg: 600 }], stockAsOf: new Date().toISOString() });
+      if (path.startsWith('/api/source-lots/')) return json({ id: sourceLotId, lotId: 'lot-id', lotCode: 'LOT-1', procurementId: receipt?.id, procurementCode: 'PN-001', farmerId, plotId, plotSeasonId, riceVariety: 'ST25', receivedAt: receipt?.receivedAt, initialNetMassKg: '600', moisturePercent: '22.5', receivingStatus: 'PENDING_ARRIVAL', usableStockKg: '0', currentStock: [], stockAsOf: new Date().toISOString() });
       if (path === '/api/samples') {
         const request = JSON.parse(String(init?.body)); sample = { id: request.payload.entityId, sourceLotId, code: request.payload.code, sealCode: request.payload.sealCode, collectedAt: request.payload.collectedAt, capturedAt: request.capturedAt, recordedAt: request.capturedAt, handoverCount: 0 }; return json(sample, 201);
       }
@@ -106,10 +106,12 @@ describe('Capture journey', () => {
     await browser.selectOptions(await screen.findByLabelText('Plot season'), plotSeasonId);
     await browser.type(screen.getByLabelText('Measured mass'), '600');
     await browser.type(screen.getByLabelText('Moisture (%)'), '22.5');
-    await browser.click(screen.getByRole('button', { name: 'Commit procurement' }));
+    await browser.click(screen.getByRole('button', { name: 'Register procurement' }));
     expect(await screen.findByRole('heading', { name: 'PN-001' })).toBeInTheDocument();
+    expect(screen.getByText(/No usable stock is available/)).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /LOT-1/ }));
     expect((await screen.findAllByText('600 kg')).length).toBeGreaterThan(0);
+    expect(screen.getByText('0 kg')).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /Take sample/ }));
     await browser.type(screen.getByLabelText('Sample code'), 'SAMPLE-001');
     await browser.type(screen.getByLabelText('Seal code'), 'SEAL-001');
@@ -121,7 +123,7 @@ describe('Capture journey', () => {
     await browser.type(screen.getByLabelText('Seal condition'), 'Intact');
     await browser.click(screen.getByRole('button', { name: 'Save handover' }));
     await waitFor(() => expect(screen.getByText('Laboratory')).toBeInTheDocument());
-    expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements/commit')).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/samples')).toBe(true);
   });
 });

@@ -57,6 +57,41 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
     }
 
     [Fact]
+    public async Task Local_bearer_preserves_ledger_role_grants_and_capture_tenant_boundaries()
+    {
+        using var client = factory.CreateClient();
+        var manager = await CreateUserAsync(Roles.MillManager);
+        var managerTokens = await LoginAsync(client, manager);
+        foreach (var permission in new[] { "conversions.confirm", "corrections.reconcile", "receiving.reconcile" })
+            Assert.Contains(permission, managerTokens.User.Permissions);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", managerTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ledger/setup")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/farmers")).StatusCode);
+
+        var operatorUser = await CreateUserAsync(Roles.MillOperator);
+        var operatorTokens = await LoginAsync(client, operatorUser);
+        Assert.Contains("lots.read.facility", operatorTokens.User.Permissions);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", operatorTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ledger/lots")).StatusCode);
+
+        var purchaser = await CreateUserAsync(Roles.PurchasingStaff);
+        var purchaserTokens = await LoginAsync(client, purchaser);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", purchaserTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ledger/lookups")).StatusCode);
+        var farmerId = Guid.NewGuid();
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/farmers",
+            LedgerScenario.CaptureCommand(new { entityId = farmerId, name = "Bearer farmer" }))).StatusCode);
+        var foreign = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
+        var (foreignUser, foreignSession) = await factory.SeedUserAsync(Roles.PurchasingStaff, foreign.Id);
+        using var foreignClient = factory.CreateRealCookieClient(foreignUser, foreignSession);
+        Assert.Equal(HttpStatusCode.NotFound, (await foreignClient.GetAsync($"/api/farmers/{farmerId}")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/ledger/lookups")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/farmers")).StatusCode);
+    }
+
+    [Fact]
     public async Task Disabling_local_user_rejects_existing_access_refresh_and_new_login()
     {
         var user = await CreateUserAsync(); using var client = factory.CreateClient();

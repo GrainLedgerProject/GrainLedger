@@ -84,6 +84,7 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
         Assert.Equal(1, await db.Plots.CountAsync(x => x.Id == entityId && x.CompanyId == companyA.Id));
+        Assert.Equal(userA.Id, (await db.Plots.SingleAsync(x => x.Id == entityId)).CreatedBy);
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CompanyId == companyA.Id && x.CorrelationId == operationId));
         Assert.Equal(1, await db.OfflineOperations.CountAsync(x => x.CompanyId == companyA.Id && x.ClientOperationId == operationId));
     }

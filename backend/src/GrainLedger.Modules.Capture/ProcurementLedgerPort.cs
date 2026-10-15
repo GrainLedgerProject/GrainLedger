@@ -4,43 +4,31 @@ namespace GrainLedger.Modules.Capture;
 
 public sealed record ProcurementReceivingOption(Guid CollectionSiteId, string CollectionSiteCode,
     string CollectionSiteName, Guid ReceivingLocationId, string ReceivingLocationCode);
-public sealed record ProcurementStockLine(Guid LotId, string LotCode, Guid SourceLotId,
-    Guid ProcurementItemId, decimal NetMassKg);
-public sealed record ProcurementStockPosition(Guid LocationId, decimal OnHandKg);
+public sealed record ProcurementReceivingOptionsPage(
+    IReadOnlyList<ProcurementReceivingOption> Items, int TotalCount);
+public sealed record ProcurementListPageItem(Guid Id, string Status);
+public sealed record ProcurementListPage(IReadOnlyList<ProcurementListPageItem> Items, int TotalCount);
+public sealed record ProcurementStockPosition(Guid LocationId, string OnHandKg, string AvailableKg);
+public sealed record ProcurementReceivingState(string Status, int Version);
 
-/// <summary>
-/// Ledger implements this port without taking ownership of the caller's transaction.
-/// A successful return from PostReceiptAsync means every lot and initial posting was written.
-/// </summary>
+/// <summary>Ledger validates and registers pending source packages on the caller's transaction.</summary>
 public interface IProcurementLedgerPort
 {
-    Task<IReadOnlyList<ProcurementReceivingOption>> ListReceivingOptionsAsync(Guid companyId,
-        Guid? collectionSiteId, int offset, int limit, CancellationToken ct);
-    Task<bool> IsValidReceivingOptionAsync(Guid companyId, Guid collectionSiteId,
-        Guid receivingLocationId, CancellationToken ct);
-    Task PostReceiptAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
-        Guid companyId, Guid actorId, Guid eventId, Guid procurementId, Guid commodityId,
-        Guid collectionSiteId, Guid receivingLocationId, IReadOnlyList<ProcurementStockLine> lines,
-        CancellationToken ct);
+    Task<ProcurementReceivingOptionsPage> ListReceivingOptionsAsync(Guid companyId, Guid? collectionSiteId,
+        string? search, string sortBy, bool descending, int offset, int limit, CancellationToken ct);
+    Task<ProcurementListPage> ListProcurementPageAsync(Guid companyId, Guid? farmerId,
+        DateTimeOffset? receivedFromInclusive, DateTimeOffset? receivedBeforeExclusive,
+        string? search, string sortBy, bool descending, int offset, int limit, CancellationToken ct);
+    Task<bool> IsValidReceivingOptionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid companyId, Guid collectionSiteId, Guid receivingLocationId, CancellationToken ct);
+    Task RegisterPendingAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid actorId, Guid procurementId, CancellationToken ct);
+    Task<ProcurementReceivingState?> GetReceivingStateAsync(Guid procurementId, CancellationToken ct);
     Task<IReadOnlyList<ProcurementStockPosition>> GetCurrentStockAsync(Guid companyId, Guid lotId, CancellationToken ct);
 }
 
 public sealed class ProcurementLedgerUnavailableException : Exception
 {
-    public ProcurementLedgerUnavailableException() : base("The Custody Ledger integration is not configured.") { }
+    public ProcurementLedgerUnavailableException() : base("Protected procurement stock is unavailable.") { }
 }
 
-/// <summary>Fail closed until the Ledger team's real adapter is installed.</summary>
-public sealed class UnconfiguredProcurementLedgerPort : IProcurementLedgerPort
-{
-    public Task<IReadOnlyList<ProcurementReceivingOption>> ListReceivingOptionsAsync(Guid companyId,
-        Guid? collectionSiteId, int offset, int limit, CancellationToken ct) => throw new ProcurementLedgerUnavailableException();
-    public Task<bool> IsValidReceivingOptionAsync(Guid companyId, Guid collectionSiteId,
-        Guid receivingLocationId, CancellationToken ct) => throw new ProcurementLedgerUnavailableException();
-    public Task PostReceiptAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
-        Guid companyId, Guid actorId, Guid eventId, Guid procurementId, Guid commodityId,
-        Guid collectionSiteId, Guid receivingLocationId, IReadOnlyList<ProcurementStockLine> lines,
-        CancellationToken ct) => throw new ProcurementLedgerUnavailableException();
-    public Task<IReadOnlyList<ProcurementStockPosition>> GetCurrentStockAsync(Guid companyId, Guid lotId,
-        CancellationToken ct) => throw new ProcurementLedgerUnavailableException();
-}

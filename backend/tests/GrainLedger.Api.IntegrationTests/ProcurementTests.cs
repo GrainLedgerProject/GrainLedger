@@ -1,223 +1,233 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
-using System.Security.Claims;
 using System.Text.Json;
 using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Catalogs;
 using GrainLedger.Modules.Identity;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Options;
 using Npgsql;
 using Xunit;
+using static GrainLedger.Api.IntegrationTests.LedgerScenario;
 
 namespace GrainLedger.Api.IntegrationTests;
 
 public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
-    private async Task<(Guid CompanyId, Guid FarmerId, Guid PlotSeasonId, Guid CommodityId)> SeedAsync()
-    {
-        var company = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
-        var farmerId = Guid.NewGuid(); var plotId = Guid.NewGuid();
-        var seasonId = Guid.NewGuid(); var plotSeasonId = Guid.NewGuid();
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
-            db.Farmers.Add(new Farmer { Id = farmerId, CompanyId = company.Id,
-                Code = Guid.NewGuid().ToString("N"), Name = "Farmer", CreatedAt = DateTimeOffset.UtcNow });
-            db.Plots.Add(new Plot { Id = plotId, CompanyId = company.Id, FarmerId = farmerId,
-                Code = Guid.NewGuid().ToString("N"), AreaHa = 1m,
-                BoundaryGeojson = "{\"type\":\"Point\",\"coordinates\":[106.35,10.4]}" });
-            db.CropSeasons.Add(new CropSeason { Id = seasonId, CompanyId = company.Id,
-                Name = "Test season", StartsOn = new DateOnly(2026, 1, 1), EndsOn = new DateOnly(2026, 12, 31) });
-            await db.SaveChangesAsync();
-            db.PlotSeasons.Add(new PlotSeason { Id = plotSeasonId, CompanyId = company.Id,
-                PlotId = plotId, SeasonId = seasonId, RiceVariety = "ST25" });
-            await db.SaveChangesAsync();
-        }
-        Guid commodityId;
-        using (var scope = factory.Services.CreateScope())
-        {
-            var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
-            var commodity = await catalog.Commodities.SingleOrDefaultAsync(x => x.Code == "PADDY");
-            if (commodity is null)
-            {
-                commodity = new Commodity { Id = Guid.NewGuid(), Code = "PADDY", Name = "Paddy" };
-                catalog.Commodities.Add(commodity);
-            }
-            if (!await catalog.MeasurementUnits.AnyAsync(x => x.Code == "KG"))
-                catalog.MeasurementUnits.Add(new MeasurementUnit { Id = Guid.NewGuid(), Code = "KG",
-                    Name = "Kilogram", QuantityKind = "MASS" });
-            await catalog.SaveChangesAsync(); commodityId = commodity.Id;
-        }
-        return (company.Id, farmerId, plotSeasonId, commodityId);
-    }
-
-    private async Task<HttpClient> ClientAsync(WebApplicationFactory<Program> app, Guid companyId)
-    {
-        var (user, session) = await factory.SeedUserAsync(Roles.PurchasingStaff, companyId);
-        var client = app == factory ? factory.CreateRealCookieClient(user, session) :
-            CreateCookieClient(app, user, session);
-        var csrf = await client.GetFromJsonAsync<JsonElement>("/api/auth/csrf");
-        client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", csrf.GetProperty("token").GetString());
-        return client;
-    }
-
-    private static HttpClient CreateCookieClient(WebApplicationFactory<Program> app, User user, LoginSession session)
-    {
-        using var scope = app.Services.CreateScope();
-        var options = scope.ServiceProvider.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get("GrainLedger.Application");
-        var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim("session_id", session.Id.ToString())], "GrainLedger.Application");
-        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity),
-            new AuthenticationProperties { ExpiresUtc = session.ExpiresAt }, "GrainLedger.Application");
-        var client = app.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), HandleCookies = true });
-        client.DefaultRequestHeaders.Add("Cookie", $"__Host-GrainLedger.Session={options.TicketDataFormat.Protect(ticket)}");
-        return client;
-    }
-
-    private static object Request(Guid farmerId, Guid plotSeasonId, Guid commodityId,
-        Guid siteId, Guid locationId, Guid? procurementId = null, Guid? operationId = null,
-        string mass = "600", string unit = "KG", bool twoLines = false)
-    {
-        var first = new { itemId = Guid.NewGuid(), lineNo = 1, plotSeasonId,
-            measuredValue = mass, measuredUnit = unit, moisturePercent = "22.5",
-            lotId = Guid.NewGuid(), sourceLotId = Guid.NewGuid() };
-        var second = new { itemId = Guid.NewGuid(), lineNo = 2, plotSeasonId,
-            measuredValue = "400", measuredUnit = "KG", moisturePercent = "21",
-            lotId = Guid.NewGuid(), sourceLotId = Guid.NewGuid() };
-        return new { deviceId = "web-p3-test", clientOperationId = operationId ?? Guid.NewGuid(),
-        capturedAt = new DateTimeOffset(2026, 10, 14, 3, 5, 0, TimeSpan.Zero), payloadSchemaVersion = 1,
-        payload = new { entityId = procurementId ?? Guid.NewGuid(), farmerId,
-            collectionSiteId = siteId, receivingLocationId = locationId, commodityId,
-            receivedAt = new DateTimeOffset(2026, 10, 14, 3, 0, 0, TimeSpan.Zero),
-            items = twoLines ? new[] { first, second } : new[] { first } } };
-    }
-
     [Fact]
-    public async Task Unconfigured_ledger_returns_503_without_capture_writes()
+    public async Task Real_port_atomic_commit_replay_and_current_stock_are_company_scoped()
     {
-        var source = await SeedAsync();
-        using var client = await ClientAsync(factory, source.CompanyId);
-        var request = Request(source.FarmerId, source.PlotSeasonId, source.CommodityId,
-            Guid.NewGuid(), Guid.NewGuid());
-        var response = await client.PostAsJsonAsync("/api/procurements/commit", request);
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
-        Assert.False(await db.Procurements.AnyAsync(x => x.CompanyId == source.CompanyId));
-        Assert.False(await db.OfflineOperations.AnyAsync(x => x.DeviceId == "web-p3-test" && x.CompanyId == source.CompanyId));
-    }
-
-    [Fact]
-    public async Task Bad_precision_is_rejected_before_writing()
-    {
-        var source = await SeedAsync();
-        using var client = await ClientAsync(factory, source.CompanyId);
-        var response = await client.PostAsJsonAsync("/api/procurements/commit",
-            Request(source.FarmerId, source.PlotSeasonId, source.CommodityId,
-                Guid.NewGuid(), Guid.NewGuid(), mass: "0.0001", unit: "G"));
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Fake_ledger_contract_commits_once_and_can_read_receipt()
-    {
-        var source = await SeedAsync();
-        var port = new FakeLedgerPort();
-        using var app = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
-        {
-            services.RemoveAll<IProcurementLedgerPort>();
-            services.AddSingleton<IProcurementLedgerPort>(port);
-        }));
-        using var client = await ClientAsync(app, source.CompanyId);
-        var receiptId = Guid.NewGuid(); var operationId = Guid.NewGuid();
-        var request = Request(source.FarmerId, source.PlotSeasonId, source.CommodityId,
-            port.SiteId, port.LocationId, receiptId, operationId, twoLines: true);
-        var created = await client.PostAsJsonAsync("/api/procurements/commit", request);
+        using var s = await CreateAsync(factory);
+        var reference = await GetAsync(s.Purchaser, $"/api/procurement-reference-data?collectionSiteId={s.FacilityId}");
+        Assert.Equal(s.CatalogCommodityId, reference.GetProperty("commodity").GetProperty("id").GetGuid());
+        Assert.Contains(reference.GetProperty("receivingOptions").EnumerateArray(), x => x.GetProperty("receivingLocationId").GetGuid() == s.LocationId);
+        Assert.DoesNotContain(reference.GetProperty("receivingOptions").EnumerateArray(), x => x.GetProperty("receivingLocationId").GetGuid() == s.IsolationLocationId);
+        var optionsPage = await GetAsync(s.Purchaser,
+            $"/api/procurement-reference-data?collectionSiteId={s.FacilityId}&search=Synthetic&page=1&pageSize=1&sortBy=receivingLocationCode&sortDirection=desc");
+        Assert.Equal(2, optionsPage.GetProperty("totalCount").GetInt32());
+        Assert.True(optionsPage.GetProperty("hasMore").GetBoolean());
+        Assert.Single(optionsPage.GetProperty("receivingOptions").EnumerateArray());
+        var id = Guid.NewGuid(); var request = s.ReceiptBody(id, ["600", "400"]);
+        using var created = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        var result = (await created.Content.ReadFromJsonAsync<ProcurementResponse>())!;
-        Assert.Equal("1000", result.TotalNetMassKg);
-        Assert.Equal(2, result.Items.Count);
-        Assert.Equal(1, port.PostCalls);
-        var replay = await client.PostAsJsonAsync("/api/procurements/commit", request);
+        var receipt = (await created.Content.ReadFromJsonAsync<ProcurementResponse>())!;
+        Assert.Equal("1000", receipt.TotalNetMassKg);
+        using var replay = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
-        Assert.Equal(1, port.PostCalls);
-        var detail = await client.GetFromJsonAsync<ProcurementResponse>($"/api/procurements/{receiptId}");
-        Assert.Equal(result.EventId, detail!.EventId);
-        var list = await client.GetFromJsonAsync<ProcurementListResponse>("/api/procurements");
-        Assert.Contains(list!.Items, x => x.Id == receiptId && x.TotalNetMassKg == "1000");
-        var lot = await client.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{result.Items[0].SourceLotId}");
-        Assert.Equal(result.Items[0].LotId, lot!.LotId);
-        var otherCompany = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
-        using var foreignClient = await ClientAsync(app, otherCompany.Id);
-        Assert.Equal(HttpStatusCode.NotFound,
-            (await foreignClient.GetAsync($"/api/procurements/{receiptId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound,
-            (await foreignClient.GetAsync($"/api/source-lots/{result.Items[0].SourceLotId}")).StatusCode);
+        Assert.Equal(receipt.EventId, (await replay.Content.ReadFromJsonAsync<ProcurementResponse>())!.EventId);
+        Assert.Equal("PENDING_ARRIVAL", receipt.Status);
+        Assert.All(receipt.Items, x => Assert.Equal("0", x.InitialStock.ReceivedKg));
+        var procurementPage = await GetAsync(s.Purchaser,
+            $"/api/procurements?farmerId={s.FarmerId}&search=PENDING_ARRIVAL&page=1&pageSize=1&sortBy=status&sortDirection=desc");
+        Assert.Equal(1, procurementPage.GetProperty("totalCount").GetInt32());
+        Assert.False(procurementPage.GetProperty("hasMore").GetBoolean());
+        Assert.Equal("PENDING_ARRIVAL", procurementPage.GetProperty("items")[0].GetProperty("status").GetString());
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        var pendingSource = await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.Items[0].SourceLotId}");
+        Assert.Empty(pendingSource!.CurrentStock);
+        Assert.Equal("0", pendingSource.UsableStockKg);
+        await s.ConfirmArrivalAsync(JsonSerializer.SerializeToElement(receipt, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var lotId = receipt.Items[0].LotId;
+        var protectedLot = await s.LotAsync(lotId, s.Customer);
+        Assert.Equal(600m, Quantity(protectedLot));
+        var mappedCommodity = protectedLot.GetProperty("commodityId").GetGuid();
+        Assert.NotEqual(s.CatalogCommodityId, mappedCommodity);
+        Assert.Equal(mappedCommodity, await ScalarAsync<Guid>("SELECT ledger_commodity_id FROM ledger.catalog_commodities WHERE catalog_commodity_id=@id", s.CatalogCommodityId));
+        Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM capture.offline_operations WHERE applied_event_id=@id", receipt.EventId));
+        await s.TransferAsync(lotId, "10");
+        var source = (await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.Items[0].SourceLotId}"))!;
+        Assert.Equal(s.CatalogCommodityId, source.CommodityId);
+        Assert.Equal("600", source.InitialNetMassKg);
+        Assert.Equal("590", source.CurrentStock.Single(x => x.LocationId == s.LocationId).OnHandKg);
+        Assert.Equal("10", source.CurrentStock.Single(x => x.LocationId == s.SecondLocationId).OnHandKg);
+        Assert.Equal(600m, source.CurrentStock.Sum(x => decimal.Parse(x.OnHandKg, CultureInfo.InvariantCulture)));
+        Assert.Equal(HttpStatusCode.NotFound, (await s.ForeignCustomer.GetAsync($"/api/procurements/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await s.ForeignCustomer.GetAsync($"/api/source-lots/{source.Id}")).StatusCode);
+        Assert.DoesNotContain((await GetAsync(s.ForeignCustomer, "/api/procurements")).GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetGuid() == id);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
-        Assert.Equal(1, await db.Procurements.CountAsync(x => x.Id == receiptId));
-        Assert.Equal(2, await db.ProcurementItems.CountAsync(x => x.ProcurementId == receiptId));
-        Assert.Equal(2, await db.SourceLots.CountAsync(x => x.CompanyId == source.CompanyId &&
-            result.Items.Select(y => y.SourceLotId).Contains(x.Id)));
-        Assert.Equal(1, await db.OfflineOperations.CountAsync(x => x.ClientOperationId == operationId));
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<IProcurementLedgerPort>().GetCurrentStockAsync(s.ForeignOwnerId, lotId, default));
+        var wrongSource = s.ReceiptBody(Guid.NewGuid(), ["1"]);
+        await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, "/api/procurements", wrongSource, HttpStatusCode.Conflict);
+    }
+
+    [Theory]
+    [InlineData("0.001", "G", "0.000001")]
+    [InlineData("0.000000001", "T", "0.000001")]
+    [InlineData("1.123456", "KG", "1.123456")]
+    public async Task Real_port_preserves_exact_mass_and_original_precision(string measured, string unit, string kg)
+    {
+        using var s = await CreateAsync(factory);
+        var request = s.ReceiptBody(Guid.NewGuid(), [measured], unit: unit);
+        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
+        await s.ConfirmArrivalAsync(receipt);
+        var lot = Lots(receipt)[0];
+        Assert.Equal(decimal.Parse(kg, CultureInfo.InvariantCulture), Quantity(await s.LotAsync(lot)));
+        Assert.Equal(decimal.Parse(measured, CultureInfo.InvariantCulture), await ScalarAsync<decimal>("SELECT (details->>'originalQuantity')::numeric FROM ledger.events WHERE lot_id=@id AND kind='RECEIPT'", lot));
+        Assert.Equal(unit, await ScalarAsync<string>("SELECT details->>'originalUnit' FROM ledger.events WHERE lot_id=@id AND kind='RECEIPT'", lot));
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE lot_id=@id", lot));
+    }
+
+    [Theory]
+    [InlineData("0.0001", "G")]
+    [InlineData("0.0000000001", "T")]
+    [InlineData("1e3", "KG")]
+    public async Task Inexact_or_exponent_mass_is_rejected_without_writes(string mass, string unit)
+    {
+        using var s = await CreateAsync(factory);
+        var id = Guid.NewGuid();
+        await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(id, [mass], unit: unit), HttpStatusCode.BadRequest);
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurements WHERE id=@id", id));
     }
 
     [Fact]
-    public async Task Ledger_failure_rolls_back_receipt_event_and_operation()
+    public async Task Committed_procurement_package_is_immutable_at_database_boundary()
     {
-        var source = await SeedAsync();
-        var port = new FakeLedgerPort { FailPost = true };
-        using var app = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        using var s = await CreateAsync(factory);
+        var receipt = await s.ReceiptAsync("10");
+        var id = receipt.GetProperty("id").GetGuid();
+        await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
+        foreach (var sql in new[]
         {
-            services.RemoveAll<IProcurementLedgerPort>();
-            services.AddSingleton<IProcurementLedgerPort>(port);
-        }));
-        using var client = await ClientAsync(app, source.CompanyId);
-        var receiptId = Guid.NewGuid(); var operationId = Guid.NewGuid();
-        var response = await client.PostAsJsonAsync("/api/procurements/commit",
-            Request(source.FarmerId, source.PlotSeasonId, source.CommodityId,
-                port.SiteId, port.LocationId, receiptId, operationId));
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
-        Assert.False(await db.Procurements.AnyAsync(x => x.Id == receiptId));
-        Assert.False(await db.ProcurementItems.AnyAsync(x => x.ProcurementId == receiptId));
-        Assert.False(await db.BusinessEvents.AnyAsync(x => x.CorrelationId == operationId));
-        Assert.False(await db.OfflineOperations.AnyAsync(x => x.ClientOperationId == operationId));
+            "UPDATE capture.procurements SET status='DRAFT' WHERE id=@id",
+            "DELETE FROM capture.procurements WHERE id=@id",
+            "UPDATE capture.procurement_items SET net_mass_kg=11 WHERE procurement_id=@id",
+            "DELETE FROM capture.procurement_items WHERE procurement_id=@id",
+            "UPDATE capture.source_lots SET lot_id=gen_random_uuid() WHERE procurement_item_id IN (SELECT id FROM capture.procurement_items WHERE procurement_id=@id)",
+            "DELETE FROM capture.source_lots WHERE procurement_item_id IN (SELECT id FROM capture.procurement_items WHERE procurement_id=@id)",
+            "UPDATE capture.business_events SET payload='{}' WHERE id IN (SELECT event_id FROM capture.procurements WHERE id=@id)",
+            "UPDATE capture.offline_operations SET result_payload='{}' WHERE applied_event_id IN (SELECT event_id FROM capture.procurements WHERE id=@id)"
+        })
+        {
+            await using var command = new NpgsqlCommand(sql, runtime); command.Parameters.AddWithValue("id", id);
+            var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync());
+            Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
+        }
+        Assert.Equal(10m, Quantity(await s.LotAsync(Lots(receipt)[0])));
     }
 
-    private sealed class FakeLedgerPort : IProcurementLedgerPort
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Incomplete_committed_event_or_header_package_cannot_commit(bool header)
     {
-        public Guid SiteId { get; } = Guid.NewGuid();
-        public Guid LocationId { get; } = Guid.NewGuid();
-        public bool FailPost { get; set; }
-        public int PostCalls { get; private set; }
-        public Task<IReadOnlyList<ProcurementReceivingOption>> ListReceivingOptionsAsync(Guid companyId,
-            Guid? collectionSiteId, int offset, int limit, CancellationToken ct) => Task.FromResult<IReadOnlyList<ProcurementReceivingOption>>(
-            [new(SiteId, "SITE", "Test site", LocationId, "RECV")]);
-        public Task<bool> IsValidReceivingOptionAsync(Guid companyId, Guid collectionSiteId,
-            Guid receivingLocationId, CancellationToken ct) => Task.FromResult(collectionSiteId == SiteId && receivingLocationId == LocationId);
-        public async Task PostReceiptAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
-            Guid companyId, Guid actorId, Guid eventId, Guid procurementId, Guid commodityId,
-            Guid collectionSiteId, Guid receivingLocationId, IReadOnlyList<ProcurementStockLine> lines,
-            CancellationToken ct)
+        using var s = await CreateAsync(factory);
+        var id = Guid.NewGuid(); var ev = Guid.NewGuid();
+        await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
+        await using var transaction = await runtime.BeginTransactionAsync();
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO capture.business_events(id,company_id,actor_id,event_type,occurred_at,recorded_at,correlation_id,payload)
+            VALUES(@ev,@company,@actor,'PROCUREMENT_COMMITTED',now(),now(),gen_random_uuid(),jsonb_build_object('procurementId',@id));
+            """ + (header ? """
+            INSERT INTO capture.procurements(id,company_id,code,farmer_id,collection_site_id,received_by,received_at,status,event_id)
+            VALUES(@id,@company,'INCOMPLETE',@farmer,@site,@actor,now(),'COMMITTED',@ev);
+            """ : ""), runtime, transaction);
+        command.Parameters.AddWithValue("ev", ev); command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("company", s.OwnerId); command.Parameters.AddWithValue("actor", s.Accounts["purchaser"].User.Id);
+        command.Parameters.AddWithValue("farmer", s.FarmerId); command.Parameters.AddWithValue("site", s.FacilityId);
+        await command.ExecuteNonQueryAsync();
+        var error = await Assert.ThrowsAsync<PostgresException>(() => transaction.CommitAsync());
+        Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.business_events WHERE id=@id", ev));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurements WHERE id=@id", id));
+    }
+
+    [Fact]
+    public async Task Protected_port_rejects_wrong_persisted_actor_and_company_and_incomplete_source()
+    {
+        using var s = await CreateAsync(factory);
+        var receipt = await s.ReceiptAsync("10");
+        var item = receipt.GetProperty("items")[0];
+        using var scope = factory.Services.CreateScope();
+        var port = scope.ServiceProvider.GetRequiredService<IProcurementLedgerPort>();
+        await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
+        foreach (var (actor, procurementId) in new[]
         {
-            await using var command = new NpgsqlCommand("SELECT count(*) FROM capture.source_lots WHERE company_id = @company", connection, transaction);
-            command.Parameters.AddWithValue("company", companyId);
-            Assert.True((long)(await command.ExecuteScalarAsync(ct))! > 0);
-            Assert.NotEmpty(lines);
-            if (FailPost) throw new ProcurementLedgerUnavailableException();
-            PostCalls++;
+            (s.Accounts["foreignPurchaser"].User.Id, receipt.GetProperty("id").GetGuid()),
+            (s.Accounts["manager"].User.Id, receipt.GetProperty("id").GetGuid()),
+            (s.Accounts["purchaser"].User.Id, Guid.NewGuid())
+        })
+        {
+            await using var transaction = await runtime.BeginTransactionAsync();
+            var error = await Assert.ThrowsAsync<PostgresException>(() =>
+                port.RegisterPendingAsync(runtime, transaction, actor, procurementId, default));
+            Assert.Contains(error.SqlState, new[] { PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.NoDataFound, PostgresErrorCodes.CheckViolation });
+            await transaction.RollbackAsync();
         }
-        public Task<IReadOnlyList<ProcurementStockPosition>> GetCurrentStockAsync(Guid companyId, Guid lotId,
-            CancellationToken ct) => Task.FromResult<IReadOnlyList<ProcurementStockPosition>>([new(LocationId, 600m)]);
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE lot_id=@id", Lots(receipt)[0]));
+    }
+
+    [Fact]
+    public async Task Submicrosecond_clock_and_input_times_use_same_snapshot_as_PostgreSQL()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var clockTime = new DateTimeOffset(now.UtcTicks / 10 * 10 + 7, TimeSpan.Zero);
+        await using var isolated = new ApiFactory { Clock = new FixedClock(clockTime) };
+        await isolated.InitializeAsync();
+        using var s = await CreateAsync(isolated);
+        var request = JsonSerializer.SerializeToNode(s.ReceiptBody(Guid.NewGuid(), ["1"]))!.AsObject();
+        request["capturedAt"] = clockTime.ToString("O");
+        request["payload"]!["receivedAt"] = clockTime.AddSeconds(-1).ToString("O");
+        var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
+        var expected = new DateTimeOffset(clockTime.UtcTicks / 10 * 10, TimeSpan.Zero);
+        Assert.Equal(expected, receipt.GetProperty("capturedAt").GetDateTimeOffset());
+        Assert.Equal(expected, receipt.GetProperty("recordedAt").GetDateTimeOffset());
+        Assert.Equal(expected.AddSeconds(-1), receipt.GetProperty("receivedAt").GetDateTimeOffset());
+        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
+        await s.ConfirmArrivalAsync(receipt);
+        Assert.Equal(1m, Quantity(await s.LotAsync(Lots(receipt)[0])));
+    }
+
+    [Fact]
+    public async Task Concurrent_procurements_complete_with_one_connection_pool_without_lock_holder_starvation()
+    {
+        using var s = await CreateAsync(factory);
+        var config = factory.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+        var previous = config["ConnectionStrings:GrainLedger"];
+        config["ConnectionStrings:GrainLedger"] = new NpgsqlConnectionStringBuilder(factory.RuntimeConnectionString)
+            { MaxPoolSize = 1, Timeout = 5, CommandTimeout = 5 }.ConnectionString;
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var requests = new[] { s.ReceiptBody(Guid.NewGuid(), ["1"]), s.ReceiptBody(Guid.NewGuid(), ["2"]) };
+            var replies = await Task.WhenAll(requests.Select(body => s.Purchaser.PostAsJsonAsync("/api/procurements", body, deadline.Token)));
+            foreach (var reply in replies)
+            {
+                using (reply) Assert.Equal(HttpStatusCode.Created, reply.StatusCode);
+            }
+        }
+        finally { config["ConnectionStrings:GrainLedger"] = previous; }
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private async Task<T> ScalarAsync<T>(string sql, Guid id)
+    {
+        await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, owner); command.Parameters.AddWithValue("id", id);
+        return (T)(await command.ExecuteScalarAsync())!;
     }
 }

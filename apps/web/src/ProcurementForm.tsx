@@ -86,19 +86,19 @@ export function ProcurementForm({ userId, companyId, onBack, onCreated }: { user
       items: lines.map((line, index) => ({ ...line, itemId: crypto.randomUUID(), lineNo: index + 1, lotId: crypto.randomUUID(), sourceLotId: crypto.randomUUID() })) });
     if (!pending) setPending(request);
     try {
-      const created = await submitCapture<ProcurementPayload, Procurement>(key, '/api/procurements/commit', request);
+      const created = await submitCapture<ProcurementPayload, Procurement>(key, '/api/procurements', request);
       onCreated(created.id);
     } catch (cause) {
       if (wasRejected(cause) || cause instanceof ApiError && cause.status === 503) {
         discardPending(key); setPending(null);
       }
       setError(cause instanceof ApiError && cause.status === 503
-        ? 'Procurement cannot be committed yet. The Ledger service or its reference data is unavailable. No receipt or stock was created.'
+        ? 'Procurement cannot be registered yet. The Ledger service or its reference data is unavailable. No source receipt or stock was created.'
         : errorMessage(cause));
     } finally { setBusy(false); }
   }
 
-  return <><div className="page-heading"><span className="eyebrow">PROCUREMENT</span><h1>Record paddy intake</h1><p className="muted">One farmer delivery with one or more plot-season lines.</p></div><button className="text-button" onClick={onBack}>← Back to procurements</button>
+  return <><div className="page-heading"><span className="eyebrow">PROCUREMENT</span><h1>Record paddy intake</h1><p className="muted">Register expected quantities for one farmer delivery. Mill staff confirm the physical arrival before stock becomes available.</p></div><button className="text-button" onClick={onBack}>← Back to procurements</button>
     {referenceError && <div className="notice error" role="alert">Receiving options are unavailable: {referenceError} <button className="text-button" onClick={() => setReferenceRetry(n => n + 1)}>Try again</button></div>}
     {sourceError && <div className="notice error" role="alert">Source records are unavailable: {sourceError} <button className="text-button" onClick={() => setSourceRetry(n => n + 1)}>Try again</button></div>}
     <section className="panel capture-form-page"><form onSubmit={save}>
@@ -116,7 +116,7 @@ export function ProcurementForm({ userId, companyId, onBack, onCreated }: { user
       {!pending && <button className="secondary" type="button" disabled={!reference || lines.length >= reference.maxLinesPerReceipt} onClick={() => setLines(rows => [...rows, { plotSeasonId: '', measuredValue: '', measuredUnit: reference?.massUnits[0]?.code ?? 'KG', moisturePercent: '' }])}>+ Add line</button>}
       {pending && <div className="notice pending">The outcome is uncertain. Retry sends the same receipt and lot IDs; do not create a replacement request.</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
-      <div className="form-footer"><button className="secondary" type="button" onClick={onBack}>Cancel</button><button type="submit" disabled={busy || (!pending && (!reference || receivingOptions.length === 0 || plotSeasons.length === 0))}>{busy ? 'Committing…' : pending ? 'Retry commit' : 'Commit procurement'}</button></div>
+      <div className="form-footer"><button className="secondary" type="button" onClick={onBack}>Cancel</button><button type="submit" disabled={busy || (!pending && (!reference || receivingOptions.length === 0 || plotSeasons.length === 0))}>{busy ? 'Registering…' : pending ? 'Retry registration' : 'Register procurement'}</button></div>
     </form></section>
   </>;
 }

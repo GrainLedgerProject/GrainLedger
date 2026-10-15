@@ -7,9 +7,13 @@ The Capture module implements farmer registration and lookup. It uses the authen
 | Method | Route | Permission | Result |
 | --- | --- | --- | --- |
 | POST | `/api/farmers` | `farms.write` | Create a farmer; a replay of the same operation returns the prior result. |
-| GET | `/api/farmers?q=&page=&pageSize=` | `farms.read` or `farms.write` | Search the current company's farmers. Default page size 20; maximum 100. |
-| GET | `/api/farmers/{id}` | `farms.read` or `farms.write` | Return a farmer in the current company; otherwise 404. |
+| GET | `/api/farmers?search=&page=&pageSize=&sortBy=&sortDirection=` | `farms.read` or `farms.write` | Search current company farmers. Default page size 25; maximum 100; response includes `totalCount` and `hasMore`. `q` remains an alias for `search`. Sort fields: `name`, `code`, `createdAt`; direction: `asc` or `desc`. |
+| GET | `/api/farmers/{id}` | `farms.read` or `farms.write` | Return an active farmer in current company; otherwise 404. |
+| PUT | `/api/farmers/{id}` | `farms.write` | Edit own unreferenced farmer with `expectedVersion`. |
+| DELETE | `/api/farmers/{id}` | `farms.write` | Soft-delete own unreferenced farmer with body `{ \"version\": 1 }`. |
 
+
+List items include `createdBy`, `version`, `canEdit`, and `canDelete`. Server derives creator from authenticated actor; clients cannot set ownership. Only creator can edit or retire an active record. Legacy rows with `createdBy: null` are read-only. Edits and soft deletes require matching version; stale versions return 412. A farmer referenced by active plots or immutable procurements cannot be changed. Soft-deleted rows stay stored, disappear from active reads and selectors, and cannot be restored. Their unique codes remain reserved.
 All routes require authentication. Use a Bearer access token to test them in Scalar. Cookie-authenticated write requests also require `X-CSRF-TOKEN` from `GET /api/auth/csrf`.
 
 ## Create request

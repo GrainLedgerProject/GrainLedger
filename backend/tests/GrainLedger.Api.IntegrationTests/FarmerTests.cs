@@ -62,6 +62,7 @@ public sealed class FarmerTests(ApiFactory factory) : IClassFixture<ApiFactory>
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
         Assert.Equal(1, await db.Farmers.CountAsync(x => x.CompanyId == companyA.Id && x.Id == entityId));
+        Assert.Equal(userA.Id, (await db.Farmers.SingleAsync(x => x.CompanyId == companyA.Id && x.Id == entityId)).CreatedBy);
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CompanyId == companyA.Id && x.CorrelationId == operationId));
         Assert.Equal(1, await db.OfflineOperations.CountAsync(x => x.CompanyId == companyA.Id && x.ClientOperationId == operationId));
     }

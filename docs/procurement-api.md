@@ -1,23 +1,42 @@
 # P3 online procurement API — Capture handoff
 
-Capture owns `capture.procurements`, `capture.procurement_items`, and `capture.source_lots`.
-The migration is `20261013180117_AddCaptureProcurements`. It has not been applied to the shared Supabase database by this change.
+Capture owns procurement source records; Ledger owns accepted stock and positions. `POST /api/procurements` registers immutable source expectation only: no lot, position, posting or usable stock is created. One procurement represents one complete arrival; create separate procurement per load. There is no truck model, customer settlement workflow, tolerance, partial arrival or surplus acceptance.
+
+Assigned MillOperator records one complete actual measurement set covering every line. Exact normalized match confirms arrival and posts measured actual mass. Any mismatch remains pending with no usable stock. Assigned MillManager resolves mismatch with required reason and evidence scoped to procurement owner and assigned facility: `APPROVE_SHORTAGE` posts actual mass only if all actuals are at or below expected and at least one is short; `REQUEST_REMEASUREMENT` appends request and subsequent observations; `KEEP_BLOCKED` leaves unexplained shortage/surplus without stock.
+
+Existing historical procurement evidence and Ledger stock are grandfathered unchanged. Migration `20261014190000_PhysicalReceiving` applies workflow rules only to new records; it does not retroactively freeze or reinterpret legacy stock. `receiving_workflow IS NULL` identifies legacy committed procurement; new registration uses `PHYSICAL_ARRIVAL_V1`. Legacy/synthetic evidence is historical only; no automatic conversion or deletion.
+
+Forward Ledger migration `20261014010000_UseOfficialCaptureBoundary` adds protected Capture/Ledger integration and package validation. Preserve generated migration history and existing stock. Shared database migration requires explicit owner approval; documentation owner applied no migration.
 
 The API routes are:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/procurement-reference-data` | PADDY commodity, supported mass units, and eligible receiving options. |
-| POST | `/api/procurements/commit` | Commit one receipt with one or more lines. |
-| GET | `/api/procurements` | List receipts for the authenticated company. |
-| GET | `/api/procurements/{id}` | Read the immutable receipt snapshot. |
-| GET | `/api/source-lots/{id}` | Read source provenance and current Ledger stock. |
+| GET | `/api/procurement-reference-data?collectionSiteId=&search=&page=&pageSize=&sortBy=&sortDirection=` | PADDY commodity, supported mass units and eligible receiving options. |
+| POST | `/api/procurements` | Register source procurement and expected line masses; creates no stock. |
+| GET | `/api/ledger/receiving-tasks?facilityId={id}&page=1&pageSize=25` | Read assigned-facility arrivals needing operator or manager action. |
+| GET | `/api/ledger/receiving/{id}` | Read scoped arrival task and append-only observations/reviews. |
+| POST | `/api/ledger/receiving/{id}/measurements` | Submit complete operator actual-mass set for one arrival. |
+| POST | `/api/ledger/receiving/{id}/reviews` | Submit evidence-backed manager action bound to version and measurement set. |
+| GET | `/api/procurements?farmerId=&from=&to=&search=&page=&pageSize=&sortBy=&sortDirection=` | List receipts for authenticated company. |
+| GET | `/api/procurements/{id}` | Read immutable source snapshot and receiving status. |
+| GET | `/api/source-lots/{id}` | Read source provenance and current stock; pending has zero usable stock. |
 
-`POST /api/procurements/commit` uses the same operation envelope as other Capture writes. The client supplies UUIDs for the receipt, lines, lots, and source links. The server supplies company, actor, code, event, and kg conversion. A retry with the same operation ID and content returns the stored result. A changed payload with the same operation ID returns 409.
+Procurement and receiving-option lists default to page 1 with page size 25; maximum page size is 100. Responses include `totalCount` and `hasMore`; `search` also accepts legacy `q`. Procurement sort fields are `receivedAt`, `code`, and outward `status`; receiving-option sort fields are `collectionSiteName` and `receivingLocationCode`. Direction is `asc` or `desc`. Search/filter/count/order happen before paging. Outward status sort uses the current Ledger receiving projection (`COALESCE(receiving.status, procurement.status)`); the immutable Capture source status remains `COMMITTED`.
 
-The OpenAPI document exposes the request records. Example:
+**States:** `PENDING_ARRIVAL` after registration; `AWAITING_MANAGER_REVIEW` after any mismatch; `REMEASUREMENT_REQUESTED` after manager request; `RECEIVED_MATCHED` after exact operator confirmation; `RECEIVED_SHORTAGE_APPROVED` after eligible manager approval; `BLOCKED_UNRESOLVED` after manager keeps discrepancy blocked. Remeasurement appends a new complete set; prior sets/reviews remain historical. Pending or blocked procurements expose zero usable stock.
 
-```json
+`GET /api/ledger/receiving-tasks` returns `{items,page,pageSize,hasMore}` and requires assigned `facilityId`; task/detail DTOs include owner/facility/location display names, expected and actual mass, status/version and measurement/review history, never farmer contact data. Detail is `GET /api/ledger/receiving/{id}`.
+
+Operator measurement payload: `{operationId,expectedReceivingVersion,capturedAt,observations,items:[{procurementItemId,measuredValue,measuredUnit}]}`. Each procurement line occurs exactly once. Actual masses are positive exact decimal strings normalized to kg with no more than six fractional digits. Exact match posts actual; mismatch leaves stock unavailable.
+
+Manager review payload: `{operationId,expectedReceivingVersion,measurementSetId,action,reason,evidenceId}`. `APPROVE_SHORTAGE` requires all actual masses at or below expected and at least one strict shortage; it posts actuals only. `REQUEST_REMEASUREMENT` appends request; next complete set is added without erasing history. `KEEP_BLOCKED` leaves shortage/surplus blocked without stock. Reviews require assigned manager, nonempty reason and evidence scoped to procurement owner and facility. Blocked discrepancies may request remeasurement. Zero/full-loss actual is unsupported and rejected; no surplus approval.
+
+Receiving version starts at `0`, increments on each mutation; stale version or measurement-set binding returns `409`. Same operation ID, canonical payload and actor replays saved result even after later state changes; changed content returns `409`. Source-lot responses add `receivingStatus` and `usableStockKg`. Pending returns `currentStock: []` and `"0"`; accepted/historical `currentStock` entries contain `{locationId,onHandKg,availableKg}`, and usable stock sums `availableKg` so HOLD/restrictions remain effective. Missing historical positions still fail with `503`.
+
+Migration `20261014190000_PhysicalReceiving` adds nullable `capture.procurements.receiving_workflow`: `NULL` marks existing historical committed procurement unchanged; new registrations use `PHYSICAL_ARRIVAL_V1`. Source status remains immutable `COMMITTED`; workflow projection supplies outward receiving status. Historical evidence and stock are grandfathered; migration does not retroactively freeze, rewrite or reinterpret legacy stock.
+
+The OpenAPI document exposes registration request records. Example:
 {
   "deviceId": "web-test-01",
   "clientOperationId": "44444444-4444-4444-8444-444444444444",
@@ -44,14 +63,12 @@ The OpenAPI document exposes the request records. Example:
 }
 ```
 
-The UUIDs here are illustrative; use actual IDs from the current environment. Supply `measuredValue` and `moisturePercent` as decimal strings. Supported mass units are KG, G, and T, provided they exist as MASS units in the catalog. The server rejects a conversion that cannot fit `numeric(20,6)` kg exactly.
+The UUIDs here are illustrative; use actual IDs from the current environment. `collectionSiteId` is a Ledger facility UUID, and `receivingLocationId` is a Ledger receiving-location UUID. `commodityId` is the Catalog commodity UUID; Ledger resolves it through persisted Catalog-to-Ledger mapping. Supply `measuredValue` and `moisturePercent` as decimal strings. Supported mass units are KG, G, and T, provided they exist as MASS units in the catalog. The server rejects conversion that cannot fit `numeric(20,6)` kg exactly.
 
-## Ledger integration required before production commit
+`IProcurementLedgerPort` uses the same open `NpgsqlConnection` and `NpgsqlTransaction` as Capture. Pending registration writes source records and receiving marker only; it creates no Ledger lot or posting. Accepted posting uses actual measurement in the shared transaction. Incomplete historical source lots without Ledger stock fail closed with `503 LEDGER_STOCK_UNAVAILABLE`; pending source lots return `currentStock: []` and zero usable stock instead. Receipt timestamps are normalized to UTC microsecond precision before hashing, snapshotting, and persistence.
 
-`IProcurementLedgerPort` is the integration seam. The runtime currently registers `UnconfiguredProcurementLedgerPort`, which returns 503 `LEDGER_INTEGRATION_UNAVAILABLE`. This is intentional: no Capture row is committed unless Ledger has written every lot and initial stock posting. Tests inject a fake port to verify Capture logic and rollback; that fake is not production stock storage.
+Mill receiving UI exposes assigned tasks and actual measurements; purchaser UI registers source expectation only. Historical evidence is not converted, dropped, or inferred as arrival measurement.
 
-The Ledger teammate should implement and register the port. `PostReceiptAsync` receives the same open `NpgsqlConnection` and `NpgsqlTransaction` used by Capture. It must create exactly one RAW_PADDY lot and one positive initial posting per line, with the supplied IDs, owner company, commodity, receiving location, mass, and event link. It must not commit or dispose the transaction. On error, throw; Capture will roll back the whole receipt. `IsValidReceivingOptionAsync` and `ListReceivingOptionsAsync` must use the approved collection-site/receiving-location rules. `GetCurrentStockAsync` must return current stock for a lot owned by that company.
+Migration order: Identity → Catalog → Capture → Ledger. Review forward migrations, preserve generated migration history, back up, and obtain explicit shared database owner approval before migrations, seeds, grants, schema changes or data-changing verification. Use isolated PostgreSQL Testcontainers for write-based tests.
 
-The present Ledger implementation still validates against `capture_mock`; it must be changed to use the three real Capture tables before registration. The cross-schema tenant FK from `capture.source_lots.(company_id,lot_id)` to Ledger lot is intentionally pending because the target Ledger schema is owned by that teammate. Do not create a second lot or stock table in Capture.
 
-Once the adapter and FK are ready, apply migrations in the agreed order on the shared database, then test one multi-line receipt, retry, concurrent retry, and a forced Ledger failure. Do not use the test adapter or treat 503 as a successful receipt.

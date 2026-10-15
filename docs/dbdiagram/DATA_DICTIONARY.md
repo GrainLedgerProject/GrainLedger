@@ -196,6 +196,9 @@ Unique: `(company_id, id)`.
 | name | text | NN |  |  |
 | contact | text | NULL |  |  |
 | created_at | timestamptz | NN |  |  |
+| created_by | uuid | NULL | FK identity.users.Id | Creator; NULL for legacy rows. |
+| version | integer | NN |  | Optimistic edit/delete version. |
+| is_deleted | boolean | NN, default false |  | Soft-delete marker; hidden from active queries. |
 
 Unique: `(company_id, code)`; `(company_id, id)`.
 
@@ -211,6 +214,9 @@ WGS84 coordinates; GeoJSON geometry validation is required. Avoid assuming PostG
 | code | varchar(40) | NN |  |  |
 | boundary_geojson | jsonb | NN |  |  |
 | area_ha | numeric(24,12) | NN |  |  |
+| created_by | uuid | NULL | FK identity.users.Id | Creator; NULL for legacy rows. |
+| version | integer | NN |  | Optimistic edit/delete version. |
+| is_deleted | boolean | NN, default false |  | Soft-delete marker; hidden from active queries. |
 
 Unique: `(farmer_id, code)`; `(company_id, id)`.
 
@@ -227,6 +233,9 @@ Unique: `(farmer_id, code)`; `(company_id, id)`.
 | name | text | NN |  |  |
 | starts_on | date | NN |  |  |
 | ends_on | date | NN |  |  |
+| created_by | uuid | NULL | FK identity.users.Id | Creator; NULL for legacy rows. |
+| version | integer | NN |  | Optimistic edit/delete version. |
+| is_deleted | boolean | NN, default false |  | Soft-delete marker; hidden from active queries. |
 
 Unique: `(company_id, id)`.
 
@@ -243,8 +252,12 @@ Unique: `(company_id, id)`.
 | plot_id | uuid | NN | FK plots.id |  |
 | season_id | uuid | NN | FK crop_seasons.id |  |
 | rice_variety | text | NN |  |  |
+| created_by | uuid | NULL | FK identity.users.Id | Creator; NULL for legacy rows. |
+| version | integer | NN |  | Optimistic edit/delete version. |
+| is_deleted | boolean | NN, default false |  | Soft-delete marker; hidden from active queries. |
 
 Unique: `(plot_id, season_id)`; `(company_id, id)`.
+Soft deletion keeps rows and existing unique constraints intact; farmer/plot codes and plot-season pairs remain reserved.
 
 ## spray_declarations
 
