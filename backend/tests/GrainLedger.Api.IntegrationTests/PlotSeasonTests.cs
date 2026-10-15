@@ -77,14 +77,18 @@ public sealed class PlotSeasonTests(ApiFactory factory) : IClassFixture<ApiFacto
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         Assert.Equal($"/api/plot-seasons/{id}", created.Headers.Location?.OriginalString);
         Assert.Equal(HttpStatusCode.OK, (await customerClient.PostAsJsonAsync("/api/plot-seasons", request)).StatusCode);
-        var detail = await customerClient.GetFromJsonAsync<PlotSeasonResponse>($"/api/plot-seasons/{id}");
+        var detail = await customerClient.GetFromJsonAsync<PlotSeasonReferenceResponse>($"/api/plot-seasons/{id}");
         Assert.Equal("ST25", detail!.RiceVariety);
+        Assert.False(string.IsNullOrWhiteSpace(detail.PlotCode));
+        Assert.Equal(season.Name, detail.SeasonName);
         var list = await customerClient.GetFromJsonAsync<PlotSeasonListResponse>($"/api/plot-seasons?plotId={plot.Id}");
         Assert.Contains(list!.Items, x => x.Id == id);
         Assert.Equal(HttpStatusCode.NotFound, (await outsiderClient.GetAsync($"/api/plot-seasons/{id}")).StatusCode);
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
         Assert.Equal(1, await db.PlotSeasons.CountAsync(x => x.Id == id));
+        Assert.Equal(purchaser.Id, (await db.PlotSeasons.SingleAsync(x => x.Id == id)).CreatedBy);
+        Assert.Equal(admin.Id, (await db.CropSeasons.SingleAsync(x => x.Id == season.Id)).CreatedBy);
         Assert.Equal(1, await db.OfflineOperations.CountAsync(x => x.ClientOperationId == operationId));
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CorrelationId == operationId));
     }

@@ -21,7 +21,7 @@ public sealed record ProcurementLineInput(Guid ItemId, int LineNo, Guid PlotSeas
 public sealed record ProcurementInput(Guid EntityId, Guid FarmerId, Guid CollectionSiteId,
     Guid ReceivingLocationId, Guid CommodityId, DateTimeOffset ReceivedAt,
     IReadOnlyList<ProcurementLineInput?>? Items);
-public sealed record CommitProcurementRequest(string? DeviceId, Guid ClientOperationId,
+public sealed record RegisterProcurementRequest(string? DeviceId, Guid ClientOperationId,
     DateTimeOffset CapturedAt, int PayloadSchemaVersion, ProcurementInput? Payload);
 public sealed record ProcurementInitialStock(Guid LocationId, string ReceivedKg);
 public sealed record ProcurementLineResponse(Guid Id, int LineNo, Guid PlotSeasonId, Guid PlotId,
@@ -31,22 +31,24 @@ public sealed record ProcurementLineResponse(Guid Id, int LineNo, Guid PlotSeaso
 public sealed record ProcurementResponse(Guid Id, string Code, Guid FarmerId, Guid CollectionSiteId,
     Guid ReceivingLocationId, Guid CommodityId, string Status, Guid ReceivedBy,
     DateTimeOffset ReceivedAt, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt,
-    Guid EventId, string TotalNetMassKg, IReadOnlyList<ProcurementLineResponse> Items);
+    Guid EventId, string TotalNetMassKg, IReadOnlyList<ProcurementLineResponse> Items, int ReceivingVersion = 0);
 public sealed record ProcurementSummary(Guid Id, string Code, Guid FarmerId, string FarmerName,
     DateTimeOffset ReceivedAt, string Status, int ItemCount, string TotalNetMassKg);
 public sealed record ProcurementListResponse(IReadOnlyList<ProcurementSummary> Items,
-    int Page, int PageSize, bool HasMore);
+    int Page, int PageSize, int TotalCount, bool HasMore);
 public sealed record ProcurementCommodity(Guid Id, string Code, string Name);
 public sealed record ProcurementMassUnit(string Code, string Name, string KgFactor);
 public sealed record ProcurementReferenceResponse(IReadOnlyList<ProcurementReceivingOption> ReceivingOptions,
     ProcurementCommodity Commodity, IReadOnlyList<ProcurementMassUnit> MassUnits,
-    int Page, int PageSize, bool HasMore, int MaxLinesPerReceipt);
+    int Page, int PageSize, int TotalCount, bool HasMore, int MaxLinesPerReceipt);
 public sealed record SourceLotResponse(Guid Id, Guid LotId, string LotCode, Guid CommodityId, string Stage,
     Guid ProcurementId, string ProcurementCode, Guid ProcurementItemId, Guid FarmerId,
     Guid PlotId, Guid SeasonId, Guid PlotSeasonId, string RiceVariety,
     DateTimeOffset ReceivedAt, Guid CollectionSiteId, Guid InitialReceivingLocationId,
     string InitialNetMassKg, string MoisturePercent,
-    IReadOnlyList<ProcurementStockPosition> CurrentStock, DateTimeOffset StockAsOf);
+    IReadOnlyList<ProcurementStockPosition> CurrentStock, DateTimeOffset StockAsOf,
+    string ReceivingStatus, string UsableStockKg);
+internal sealed record ReceivingProjection(Guid ProcurementId, string Status, int Version);
 
 public static class ProcurementEndpoints
 {
@@ -59,8 +61,9 @@ public static class ProcurementEndpoints
             .AddEndpointFilter<NoStoreFilter>().WithTags("Procurements");
         var group = endpoints.MapGroup("/api/procurements").RequireAuthorization()
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>()
+            .AddEndpointFilter<ProcurementErrorFilter>()
             .WithTags("Procurements");
-        group.MapPost("/commit", CommitAsync).RequireAuthorization("purchases.write");
+        group.MapPost("", RegisterAsync).RequireAuthorization("purchases.write");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         endpoints.MapGet("/api/source-lots/{id:guid}", GetSourceLotAsync).RequireAuthorization()
@@ -75,6 +78,26 @@ public static class ProcurementEndpoints
         var companyId = await CompanyAsync(principal, access, identityDb, ct);
         if (companyId is null) return Results.Forbid();
         if (!TryPage(http, out var page, out var size)) return Validation("query", "Invalid pagination value.");
+        var rawSearch = http.Request.Query.TryGetValue("search", out var searchValue)
+            ? searchValue : http.Request.Query["q"];
+        if (rawSearch.Count > 1 || rawSearch.Count == 1 && rawSearch[0]!.Length > 100)
+            return Validation("search", "Search must be a single value of at most 100 characters.");
+        var search = string.IsNullOrWhiteSpace(rawSearch.FirstOrDefault()) ? null : rawSearch[0]!.Trim();
+        var sortBy = "collectionSiteName";
+        if (http.Request.Query.TryGetValue("sortBy", out var sortValue))
+        {
+            if (sortValue.Count != 1 || sortValue[0] is not ("collectionSiteName" or "receivingLocationCode"))
+                return Validation("sortBy", "Unsupported sort field.");
+            sortBy = sortValue[0]!;
+        }
+        var direction = "asc";
+        if (http.Request.Query.TryGetValue("sortDirection", out var directionValue))
+        {
+            if (directionValue.Count != 1 || directionValue[0] is not ("asc" or "desc"))
+                return Validation("sortDirection", "Use asc or desc.");
+            direction = directionValue[0]!;
+        }
+        var descending = direction == "desc";
         Guid? siteId = null;
         if (http.Request.Query.TryGetValue("collectionSiteId", out var siteValue))
         {
@@ -82,27 +105,29 @@ public static class ProcurementEndpoints
                 return Validation("collectionSiteId", "Provide one non-empty UUID.");
             siteId = parsed;
         }
-        var commodity = await catalog.Commodities.AsNoTracking().SingleOrDefaultAsync(x => x.Code == "PADDY", ct);
+        var commodity = await catalog.Commodities.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Code == "PADDY" && !x.IsArchived, ct);
         if (commodity is null) return Problem(503, "PADDY_NOT_CONFIGURED", "Configure the PADDY commodity first.");
         var knownUnits = await catalog.MeasurementUnits.AsNoTracking()
-            .Where(x => x.QuantityKind == "MASS" && (x.Code == "KG" || x.Code == "G" || x.Code == "T"))
+            .Where(x => !x.IsDeleted && x.QuantityKind == "MASS" && (x.Code == "KG" || x.Code == "G" || x.Code == "T"))
             .OrderBy(x => x.Code).ToListAsync(ct);
         var units = knownUnits.Select(x => new ProcurementMassUnit(x.Code, x.Name,
             x.Code switch { "G" => "0.001", "T" => "1000", _ => "1" })).ToArray();
         if (units.Length == 0) return Problem(503, "MASS_UNITS_NOT_CONFIGURED", "Configure a supported mass unit first.");
         try
         {
-            var options = await ledger.ListReceivingOptionsAsync(companyId.Value, siteId, (page - 1) * size, size + 1, ct);
-            return Results.Ok(new ProcurementReferenceResponse(options.Take(size).ToArray(),
+            var options = await ledger.ListReceivingOptionsAsync(companyId.Value, siteId, search, sortBy,
+                descending, (page - 1) * size, size, ct);
+            return Results.Ok(new ProcurementReferenceResponse(options.Items,
                 new ProcurementCommodity(commodity.Id, commodity.Code, commodity.Name),
-                units, page, size, options.Count > size, 100));
+                units, page, size, options.TotalCount, (long)page * size < options.TotalCount, 100));
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }
 
-    private static async Task<IResult> CommitAsync(CommitProcurementRequest request, ClaimsPrincipal principal,
+    private static async Task<IResult> RegisterAsync(RegisterProcurementRequest request, ClaimsPrincipal principal,
         ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db,
-        CatalogDbContext catalog, IProcurementLedgerPort ledger, TimeProvider clock, CancellationToken ct)
+        IProcurementLedgerPort ledger, TimeProvider clock, CancellationToken ct)
     {
         var companyId = await CompanyAsync(principal, access, identityDb, ct);
         if (companyId is null) return Results.Forbid();
@@ -111,8 +136,8 @@ public static class ProcurementEndpoints
         var payload = request.Payload!;
         var actorId = Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var deviceId = request.DeviceId!.Trim();
-        var capturedAt = request.CapturedAt.ToUniversalTime();
-        var receivedAt = payload.ReceivedAt.ToUniversalTime();
+        var capturedAt = DatabaseTime(request.CapturedAt);
+        var receivedAt = DatabaseTime(payload.ReceivedAt);
         var canonical = JsonSerializer.Serialize(new { operationType = EventType, request.PayloadSchemaVersion,
             capturedAt, payload.EntityId, payload.FarmerId, payload.CollectionSiteId,
             payload.ReceivingLocationId, payload.CommodityId, receivedAt,
@@ -122,11 +147,17 @@ public static class ProcurementEndpoints
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         var lockKey = $"{companyId.Value:N}:{deviceId}:{request.ClientOperationId:N}";
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        // Stock/source eligibility must use a fresh READ COMMITTED snapshot after the shared lock.
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", ct);
+        if (!await CropSeasonEndpoints.HasPermissionInTransactionAsync(db, actorId,
+                "purchases.write", companyId.Value, ct: ct))
+            return Results.Forbid();
         var prior = await db.OfflineOperations.AsNoTracking().SingleOrDefaultAsync(x =>
             x.CompanyId == companyId && x.DeviceId == deviceId && x.ClientOperationId == request.ClientOperationId, ct);
         if (prior is not null)
         {
+            if (prior.SubmittedBy != actorId) return Results.Forbid();
             if (prior.PayloadHash != hash)
                 return Problem(409, "OPERATION_CONFLICT", "The operation ID was used with different content.");
             if (prior.Status == "APPLIED" && prior.ResultPayload is not null)
@@ -145,16 +176,17 @@ public static class ProcurementEndpoints
             select new { ps.Id, ps.PlotId, ps.SeasonId, ps.RiceVariety }).ToListAsync(ct);
         if (sources.Count != seasonIds.Length)
             return Problem(409, "SOURCE_RECORD_NOT_READY", "Every plot-season must belong to this farmer and company.");
-        var commodity = await catalog.Commodities.AsNoTracking().SingleOrDefaultAsync(x => x.Id == payload.CommodityId, ct);
-        if (commodity?.Code != "PADDY") return Validation("payload.commodityId", "Select the configured PADDY commodity.");
+        // Catalog reads share Capture's locked transaction; a second pooled connection can deadlock lock waiters.
+        var paddy = await db.Database.SqlQuery<bool>($"SELECT EXISTS(SELECT 1 FROM catalog.commodities WHERE id={payload.CommodityId} AND code='PADDY' AND is_archived=false) AS \"Value\"").SingleAsync(ct);
+        if (!paddy) return Validation("payload.commodityId", "Select the configured PADDY commodity.");
         var unitCodes = lines.Select(x => x.Unit).Distinct().ToArray();
-        var unitCount = await catalog.MeasurementUnits.AsNoTracking().CountAsync(x =>
-            unitCodes.Contains(x.Code) && x.QuantityKind == "MASS", ct);
+        var unitCount = await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM catalog.measurement_units WHERE code=ANY({unitCodes}) AND quantity_kind='MASS' AND is_deleted=false").SingleAsync(ct);
         if (unitCount != unitCodes.Length)
             return Validation("payload.items", "Each mass unit must exist in the MASS catalog.");
         try
         {
-            if (!await ledger.IsValidReceivingOptionAsync(companyId.Value, payload.CollectionSiteId,
+            if (!await ledger.IsValidReceivingOptionAsync((NpgsqlConnection)db.Database.GetDbConnection(),
+                (NpgsqlTransaction)transaction.GetDbTransaction(), companyId.Value, payload.CollectionSiteId,
                 payload.ReceivingLocationId, ct))
                 return Validation("payload.receivingLocationId", "Select an active receiving location for the collection site.");
         }
@@ -166,7 +198,7 @@ public static class ProcurementEndpoints
                 lines.Select(y => y.Input.LotId).Contains(x.LotId), ct))
             return Problem(409, "ENTITY_ALREADY_EXISTS", "A procurement, line or lot identifier already exists.");
 
-        var now = clock.GetUtcNow();
+        var now = DatabaseTime(clock.GetUtcNow());
         var businessEvent = new CaptureBusinessEvent { CompanyId = companyId, ActorId = actorId,
             EventType = EventType, OccurredAt = receivedAt, RecordedAt = now,
             CorrelationId = request.ClientOperationId, Payload = "{}" };
@@ -189,11 +221,11 @@ public static class ProcurementEndpoints
             return new ProcurementLineResponse(x.Input.ItemId, x.Input.LineNo, x.Input.PlotSeasonId,
                 source.PlotId, source.SeasonId, source.RiceVariety, Number(x.Measured), x.Unit,
                 Number(x.Kg), Number(x.Moisture), x.Input.SourceLotId, x.Input.LotId,
-                lotCode, "RAW_PADDY", new ProcurementInitialStock(payload.ReceivingLocationId, Number(x.Kg)));
+                lotCode, "RAW_PADDY", new ProcurementInitialStock(payload.ReceivingLocationId, "0"));
         }).ToArray();
         var total = lines.Sum(x => x.Kg);
         var result = new ProcurementResponse(payload.EntityId, code, farmer.Id, payload.CollectionSiteId,
-            payload.ReceivingLocationId, payload.CommodityId, "COMMITTED", actorId, receivedAt,
+            payload.ReceivingLocationId, payload.CommodityId, "PENDING_ARRIVAL", actorId, receivedAt,
             capturedAt, now, businessEvent.Id, Number(total), itemResponses);
         businessEvent.Payload = JsonSerializer.Serialize(new { schemaVersion = 1, procurementId = payload.EntityId,
             result });
@@ -203,7 +235,7 @@ public static class ProcurementEndpoints
             AppliedEventId = businessEvent.Id, ResultPayload = JsonSerializer.Serialize(result) };
         try
         {
-            // FK targets are inserted in dependency order; the transaction remains uncommitted until Ledger succeeds.
+            // Immutable source package is registered atomically; arrival creates stock later.
             db.BusinessEvents.Add(businessEvent);
             await db.SaveChangesAsync(ct);
             db.Procurements.Add(header);
@@ -215,11 +247,7 @@ public static class ProcurementEndpoints
             await db.SaveChangesAsync(ct);
             var connection = (NpgsqlConnection)db.Database.GetDbConnection();
             var dbTransaction = (NpgsqlTransaction)transaction.GetDbTransaction();
-            var stockLines = itemResponses.Select(x => new ProcurementStockLine(x.LotId, x.LotCode,
-                x.SourceLotId, x.Id, decimal.Parse(x.NetMassKg, CultureInfo.InvariantCulture))).ToArray();
-            await ledger.PostReceiptAsync(connection, dbTransaction, companyId.Value, actorId,
-                businessEvent.Id, payload.EntityId, payload.CommodityId, payload.CollectionSiteId,
-                payload.ReceivingLocationId, stockLines, ct);
+            await ledger.RegisterPendingAsync(connection, dbTransaction, actorId, payload.EntityId, ct);
             await transaction.CommitAsync(ct);
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
@@ -231,7 +259,8 @@ public static class ProcurementEndpoints
     }
 
     private static async Task<IResult> ListAsync(HttpContext http, ClaimsPrincipal principal,
-        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, CancellationToken ct)
+        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db,
+        IProcurementLedgerPort ledger, CancellationToken ct)
     {
         if (!await CanReadAsync(access, ct)) return Results.Forbid();
         var companyId = await CompanyAsync(principal, access, identityDb, ct);
@@ -246,26 +275,61 @@ public static class ProcurementEndpoints
         }
         if (!TryDate(http, "from", out var from) || !TryDate(http, "to", out var to) ||
             (from.HasValue && to.HasValue && from > to)) return Validation("query", "Invalid date range.");
-        var query = db.Procurements.AsNoTracking().Where(x => x.CompanyId == companyId && x.Status == "COMMITTED");
-        if (farmerId is { } id) query = query.Where(x => x.FarmerId == id);
-        if (from is { } first) query = query.Where(x => x.ReceivedAt >= new DateTimeOffset(first.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime());
-        if (to is { } last) query = query.Where(x => x.ReceivedAt < new DateTimeOffset(last.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime());
-        var rows = await (from p in query
-            join f in db.Farmers.AsNoTracking() on new { p.CompanyId, Id = p.FarmerId } equals new { f.CompanyId, f.Id }
-            orderby p.ReceivedAt descending, p.Id
-            select new { p.Id, p.Code, p.FarmerId, FarmerName = f.Name, p.ReceivedAt, p.Status })
-            .Skip((page - 1) * size).Take(size + 1).ToListAsync(ct);
-        var ids = rows.Take(size).Select(x => x.Id).ToArray();
-        var totals = await db.ProcurementItems.AsNoTracking().Where(x => x.CompanyId == companyId && ids.Contains(x.ProcurementId))
-            .GroupBy(x => x.ProcurementId).Select(g => new { Id = g.Key, Count = g.Count(), Total = g.Sum(x => x.NetMassKg) })
-            .ToDictionaryAsync(x => x.Id, ct);
-        var summaries = rows.Take(size).Select(x => new ProcurementSummary(x.Id, x.Code, x.FarmerId,
-            x.FarmerName, x.ReceivedAt, x.Status, totals[x.Id].Count, Number(totals[x.Id].Total))).ToArray();
-        return Results.Ok(new ProcurementListResponse(summaries, page, size, rows.Count > size));
+        var rawSearch = http.Request.Query.TryGetValue("search", out var searchValue)
+            ? searchValue : http.Request.Query["q"];
+        if (rawSearch.Count > 1 || rawSearch.Count == 1 && rawSearch[0]!.Length > 100)
+            return Validation("search", "Search must be a single value of at most 100 characters.");
+        var search = string.IsNullOrWhiteSpace(rawSearch.FirstOrDefault()) ? null : rawSearch[0]!.Trim();
+        var sortBy = "receivedAt";
+        if (http.Request.Query.TryGetValue("sortBy", out var sortValue))
+        {
+            if (sortValue.Count != 1 || sortValue[0] is not ("receivedAt" or "code" or "status"))
+                return Validation("sortBy", "Unsupported sort field.");
+            sortBy = sortValue[0]!;
+        }
+        var descending = true;
+        if (http.Request.Query.TryGetValue("sortDirection", out var directionValue))
+        {
+            if (directionValue.Count != 1 || directionValue[0] is not ("asc" or "desc"))
+                return Validation("sortDirection", "Use asc or desc.");
+            descending = directionValue[0] == "desc";
+        }
+        var receivedFrom = from is { } first
+            ? new DateTimeOffset(first.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime()
+            : (DateTimeOffset?)null;
+        var receivedBefore = to is { } last
+            ? new DateTimeOffset(last.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime()
+            : (DateTimeOffset?)null;
+        try
+        {
+            var result = await ledger.ListProcurementPageAsync(companyId.Value, farmerId,
+                receivedFrom, receivedBefore, search, sortBy, descending, (page - 1) * size, size, ct);
+            var ids = result.Items.Select(x => x.Id).ToArray();
+            var headers = await (from p in db.Procurements.AsNoTracking()
+                join f in db.Farmers.AsNoTracking() on new { p.CompanyId, Id = p.FarmerId } equals new { f.CompanyId, f.Id }
+                where p.CompanyId == companyId && ids.Contains(p.Id)
+                select new { p.Id, p.Code, p.FarmerId, FarmerName = f.Name, p.ReceivedAt })
+                .ToDictionaryAsync(x => x.Id, ct);
+            var totals = await db.ProcurementItems.AsNoTracking()
+                .Where(x => x.CompanyId == companyId && ids.Contains(x.ProcurementId))
+                .GroupBy(x => x.ProcurementId)
+                .Select(g => new { Id = g.Key, Count = g.Count(), Total = g.Sum(x => x.NetMassKg) })
+                .ToDictionaryAsync(x => x.Id, ct);
+            var summaries = result.Items.Select(item =>
+            {
+                var header = headers[item.Id];
+                var total = totals[item.Id];
+                return new ProcurementSummary(item.Id, header.Code, header.FarmerId, header.FarmerName,
+                    header.ReceivedAt, item.Status, total.Count, Number(total.Total));
+            }).ToArray();
+            return Results.Ok(new ProcurementListResponse(summaries, page, size, result.TotalCount,
+                (long)page * size < result.TotalCount));
+        }
+        catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }
 
     private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal principal, ICurrentAccess access,
-        IdentityDbContext identityDb, CaptureDbContext db, CancellationToken ct)
+        IdentityDbContext identityDb, CaptureDbContext db, IProcurementLedgerPort ledger, CancellationToken ct)
     {
         if (!await CanReadAsync(access, ct)) return Results.Forbid();
         var companyId = await CompanyAsync(principal, access, identityDb, ct);
@@ -276,7 +340,10 @@ public static class ProcurementEndpoints
         if (ev is null) return Problem(500, "PROCUREMENT_EVENT_MISSING", "The procurement history is incomplete.");
         using var json = JsonDocument.Parse(ev.Payload);
         var result = json.RootElement.GetProperty("result").Deserialize<ProcurementResponse>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        return result is null ? Problem(500, "PROCUREMENT_EVENT_INVALID", "The procurement history is incomplete.") : Results.Ok(result);
+        if (result is null) return Problem(500, "PROCUREMENT_EVENT_INVALID", "The procurement history is incomplete.");
+        var state = await ledger.GetReceivingStateAsync(id, ct);
+        if (state is null && result.Status == "PENDING_ARRIVAL") return LedgerUnavailable();
+        return Results.Ok(state is null ? result : result with { Status = state.Status, ReceivingVersion = state.Version });
     }
 
     private static async Task<IResult> GetSourceLotAsync(Guid id, ClaimsPrincipal principal, ICurrentAccess access,
@@ -296,18 +363,22 @@ public static class ProcurementEndpoints
         var line = snapshot.Items.Single(x => x.Id == item.Id);
         try
         {
-            var stock = await ledger.GetCurrentStockAsync(companyId.Value, source.LotId, ct);
+            var state = await ledger.GetReceivingStateAsync(header.Id, ct);
+            if (state is null && snapshot.Status == "PENDING_ARRIVAL") return LedgerUnavailable();
+            var accepted = state is null || state.Status is "RECEIVED_MATCHED" or "RECEIVED_SHORTAGE_APPROVED";
+            IReadOnlyList<ProcurementStockPosition> stock = accepted ? await ledger.GetCurrentStockAsync(companyId.Value, source.LotId, ct) : [];
             return Results.Ok(new SourceLotResponse(source.Id, source.LotId, line.LotCode,
                 snapshot.CommodityId, line.Stage, header.Id, header.Code, item.Id, header.FarmerId,
                 line.PlotId, line.SeasonId, line.PlotSeasonId, line.RiceVariety, header.ReceivedAt,
                 header.CollectionSiteId, snapshot.ReceivingLocationId, line.NetMassKg,
-                line.MoisturePercent, stock, clock.GetUtcNow()));
+                line.MoisturePercent, stock, clock.GetUtcNow(), state?.Status ?? snapshot.Status,
+                Number(stock.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture)))));
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }
 
     internal sealed record ParsedLine(ProcurementLineInput Input, decimal Measured, string Unit, decimal Kg, decimal Moisture);
-    internal static Dictionary<string, string[]> Validate(CommitProcurementRequest request, out ParsedLine[] lines)
+    internal static Dictionary<string, string[]> Validate(RegisterProcurementRequest request, out ParsedLine[] lines)
     {
         var errors = new Dictionary<string, string[]>();
         var parsed = new List<ParsedLine>();
@@ -363,6 +434,8 @@ public static class ProcurementEndpoints
         return decimal.TryParse(text.Trim(), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out value);
     }
     private static string Number(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
+    // PostgreSQL/Npgsql store microseconds; normalize before snapshots and hashes to avoid JSON cast rounding.
+    private static DateTimeOffset DatabaseTime(DateTimeOffset value) => new(value.UtcTicks / 10 * 10, TimeSpan.Zero);
     private static async Task<Guid?> CompanyAsync(ClaimsPrincipal principal, ICurrentAccess access,
         IdentityDbContext identityDb, CancellationToken ct)
     {
@@ -373,7 +446,7 @@ public static class ProcurementEndpoints
         await access.HasPermissionAsync("purchases.write", ct) || await access.HasPermissionAsync("lots.read.tenant", ct);
     private static bool TryPage(HttpContext http, out int page, out int size)
     {
-        page = 1; size = 20;
+        page = 1; size = 25;
         if (http.Request.Query.TryGetValue("page", out var p) &&
             (p.Count != 1 || !int.TryParse(p[0], NumberStyles.None, CultureInfo.InvariantCulture, out page) || page < 1)) return false;
         if (http.Request.Query.TryGetValue("pageSize", out var s) &&
@@ -390,6 +463,19 @@ public static class ProcurementEndpoints
     private static IResult Validation(string key, string message) => Results.ValidationProblem(new Dictionary<string, string[]> { [key] = [message] });
     private static IResult Problem(int status, string code, string title) => Results.Problem(statusCode: status, title: title,
         extensions: new Dictionary<string, object?> { ["code"] = code });
-    private static IResult LedgerUnavailable() => Problem(503, "LEDGER_INTEGRATION_UNAVAILABLE",
-        "Custody Ledger integration is not configured; no procurement was committed.");
+    private static IResult LedgerUnavailable() => Problem(503, "LEDGER_STOCK_UNAVAILABLE",
+        "Protected procurement stock is unavailable.");
+}
+
+internal sealed class ProcurementErrorFilter : IEndpointFilter
+{
+    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        try { return await next(context); }
+        catch (PostgresException ex) when (ex.SqlState is "23514" or "23505" or "23503" or "23502" or "42501" or "P0002" or "22P02" or "22003")
+        {
+            return Results.Problem(statusCode: ex.SqlState == "42501" ? 403 : ex.SqlState is "23502" or "22P02" or "22003" ? 400 : 409,
+                title: ex.MessageText, extensions: new Dictionary<string, object?> { ["code"] = "PROCUREMENT_REJECTED" });
+        }
+    }
 }

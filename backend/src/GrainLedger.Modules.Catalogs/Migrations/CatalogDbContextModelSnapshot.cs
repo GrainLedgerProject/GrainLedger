@@ -132,6 +132,14 @@ namespace GrainLedger.Modules.Catalogs.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("name");
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_archived");
+
+
 
                     b.Property<uint>("Version")
                         .IsConcurrencyToken()
@@ -143,6 +151,7 @@ namespace GrainLedger.Modules.Catalogs.Migrations
 
                     b.HasIndex("Code")
                         .IsUnique();
+
 
                     b.ToTable("commodities", "catalog");
                 });
@@ -204,6 +213,14 @@ namespace GrainLedger.Modules.Catalogs.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("quantity_kind");
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
 
                     b.Property<uint>("Version")
                         .IsConcurrencyToken()

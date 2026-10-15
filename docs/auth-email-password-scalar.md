@@ -37,12 +37,11 @@ Khóa JWT phải giữ ổn định giữa các lần restart. Đổi khóa làm
 ## Khởi động
 
 ```bash
-docker compose up -d postgres
 dotnet run --project backend/src/GrainLedger.Api -- --migrate
 dotnet run --project backend/src/GrainLedger.Api
 ```
 
-Phải chạy migration mới trước khi test các bảng/cột xác thực bổ sung. Không xóa volume hoặc database cũ để áp dụng thay đổi này.
+Run `--migrate` only against a database you own/control. Preserve existing database and `.env`; do not drop/reset volume. Migration order is Identity → Catalog → Capture → Ledger. Shared Supabase migration or data-changing verification requires explicit database-owner approval. No prior synthetic source records convert automatically; existing Ledger stock/history remains.
 
 Mở **http://localhost:5080/scalar/v1**. OpenAPI JSON ở **http://localhost:5080/openapi/v1.json**. Các trang này chỉ được bật ở Development và môi trường integration test, không tự công khai ở Production.
 

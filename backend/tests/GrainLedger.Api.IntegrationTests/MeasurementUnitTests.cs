@@ -29,14 +29,19 @@ public sealed class MeasurementUnitTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal("KG", unit.Code);
         Assert.Equal("Kilogram", unit.Name);
         Assert.Equal("MASS", unit.QuantityKind);
+        Assert.Equal(admin.Id, unit.CreatedBy);
         Assert.Equal($"/api/measurement-units/{unit.Id}", created.Headers.Location?.OriginalString);
         var etag = created.Headers.ETag!.ToString();
 
         var detail = await purchaserClient.GetAsync($"/api/measurement-units/{unit.Id}");
         Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
         Assert.Equal(etag, detail.Headers.ETag?.ToString());
-        var list = await purchaserClient.GetFromJsonAsync<MeasurementUnitListResponse>("/api/measurement-units?q=KG");
-        Assert.Contains(list!.Items, x => x.Id == unit.Id);
+        var list = await adminClient.GetFromJsonAsync<MeasurementUnitListResponse>("/api/measurement-units?q=KG&sortBy=name&sortDirection=desc&pageSize=1");
+        Assert.Equal(1, list!.TotalCount);
+        Assert.Single(list.Items);
+        Assert.False(list.HasMore);
+        Assert.True(list.Items.Single(x => x.Id == unit.Id).CanEdit);
+        Assert.True(list.Items.Single(x => x.Id == unit.Id).CanDelete);
         Assert.Equal(HttpStatusCode.Forbidden,
             (await purchaserClient.PostAsJsonAsync("/api/measurement-units", new { code = "HA", name = "Hectare", quantityKind = "AREA" })).StatusCode);
 
@@ -92,6 +97,56 @@ public sealed class MeasurementUnitTests(ApiFactory factory) : IClassFixture<Api
             (await client.PostAsJsonAsync("/api/measurement-units", new { code = code.ToLowerInvariant(), name = "Duplicate", quantityKind = "MASS" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/measurement-units?page=")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/measurement-units?pageSize=101")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/measurement-units/{Guid.NewGuid()}")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/measurement-units?sortBy=quantityKind")).StatusCode);
+        using var missing = new HttpRequestMessage(HttpMethod.Delete, $"/api/measurement-units/{Guid.NewGuid()}");
+        missing.Headers.TryAddWithoutValidation("If-Match", "\"0\"");
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(missing)).StatusCode);
+    }
+    [Fact]
+    public async Task Legacy_unit_is_not_editable_and_unused_creator_unit_can_be_soft_deleted()
+    {
+        var mill = await factory.SeedOrganizationAsync(OrganizationKind.Mill);
+        var (admin, session) = await factory.SeedUserAsync(Roles.Administrator, mill.Id);
+        using var client = factory.CreateRealCookieClient(admin, session);
+        var csrf = await client.GetFromJsonAsync<JsonElement>("/api/auth/csrf");
+        client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", csrf.GetProperty("token").GetString());
+
+        var legacyResponse = await client.PostAsJsonAsync("/api/measurement-units",
+            new { code = $"L{Guid.NewGuid():N}"[..30], name = "Legacy", quantityKind = "MASS" });
+        var legacy = (await legacyResponse.Content.ReadFromJsonAsync<MeasurementUnitResponse>())!;
+        using (var legacyScope = factory.Services.CreateScope())
+        {
+            var legacyDb = legacyScope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var row = await legacyDb.MeasurementUnits.SingleAsync(x => x.Id == legacy.Id);
+            row.CreatedBy = null;
+            await legacyDb.SaveChangesAsync();
+        }
+        var list = await client.GetFromJsonAsync<MeasurementUnitListResponse>($"/api/measurement-units?q={legacy.Code}");
+        var legacyRow = Assert.Single(list!.Items);
+        Assert.Null(legacyRow.CreatedBy);
+        Assert.False(legacyRow.CanEdit);
+        Assert.False(legacyRow.CanDelete);
+        var legacyDetail = await client.GetAsync($"/api/measurement-units/{legacy.Id}");
+        Assert.Equal(HttpStatusCode.OK, legacyDetail.StatusCode);
+        using var legacyDelete = new HttpRequestMessage(HttpMethod.Delete, $"/api/measurement-units/{legacy.Id}");
+        legacyDelete.Headers.TryAddWithoutValidation("If-Match", legacyDetail.Headers.ETag!.ToString());
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(legacyDelete)).StatusCode);
+
+        var removableResponse = await client.PostAsJsonAsync("/api/measurement-units",
+            new { code = $"D{Guid.NewGuid():N}"[..30], name = "Disposable", quantityKind = "AREA" });
+        var removable = (await removableResponse.Content.ReadFromJsonAsync<MeasurementUnitResponse>())!;
+        using var delete = new HttpRequestMessage(HttpMethod.Delete, $"/api/measurement-units/{removable.Id}");
+        delete.Headers.TryAddWithoutValidation("If-Match", removableResponse.Headers.ETag!.ToString());
+        Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(delete)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/measurement-units/{removable.Id}")).StatusCode);
+        Assert.Equal(0, (await client.GetFromJsonAsync<MeasurementUnitListResponse>($"/api/measurement-units?q={removable.Code}"))!.TotalCount);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/measurement-units",
+            new { code = removable.Code, name = "Reused code", quantityKind = "AREA" })).StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var deleted = await db.MeasurementUnits.IgnoreQueryFilters().SingleAsync(x => x.Id == removable.Id);
+        Assert.True(deleted.IsDeleted);
+        Assert.NotEqual(removable.Version, deleted.Version);
+        Assert.Equal(1, await db.CatalogEvents.CountAsync(x => x.ResourceId == removable.Id && x.EventType == "MEASUREMENT_UNIT_DELETED"));
     }
 }

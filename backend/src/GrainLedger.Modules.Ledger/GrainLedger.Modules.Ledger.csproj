@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /><ProjectReference Include="../GrainLedger.Modules.Identity/GrainLedger.Modules.Identity.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../GrainLedger.Modules.Capture/GrainLedger.Modules.Capture.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../GrainLedger.Modules.Catalogs/GrainLedger.Modules.Catalogs.csproj" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Sql/*.sql" /></ItemGroup>
+</Project>

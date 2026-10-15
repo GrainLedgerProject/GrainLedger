@@ -16,8 +16,14 @@ public sealed record PlotInput(Guid EntityId, Guid FarmerId, string? Code, JsonE
 public sealed record RegisterPlotRequest(string? DeviceId, Guid ClientOperationId, DateTimeOffset CapturedAt,
     int PayloadSchemaVersion, PlotInput? Payload);
 public sealed record PlotResponse(Guid Id, Guid FarmerId, string Code, JsonElement Geometry, decimal AreaHa);
-public sealed record PlotListItemResponse(Guid Id, Guid FarmerId, string Code, decimal AreaHa);
-public sealed record PlotListResponse(IReadOnlyList<PlotListItemResponse> Items, int Page, int PageSize, bool HasMore);
+public sealed record PlotListItemResponse(Guid Id, Guid FarmerId, string Code, decimal AreaHa,
+    Guid? CreatedBy, int Version, bool CanEdit, bool CanDelete);
+public sealed record PlotReferenceResponse(Guid Id, Guid FarmerId, string Code, JsonElement Geometry,
+    decimal AreaHa, Guid? CreatedBy, int Version, bool CanEdit, bool CanDelete);
+public sealed record PlotListResponse(IReadOnlyList<PlotListItemResponse> Items,
+    int Page, int PageSize, int TotalCount, bool HasMore);
+public sealed record UpdatePlotRequest(Guid FarmerId, string? Code, JsonElement Geometry,
+    decimal AreaHa, int ExpectedVersion);
 
 public static class PlotEndpoints
 {
@@ -28,6 +34,8 @@ public static class PlotEndpoints
         group.MapPost("", RegisterAsync).RequireAuthorization("farms.write");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
+        group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("farms.write");
+        group.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization("farms.write");
         return endpoints;
     }
 
@@ -59,7 +67,10 @@ public static class PlotEndpoints
         var lockKey = $"{companyId:N}:{deviceId}:{request.ClientOperationId:N}";
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
+        if (!await CropSeasonEndpoints.HasPermissionInTransactionAsync(db, actor.Value.UserId,
+                "farms.write", companyId, ct: ct))
+            return Results.Forbid();
         var prior = await db.OfflineOperations.AsNoTracking().SingleOrDefaultAsync(x =>
             x.CompanyId == companyId && x.DeviceId == deviceId && x.ClientOperationId == request.ClientOperationId, ct);
         if (prior is not null)
@@ -82,7 +93,7 @@ public static class PlotEndpoints
         var plot = new Plot
         {
             Id = payload.EntityId, CompanyId = companyId, FarmerId = payload.FarmerId,
-            Code = code, BoundaryGeojson = geometry, AreaHa = normalizedArea
+            Code = code, BoundaryGeojson = geometry, AreaHa = normalizedArea, CreatedBy = actor.Value.UserId
         };
         var result = ToResponse(plot);
         var businessEvent = new CaptureBusinessEvent
@@ -123,31 +134,45 @@ public static class PlotEndpoints
         return Results.Created($"/api/plots/{plot.Id}", result);
     }
 
-    private static async Task<IResult> ListAsync(Guid? farmerId, string? q, int? page, int? pageSize,
-        ClaimsPrincipal principal, ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid? farmerId, string? search, string? q,
+        int? page, int? pageSize, string? sortBy, string? sortDirection,
+        ClaimsPrincipal principal, ICurrentAccess access, IdentityDbContext identityDb,
+        CaptureDbContext db, CancellationToken ct)
     {
         if (!await CanReadAsync(access, ct)) return Results.Forbid();
         var actor = await GetActorAsync(principal, identityDb, ct);
         if (actor is null || !await access.CanAccessOrganizationAsync(actor.Value.CompanyId, ct)) return Results.Forbid();
-        if (farmerId == Guid.Empty || page is < 1 || pageSize is < 1 or > 100 || q?.Length > 100)
+        var term = search ?? q;
+        if (farmerId == Guid.Empty || page is < 1 || pageSize is < 1 or > 100 || term?.Length > 100)
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["query"] = ["Invalid search or pagination value."] });
         var currentPage = page ?? 1;
-        var size = pageSize ?? 20;
+        var size = pageSize ?? 25;
         if (currentPage - 1 > int.MaxValue / size)
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["page"] = ["Page is too large."] });
+        var sort = sortBy?.ToLowerInvariant() ?? "code";
+        var direction = sortDirection?.ToLowerInvariant() ?? "asc";
+        if (sort is not ("code" or "areaha") || direction is not ("asc" or "desc"))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["sortBy"] = ["Unsupported sort field or direction."] });
         var query = db.Plots.AsNoTracking().Where(x => x.CompanyId == actor.Value.CompanyId);
         if (farmerId is { } id) query = query.Where(x => x.FarmerId == id);
-        if (!string.IsNullOrWhiteSpace(q))
+        if (!string.IsNullOrWhiteSpace(term))
         {
-            var term = q.Trim();
-            var pattern = "%" + term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+            var pattern = "%" + term.Trim().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
             query = query.Where(x => EF.Functions.ILike(x.Code, pattern, "\\"));
         }
-        var rows = await query.OrderBy(x => x.Code).ThenBy(x => x.Id)
-            .Skip((currentPage - 1) * size).Take(size + 1).ToListAsync(ct);
-        return Results.Ok(new PlotListResponse(rows.Take(size).Select(x =>
-            new PlotListItemResponse(x.Id, x.FarmerId, x.Code, x.AreaHa)).ToList(),
-            currentPage, size, rows.Count > size));
+        var totalCount = await query.CountAsync(ct);
+        IOrderedQueryable<Plot> ordered = (sort, direction == "desc") switch
+        {
+            ("areaha", false) => query.OrderBy(x => x.AreaHa),
+            ("areaha", true) => query.OrderByDescending(x => x.AreaHa),
+            ("code", true) => query.OrderByDescending(x => x.Code),
+            _ => query.OrderBy(x => x.Code)
+        };
+        var rows = await ordered.ThenBy(x => x.Id).Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
+        var canManage = await access.HasPermissionAsync("farms.write", ct);
+        var items = rows.Select(x => ToListItem(x, actor.Value.UserId, canManage)).ToArray();
+        return Results.Ok(new PlotListResponse(items, currentPage, size, totalCount,
+            (long)currentPage * size < totalCount));
     }
 
     private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal principal, ICurrentAccess access,
@@ -157,8 +182,113 @@ public static class PlotEndpoints
         var actor = await GetActorAsync(principal, identityDb, ct);
         if (actor is null || !await access.CanAccessOrganizationAsync(actor.Value.CompanyId, ct)) return Results.Forbid();
         var plot = await db.Plots.AsNoTracking().SingleOrDefaultAsync(x => x.CompanyId == actor.Value.CompanyId && x.Id == id, ct);
-        return plot is null ? Problem(404, "PLOT_NOT_FOUND", "Plot not found.") : Results.Ok(ToResponse(plot));
+        if (plot is null) return Problem(404, "PLOT_NOT_FOUND", "Plot not found.");
+        var canManage = await access.HasPermissionAsync("farms.write", ct);
+        return Results.Ok(ToReferenceResponse(plot, actor.Value.UserId, canManage));
     }
+
+    private static async Task<IResult> UpdateAsync(Guid id, UpdatePlotRequest request,
+        ClaimsPrincipal principal, ICurrentAccess access, IdentityDbContext identityDb,
+        CaptureDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        if (request.ExpectedVersion < 1 || request.FarmerId == Guid.Empty ||
+            request.Code is not null && (string.IsNullOrWhiteSpace(request.Code) || request.Code.Trim().Length > 40) ||
+            request.AreaHa <= 0 || request.AreaHa >= 1_000_000_000_000m ||
+            decimal.Round(request.AreaHa, 12) != request.AreaHa ||
+            !PlotGeometry.TryNormalize(request.Geometry, out var geometry))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["Invalid plot values or version."] });
+        var actor = await GetActorAsync(principal, identityDb, ct);
+        if (actor is null || !await access.CanAccessOrganizationAsync(actor.Value.CompanyId, ct)) return Results.Forbid();
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
+        if (!await CropSeasonEndpoints.HasPermissionInTransactionAsync(db, actor.Value.UserId,
+                "farms.write", actor.Value.CompanyId, ct: ct))
+            return Results.Forbid();
+        var plot = await db.Plots.SingleOrDefaultAsync(x => x.CompanyId == actor.Value.CompanyId && x.Id == id, ct);
+        if (plot is null) return Problem(404, "PLOT_NOT_FOUND", "Plot not found.");
+        if (plot.CreatedBy != actor.Value.UserId) return Results.Forbid();
+        if (plot.Version != request.ExpectedVersion) return Problem(412, "REFERENCE_STALE", "The plot changed. Reload before editing.");
+        if (await PlotInUseAsync(db, actor.Value.CompanyId, id, ct))
+            return Problem(409, "REFERENCE_IN_USE", "A referenced plot cannot be edited.");
+        if (!await db.Farmers.AnyAsync(x => x.CompanyId == actor.Value.CompanyId && x.Id == request.FarmerId, ct))
+            return Problem(409, "SOURCE_RECORD_NOT_READY", "The selected farmer is not available.");
+        var code = request.Code?.Trim() ?? $"TR-{id:N}".ToUpperInvariant();
+        if (await db.Plots.AnyAsync(x => x.CompanyId == actor.Value.CompanyId && x.FarmerId == request.FarmerId &&
+                x.Id != id && x.Code == code, ct))
+            return Problem(409, "PLOT_CODE_EXISTS", "The plot code already exists for this farmer.");
+        var before = new { plot.FarmerId, plot.Code, plot.BoundaryGeojson, plot.AreaHa, plot.Version };
+        plot.FarmerId = request.FarmerId;
+        plot.Code = code;
+        plot.BoundaryGeojson = geometry;
+        plot.AreaHa = decimal.Parse(request.AreaHa.ToString("G29", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+        plot.Version++;
+        var now = clock.GetUtcNow();
+        db.BusinessEvents.Add(new CaptureBusinessEvent
+        {
+            CompanyId = plot.CompanyId, ActorId = actor.Value.UserId, EventType = "PLOT_UPDATED",
+            OccurredAt = now, RecordedAt = now, CorrelationId = Guid.NewGuid(),
+            Payload = JsonSerializer.Serialize(new { schemaVersion = 1, plotId = plot.Id, before,
+                after = new { plot.FarmerId, plot.Code, plot.BoundaryGeojson, plot.AreaHa, plot.Version } })
+        });
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Problem(412, "REFERENCE_STALE", "The plot changed. Reload before editing.");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            return Problem(409, "PLOT_CODE_EXISTS", "The plot code already exists for this farmer.");
+        }
+        return Results.Ok(ToReferenceResponse(plot, actor.Value.UserId, true));
+    }
+
+    private static async Task<IResult> DeleteAsync(Guid id, [Microsoft.AspNetCore.Mvc.FromBody] DeleteReferenceRequest request,
+        ClaimsPrincipal principal, ICurrentAccess access, IdentityDbContext identityDb,
+        CaptureDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        if (request.Version < 1) return Results.ValidationProblem(new Dictionary<string, string[]> { ["version"] = ["Version must be positive."] });
+        var actor = await GetActorAsync(principal, identityDb, ct);
+        if (actor is null || !await access.CanAccessOrganizationAsync(actor.Value.CompanyId, ct)) return Results.Forbid();
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
+        if (!await CropSeasonEndpoints.HasPermissionInTransactionAsync(db, actor.Value.UserId,
+                "farms.write", actor.Value.CompanyId, ct: ct))
+            return Results.Forbid();
+        var plot = await db.Plots.SingleOrDefaultAsync(x => x.CompanyId == actor.Value.CompanyId && x.Id == id, ct);
+        if (plot is null) return Problem(404, "PLOT_NOT_FOUND", "Plot not found.");
+        if (plot.CreatedBy != actor.Value.UserId) return Results.Forbid();
+        if (plot.Version != request.Version) return Problem(412, "REFERENCE_STALE", "The plot changed. Reload before deleting.");
+        if (await PlotInUseAsync(db, actor.Value.CompanyId, id, ct))
+            return Problem(409, "REFERENCE_IN_USE", "A referenced plot cannot be deleted.");
+        var before = new { plot.FarmerId, plot.Code, plot.BoundaryGeojson, plot.AreaHa, plot.Version, plot.IsDeleted };
+        plot.IsDeleted = true;
+        plot.Version++;
+        var now = clock.GetUtcNow();
+        db.BusinessEvents.Add(new CaptureBusinessEvent
+        {
+            CompanyId = plot.CompanyId, ActorId = actor.Value.UserId, EventType = "PLOT_DELETED",
+            OccurredAt = now, RecordedAt = now, CorrelationId = Guid.NewGuid(),
+            Payload = JsonSerializer.Serialize(new { schemaVersion = 1, plotId = plot.Id, before,
+                after = new { plot.FarmerId, plot.Code, plot.BoundaryGeojson, plot.AreaHa, plot.Version, plot.IsDeleted } })
+        });
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Problem(412, "REFERENCE_STALE", "The plot changed. Reload before deleting.");
+        }
+        return Results.NoContent();
+    }
+
+    private static Task<bool> PlotInUseAsync(CaptureDbContext db, Guid companyId, Guid id, CancellationToken ct) =>
+        db.PlotSeasons.AnyAsync(x => x.CompanyId == companyId && x.PlotId == id, ct);
 
     private static Dictionary<string, string[]> Validate(RegisterPlotRequest request, out string geometry)
     {
@@ -185,6 +315,20 @@ public static class PlotEndpoints
 
     private static PlotResponse ToResponse(Plot plot) => new(plot.Id, plot.FarmerId, plot.Code,
         JsonSerializer.Deserialize<JsonElement>(plot.BoundaryGeojson), plot.AreaHa);
+    private static PlotListItemResponse ToListItem(Plot plot, Guid actorId, bool canManage)
+    {
+        var canEdit = plot.CreatedBy == actorId && canManage;
+        return new PlotListItemResponse(plot.Id, plot.FarmerId, plot.Code, plot.AreaHa,
+            plot.CreatedBy, plot.Version, canEdit, canEdit);
+    }
+
+    private static PlotReferenceResponse ToReferenceResponse(Plot plot, Guid actorId, bool canManage)
+    {
+        var canEdit = plot.CreatedBy == actorId && canManage;
+        return new PlotReferenceResponse(plot.Id, plot.FarmerId, plot.Code,
+            JsonSerializer.Deserialize<JsonElement>(plot.BoundaryGeojson), plot.AreaHa,
+            plot.CreatedBy, plot.Version, canEdit, canEdit);
+    }
 
     private static async Task<bool> CanReadAsync(ICurrentAccess access, CancellationToken ct) =>
         await access.HasPermissionAsync("farms.read", ct) || await access.HasPermissionAsync("farms.write", ct);

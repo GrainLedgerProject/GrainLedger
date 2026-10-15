@@ -5,6 +5,7 @@ using GrainLedger.Modules.Catalogs;
 using GrainLedger.Modules.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Xunit;
 
 namespace GrainLedger.Api.IntegrationTests;
@@ -129,17 +130,20 @@ public sealed class ActiveSubstanceTests(ApiFactory factory) : IClassFixture<Api
             new { code = $"USED-{Guid.NewGuid():N}", name = "Used substance" });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var id = (await created.Content.ReadFromJsonAsync<ActiveSubstanceResponse>())!.Id;
-        using (var scope = factory.Services.CreateScope())
+        await using (var owner = new NpgsqlConnection(factory.OwnerConnectionString))
         {
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
-            await db.Database.ExecuteSqlRawAsync("""
+            await owner.OpenAsync();
+            await using var setup = new NpgsqlCommand("""
                 CREATE TABLE IF NOT EXISTS catalog.test_active_substance_refs (
                     id uuid PRIMARY KEY,
                     substance_id uuid NOT NULL REFERENCES catalog.active_substances(id)
-                )
-                """);
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $"INSERT INTO catalog.test_active_substance_refs (id, substance_id) VALUES ({Guid.NewGuid()}, {id})");
+                );
+                """, owner);
+            await setup.ExecuteNonQueryAsync();
+            await using var reference = new NpgsqlCommand("INSERT INTO catalog.test_active_substance_refs(id,substance_id) VALUES($1,$2)", owner);
+            reference.Parameters.AddWithValue(Guid.NewGuid());
+            reference.Parameters.AddWithValue(id);
+            await reference.ExecuteNonQueryAsync();
         }
         using var delete = new HttpRequestMessage(HttpMethod.Delete, $"/api/active-substances/{id}");
         delete.Headers.TryAddWithoutValidation("If-Match", created.Headers.ETag!.ToString());

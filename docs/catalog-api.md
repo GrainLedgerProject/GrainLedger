@@ -9,13 +9,14 @@ Danh mục này định nghĩa đơn vị và loại đại lượng; không t�
 | Method | Route | Quyền | Kết quả |
 | --- | --- | --- | --- |
 | POST | `/api/measurement-units` | `platform.configure` (Administrator) | Tạo; trả 201, Location và ETag |
-| GET | `/api/measurement-units?q=&page=&pageSize=` | Tài khoản đang hoạt động, role và tổ chức hợp lệ | Tìm mã/tên; mặc định 20 dòng/trang, tối đa 100 |
+| GET | `/api/measurement-units?q=&page=&pageSize=&sortBy=&sortDirection=` | Tài khoản đang hoạt động, role và tổ chức hợp lệ | Tìm mã/tên; mặc định 25 dòng/trang, tối đa 100 |
 | GET | `/api/measurement-units/{id}` | Như GET danh sách | Chi tiết gồm loại đại lượng và ETag; không có trả 404 |
 | PATCH | `/api/measurement-units/{id}` | `platform.configure`, `If-Match` | Chỉ sửa tên; trả ETag mới |
+| DELETE | `/api/measurement-units/{id}` | `platform.configure`, current creator, `If-Match` | Soft-delete unused unit; returns 204 |
 
-POST body: `{"code":"KG","name":"Kilogram","quantityKind":"MASS"}`. PATCH body: `{"name":"Kilogram (kg)"}`. Mã tối đa 30 ký tự, được trim, viết hoa và phải duy nhất. `quantityKind` được chuẩn hóa chữ hoa và hiện chỉ nhận `MASS`, `AREA`, `RESIDUE_CONCENTRATION`, `APPLICATION_RATE`, `FRACTION`. Mã và loại đại lượng không đổi sau khi tạo; cần ý nghĩa khác thì tạo đơn vị mới. Mã trùng trả 409; PATCH thiếu `If-Match` trả 428, ETag cũ trả 412. Tạo/sửa thành công ghi `catalog_events` cùng giao dịch. Chưa có DELETE.
+POST body: `{"code":"KG","name":"Kilogram","quantityKind":"MASS"}`. PATCH body: `{"name":"Kilogram (kg)"}`. Mã tối đa 30 ký tự, được trim, viết hoa và phải duy nhất. `quantityKind` được chuẩn hóa chữ hoa và hiện chỉ nhận `MASS`, `AREA`, `RESIDUE_CONCENTRATION`, `APPLICATION_RATE`, `FRACTION`. Mã và loại đại lượng không đổi sau khi tạo; cần ý nghĩa khác thì tạo đơn vị mới. Mã trùng trả 409; PATCH/DELETE thiếu `If-Match` trả 428, ETag cũ trả 412. Sửa/xóa yêu cầu current creator; unit đang được procurement, spray hoặc MRL history tham chiếu trả 409 `MEASUREMENT_UNIT_IN_USE`. Delete chỉ đánh `is_deleted`; dữ liệu và mã vẫn được giữ, ẩn khỏi danh sách/selector, không có restore. Thành công ghi `catalog_events` cùng giao dịch.
 
-Migration `20261012175054_AddMeasurementUnits` chỉ tạo `catalog.measurement_units`, CHECK cho `quantity_kind` và unique index cho `code`; không thay Identity hoặc Capture. Migration đã áp dụng lên Supabase dev ngày 13/10/2026. Khởi động lại API để Scalar hiển thị route mới.
+Migration `20261012175054_AddMeasurementUnits` creates `catalog.measurement_units`; `20261014120000_AddCatalogAttributionAndCommodityArchive` adds creator and soft-delete state. Do not assume migration is applied to target. Shared Supabase migration requires explicit database-owner approval. Normal application startup uses runtime credentials and does not migrate or seed.
 
 ## Giống lúa (`rice-varieties`)
 
@@ -54,13 +55,14 @@ Commodity là loại hoặc dạng sản phẩm được áp dụng giới hạn
 | Method | Route | Quyền | Kết quả |
 | --- | --- | --- | --- |
 | POST | `/api/commodities` | `platform.configure` (Administrator) | Tạo; trả 201, Location và ETag |
-| GET | `/api/commodities?q=&page=&pageSize=` | Tài khoản đang hoạt động, role và tổ chức hợp lệ | Tìm mã/tên; mặc định 20 dòng/trang, tối đa 100 |
+| GET | `/api/commodities?q=&page=&pageSize=&sortBy=&sortDirection=` | Tài khoản đang hoạt động, role và tổ chức hợp lệ | Tìm mã/tên; mặc định 25 dòng/trang, tối đa 100 |
 | GET | `/api/commodities/{id}` | Như GET danh sách | Chi tiết và ETag; không có trả 404 |
+| DELETE | `/api/commodities/{id}` | `platform.configure`, current creator, `If-Match` | Archive unused commodity; returns 204 |
 | PATCH | `/api/commodities/{id}` | `platform.configure`, `If-Match` | Chỉ sửa tên; trả ETag mới |
 
-POST body: `{"code":"RICE","name":"Milled rice"}`. PATCH body: `{"name":"Milled white rice"}`. API trim, viết hoa mã và giới hạn 40 ký tự; mã không đổi sau khi tạo. Mã trùng trả 409. PATCH thiếu `If-Match` trả 428, ETag cũ trả 412. Tạo/sửa thành công ghi `catalog_events` cùng giao dịch. Chưa có DELETE cho commodities.
+POST body: `{"code":"RICE","name":"Milled rice"}`. PATCH body: `{"name":"Milled white rice"}`. API trims, uppercases code and limits it to 40 characters; code cannot change after creation. Duplicate code returns 409. PATCH/DELETE require `If-Match`: missing returns 428, stale ETag returns 412. Successful create/update/archive writes `catalog_events` in same transaction. Archive requires current creator; referenced commodity returns 409 `COMMODITY_IN_USE`. Archive is soft: row and code remain reserved, while active lists/details/selectors hide it. No restore endpoint.
 
-Migration `20261012074031_AddCommodities` chỉ tạo `catalog.commodities` và chỉ mục unique cho `code`; không thay Identity hoặc Capture. Migration đã áp dụng lên Supabase dev ngày 12/10/2026. Khởi động lại API để Scalar hiển thị route mới.
+Migration `20261012074031_AddCommodities` creates `catalog.commodities`; `20261014120000_AddCatalogAttributionAndCommodityArchive` adds commodity creator/archive state and measurement-unit creator/deleted state. Do not assume either migration is applied to a target database. Shared Supabase migration requires explicit database-owner approval. Normal application startup uses runtime credentials and does not migrate or seed.
 
 ## Thị trường xuất khẩu (`markets`)
 
