@@ -38,7 +38,7 @@ Not included: offline capture, pesticide declarations, sampling/lab workflows, r
 
 See `docs/architecture.md` for module structure, role provisioning, UI workflow map, runtime/migration deployment steps, exact numeric and lineage guarantees, and explicit exclusions.
 
-- Identity, Catalog, Capture and Ledger are host modules with owned schemas/migrations. No EF entities cross module boundaries. Official Capture procurement is integrated with Ledger; no synthetic Capture module, route or seed command is active.
+- Identity, Catalog, Capture and Ledger are host modules with owned schemas/migrations. No EF entities cross module boundaries. Official Capture procurement is integrated with Ledger; retired MockCapture modules, routes and `--seed-mock` remain unavailable. Development-only `--seed-ledger` creates clearly labeled demo mill setup and stock through the official Catalog/Capture/Ledger APIs; see [development accounts](development-accounts.md).
 - Capture procurement and Ledger lot/posting/package writes share one PostgreSQL transaction; module routines never commit caller transaction.
 - Migration order is Identity → Catalog → Capture → Ledger. Preserve generated migration history and historical Ledger data. No automatic conversion of legacy synthetic records. Migration/seed on shared database requires explicit owner approval.
 - Runtime login is pre-created, restricted and non-owner; ordinary startup never migrates. Never use postgres superuser as runtime or point Development migration at production/a teammate database.

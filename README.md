@@ -60,15 +60,16 @@ Requires .NET SDK 10, Node.js 24, npm and Docker (or PostgreSQL).
 
    Vite on port 5173 proxies `/api` and `/signin-google` to backend port 5080. Use `localhost` consistently, not `127.0.0.1`. Production redirect: `https://YOUR_HOST/signin-google`. See [ASP.NET Core Google authentication](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/social/google-logins?view=aspnetcore-10.0).
 
-5. Run migrations and seed local accounts. Migration updates Identity, Catalog, Capture and Ledger in order; it does not convert or seed historical records:
+5. Run migrations, then choose an optional Development seed. Migration updates Identity, Catalog, Capture and Ledger in order; it does not convert or seed historical records:
 
    ```bash
    ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --migrate
+   # Accounts only; use --seed-ledger instead for accounts, demo mill setup and stock.
    ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --seed-dev
    dotnet run --project backend/src/GrainLedger.Api
    ```
 
-   Keep existing `.env` and connection strings unchanged. Before migration or seed, confirm `ConnectionStrings__GrainLedger` and `ConnectionStrings__GrainLedgerMigration` target your intended Development database. `--seed-dev` needs `DevelopmentSeed__Password` as documented in [development accounts](docs/development-accounts.md). Migration preserves existing Ledger stock/history; no automatic conversion of prior synthetic source records into official Capture records occurs. Normal API startup does not migrate or seed. Do not run migrations or seeds against shared Supabase without explicit database-owner approval.
+   Keep existing `.env` and connection strings unchanged. Before migration or seed, confirm `ConnectionStrings__GrainLedger` and `ConnectionStrings__GrainLedgerMigration` target your intended Development database. Both `--seed-dev` and `--seed-ledger` need `DevelopmentSeed__Password`; see [development accounts and demo Ledger data](docs/development-accounts.md). `--seed-ledger` configures a synthetic mill and creates 600 kg RAW_PADDY through official procurement and accepted arrival using the restricted runtime connection. Its facility-scoped 0% DRYING policy is synthetic, not factory-approved; other processing policies remain unconfigured. Reruns preserve existing setup edits and never replenish stock. Migration preserves existing Ledger stock/history; no automatic conversion of prior synthetic source records into official Capture records occurs. Normal API startup does not migrate or seed. Do not run migrations or seeds against shared Supabase without explicit database-owner approval.
 
 6. Start frontend:
 
