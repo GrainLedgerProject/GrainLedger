@@ -118,8 +118,91 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
 .checkbox-label input { width: 16px; height: 16px; accent-color: #28583b; }
 .loading { min-height: 100dvh; display: grid; place-items: center; }
 .empty { text-align: center; padding: 30px; color: #75826f; }
+.farmer-search { display: flex; flex-direction: column; width: min(100%, 410px); }
+.farmer-search label { margin: 0 0 8px; }
+.farmer-search-controls { display: flex; gap: 8px; }
+.farmer-search-controls button { font-size: 12px; }
+.farmer-link { text-align: left; }
+.farmer-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding-top: 20px; font-size: 12px; }
+.farmer-pagination span { margin-right: auto; color: #737e77; }
+.farmer-page-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
+.farmer-page-heading > button { flex-shrink: 0; margin-bottom: 16px; }
+.farmer-link { display: inline-flex; gap: 12px; align-items: center; font-weight: 650; }
+.farmer-row-avatar { width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; background: #e7eee2; color: #315b3d; font-size: 12px; }
+.farmer-code { display: inline-block; border-radius: 6px; background: #eff3e9; color: #42643d; padding: 6px 9px; font-size: 11px; font-weight: 650; letter-spacing: .2px; }
+.farmer-detail { margin-top: 22px; max-width: 900px; padding: 0; overflow: hidden; }
+.farmer-detail-hero { display: flex; align-items: center; gap: 22px; padding: 36px; background: linear-gradient(110deg, #f2f6ec, #fff); border-bottom: 1px solid #e3e9dc; }
+.farmer-detail-hero h2 { font-size: 26px; margin: 6px 0 12px; }
+.farmer-monogram { width: 72px; height: 72px; flex-shrink: 0; display: grid; place-items: center; border-radius: 20px; background: #dce9d4; color: #245238; font-family: 'Manrope', sans-serif; font-size: 32px; font-weight: 750; }
+.farmer-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding: 30px 36px 36px; }
+.farmer-facts > div { padding: 17px 18px; border: 1px solid #e5eade; border-radius: 9px; background: #fff; min-width: 0; }
+.farmer-facts span { display: block; margin-bottom: 8px; color: #788779; font-size: 11px; }
+.farmer-facts strong { overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+.farmer-plots { max-width: 900px; margin-top: 20px; }
+.farmer-plots-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #edf0e8; margin-bottom: 14px; }
+.farmer-plots-heading h2 { margin: 7px 0 4px; }
+.farmer-plots-heading p { margin: 0; font-size: 12px; }
+.farmer-plots-heading button { flex-shrink: 0; font-size: 12px; }
+.farmer-plot-link { font-weight: 650; }
+.farmer-plot-link span { font-size: 11px; }
+.plot-record, .plot-location, .plot-seasons, .plot-season-record { max-width: 900px; }
+.plot-record { margin-top: 22px; padding: 0; overflow: hidden; }
+.plot-record-hero { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 34px; background: linear-gradient(110deg, #f2f6ec, #fff); border-bottom: 1px solid #e3e9dc; }
+.plot-record-hero h2 { font-size: 27px; margin: 7px 0; overflow-wrap: anywhere; }
+.plot-record-hero p { font-size: 13px; margin: 0; }
+.plot-area-badge { flex-shrink: 0; padding: 12px 16px; border-radius: 9px; background: #dce9d4; color: #245238; font-weight: 700; }
+.plot-record-facts, .plot-coordinates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.plot-record-facts { padding: 27px 34px 32px; }
+.plot-record-facts > div, .plot-coordinates > div { border: 1px solid #e5eade; border-radius: 9px; padding: 16px 18px; }
+.plot-record-facts span, .plot-coordinates span { display: block; color: #788779; font-size: 11px; margin-bottom: 6px; }
+.plot-record-facts strong, .plot-coordinates strong { font-size: 14px; }
+.plot-location { margin-top: 20px; }
+.plot-location h2 { margin: 7px 0 5px; }
+.plot-location details { margin-top: 16px; }
+.plot-geojson { overflow-x: auto; padding: 15px; border-radius: 8px; background: #f7f8f4; font-size: 12px; }
+.plot-seasons { margin-top: 20px; }
+.plot-seasons-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #edf0e8; margin-bottom: 14px; }
+.plot-seasons-heading h2 { margin: 7px 0 4px; }
+.plot-seasons-heading p { margin: 0; font-size: 12px; }
+.plot-seasons-heading button { flex-shrink: 0; font-size: 12px; }
+.plot-season-record { margin-top: 22px; padding: 0; overflow: hidden; }
+.plot-season-record-hero { padding: 34px; background: linear-gradient(110deg, #f2f6ec, #fff); border-bottom: 1px solid #e3e9dc; }
+.plot-season-record-hero h2 { font-size: 27px; margin: 7px 0; }
+.plot-season-record-hero p { margin: 0; font-size: 13px; }
+.plot-season-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; padding: 27px 34px 32px; }
+.plot-season-facts > div { border: 1px solid #e5eade; border-radius: 9px; padding: 16px 18px; min-width: 0; }
+.plot-season-facts span { display: block; color: #788779; font-size: 11px; margin-bottom: 6px; }
+.plot-season-facts strong { font-size: 14px; overflow-wrap: anywhere; }
+.capture-section, .capture-detail { max-width: 900px; margin-top: 20px; }
+.capture-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #edf0e8; margin-bottom: 14px; }
+.capture-section-heading h2 { margin: 7px 0 4px; }
+.capture-section-heading p { margin: 0; font-size: 12px; }
+.capture-section-heading button { flex-shrink: 0; font-size: 12px; }
+.farmer-modal.capture-modal-wide { width: min(100%, 760px); }
+.capture-form-subheading { font-family: 'Manrope', sans-serif; font-size: 14px; margin: 24px 0 8px; }
+.capture-item-row { padding: 8px 14px; margin: 10px 0; border: 1px solid #e5eade; border-radius: 8px; }
+.capture-item-row label { margin: 10px 0; }
+.capture-detail dl { display: grid; grid-template-columns: 150px 1fr; gap: 8px 16px; }
+.capture-detail dt, .capture-detail dd { margin: 0; }
+.capture-form-page { max-width: 900px; margin-top: 20px; }
+.capture-form-page h2 { margin-top: 25px; padding-bottom: 10px; border-bottom: 1px solid #edf0e8; }
+.capture-form-page h2:first-child { margin-top: 0; }
+.capture-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; margin: 20px 0; }
+.capture-stat-grid > div { padding: 16px; border: 1px solid #e5eade; border-radius: 9px; min-width: 0; }
+.capture-stat-grid span { display: block; color: #788779; font-size: 11px; margin-bottom: 8px; }
+.capture-stat-grid strong { font-size: 14px; overflow-wrap: anywhere; }
+.farmer-modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgba(12, 36, 24, .54); }
+.farmer-modal { width: min(100%, 560px); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 30px; border: 1px solid #e3e7dc; border-radius: 16px; background: #fff; box-shadow: 0 25px 80px rgba(10, 32, 20, .25); }
+.farmer-modal-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.farmer-modal-heading h2 { font-size: 25px; margin: 8px 0 0; }
+.farmer-modal > p { font-size: 13px; margin: 12px 0 22px; }
+.farmer-modal-close { padding: 0; width: 32px; height: 32px; flex-shrink: 0; background: transparent; color: #5f7564; font-size: 25px; font-weight: 400; }
+.farmer-modal-close:hover { background: #eef3ea; }
+.required-mark { color: #a04b41; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 @media (min-width: 1450px) { .content { padding-top: 60px; } }
 @media (max-width: 1100px) { .sidebar { width: 213px; padding: 24px 15px; } .content { padding: 32px 24px; } .topbar { padding: 15px 24px; } .panel { padding: 22px; } .login-story { padding: 38px; } }
 @media (max-width: 850px) { .profile-grid { grid-template-columns: 1fr; } .stack { grid-template-columns: 1fr 1fr; } .sidebar { width: 185px; } .sidebar .brand { font-size: 17px; } .sidebar .brand-icon { font-size: 29px; } .organization-form { grid-template-columns: 1fr; } .login-story { padding: 32px; } .login-form { padding: 32px; } .login-story h1 { letter-spacing: -2px; } .story-footer span { display: none; } }
-@media (max-width: 620px) { .login-layout { grid-template-columns: 1fr; } .login-story { min-height: auto; gap: 36px; padding: 25px; } .login-story h1 { font-size: 43px; } .login-story .story-footer { display: none; } .login-form { padding: 38px 25px; } .workspace { flex-direction: column; } .sidebar { width: 100%; padding: 12px 20px; flex-direction: row; justify-content: space-between; align-items: center; gap: 10px; } .nav-caption, .sidebar-bottom { display: none; } nav { display: flex; } nav button { font-size: 11px; padding: 9px 7px; } nav button span { display: none; } .topbar { min-height: 61px; padding: 12px 20px; font-size: 10px; } .content { padding: 28px 20px; } .stack { grid-template-columns: 1fr; } .section-toolbar { align-items: start; } .form-columns { grid-template-columns: 1fr; gap: 0; } .separator { margin: 0 5px; } h1 { font-size: 28px; } }
+@media (max-width: 620px) { .login-layout { grid-template-columns: 1fr; } .login-story { min-height: auto; gap: 36px; padding: 25px; } .login-story h1 { font-size: 43px; } .login-story .story-footer { display: none; } .login-form { padding: 38px 25px; } .workspace { flex-direction: column; } .sidebar { width: 100%; padding: 12px 20px; flex-direction: row; justify-content: space-between; align-items: center; gap: 10px; } .nav-caption, .sidebar-bottom { display: none; } nav { display: flex; min-width: 0; overflow-x: auto; } nav button { flex: 0 0 auto; font-size: 11px; padding: 9px 7px; } nav button span { display: none; } .topbar { min-height: 61px; padding: 12px 20px; font-size: 10px; } .content { padding: 28px 20px; } .stack { grid-template-columns: 1fr; } .section-toolbar { align-items: start; flex-direction: column; } .farmer-search, .farmer-search-controls { width: 100%; } .form-columns { grid-template-columns: 1fr; gap: 0; } .separator { margin: 0 5px; } h1 { font-size: 28px; } }
+@media (max-width: 620px) { .farmer-page-heading { align-items: stretch; flex-direction: column; gap: 8px; } .farmer-page-heading > button { align-self: flex-start; margin: 0; } .farmer-detail-hero { padding: 24px; } .farmer-facts { grid-template-columns: 1fr; padding: 20px 24px 24px; } .farmer-plots-heading, .plot-seasons-heading { align-items: flex-start; flex-direction: column; } .farmer-modal { padding: 22px; } .plot-record-hero, .plot-season-record-hero { padding: 24px; align-items: flex-start; flex-direction: column; } .plot-record-facts, .plot-season-facts { padding: 20px 24px 24px; } .plot-record-facts, .plot-coordinates, .plot-season-facts { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .capture-section-heading { align-items: flex-start; flex-direction: column; } .capture-detail dl { display: block; } .capture-detail dt { margin-top: 14px; } .capture-stat-grid { grid-template-columns: 1fr; } }

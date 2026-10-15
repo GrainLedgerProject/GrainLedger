@@ -16,7 +16,7 @@ export type RegistrationPending = { registrationId: string; email: string; expir
 export type IssuedTokens = { accessToken: string; refreshToken: string; tokenType: 'Bearer'; expiresIn: number; user: User };
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public code?: string, public errors?: Record<string, string[]>, public traceId?: string) { super(message); }
 }
 
 let accessToken: string | null = null;
@@ -50,7 +50,7 @@ async function parseError(response: Response): Promise<ApiError> {
     : response.status === 412 ? 'This account changed while you were editing. Reload accounts and try again.'
     : response.status === 429 ? 'Too many requests. Please wait a moment and try again.'
     : validation || problem.detail || problem.title || 'The request could not be completed. Please try again.';
-  return new ApiError(response.status, message);
+  return new ApiError(response.status, message, problem.code, problem.errors, problem.traceId);
 }
 
 async function rotateTokens(failedAccessToken: string, requestGeneration: number): Promise<boolean> {
