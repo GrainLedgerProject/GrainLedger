@@ -153,7 +153,7 @@ public static class LedgerDatabase
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
             {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
-                ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.lock_writes(),
+                ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.trace_lot(uuid,uuid,text,text),ledger.lock_writes(),
                 ledger.provision_catalog_commodities(uuid),
                 ledger.register_pending_procurement(uuid,uuid),
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),

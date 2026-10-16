@@ -82,6 +82,8 @@ Ledger collection APIs for large queues now use bounded server-side filtering, s
 
 Proposal F18 (PDF pp. 5, 9) requires bad-test-to-container and container-to-plot tracing with complete affected sets and exact proportions. Current root-source contribution rows support indexed source lookup and source proportions; intermediate ancestry is recoverable from committed operation inputs and each lot's `operation_id`. Lab/residue, export and container-loading workflows are not implemented. Future tracing must join durable source/plot and container-loading records, distinguish historical attribution from remaining stock, and process the complete affected set independently of paged presentation. Current HOLD applies to specified lot; it does not automatically cascade to processing descendants. Descendant/container HOLD policy must be defined rather than assumed.
 
+Lot tracing step A now exposes audited `POST /api/ledger/trace`: scoped forward/backward traversal of committed operations, current/history correction views, exact retained source weights and Capture-owned bulk immutable provenance. CustomerManager has both directions, ExportStaff only forward affected targets, and Administrator uses its explicit global trace grant without broader stock/business access. Graph/stock weights share one query snapshot; trace does not take the stock-write lock or mutate quantities. See [API contract](traceability-api.md) and [implementation/dependency plan](traceability-implementation-plan.md). This does not implement lab/plan/container traversal or prove the full-season performance target.
+
 ## HTTP Identity contract
 
 | Method | Path | Access / behavior |

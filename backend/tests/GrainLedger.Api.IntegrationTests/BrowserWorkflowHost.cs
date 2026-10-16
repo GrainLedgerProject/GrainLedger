@@ -29,7 +29,10 @@ public sealed class BrowserWorkflowHost
             verification.EnsureSuccessStatusCode();
         }
         using var scenario = await LedgerScenario.CreateAsync(factory);
-        await scenario.ReceiptAsync("10");
+        var received = await scenario.ReceiptAsync("10");
+        var traceSourceLotId = LedgerScenario.Lots(received)[0];
+        var processed = await scenario.CommitAsync(await scenario.DraftAsync("DRYING", [(traceSourceLotId, "10")], [("DRIED_PADDY", "8")], "2"));
+        var traceOutputLotId = LedgerScenario.Output(processed);
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
@@ -99,7 +102,8 @@ public sealed class BrowserWorkflowHost
                 isolationLocationId = scenario.IsolationLocationId, foreignLocationId = scenario.ForeignLocationId,
                 equipmentId = scenario.EquipmentId, commodityId = scenario.CommodityId, catalogCommodityId = scenario.CatalogCommodityId,
                 farmerId = scenario.FarmerId, seasonId = scenario.SeasonId, plotSeasonId = scenario.PlotSeasonId,
-                evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(), accounts
+                evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(),
+                traceSourceLotId, traceOutputLotId, accounts
             }, new JsonSerializerOptions { WriteIndented = true });
         try { await bridge.StartAsync(); await bridge.WaitForShutdownAsync(); }
         finally { File.Delete(sessionFile); await factory.DisposeAsync(); }
