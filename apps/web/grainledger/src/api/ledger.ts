@@ -99,6 +99,11 @@ export const ledgerEndpoints = {
 
   // Corrections & Reconciliations (BR-12)
   getCorrections: () => apiFetch<unknown>('/api/ledger/corrections'),
+  createCorrection: (req: unknown) =>
+    apiFetch<unknown>('/api/ledger/corrections', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
   reconcileCorrection: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/ledger/corrections/${id}/reconcile`, {
       method: 'POST',

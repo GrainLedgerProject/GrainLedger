@@ -4,9 +4,12 @@ import { CompanyContextBar } from "@/components/CompanyContextBar/CompanyContext
 import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
 import { GlobalSearchModal } from "@/components/GlobalSearchModal/GlobalSearchModal";
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Outlet } from "react-router-dom";
 
 export const AppLayout: React.FC = () => {
+  const { t } = useTranslation();
+
   return (
     <div className="min-h-screen bg-parchment-grain flex flex-row selection:bg-accent-primary/20 selection:text-accent-primary">
       {/* App Sidebar */}
@@ -39,8 +42,8 @@ export const AppLayout: React.FC = () => {
             </div>
           </footer>
           <div className="flex items-center gap-4 text-[11px]">
-            <span>Tuân thủ mô hình Mass Balance ISO 22095:2020</span>
-            <span>Phiên bản v1.0.0-prod</span>
+            <span>{t('common.isoComplianceFooter', 'Tuân thủ mô hình Mass Balance ISO 22095:2020')}</span>
+            <span>{t('common.versionFooter', 'Phiên bản v1.0.0-dev')}</span>
           </div>
         </footer>
       </div>

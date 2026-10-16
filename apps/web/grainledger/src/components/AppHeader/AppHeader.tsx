@@ -19,6 +19,7 @@ import {
 } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import React, { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 export interface AppHeaderProps {
@@ -27,6 +28,7 @@ export interface AppHeaderProps {
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) => {
+  const { t } = useTranslation();
   const { user, logout, hasUnsavedDrafts } = useAuthStore();
   const {
     theme,
@@ -84,7 +86,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
               </nav>
             ) : null}
             <h1 className="text-base font-semibold text-ink-primary truncate font-body">
-              {pageTitle || 'Bàn làm việc vận hành'}
+              {pageTitle || t('header.defaultTitle', 'Bàn làm việc vận hành')}
             </h1>
           </div>
         </div>
@@ -95,11 +97,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
             type="button"
             onClick={() => setSearchOpen(true)}
             className="w-full flex items-center justify-between px-3 py-1.5 rounded-md bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/25 text-xs text-ink-tertiary hover:text-ink-primary hover:border-ink-tertiary/40 transition-colors shadow-xs"
-            aria-label="Tìm kiếm trong hệ thống (Cmd/Ctrl+K)"
+            aria-label={t('header.searchTitle', 'Tìm kiếm trong hệ thống (Cmd/Ctrl+K)')}
           >
             <div className="flex items-center gap-2">
               <MagnifyingGlass size={15} />
-              <span>Tìm kiếm lô, container, nông hộ...</span>
+              <span>{t('common.searchPlaceholder', 'Tìm kiếm lô, container, nông hộ...')}</span>
             </div>
             <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface-base border border-ink-tertiary/30">
               ⌘K
@@ -147,9 +149,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                   className="absolute right-0 mt-2 w-80 bg-surface-base dark:bg-surface-raised border border-ink-tertiary/25 rounded-lg shadow-lg p-3 z-50 text-xs space-y-2"
                 >
                   <div className="flex items-center justify-between pb-2 border-b border-ink-tertiary/15 font-semibold text-ink-primary">
-                    <span>Cảnh báo & Hoạt động cần duyệt</span>
+                    <span>{t('header.notificationsTitle', 'Cảnh báo & Hoạt động cần duyệt')}</span>
                     <span className="font-mono text-[10px] bg-red-100 text-accent-danger px-1.5 py-0.5 rounded">
-                      2 mới
+                      {t('header.newCount', '2 mới')}
                     </span>
                   </div>
 
@@ -161,10 +163,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                     >
                       <div className="flex items-center gap-1.5 font-bold text-accent-danger">
                         <LockSimple size={14} weight="fill" />
-                        <span>Cảnh báo HOLD mới: Lô LOT-2026-S1</span>
+                        <span>{t('header.holdAlert', 'Cảnh báo HOLD mới: Lô LOT-2026-S1')}</span>
                       </div>
                       <p className="text-[11px] text-ink-secondary mt-0.5">
-                        Tricyclazole tiệm cận ngưỡng MRL EU (0.009 mg/kg / 0.010 mg/kg).
+                        {t('header.holdAlertDesc', 'Tricyclazole tiệm cận ngưỡng MRL EU (0.009 mg/kg / 0.010 mg/kg).')}
                       </p>
                     </Link>
 
@@ -175,10 +177,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                     >
                       <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-200">
                         <WarningCircle size={14} weight="fill" />
-                        <span>Phương án PLAN-001 chờ duyệt</span>
+                        <span>{t('header.planAlert', 'Phương án PLAN-001 chờ duyệt')}</span>
                       </div>
                       <p className="text-[11px] text-ink-secondary mt-0.5">
-                        Container C1 (25.000 kg) đang chờ phê duyệt từ Customer Manager.
+                        {t('header.planAlertDesc', 'Container C-101 (24,000 kg Gạo trắng 5% tấm) — Khách hàng Exporter A.')}
                       </p>
                     </Link>
                   </div>
@@ -192,7 +194,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
             type="button"
             onClick={toggleTheme}
             className="p-2 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-surface-raised transition-colors"
-            title={theme === 'dark' ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
+            title={theme === 'dark' ? t('header.switchToLight', 'Chuyển sang chế độ sáng') : t('header.switchToDark', 'Chuyển sang chế độ tối')}
             aria-label="Toggle dark mode"
           >
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
@@ -203,7 +205,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
             type="button"
             onClick={() => setLanguage(language === 'vi' ? 'en' : 'vi')}
             className="flex items-center gap-1 p-2 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-surface-raised transition-colors text-xs font-semibold"
-            title="Chuyển ngôn ngữ / Switch language"
+            title={t('header.switchLang', 'Chuyển ngôn ngữ / Switch language')}
             aria-label="Toggle language"
           >
             <Globe size={16} />
@@ -214,7 +216,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
           <Link
             to="/"
             className="p-2 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-surface-raised transition-colors"
-            title="Giới thiệu & Hướng dẫn hệ thống"
+            title={t('header.helpTitle', 'Giới thiệu & Hướng dẫn hệ thống')}
             aria-label="Documentation"
           >
             <Question size={18} />
@@ -226,13 +228,13 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
               type="button"
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
               className="flex items-center gap-2 p-1 pl-2 rounded-full hover:bg-surface-raised dark:hover:bg-surface-overlay border border-ink-tertiary/20 transition-colors"
-              aria-label="User profile menu"
+              aria-label={t('header.userMenu', 'Menu hồ sơ người dùng')}
             >
               <div className="w-7 h-7 rounded-full bg-accent-primary text-white flex items-center justify-center font-bold text-xs shadow-xs">
                 {getInitials(user?.displayName)}
               </div>
               <span className="hidden sm:block text-xs font-semibold text-ink-primary max-w-[120px] truncate">
-                {user?.displayName || 'Người dùng'}
+                {user?.displayName || t('header.notLoggedIn', 'Người dùng')}
               </span>
               <CaretDown size={12} className="text-ink-tertiary" />
             </button>
@@ -249,10 +251,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                   {/* User Profile Header in Menu */}
                   <div className="space-y-1.5 pb-2.5 border-b border-ink-tertiary/15">
                     <p className="font-bold text-sm text-ink-primary truncate">
-                      {user?.displayName || 'Chưa đăng nhập'}
+                      {user?.displayName || t('header.notLoggedIn', 'Chưa đăng nhập')}
                     </p>
                     <p className="text-ink-tertiary truncate font-mono text-[11px]">
-                      {user?.email || 'guest@grainledger.local'}
+                      {user?.email || t('header.guestEmail', 'guest@grainledger.local')}
                     </p>
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
                       {user && <RoleChip role={user.role} size="sm" />}
@@ -272,7 +274,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                       className="flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-surface-raised dark:hover:bg-surface-overlay text-ink-primary transition-colors"
                     >
                       <User size={16} className="text-ink-secondary" />
-                      <span>Thông tin cá nhân</span>
+                      <span>{t('nav.profile', 'Thông tin cá nhân')}</span>
                     </Link>
 
                     <Link
@@ -281,7 +283,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                       className="flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-surface-raised dark:hover:bg-surface-overlay text-ink-primary transition-colors"
                     >
                       <LockSimple size={16} className="text-ink-secondary" />
-                      <span>Bảo mật tài khoản</span>
+                      <span>{t('nav.security', 'Bảo mật tài khoản')}</span>
                     </Link>
                   </div>
 
@@ -295,7 +297,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                       className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-accent-danger hover:bg-red-50 dark:hover:bg-red-950/30 font-semibold transition-colors"
                     >
                       <SignOut size={16} />
-                      <span>Đăng xuất</span>
+                      <span>{t('nav.signOut', 'Đăng xuất')}</span>
                     </button>
                   </div>
                 </motion.div>
@@ -308,15 +310,21 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
       {/* Logout Confirmation Modal */}
       <ConfirmPopover
         isOpen={isLogoutModalOpen}
-        title="Đăng xuất khỏi GrainLedger?"
-        description="Phiên làm việc hiện tại của bạn sẽ kết thúc an toàn. Mọi dữ liệu đã ghi nhận vào sổ cái luôn được bảo toàn."
+        title={t('auth.signOutConfirmTitle', 'Đăng xuất khỏi GrainLedger?')}
+        description={t(
+          'auth.signOutConfirmDesc',
+          'Phiên làm việc hiện tại của bạn sẽ kết thúc an toàn. Mọi dữ liệu đã ghi nhận vào sổ cái luôn được bảo toàn.'
+        )}
         warningNote={
           hasUnsavedDrafts
-            ? 'Bạn có thay đổi biểu mẫu chưa lưu. Đăng xuất sẽ xoá các nháp chưa commit.'
+            ? t(
+                'auth.signOutConfirmDraftWarning',
+                'Bạn có thay đổi biểu mẫu chưa lưu. Đăng xuất sẽ xoá các nháp chưa commit.'
+              )
             : undefined
         }
-        confirmLabel="Đăng xuất"
-        cancelLabel="Huỷ"
+        confirmLabel={t('auth.confirmSignOut', 'Đăng xuất')}
+        cancelLabel={t('auth.cancel', 'Huỷ')}
         variant="danger"
         onConfirm={handleLogoutConfirm}
         onCancel={() => setIsLogoutModalOpen(false)}

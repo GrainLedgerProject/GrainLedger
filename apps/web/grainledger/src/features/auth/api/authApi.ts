@@ -29,8 +29,8 @@ export const authApi = {
             permissions: tokens.user.permissions || [],
           },
           tokens: {
-            access: tokens.accessToken,
-            refresh: tokens.refreshToken,
+            access: tokens.accessToken || (tokens as unknown as { AccessToken: string }).AccessToken,
+            refresh: tokens.refreshToken || (tokens as unknown as { RefreshToken: string }).RefreshToken,
           },
         };
       }

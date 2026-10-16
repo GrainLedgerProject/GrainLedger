@@ -1,6 +1,7 @@
 import { formatMessage } from '@/app/i18n/messages';
 import { ArrowClockwise, WarningCircle } from '@phosphor-icons/react';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 export interface StalePlanBannerProps {
@@ -20,12 +21,22 @@ export const StalePlanBanner: React.FC<StalePlanBannerProps> = ({
   planId,
   orderId = 'ORD-2026-EU-01',
   containerId = 'CONT-01',
-  reason = 'Có kết quả kiểm nghiệm mới hoặc thay đổi tồn kho của các lô nguyên liệu thành phần.',
+  reason,
   className = '',
 }) => {
-  const message = formatMessage('MSG08', {
-    plan_id: planId,
-  });
+  const { t, i18n } = useTranslation();
+  const defaultReason = t(
+    'export.stalePlanDefaultReason',
+    'Có kết quả kiểm nghiệm mới hoặc thay đổi tồn kho của các lô nguyên liệu thành phần.'
+  );
+
+  const message = formatMessage(
+    'MSG08',
+    {
+      plan_id: planId,
+    },
+    i18n.language
+  );
 
   return (
     <div
@@ -43,12 +54,12 @@ export const StalePlanBanner: React.FC<StalePlanBannerProps> = ({
               {message}
             </span>
             <span className="text-xs font-mono text-ink-secondary bg-surface-base px-2 py-0.5 rounded border border-functional-stale-border/40">
-              Mã Plan: {planId}
+              {t('export.planCode', 'Mã Plan')}: {planId}
             </span>
           </div>
 
           <p className="text-xs text-ink-secondary leading-normal">
-            <strong>Nguyên nhân chuyển trạng thái STALE:</strong> {reason}
+            <strong>{t('export.staleReason', 'Nguyên nhân chuyển trạng thái STALE')}:</strong> {reason || defaultReason}
           </p>
 
           <div className="pt-2 flex items-center gap-3">
@@ -57,10 +68,10 @@ export const StalePlanBanner: React.FC<StalePlanBannerProps> = ({
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-accent-warning text-ink-primary hover:bg-amber-400 transition-colors shadow-xs"
             >
               <ArrowClockwise size={14} weight="bold" />
-              Yêu cầu đánh giá lại phương án
+              {t('export.reRequestPlan', 'Yêu cầu đánh giá lại phương án')}
             </Link>
             <span className="text-xs text-ink-tertiary">
-              Cần chạy lại bài toán kiểm tra tính khả thi và MRL mới nhất.
+              {t('export.staleRecheckHint', 'Cần chạy lại bài toán kiểm tra tính khả thi và MRL mới nhất.')}
             </span>
           </div>
         </div>
@@ -68,3 +79,4 @@ export const StalePlanBanner: React.FC<StalePlanBannerProps> = ({
     </div>
   );
 };
+

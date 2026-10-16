@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ledgerEndpoints } from "@/api/ledger";
 import { useAuthStore } from "@/app/store/authStore";
 import { GrainLoader } from "@/components/GrainLoader/GrainLoader";
@@ -33,8 +34,10 @@ interface ReceivingTaskItem {
 }
 
 export const ReceivingTasksPage: React.FC = () => {
+  const { t } = useTranslation();
   const user = useAuthStore((state) => state.user);
-  const isManager = user?.role === "MILL_MANAGER" || user?.role === "MILL_ADMIN";
+  const isManager =
+    user?.role === "MILL_MANAGER" || user?.role === "MILL_ADMIN";
 
   const [tasks, setTasks] = useState<ReceivingTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +45,9 @@ export const ReceivingTasksPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Measure Modal
-  const [selectedTask, setSelectedTask] = useState<ReceivingTaskItem | null>(null);
+  const [selectedTask, setSelectedTask] = useState<ReceivingTaskItem | null>(
+    null,
+  );
   const [isMeasureModalOpen, setIsMeasureModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [measuredWeight, setMeasuredWeight] = useState("4980.000");
@@ -101,7 +106,7 @@ export const ReceivingTasksPage: React.FC = () => {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError("Không thể tải danh sách chuyến xe tiếp nhận.");
+        setError(t("mill.receiving.loadError", "Không thể tải danh sách chuyến xe tiếp nhận."));
       }
     } finally {
       setLoading(false);
@@ -139,7 +144,7 @@ export const ReceivingTasksPage: React.FC = () => {
         measuredAt: new Date().toISOString(),
       });
       setSuccessMsg(
-        `Đã ghi nhận số cân thực tế cho chuyến xe ${selectedTask.sourceLotCode}`,
+        t("mill.receiving.measureSuccess", `Đã ghi nhận số cân thực tế cho chuyến xe ${selectedTask.sourceLotCode}`)
       );
       setIsMeasureModalOpen(false);
       await loadTasks();
@@ -147,7 +152,7 @@ export const ReceivingTasksPage: React.FC = () => {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError("Không thể ghi nhận số cân tiếp nhận.");
+        setError(t("mill.receiving.measureError", "Không thể ghi nhận số cân tiếp nhận."));
       }
     } finally {
       setSubmitting(false);
@@ -168,7 +173,7 @@ export const ReceivingTasksPage: React.FC = () => {
           : "Lệch cân quá mức quy định",
       });
       setSuccessMsg(
-        `Đã hoàn tất duyệt đối soát chuyến xe ${selectedTask.sourceLotCode}`,
+        t("mill.receiving.reviewSuccess", `Đã hoàn tất duyệt đối soát chuyến xe ${selectedTask.sourceLotCode}`)
       );
       setIsReviewModalOpen(false);
       await loadTasks();
@@ -176,7 +181,7 @@ export const ReceivingTasksPage: React.FC = () => {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError("Không thể duyệt đối soát.");
+        setError(t("mill.receiving.reviewError", "Không thể duyệt đối soát."));
       }
     } finally {
       setSubmitting(false);
@@ -189,14 +194,16 @@ export const ReceivingTasksPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-ink-tertiary/15 pb-4">
         <div>
           <span className="text-xs font-mono font-bold text-accent-primary uppercase tracking-wider block">
-            TIẾP NHẬN LÚA VỀ NHÀ MÁY (RECEIVING & ARRIVAL WORKFLOW)
+            {t("mill.receiving.tag", "TIẾP NHẬN LÚA VỀ NHÀ MÁY (RECEIVING & ARRIVAL WORKFLOW)")}
           </span>
           <h2 className="text-2xl font-display font-bold text-ink-primary">
-            Tiếp Nhận & Cân Đối Soát Xe Tải Về Nhà Máy
+            {t("mill.receiving.title", "Tiếp Nhận & Cân Đối Soát Xe Tải Về Nhà Máy")}
           </h2>
           <p className="text-xs text-ink-secondary mt-0.5">
-            Quy trình 2 bước: Nhân viên cân ghi số đo thực tế (Measure) và Quản
-            lý nhà máy duyệt đối soát lệch cân (Review).
+            {t(
+              "mill.receiving.desc",
+              "Quy trình 2 bước: Nhân viên cân ghi số đo thực tế (Measure) và Quản lý nhà máy duyệt đối soát lệch cân (Review)."
+            )}
           </p>
         </div>
 
@@ -204,7 +211,7 @@ export const ReceivingTasksPage: React.FC = () => {
           type="button"
           onClick={loadTasks}
           className="p-2.5 rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-secondary hover:text-ink-primary transition-colors"
-          title="Tải lại dữ liệu"
+          title={t("common.reload", "Tải lại dữ liệu")}
         >
           <ArrowsClockwise size={16} />
         </button>
@@ -228,17 +235,19 @@ export const ReceivingTasksPage: React.FC = () => {
       <div className="rounded-xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised overflow-hidden shadow-xs">
         {loading ? (
           <div className="py-16 flex justify-center">
-            <GrainLoader label="Đang đối soát lịch trình tiếp nhận..." />
+            <GrainLoader label={t("mill.receiving.loading", "Đang đối soát lịch trình tiếp nhận...")} />
           </div>
         ) : tasks.length === 0 ? (
           <div className="py-16 text-center space-y-2">
             <Truck size={40} className="mx-auto text-ink-tertiary opacity-60" />
             <p className="text-sm font-semibold text-ink-primary">
-              Không có chuyến xe nào đang chờ
+              {t("mill.receiving.emptyTitle", "Không có chuyến xe nào đang chờ")}
             </p>
             <p className="text-xs text-ink-secondary max-w-sm mx-auto">
-              Khi nông hộ xuất lúa tươi tại điểm thu mua, thông tin chuyến xe sẽ
-              tự động hiển thị tại đây.
+              {t(
+                "mill.receiving.emptyDesc",
+                "Khi nông hộ xuất lúa tươi tại điểm thu mua, thông tin chuyến xe sẽ tự động hiển thị tại đây."
+              )}
             </p>
           </div>
         ) : (
@@ -246,30 +255,30 @@ export const ReceivingTasksPage: React.FC = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-surface-raised dark:bg-surface-overlay border-b border-ink-tertiary/20 text-ink-secondary font-semibold uppercase tracking-wider text-[11px]">
                 <tr>
-                  <th className="py-3 px-4">Lô Nguồn</th>
-                  <th className="py-3 px-4">Nông hộ</th>
-                  <th className="py-3 px-4">Cân xuất phát (kg)</th>
-                  <th className="py-3 px-4">Cân cập bến (kg)</th>
-                  <th className="py-3 px-4">Độ lệch</th>
-                  <th className="py-3 px-4">Trạng thái</th>
-                  <th className="py-3 px-4 text-right">Thao tác</th>
+                  <th className="py-3 px-4">{t("mill.receiving.thSourceLot", "Lô Nguồn")}</th>
+                  <th className="py-3 px-4">{t("mill.receiving.thFarmer", "Nông hộ")}</th>
+                  <th className="py-3 px-4">{t("mill.receiving.thOriginWeight", "Cân xuất phát (kg)")}</th>
+                  <th className="py-3 px-4">{t("mill.receiving.thArrivalWeight", "Cân cập bến (kg)")}</th>
+                  <th className="py-3 px-4">{t("mill.receiving.thVariance", "Độ lệch")}</th>
+                  <th className="py-3 px-4">{t("common.status", "Trạng thái")}</th>
+                  <th className="py-3 px-4 text-right">{t("common.action", "Thao tác")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-tertiary/10">
-                {tasks.map((t) => {
-                  const orig = parseFloat(t.originQuantityKg) || 0;
-                  const arr = parseFloat(t.arrivalMeasuredKg || "0");
+                {tasks.map((task) => {
+                  const orig = parseFloat(task.originQuantityKg) || 0;
+                  const arr = parseFloat(task.arrivalMeasuredKg || "0");
                   const diff = arr > 0 ? arr - orig : 0;
                   return (
                     <tr
-                      key={t.id}
+                      key={task.id}
                       className="hover:bg-surface-raised/60 dark:hover:bg-surface-overlay/40 transition-colors"
                     >
                       <td className="py-3 px-4 font-mono font-bold text-accent-primary">
-                        {t.sourceLotCode || `LOT-${t.id.slice(0, 6)}`}
+                        {task.sourceLotCode || `LOT-${task.id.slice(0, 6)}`}
                       </td>
                       <td className="py-3 px-4 font-semibold text-ink-primary">
-                        {t.farmerName || "Nông hộ Cái Bè"}
+                        {task.farmerName || "Nông hộ Cái Bè"}
                       </td>
                       <td className="py-3 px-4 font-mono text-ink-secondary">
                         {orig.toLocaleString("vi-VN")} kg
@@ -277,7 +286,7 @@ export const ReceivingTasksPage: React.FC = () => {
                       <td className="py-3 px-4 font-mono font-bold text-ink-primary">
                         {arr > 0
                           ? `${arr.toLocaleString("vi-VN")} kg`
-                          : "Chưa cân xe"}
+                          : t("mill.receiving.notMeasured", "Chưa cân xe")}
                       </td>
                       <td className="py-3 px-4 font-mono">
                         {arr > 0 ? (
@@ -297,41 +306,40 @@ export const ReceivingTasksPage: React.FC = () => {
                       <td className="py-3 px-4">
                         <StatusBadge
                           status={
-                            t.status === "RECEIVED_MATCHED"
+                            task.status === "RECEIVED_MATCHED"
                               ? "BALANCED"
-                              : t.status === "AWAITING_MANAGER_REVIEW"
+                              : task.status === "AWAITING_MANAGER_REVIEW"
                                 ? "STALE"
                                 : "REJECTED"
                           }
-                          label={t.status}
+                          label={task.status}
                         />
                       </td>
                       <td className="py-3 px-4 text-right space-x-1">
-                        {!t.arrivalMeasuredKg && (
+                        {!task.arrivalMeasuredKg && (
                           <button
                             type="button"
-                            onClick={() => handleOpenMeasure(t)}
+                            onClick={() => handleOpenMeasure(task)}
                             className="px-2.5 py-1 rounded bg-accent-primary text-white font-semibold text-[11px] hover:bg-accent-primary-dim"
                           >
-                            Cân xe đến
+                            {t("mill.receiving.btnMeasure", "Cân xe đến")}
                           </button>
                         )}
-                        {t.arrivalMeasuredKg &&
-                          t.status === "AWAITING_MANAGER_REVIEW" && (
-                            isManager ? (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenReview(t)}
-                                className="px-2.5 py-1 rounded bg-amber-600 text-white font-semibold text-[11px] hover:bg-amber-700"
-                              >
-                                Duyệt đối soát
-                              </button>
-                            ) : (
-                              <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded text-[11px] font-medium border border-amber-200">
-                                Chờ Quản lý duyệt
-                              </span>
-                            )
-                          )}
+                        {task.arrivalMeasuredKg &&
+                          task.status === "AWAITING_MANAGER_REVIEW" &&
+                          (isManager ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReview(task)}
+                              className="px-2.5 py-1 rounded bg-amber-600 text-white font-semibold text-[11px] hover:bg-amber-700"
+                            >
+                              {t("mill.receiving.btnReview", "Duyệt đối soát")}
+                            </button>
+                          ) : (
+                            <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded text-[11px] font-medium border border-amber-200">
+                              {t("mill.receiving.awaitingManager", "Chờ Quản lý duyệt")}
+                            </span>
+                          ))}
                       </td>
                     </tr>
                   );
@@ -348,7 +356,7 @@ export const ReceivingTasksPage: React.FC = () => {
           <div className="w-full max-w-md bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl shadow-xl overflow-hidden animate-ledger-in">
             <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between">
               <h3 className="font-display font-bold text-base text-ink-primary">
-                Ghi nhận Cân Xe Tải Đến Nhà Máy
+                {t("mill.receiving.modalMeasureTitle", "Ghi nhận Cân Xe Tải Đến Nhà Máy")}
               </h3>
               <button
                 type="button"
@@ -365,20 +373,20 @@ export const ReceivingTasksPage: React.FC = () => {
             >
               <div className="p-3 rounded-lg bg-surface-raised border space-y-1">
                 <span className="text-ink-tertiary">
-                  Mã lô nguồn xuất phát:
+                  {t("mill.receiving.sourceLotLabel", "Mã lô nguồn xuất phát:")}
                 </span>
                 <span className="font-mono font-bold text-ink-primary block">
                   {selectedTask.sourceLotCode}
                 </span>
                 <span className="text-ink-secondary text-[11px]">
-                  Khối lượng ghi nhận ban đầu:{" "}
+                  {t("mill.receiving.originMassRecorded", "Khối lượng ghi nhận ban đầu:")}{" "}
                   <strong>{selectedTask.originQuantityKg} kg</strong>
                 </span>
               </div>
 
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Khối lượng cân thực tế tại nhà máy (kg) *
+                  {t("mill.receiving.actualMassLabel", "Khối lượng cân thực tế tại nhà máy (kg) *")}
                 </label>
                 <div className="relative">
                   <input
@@ -396,7 +404,7 @@ export const ReceivingTasksPage: React.FC = () => {
 
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Độ ẩm đo tại cân bến (%) *
+                  {t("mill.receiving.actualMoistureLabel", "Độ ẩm đo tại cân bến (%) *")}
                 </label>
                 <div className="relative">
                   <input
@@ -419,14 +427,16 @@ export const ReceivingTasksPage: React.FC = () => {
                   onClick={() => setIsMeasureModalOpen(false)}
                   className="px-4 py-2 rounded-lg border border-ink-tertiary/20 hover:bg-surface-raised font-semibold text-ink-secondary"
                 >
-                  Huỷ
+                  {t("common.cancel", "Huỷ")}
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
                   className="px-5 py-2 rounded-lg bg-accent-primary text-white font-semibold hover:bg-accent-primary-dim transition-colors disabled:opacity-60"
                 >
-                  {submitting ? "Đang lưu..." : "Xác nhận số cân"}
+                  {submitting
+                    ? t("common.saving", "Đang lưu...")
+                    : t("mill.receiving.confirmMeasure", "Xác nhận số cân")}
                 </button>
               </div>
             </form>
@@ -440,7 +450,7 @@ export const ReceivingTasksPage: React.FC = () => {
           <div className="w-full max-w-md bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl shadow-xl overflow-hidden animate-ledger-in">
             <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between">
               <h3 className="font-display font-bold text-base text-ink-primary">
-                Duyệt Đối Soát Chuyến Xe Tiếp Nhận
+                {t("mill.receiving.modalReviewTitle", "Duyệt Đối Soát Chuyến Xe Tiếp Nhận")}
               </h3>
               <button
                 type="button"
@@ -454,14 +464,16 @@ export const ReceivingTasksPage: React.FC = () => {
             <div className="p-5 space-y-4 text-xs">
               <div className="p-3.5 rounded-xl bg-surface-raised border space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-ink-tertiary">Cân xuất phát:</span>
+                  <span className="text-ink-tertiary">
+                    {t("mill.receiving.originMassLabel", "Cân xuất phát:")}
+                  </span>
                   <span className="font-mono font-bold text-ink-primary">
                     {selectedTask.originQuantityKg} kg
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-ink-tertiary">
-                    Cân thực tế cập bến:
+                    {t("mill.receiving.actualArrivalMassLabel", "Cân thực tế cập bến:")}
                   </span>
                   <span className="font-mono font-bold text-accent-primary">
                     {selectedTask.arrivalMeasuredKg} kg
@@ -469,7 +481,7 @@ export const ReceivingTasksPage: React.FC = () => {
                 </div>
                 <div className="flex justify-between border-t pt-2">
                   <span className="text-ink-secondary font-semibold">
-                    Chênh lệch:
+                    {t("mill.receiving.varianceLabel", "Chênh lệch:")}
                   </span>
                   <span className="font-mono font-bold text-ink-primary">
                     {(
@@ -482,8 +494,10 @@ export const ReceivingTasksPage: React.FC = () => {
               </div>
 
               <div className="p-3 rounded-lg bg-emerald-50 text-[#2F6B3A] text-[11px] leading-relaxed">
-                Độ lệch nằm trong giới hạn dung sai cho phép (0,5%). Duyệt để
-                ghi nhận lô hàng vào Sổ cái và chuyển vào Silo sấy.
+                {t(
+                  "mill.receiving.toleranceOkDesc",
+                  "Độ lệch nằm trong giới hạn dung sai cho phép (0,5%). Duyệt để ghi nhận lô hàng vào Sổ cái và chuyển vào Silo sấy."
+                )}
               </div>
 
               <div className="pt-3 border-t flex items-center justify-end gap-2">
@@ -492,14 +506,14 @@ export const ReceivingTasksPage: React.FC = () => {
                   onClick={() => handleApproveReview(false)}
                   className="px-4 py-2 rounded-lg border border-red-300 text-accent-danger font-semibold hover:bg-red-50"
                 >
-                  Từ chối (Yêu cầu cân lại)
+                  {t("mill.receiving.btnRejectDiscrepancy", "Từ chối (Yêu cầu cân lại)")}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleApproveReview(true)}
                   className="px-5 py-2 rounded-lg bg-accent-primary text-white font-semibold hover:bg-accent-primary-dim"
                 >
-                  Chấp thuận nhập kho
+                  {t("mill.receiving.btnApproveMatch", "Chấp thuận nhập kho")}
                 </button>
               </div>
             </div>

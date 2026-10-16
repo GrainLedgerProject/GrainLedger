@@ -46,9 +46,11 @@ import {
 } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "framer-motion";
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 export const LandingPage: React.FC = () => {
+  const { t } = useTranslation();
   const { theme, toggleTheme, language, setLanguage } = useUiStore();
   const shouldReduceMotion = useReducedMotion();
 
@@ -258,7 +260,7 @@ export const LandingPage: React.FC = () => {
               to="/sign-in"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-semibold bg-[#2F6B3A] text-white hover:bg-[#245430] transition-all shadow-sm hover:shadow-md"
             >
-              <span>Đăng nhập hệ thống</span>
+              <span>{t("landing.ctaSignIn", "Đăng nhập hệ thống")}</span>
               <ArrowRight size={14} weight="bold" />
             </Link>
           </div>
@@ -283,7 +285,9 @@ export const LandingPage: React.FC = () => {
             >
               <ShieldCheck size={16} weight="bold" />
               <span>
-                Dự án Thí điểm Nhà máy Tiền Giang · Chuẩn Quốc tế ISO 22095:2020
+                {language === "vi"
+                  ? "Dự án Thí điểm Nhà máy Tiền Giang · Chuẩn Quốc tế ISO 22095:2020"
+                  : "Tiền Giang Mill Pilot Project · ISO 22095:2020 International Standard"}
               </span>
             </motion.div>
 
@@ -294,7 +298,10 @@ export const LandingPage: React.FC = () => {
               transition={{ duration: 0.5, delay: 0.1 }}
               className="font-display text-4xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-[#1B2420] dark:text-[#F4EFE6] leading-[1.12]"
             >
-              Hạ tầng số cho xuất khẩu lúa gạo tương lai.
+              {t(
+                "landing.heroHeadline",
+                "Hạ tầng số cho xuất khẩu lúa gạo tương lai.",
+              )}
             </motion.h1>
 
             {/* Subtitle */}
@@ -304,10 +311,10 @@ export const LandingPage: React.FC = () => {
               transition={{ duration: 0.5, delay: 0.2 }}
               className="text-lg sm:text-xl text-[#4A5C55] dark:text-[#A3B8AF] leading-relaxed max-w-3xl mx-auto"
             >
-              GrainLedger giải quyết bài toán cốt lõi của chuỗi lúa gạo: Ghi
-              nhận chính xác tỷ lệ đóng góp của từng nông hộ nhỏ vào silo chung
-              và kiểm soát dư lượng thuốc bảo vệ thực vật trước khi container
-              cập cảng EU, Mỹ, Nhật Bản.
+              {t(
+                "landing.heroSubheadline",
+                "GrainLedger giải quyết bài toán cốt lõi của chuỗi lúa gạo: Ghi nhận chính xác tỷ lệ đóng góp của từng nông hộ nhỏ vào silo chung và kiểm soát dư lượng thuốc bảo vệ thực vật trước khi container cập cảng EU, Mỹ, Nhật Bản.",
+              )}
             </motion.p>
 
             {/* CTAs */}
@@ -321,7 +328,9 @@ export const LandingPage: React.FC = () => {
                 to="/sign-in"
                 className="inline-flex items-center gap-2 px-8 py-3.5 rounded-lg text-sm font-semibold bg-[#2F6B3A] text-white hover:bg-[#245430] transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5"
               >
-                <span>Vào bàn làm việc vận hành</span>
+                <span>
+                  {t("landing.ctaSignIn", "Vào bàn làm việc vận hành")}
+                </span>
                 <ArrowRight size={16} weight="bold" />
               </Link>
               <a
@@ -332,7 +341,11 @@ export const LandingPage: React.FC = () => {
                   size={18}
                   className="text-[#2F6B3A] dark:text-emerald-400"
                 />
-                <span>Trải nghiệm mô phỏng Sổ cái</span>
+                <span>
+                  {language === "vi"
+                    ? "Trải nghiệm mô phỏng Sổ cái"
+                    : "Experience Ledger Simulator"}
+                </span>
               </a>
             </motion.div>
           </div>
@@ -1308,7 +1321,6 @@ export const LandingPage: React.FC = () => {
           ========================================================================= */}
       <section className="py-20 bg-[#2F6B3A] text-white relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6 relative z-10">
-          <img src="/favicon.png" alt="GrainLedger" className="w-8 h-8" />
           <h2 className="font-display text-3xl sm:text-5xl font-bold tracking-tight max-w-2xl mx-auto leading-tight">
             Sẵn sàng chuẩn hóa chuỗi cung ứng lúa gạo của bạn?
           </h2>
@@ -1330,39 +1342,38 @@ export const LandingPage: React.FC = () => {
       {/* =========================================================================
           9. MODERN ENTERPRISE FOOTER (Rize.farm layout)
           ========================================================================= */}
-      <footer className="bg-[#0E1411] text-[#A3B8AF] text-xs py-16 border-t border-emerald-950/30">
+      <footer className="bg-[#F0F4F1] dark:bg-[#0E1411] text-[#4A5C55] dark:text-[#A3B8AF] text-xs py-16 border-t border-emerald-950/10 dark:border-emerald-900/40 transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-10 pb-12 border-b border-emerald-900/20">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-10 pb-12 border-b border-emerald-950/10 dark:border-emerald-900/30">
             {/* Col 1: Brand */}
             <div className="space-y-4 md:col-span-1">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-[#2F6B3A] text-white flex items-center justify-center">
-                  <img src="/icons.png" alt="GrainLedger" className="w-8 h-8" />
-                </div>
-                <span className="font-display font-bold text-xl text-white">
-                  GrainLedger
-                </span>
+              <div className="flex items-center">
+                <img
+                  src="/icons.svg"
+                  alt="GrainLedger"
+                  className="w-full object-contain"
+                />
               </div>
-              <p className="text-xs text-[#7A8F87] leading-relaxed">
+              <p className="text-xs text-[#5A6E66] dark:text-[#7A8F87] leading-relaxed">
                 Nền tảng sổ cái lưu giữ theo cân bằng khối lượng (Mass-Balance
                 Custody Ledger) phục vụ xuất khẩu lúa gạo sang các thị trường
                 cao cấp.
               </p>
-              <div className="text-[11px] text-[#7A8F87]">
+              <div className="text-[11px] text-[#5A6E66] dark:text-[#7A8F87]">
                 Đề tài FA26SE272 · Nhóm GFA26SE137
               </div>
             </div>
 
             {/* Col 2: Nền tảng */}
             <div className="space-y-3">
-              <h4 className="font-bold text-xs uppercase tracking-wider text-white">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-[#1B2420] dark:text-white">
                 Công nghệ
               </h4>
               <ul className="space-y-2 text-xs">
                 <li>
                   <a
                     href="#tech"
-                    className="hover:text-white transition-colors"
+                    className="text-[#4A5C55] dark:text-[#A3B8AF] hover:text-[#2F6B3A] dark:hover:text-white transition-colors"
                   >
                     Sổ cái Cân bằng Khối lượng
                   </a>
@@ -1370,7 +1381,7 @@ export const LandingPage: React.FC = () => {
                 <li>
                   <a
                     href="#tech"
-                    className="hover:text-white transition-colors"
+                    className="text-[#4A5C55] dark:text-[#A3B8AF] hover:text-[#2F6B3A] dark:hover:text-white transition-colors"
                   >
                     Động cơ MRL & An toàn
                   </a>
@@ -1378,7 +1389,7 @@ export const LandingPage: React.FC = () => {
                 <li>
                   <a
                     href="#tech"
-                    className="hover:text-white transition-colors"
+                    className="text-[#4A5C55] dark:text-[#A3B8AF] hover:text-[#2F6B3A] dark:hover:text-white transition-colors"
                   >
                     Thu mua Ngoại tuyến Mobile
                   </a>
@@ -1386,7 +1397,7 @@ export const LandingPage: React.FC = () => {
                 <li>
                   <a
                     href="#tech"
-                    className="hover:text-white transition-colors"
+                    className="text-[#4A5C55] dark:text-[#A3B8AF] hover:text-[#2F6B3A] dark:hover:text-white transition-colors"
                   >
                     Truy vết Hai chiều Đồ thị
                   </a>
@@ -1396,25 +1407,27 @@ export const LandingPage: React.FC = () => {
 
             {/* Col 3: Chuẩn mực */}
             <div className="space-y-3">
-              <h4 className="font-bold text-xs uppercase tracking-wider text-white">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-[#1B2420] dark:text-white">
                 Tiêu chuẩn Xuất khẩu
               </h4>
               <ul className="space-y-2 text-xs">
                 <li>
-                  <span className="text-[#7A8F87]">
+                  <span className="text-[#5A6E66] dark:text-[#7A8F87]">
                     ISO 22095:2020 Mass Balance
                   </span>
                 </li>
                 <li>
-                  <span className="text-[#7A8F87]">
+                  <span className="text-[#5A6E66] dark:text-[#7A8F87]">
                     EU EC 396/2005 (Tricyclazole)
                   </span>
                 </li>
                 <li>
-                  <span className="text-[#7A8F87]">US EPA 40 CFR Part 180</span>
+                  <span className="text-[#5A6E66] dark:text-[#7A8F87]">
+                    US EPA 40 CFR Part 180
+                  </span>
                 </li>
                 <li>
-                  <span className="text-[#7A8F87]">
+                  <span className="text-[#5A6E66] dark:text-[#7A8F87]">
                     Japan MHLW Positive List
                   </span>
                 </li>
@@ -1423,17 +1436,17 @@ export const LandingPage: React.FC = () => {
 
             {/* Col 4: Liên hệ & Thử nghiệm */}
             <div className="space-y-3">
-              <h4 className="font-bold text-xs uppercase tracking-wider text-white">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-[#1B2420] dark:text-white">
                 Cơ sở Thí điểm
               </h4>
-              <p className="text-xs text-[#7A8F87] leading-relaxed">
+              <p className="text-xs text-[#5A6E66] dark:text-[#7A8F87] leading-relaxed">
                 Nhà máy Xay xát Lúa gạo Tiền Giang, Đồng bằng sông Cửu Long,
                 Việt Nam.
               </p>
               <div className="pt-2">
                 <Link
                   to="/sign-in"
-                  className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-semibold hover:underline"
+                  className="inline-flex items-center gap-1.5 text-xs text-[#2F6B3A] dark:text-emerald-400 font-semibold hover:underline"
                 >
                   <span>Truy cập Cổng Tài khoản</span>
                   <ArrowRight size={13} />
@@ -1442,7 +1455,7 @@ export const LandingPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-[#7A8F87]">
+          <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-[#5A6E66] dark:text-[#7A8F87]">
             <div>GrainLedger © 2026 GFA26SE137. Mọi quyền được bảo lưu.</div>
             <div>
               Tuân thủ nghiêm ngặt tiêu chuẩn bảo toàn khối lượng ISO

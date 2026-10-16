@@ -2,6 +2,7 @@ import { MassValue } from '@/components/MassValue/MassValue';
 import type { Decimal } from '@/shared/utils/decimalMass';
 import { ArrowsCounterClockwise, ShieldWarning, XCircle } from '@phosphor-icons/react';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 export interface LedgerRejectionCardProps {
   msgCode: 'MSG01' | 'MSG02' | string;
@@ -32,10 +33,16 @@ export const LedgerRejectionCard: React.FC<LedgerRejectionCardProps> = ({
   inputMassKg,
   outputMassKg,
   lossKg,
-  suggestedFix = 'Kiểm tra lại số cân bàn cân thực tế hoặc đối soát lại lượng hao hụt ẩm đã khai báo trước khi nộp lại giao dịch.',
+  suggestedFix,
   onRetry,
   className = '',
 }) => {
+  const { t } = useTranslation();
+  const defaultSuggestedFix = t(
+    'mill.rejection.defaultSuggestedFix',
+    'Kiểm tra lại số cân bàn cân thực tế hoặc đối soát lại lượng hao hụt ẩm đã khai báo trước khi nộp lại giao dịch.'
+  );
+
   return (
     <div
       className={`animate-ledger-shake border-2 border-accent-danger bg-functional-rejected-bg dark:bg-functional-rejected-bg/40 rounded-lg p-5 shadow-md ${className}`}
@@ -55,29 +62,35 @@ export const LedgerRejectionCard: React.FC<LedgerRejectionCardProps> = ({
               </span>
               <h3 className="font-semibold text-accent-danger text-base">
                 {msgCode === 'MSG01'
-                  ? 'Giao dịch bị từ chối — Vi phạm Cân bằng Khối lượng (BR-01)'
+                  ? t('mill.rejection.titleBR01', 'Giao dịch bị từ chối — Vi phạm Cân bằng Khối lượng (BR-01)')
                   : msgCode === 'MSG02'
-                  ? 'Giao dịch bị từ chối — Không đủ số dư khả dụng (BR-02)'
-                  : 'Giao dịch bị sổ cái từ chối'}
+                  ? t('mill.rejection.titleBR02', 'Giao dịch bị từ chối — Không đủ số dư khả dụng (BR-02)')
+                  : t('mill.rejection.titleDefault', 'Giao dịch bị sổ cái từ chối')}
               </h3>
             </div>
             <span className="text-xs text-ink-secondary italic">
-              Định luật bảo toàn khối lượng ISO 22095
+              {t('mill.rejection.isoLaw', 'Định luật bảo toàn khối lượng ISO 22095')}
             </span>
           </div>
 
           <p className="text-sm text-ink-primary leading-relaxed">
             {msgCode === 'MSG01' ? (
               <>
-                Sổ cái từ chối ghi nhận bước chế biến này vì tổng khối lượng đầu ra cộng hao hụt không khớp với tổng đầu vào. Lệch quá mức dung sai cho phép.
+                {t(
+                  'mill.rejection.msg01Desc',
+                  'Sổ cái từ chối ghi nhận bước chế biến này vì tổng khối lượng đầu ra cộng hao hụt không khớp với tổng đầu vào. Lệch quá mức dung sai cho phép.'
+                )}
               </>
             ) : msgCode === 'MSG02' ? (
               <>
-                Thao tác bị từ chối. Lô <span className="font-mono font-bold">{lotId}</span> chỉ còn khả dụng{' '}
-                <MassValue value={availableKg} decimals={3} /> tại vị trí kho này.
+                {t('mill.rejection.msg02Prefix', 'Thao tác bị từ chối. Lô')}{' '}
+                <span className="font-mono font-bold">{lotId}</span>{' '}
+                {t('mill.rejection.msg02Mid', 'chỉ còn khả dụng')}{' '}
+                <MassValue value={availableKg} decimals={3} />{' '}
+                {t('mill.rejection.msg02Suffix', 'tại vị trí kho này.')}
               </>
             ) : (
-              'Dữ liệu vi phạm quy tắc kế toán lưu giữ của hệ thống.'
+              t('mill.rejection.defaultDesc', 'Dữ liệu vi phạm quy tắc kế toán lưu giữ của hệ thống.')
             )}
           </p>
 
@@ -85,11 +98,11 @@ export const LedgerRejectionCard: React.FC<LedgerRejectionCardProps> = ({
           {msgCode === 'MSG01' && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-md bg-surface-base border border-accent-danger/30 text-xs">
               <div>
-                <span className="text-ink-tertiary block">Tổng đầu vào:</span>
+                <span className="text-ink-tertiary block">{t('mill.rejection.totalIn', 'Tổng đầu vào')}:</span>
                 <MassValue value={inputMassKg} decimals={3} className="text-sm font-semibold" />
               </div>
               <div>
-                <span className="text-ink-tertiary block">Đầu ra + Hao hụt:</span>
+                <span className="text-ink-tertiary block">{t('mill.rejection.totalOutLoss', 'Đầu ra + Hao hụt')}:</span>
                 <MassValue
                   value={
                     outputMassKg !== undefined && lossKg !== undefined
@@ -101,7 +114,7 @@ export const LedgerRejectionCard: React.FC<LedgerRejectionCardProps> = ({
                 />
               </div>
               <div>
-                <span className="text-ink-tertiary block">Độ lệch (Variance):</span>
+                <span className="text-ink-tertiary block">{t('mill.rejection.variance', 'Độ lệch (Variance)')}:</span>
                 <MassValue
                   value={varianceKg}
                   decimals={3}
@@ -109,7 +122,7 @@ export const LedgerRejectionCard: React.FC<LedgerRejectionCardProps> = ({
                 />
               </div>
               <div>
-                <span className="text-ink-tertiary block">Dung sai tối đa:</span>
+                <span className="text-ink-tertiary block">{t('mill.rejection.allowed', 'Dung sai tối đa')}:</span>
                 <MassValue
                   value={allowedKg}
                   decimals={3}
@@ -123,7 +136,8 @@ export const LedgerRejectionCard: React.FC<LedgerRejectionCardProps> = ({
           <div className="flex items-start gap-2 pt-1 text-xs text-ink-secondary">
             <ShieldWarning size={16} className="text-accent-warning shrink-0 mt-0.5" />
             <p>
-              <strong className="text-ink-primary">Hướng giải quyết:</strong> {suggestedFix}
+              <strong className="text-ink-primary">{t('mill.rejection.suggestedFixLabel', 'Hướng giải quyết')}:</strong>{' '}
+              {suggestedFix || defaultSuggestedFix}
             </p>
           </div>
 
@@ -135,7 +149,7 @@ export const LedgerRejectionCard: React.FC<LedgerRejectionCardProps> = ({
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-accent-danger text-white hover:bg-red-700 transition-colors shadow-xs"
               >
                 <ArrowsCounterClockwise size={14} />
-                Hiệu chỉnh lại thông số
+                {t('mill.rejection.retryButton', 'Hiệu chỉnh lại thông số')}
               </button>
             </div>
           )}
@@ -144,3 +158,4 @@ export const LedgerRejectionCard: React.FC<LedgerRejectionCardProps> = ({
     </div>
   );
 };
+

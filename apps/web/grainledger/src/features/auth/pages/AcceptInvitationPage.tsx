@@ -1,10 +1,3 @@
-/**
- * @screen SC-01b (Invitation Acceptance)
- * @feature Auth
- * @roles Invited Users
- * @route /invite/:token
- * @description Validates user invitation token and allows initial password creation.
- */
 import { GrainLoader } from '@/components/GrainLoader/GrainLoader';
 import { authApi } from '@/features/auth/api/authApi';
 import {
@@ -23,9 +16,11 @@ import {
 } from '@phosphor-icons/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 export const AcceptInvitationPage: React.FC = () => {
+  const { t } = useTranslation();
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
 
@@ -49,7 +44,8 @@ export const AcceptInvitationPage: React.FC = () => {
 
   // Calculate Password Strength
   const passwordStrength = useMemo(() => {
-    if (!passwordValue) return { score: 0, label: 'Chưa nhập', color: 'bg-ink-tertiary/20' };
+    if (!passwordValue)
+      return { score: 0, label: t('auth.invitation.strengthNone', 'Chưa nhập'), color: 'bg-ink-tertiary/20' };
     let score = 0;
     if (passwordValue.length >= 12) score += 1;
     if (/[A-Z]/.test(passwordValue)) score += 1;
@@ -58,13 +54,13 @@ export const AcceptInvitationPage: React.FC = () => {
     if (/[^A-Za-z0-9]/.test(passwordValue)) score += 1;
 
     if (score <= 2) {
-      return { score: 1, label: 'Yếu (Weak)', color: 'bg-accent-danger' };
+      return { score: 1, label: t('auth.invitation.strengthWeak', 'Yếu (Weak)'), color: 'bg-accent-danger' };
     } else if (score <= 4) {
-      return { score: 2, label: 'Khá (Fair)', color: 'bg-accent-warning' };
+      return { score: 2, label: t('auth.invitation.strengthFair', 'Khá (Fair)'), color: 'bg-accent-warning' };
     } else {
-      return { score: 3, label: 'Mạnh (Strong)', color: 'bg-accent-primary' };
+      return { score: 3, label: t('auth.invitation.strengthStrong', 'Mạnh (Strong)'), color: 'bg-accent-primary' };
     }
-  }, [passwordValue]);
+  }, [passwordValue, t]);
 
   useEffect(() => {
     let isMounted = true;
@@ -80,7 +76,7 @@ export const AcceptInvitationPage: React.FC = () => {
           setTokenError(
             err instanceof Error
               ? err.message
-              : 'Lời mời không hợp lệ hoặc đã hết hạn.'
+              : t('auth.invitation.invalidDefault', 'Lời mời không hợp lệ hoặc đã hết hạn.')
           );
           setIsValidating(false);
         }
@@ -90,7 +86,7 @@ export const AcceptInvitationPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [token]);
+  }, [token, t]);
 
   const onSubmit = async (values: AcceptInvitationFormValues) => {
     setIsSubmitting(true);
@@ -117,10 +113,10 @@ export const AcceptInvitationPage: React.FC = () => {
           </div>
           <div>
             <h1 className="text-xl font-serif font-bold text-ink-primary">
-              Kích hoạt tài khoản GrainLedger
+              {t('auth.invitation.title', 'Kích hoạt tài khoản GrainLedger')}
             </h1>
             <p className="text-xs text-ink-secondary">
-              Thiết lập mật khẩu an toàn theo thư mời từ Quản trị viên
+              {t('auth.invitation.subtitle', 'Thiết lập mật khẩu an toàn theo thư mời từ Quản trị viên')}
             </p>
           </div>
         </div>
@@ -128,7 +124,7 @@ export const AcceptInvitationPage: React.FC = () => {
         {/* Loading Token state */}
         {isValidating && (
           <div className="py-12 flex flex-col items-center justify-center space-y-3">
-            <GrainLoader size="md" label="Đang kiểm tra tính hợp lệ của thư mời..." />
+            <GrainLoader size="md" label={t('auth.invitation.validating', 'Đang kiểm tra tính hợp lệ của thư mời...')} />
           </div>
         )}
 
@@ -138,10 +134,15 @@ export const AcceptInvitationPage: React.FC = () => {
             <div className="p-4 rounded-md bg-functional-rejected-bg border border-functional-rejected-border text-accent-danger text-sm flex items-start gap-3">
               <WarningCircle size={22} weight="fill" className="shrink-0 mt-0.5" />
               <div>
-                <h3 className="font-semibold text-base mb-1">Thư mời không còn hiệu lực</h3>
+                <h3 className="font-semibold text-base mb-1">
+                  {t('auth.invitation.invalidTitle', 'Thư mời không còn hiệu lực')}
+                </h3>
                 <p className="text-xs">{tokenError}</p>
                 <p className="text-xs mt-2 font-medium">
-                  Vui lòng liên hệ Quản trị nhà máy (Mill Administrator) để cấp lại lời mời kích hoạt mới.
+                  {t(
+                    'auth.invitation.contactAdmin',
+                    'Vui lòng liên hệ Quản trị nhà máy (Mill Administrator) để cấp lại lời mời kích hoạt mới.'
+                  )}
                 </p>
               </div>
             </div>
@@ -151,7 +152,7 @@ export const AcceptInvitationPage: React.FC = () => {
               className="inline-flex items-center gap-2 text-xs font-semibold text-accent-primary hover:underline"
             >
               <ArrowLeft size={14} />
-              Quay lại màn hình đăng nhập
+              {t('auth.backToSignIn', 'Quay lại màn hình đăng nhập')}
             </Link>
           </div>
         )}
@@ -161,8 +162,8 @@ export const AcceptInvitationPage: React.FC = () => {
           <div className="p-4 rounded-md bg-functional-balanced-bg border border-functional-balanced-border text-accent-primary text-sm flex items-center gap-3">
             <CheckCircle size={24} weight="fill" />
             <div>
-              <h3 className="font-semibold text-base">Thiết lập mật khẩu thành công!</h3>
-              <p className="text-xs opacity-90">Đang chuyển hướng về trang đăng nhập...</p>
+              <h3 className="font-semibold text-base">{t('auth.invitation.successTitle', 'Thiết lập mật khẩu thành công!')}</h3>
+              <p className="text-xs opacity-90">{t('auth.invitation.redirecting', 'Đang chuyển hướng về trang đăng nhập...')}</p>
             </div>
           </div>
         )}
@@ -173,11 +174,15 @@ export const AcceptInvitationPage: React.FC = () => {
             {/* Pre-filled readonly info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-md bg-surface-raised dark:bg-surface-overlay text-xs">
               <div>
-                <span className="text-ink-tertiary block font-medium">Họ và tên:</span>
+                <span className="text-ink-tertiary block font-medium">
+                  {t('auth.invitation.nameLabel', 'Họ và tên')}:
+                </span>
                 <span className="font-semibold text-ink-primary">{invitedUser.name}</span>
               </div>
               <div>
-                <span className="text-ink-tertiary block font-medium">Email định danh:</span>
+                <span className="text-ink-tertiary block font-medium">
+                  {t('auth.invitation.emailLabel', 'Email định danh')}:
+                </span>
                 <span className="font-mono text-ink-primary">{invitedUser.email}</span>
               </div>
             </div>
@@ -185,7 +190,7 @@ export const AcceptInvitationPage: React.FC = () => {
             {/* New Password */}
             <div>
               <label className="block text-xs font-semibold text-ink-secondary mb-1">
-                Mật khẩu mới
+                {t('auth.invitation.newPasswordLabel', 'Mật khẩu mới')}
               </label>
               <div className="relative">
                 <input
@@ -211,7 +216,7 @@ export const AcceptInvitationPage: React.FC = () => {
               {passwordValue && (
                 <div className="mt-2 space-y-1">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-ink-tertiary">Độ mạnh mật khẩu:</span>
+                    <span className="text-ink-tertiary">{t('settings.complexity', 'Độ mạnh mật khẩu')}:</span>
                     <span className="font-semibold text-ink-primary">{passwordStrength.label}</span>
                   </div>
                   <div className="h-1.5 w-full bg-surface-raised dark:bg-surface-overlay rounded-full overflow-hidden flex gap-1">
@@ -242,7 +247,7 @@ export const AcceptInvitationPage: React.FC = () => {
             {/* Confirm Password */}
             <div>
               <label className="block text-xs font-semibold text-ink-secondary mb-1">
-                Xác nhận mật khẩu mới
+                {t('auth.invitation.confirmPasswordLabel', 'Xác nhận mật khẩu mới')}
               </label>
               <div className="relative">
                 <input
@@ -265,10 +270,13 @@ export const AcceptInvitationPage: React.FC = () => {
             <div className="p-3 rounded-md bg-emerald-50 dark:bg-emerald-950/30 border border-accent-primary/20 text-xs text-ink-secondary space-y-1">
               <span className="font-semibold text-accent-primary flex items-center gap-1">
                 <ShieldCheck size={14} />
-                Tiêu chuẩn mật khẩu an toàn
+                {t('auth.invitation.standardTitle', 'Tiêu chuẩn mật khẩu an toàn')}
               </span>
               <p className="text-[11px]">
-                Tối thiểu 12 ký tự, bao gồm ít nhất một chữ hoa, chữ thường, chữ số và ký tự đặc biệt.
+                {t(
+                  'auth.invitation.passwordHint',
+                  'Tối thiểu 12 ký tự, bao gồm ít nhất một chữ hoa, chữ thường, chữ số và ký tự đặc biệt.'
+                )}
               </p>
             </div>
 
@@ -278,9 +286,9 @@ export const AcceptInvitationPage: React.FC = () => {
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-accent-primary text-white font-semibold text-sm hover:bg-accent-primary-dim transition-colors shadow-xs disabled:opacity-60"
             >
               {isSubmitting ? (
-                <GrainLoader size="sm" label="Đang lưu mật khẩu..." />
+                <GrainLoader size="sm" label={t('auth.invitation.saving', 'Đang lưu mật khẩu...')} />
               ) : (
-                <span>Kích hoạt tài khoản & Đăng nhập</span>
+                <span>{t('auth.invitation.submitButton', 'Kích hoạt tài khoản & Đăng nhập')}</span>
               )}
             </button>
           </form>
@@ -289,3 +297,4 @@ export const AcceptInvitationPage: React.FC = () => {
     </div>
   );
 };
+

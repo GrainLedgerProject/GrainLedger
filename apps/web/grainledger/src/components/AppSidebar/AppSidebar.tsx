@@ -10,7 +10,9 @@ import {
   CaretDoubleRight,
   ChartPieSlice,
   CheckSquare,
+  CheckSquareIcon,
   ClockCounterClockwise,
+  ClockCounterClockwiseIcon,
   CoinVertical,
   Crosshair,
   Drop,
@@ -34,6 +36,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 
 interface NavItem {
@@ -50,6 +53,7 @@ interface NavItem {
 }
 
 export const AppSidebar: React.FC = () => {
+  const { t } = useTranslation();
   const user = useAuthStore((state) => state.user);
   const { isSidebarCollapsed, toggleSidebar, pendingOfflineCount } =
     useUiStore();
@@ -62,232 +66,232 @@ export const AppSidebar: React.FC = () => {
     switch (role) {
       case "MILL_ADMIN":
         return [
-          { label: "Tổng quan hệ thống", path: "/home", icon: House },
-          { label: "Khách hàng", path: "/admin/customers", icon: Buildings },
-          { label: "Tài khoản & Quyền", path: "/admin/access", icon: Users },
+          { label: t("nav.home", "Tổng quan hệ thống"), path: "/home", icon: House },
+          { label: t("nav.admin.customers", "Khách hàng"), path: "/admin/customers", icon: Buildings },
+          { label: t("nav.admin.access", "Tài khoản & Quyền"), path: "/admin/access", icon: Users },
           {
-            label: "Cơ sở & Thiết bị",
+            label: t("nav.admin.facilities", "Cơ sở & Thiết bị"),
             path: "/admin/facilities",
             icon: Factory,
           },
           {
-            label: "Chính sách cân bằng",
+            label: t("nav.admin.balancePolicy", "Chính sách cân bằng"),
             path: "/admin/balance-policy",
             icon: Scales,
           },
           {
-            label: "Danh mục vận hành",
+            label: t("nav.admin.masterData", "Danh mục vận hành"),
             path: "/admin/master-data",
             icon: ListBullets,
           },
           {
-            label: "Phiên bản MRL",
+            label: t("nav.compliance.mrlVersions", "Phiên bản MRL"),
             path: "/compliance/mrl-versions",
             icon: BookOpen,
           },
-          { label: "Tìm sự kiện", path: "/events", icon: MagnifyingGlass },
+          { label: t("nav.events", "Tìm sự kiện"), path: "/events", icon: MagnifyingGlass },
         ];
 
       case "MILL_OPERATOR":
         return [
-          { label: "Hôm nay tại dây chuyền", path: "/home", icon: House },
+          { label: t("nav.mill.today", "Hôm nay tại dây chuyền"), path: "/home", icon: House },
           {
-            label: "Tiếp nhận & Cân đến",
+            label: t("nav.mill.receiving", "Tiếp nhận & Cân đến"),
             path: "/mill/receiving",
             icon: Truck,
           },
           {
-            label: "Ghi bước chế biến",
+            label: t("nav.mill.operations", "Ghi bước chế biến"),
             path: "/mill/operations/new",
             icon: Scales,
             isPrimary: true,
           },
           {
-            label: "Yêu cầu sửa",
+            label: t("nav.mill.corrections", "Yêu cầu sửa"),
             path: "/mill/corrections/new",
-            icon: ClockCounterClockwise,
+            icon: ClockCounterClockwiseIcon,
           },
           {
-            label: "Ghi bút toán bù",
+            label: t("nav.mill.commitCorrection", "Ghi bút toán bù"),
             path: "/mill/corrections/pending",
-            icon: CheckSquare,
+            icon: CheckSquareIcon,
             badge: 2,
             badgeTone: "warning",
           },
           {
-            label: "Thực thi plan",
+            label: t("nav.mill.planExecutions", "Thực thi plan"),
             path: "/mill/plan-executions/PLAN-001",
             icon: ArrowsClockwise,
             badge: 1,
             badgeTone: "primary",
           },
-          { label: "Tìm sự kiện", path: "/events", icon: MagnifyingGlass },
+          { label: t("nav.events", "Tìm sự kiện"), path: "/events", icon: MagnifyingGlass },
         ];
 
       case "MILL_MANAGER":
         return [
-          { label: "Bàn điều hành Quản lý", path: "/home", icon: House },
+          { label: t("nav.manager.home", "Bàn điều hành Quản lý"), path: "/home", icon: House },
           {
-            label: "Tiếp nhận & Đối soát cân",
+            label: t("nav.manager.receiving", "Tiếp nhận & Đối soát cân"),
             path: "/mill/receiving",
             icon: Truck,
           },
           {
-            label: "Đối soát & Xác nhận",
-            path: "/mill/reconciliations/REC-001",
+            label: t("nav.mill.reconciliations", "Đối soát & Xác nhận"),
+            path: "/mill/reconciliations",
             icon: CheckSquare,
             badge: 1,
             badgeTone: "warning",
           },
           {
-            label: "Ghi bút toán bù",
+            label: t("nav.mill.commitCorrection", "Ghi bút toán bù"),
             path: "/mill/corrections/pending",
             icon: ClockCounterClockwise,
           },
           {
-            label: "Cảnh báo HOLD",
+            label: t("nav.risk.holdAlerts", "Cảnh báo HOLD"),
             path: "/risk/holds",
             icon: LockSimple,
             badge: 1,
             badgeTone: "danger",
           },
           {
-            label: "Chính sách cân bằng",
+            label: t("nav.admin.balancePolicy", "Chính sách cân bằng"),
             path: "/admin/balance-policy",
             icon: Scales,
           },
           {
-            label: "Ghi bước chế biến",
+            label: t("nav.mill.operations", "Ghi bước chế biến"),
             path: "/mill/operations/new",
             icon: Scales,
           },
-          { label: "Tìm sự kiện", path: "/events", icon: MagnifyingGlass },
+          { label: t("nav.events", "Tìm sự kiện"), path: "/events", icon: MagnifyingGlass },
         ];
 
       case "CUSTOMER_PROCUREMENT_OFFICER":
         return [
-          { label: "Bàn làm việc thu mua", path: "/home", icon: House },
+          { label: t("nav.field.home", "Bàn làm việc thu mua"), path: "/home", icon: House },
           {
-            label: "Đồng bộ / Hàng đợi",
+            label: t("nav.field.sync", "Đồng bộ / Hàng đợi"),
             path: "/field/sync",
             icon: ArrowsClockwise,
             badge: pendingOfflineCount,
             badgeTone: pendingOfflineCount > 0 ? "warning" : undefined,
           },
-          { label: "Nông hộ", path: "/field/farmers/new", icon: Users },
-          { label: "Thửa ruộng", path: "/field/plots/new", icon: MapPin },
+          { label: t("nav.field.farmers", "Nông hộ"), path: "/field/farmers/new", icon: Users },
+          { label: t("nav.field.plots", "Thửa ruộng"), path: "/field/plots/new", icon: MapPin },
           {
-            label: "Khai báo thuốc BVTV",
+            label: t("nav.field.declarations", "Khai báo thuốc BVTV"),
             path: "/field/declarations/new",
             icon: Drop,
           },
           {
-            label: "Thu mua lúa",
+            label: t("nav.field.receipts", "Thu mua lúa"),
             path: "/field/receipts/new",
             icon: HandCoins,
           },
           {
-            label: "Lấy mẫu niêm phong",
+            label: t("nav.field.samples", "Lấy mẫu niêm phong"),
             path: "/field/samples/new",
             icon: TestTube,
           },
-          { label: "Tìm sự kiện", path: "/events", icon: MagnifyingGlass },
+          { label: t("nav.events", "Tìm sự kiện"), path: "/events", icon: MagnifyingGlass },
         ];
 
       case "CUSTOMER_MANAGER":
         return [
           {
-            label: "Điều phối Chất lượng & Rủi ro",
+            label: t("nav.customerManager.home", "Điều phối Chất lượng & Rủi ro"),
             path: "/home",
             icon: House,
           },
           {
-            label: "Truy vết hai chiều",
+            label: t("nav.risk.traceback", "Truy vết hai chiều"),
             path: "/risk/traceback",
             icon: Crosshair,
             isPrimary: true,
           },
           {
-            label: "Lệnh giữ HOLD",
+            label: t("nav.risk.holds", "Lệnh giữ HOLD"),
             path: "/risk/holds",
             icon: LockSimple,
             badge: 1,
             badgeTone: "danger",
           },
           {
-            label: "Mẫu xét nghiệm",
-            path: "/compliance/lab-samples/new",
+            label: t("nav.compliance.labSamples", "Mẫu xét nghiệm"),
+            path: "/compliance/lab-samples",
             icon: Flask,
           },
           {
-            label: "Kết quả xét nghiệm",
+            label: t("nav.compliance.labResults", "Kết quả xét nghiệm"),
             path: "/compliance/lab-results",
             icon: TestTube,
           },
           {
-            label: "Biên an toàn MRL",
+            label: t("nav.compliance.safetyMargin", "Biên an toàn MRL"),
             path: "/compliance/safety-margin",
             icon: ShieldCheck,
           },
           {
-            label: "Duyệt phương án",
+            label: t("nav.export.plansPending", "Duyệt phương án"),
             path: "/export/plans/pending",
             icon: CheckSquare,
             badge: 1,
             badgeTone: "warning",
           },
           {
-            label: "Phiên bản MRL",
+            label: t("nav.compliance.mrlVersions", "Phiên bản MRL"),
             path: "/compliance/mrl-versions",
             icon: BookOpen,
           },
-          { label: "Tìm sự kiện", path: "/events", icon: MagnifyingGlass },
+          { label: t("nav.events", "Tìm sự kiện"), path: "/events", icon: MagnifyingGlass },
         ];
 
       case "CUSTOMER_EXPORT_OFFICER":
         return [
           {
-            label: "Điều phối Đơn hàng & Xuất khẩu",
+            label: t("nav.exportOfficer.home", "Điều phối Đơn hàng & Xuất khẩu"),
             path: "/home",
             icon: House,
           },
           {
-            label: "Đơn xuất khẩu",
+            label: t("nav.export.orders", "Đơn xuất khẩu"),
             path: "/export/orders",
             icon: Export,
             isPrimary: true,
           },
           {
-            label: "Yêu cầu phương án",
+            label: t("nav.export.plans", "Yêu cầu phương án"),
             path: "/export/plans",
             icon: ChartPieSlice,
           },
-          { label: "Xếp container", path: "/export/containers", icon: Truck },
+          { label: t("nav.export.containers", "Xếp container"), path: "/export/containers", icon: Truck },
           {
-            label: "Hồ sơ & Chứng từ",
+            label: t("nav.export.dossiers", "Hồ sơ & Chứng từ"),
             path: "/export/dossiers",
             icon: FileText,
           },
-          { label: "Cảnh báo HOLD", path: "/risk/holds", icon: LockSimple },
+          { label: t("nav.risk.holdAlerts", "Cảnh báo HOLD"), path: "/risk/holds", icon: LockSimple },
           {
-            label: "Phiên bản MRL",
+            label: t("nav.compliance.mrlVersions", "Phiên bản MRL"),
             path: "/compliance/mrl-versions",
             icon: BookOpen,
           },
-          { label: "Tìm sự kiện", path: "/events", icon: MagnifyingGlass },
+          { label: t("nav.events", "Tìm sự kiện"), path: "/events", icon: MagnifyingGlass },
         ];
 
       case "AUTHORIZED_STOCK_VIEWER":
         return [
-          { label: "Tổng quan tồn kho", path: "/home", icon: House },
+          { label: t("nav.stockViewer.home", "Tổng quan tồn kho"), path: "/home", icon: House },
           {
-            label: "Tồn kho theo vị trí",
+            label: t("nav.stock.overview", "Tồn kho theo vị trí"),
             path: "/stock",
             icon: Package,
             isPrimary: true,
           },
           {
-            label: "Chi tiết lô lúa/gạo",
+            label: t("nav.stock.lots", "Chi tiết lô lúa/gạo"),
             path: "/stock/lots/LOT-2026-S1",
             icon: Tag,
           },
@@ -295,8 +299,8 @@ export const AppSidebar: React.FC = () => {
 
       default:
         return [
-          { label: "Tổng quan", path: "/home", icon: House },
-          { label: "Tìm sự kiện", path: "/events", icon: MagnifyingGlass },
+          { label: t("nav.home", "Tổng quan"), path: "/home", icon: House },
+          { label: t("nav.events", "Tìm sự kiện"), path: "/events", icon: MagnifyingGlass },
         ];
     }
   };
@@ -424,13 +428,13 @@ export const AppSidebar: React.FC = () => {
           className="w-full flex items-center justify-center p-2 rounded-md text-ink-tertiary hover:text-ink-primary hover:bg-surface-base transition-colors text-xs"
           aria-label={
             isSidebarCollapsed
-              ? "Mở rộng thanh điều hướng"
-              : "Thu gọn thanh điều hướng"
+              ? t("common.expand", "Mở rộng thanh điều hướng")
+              : t("common.collapse", "Thu gọn thanh điều hướng")
           }
           title={
             isSidebarCollapsed
-              ? "Mở rộng thanh điều hướng"
-              : "Thu gọn thanh điều hướng"
+              ? t("common.expand", "Mở rộng thanh điều hướng")
+              : t("common.collapse", "Thu gọn thanh điều hướng")
           }
         >
           {isSidebarCollapsed ? (
@@ -438,7 +442,9 @@ export const AppSidebar: React.FC = () => {
           ) : (
             <CaretDoubleLeft size={16} />
           )}
-          {!isSidebarCollapsed && <span className="ml-2 text-xs">Thu gọn</span>}
+          {!isSidebarCollapsed && (
+            <span className="ml-2 text-xs">{t("common.collapse", "Thu gọn")}</span>
+          )}
         </button>
       </div>
     </aside>

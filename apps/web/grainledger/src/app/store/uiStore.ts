@@ -29,6 +29,10 @@ const storedTheme = (localStorage.getItem('grainledger_theme') as 'light' | 'dar
 const storedCollapsed = localStorage.getItem('grainledger_sidebar_collapsed') === 'true';
 const storedLang = (localStorage.getItem('grainledger_lang') as 'vi' | 'en') || 'vi';
 
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = storedLang;
+}
+
 // Apply initial theme class to HTML element
 if (storedTheme === 'dark') {
   document.documentElement.classList.add('dark');
@@ -70,7 +74,10 @@ export const useUiStore = create<UiState>((set) => ({
 
   setLanguage: (lang) => {
     localStorage.setItem('grainledger_lang', lang);
-    i18n.changeLanguage(lang);
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = lang;
+    }
+    void i18n.changeLanguage(lang);
     set({ language: lang });
   },
 
@@ -96,3 +103,14 @@ export const useUiStore = create<UiState>((set) => ({
 // Listen to network online/offline events
 window.addEventListener('online', () => useUiStore.getState().setOnline(true));
 window.addEventListener('offline', () => useUiStore.getState().setOnline(false));
+
+// Bidirectional synchronization when i18n changes language externally
+i18n.on('languageChanged', (lng) => {
+  const normalized = lng?.startsWith('en') ? 'en' : 'vi';
+  if (useUiStore.getState().language !== normalized) {
+    useUiStore.setState({ language: normalized });
+  }
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = normalized;
+  }
+});

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { ledgerEndpoints } from '@/api/ledger';
-import { GrainLoader } from '@/components/GrainLoader/GrainLoader';
-import { StatusBadge } from '@/components/StatusBadge/StatusBadge';
+import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { ledgerEndpoints } from "@/api/ledger";
+import { GrainLoader } from "@/components/GrainLoader/GrainLoader";
+import { StatusBadge } from "@/components/StatusBadge/StatusBadge";
 import {
   LockSimple,
   ShieldWarning,
@@ -14,7 +15,7 @@ import {
   Calendar,
   Warehouse,
   Flask,
-} from '@phosphor-icons/react';
+} from "@phosphor-icons/react";
 
 interface HoldOrder {
   id: string;
@@ -23,12 +24,13 @@ interface HoldOrder {
   reasonCode: string;
   notes?: string;
   issuedAt: string;
-  status: 'ACTIVE_HOLD' | 'QUARANTINED' | 'UNDER_RETEST';
+  status: "ACTIVE_HOLD" | "QUARANTINED" | "UNDER_RETEST";
   lotQuantityKg?: string;
   ownerName?: string;
 }
 
 export const HoldManagementPage: React.FC = () => {
+  const { t } = useTranslation();
   const [holds, setHolds] = useState<HoldOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,9 +38,11 @@ export const HoldManagementPage: React.FC = () => {
 
   // Issue Hold Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [targetLotCode, setTargetLotCode] = useState('LOT-2026-S1');
-  const [reasonCode, setReasonCode] = useState('MRL_TRICYCLAZOLE_EXCEEDED');
-  const [notes, setNotes] = useState('Kết quả thử nghiệm phòng lab LOQ vượt ngưỡng 0.010 mg/kg của thị trường EU.');
+  const [targetLotCode, setTargetLotCode] = useState("LOT-2026-S1");
+  const [reasonCode, setReasonCode] = useState("MRL_TRICYCLAZOLE_EXCEEDED");
+  const [notes, setNotes] = useState(
+    "Kết quả thử nghiệm phòng lab LOQ vượt ngưỡng 0.010 mg/kg của thị trường EU.",
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const loadHolds = async () => {
@@ -52,7 +56,7 @@ export const HoldManagementPage: React.FC = () => {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Không thể tải danh sách lệnh HOLD.');
+        setError(t("risk.hold.errLoad", "Không thể tải danh sách lệnh HOLD."));
       }
     } finally {
       setLoading(false);
@@ -76,14 +80,22 @@ export const HoldManagementPage: React.FC = () => {
         issuedAt: new Date().toISOString(),
       });
 
-      setSuccessMsg(`Đã ban hành Lệnh HOLD phong toả khẩn cấp cho lô ${targetLotCode}`);
+      setSuccessMsg(
+        t(
+          "risk.hold.issuedSuccess",
+          "Đã ban hành Lệnh HOLD phong toả khẩn cấp cho lô {{lot}}",
+          {
+            lot: targetLotCode,
+          },
+        ),
+      );
       setIsModalOpen(false);
       await loadHolds();
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Không thể ban hành lệnh HOLD.');
+        setError(t("risk.hold.errCreate", "Không thể ban hành lệnh HOLD."));
       }
     } finally {
       setSubmitting(false);
@@ -97,13 +109,23 @@ export const HoldManagementPage: React.FC = () => {
         respondedAt: new Date().toISOString(),
         notes: `Ghi nhận chuyển kho cách ly vật lý theo quy định BR-15`,
       });
-      setSuccessMsg(`Đã cập nhật xử lý lệnh HOLD cho lô ${hold.lotCode || hold.id}`);
+      setSuccessMsg(
+        t(
+          "risk.hold.updatedSuccess",
+          "Đã cập nhật xử lý lệnh HOLD cho lô {{lot}}",
+          {
+            lot: hold.lotCode || hold.id,
+          },
+        ),
+      );
       await loadHolds();
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Không thể cập nhật phản hồi HOLD.');
+        setError(
+          t("risk.hold.errRespond", "Không thể cập nhật phản hồi HOLD."),
+        );
       }
     }
   };
@@ -114,13 +136,16 @@ export const HoldManagementPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-ink-tertiary/15 pb-4">
         <div>
           <span className="text-xs font-mono font-bold text-accent-danger uppercase tracking-wider block">
-            SC-34, SC-35 · QUẢN LÝ PHONG TỎA & CÁNH BÁO RỦI RO
+            {t("risk.hold.badge", "QUẢN LÝ PHONG TỎA & CẢNH BÁO RỦI RO")}
           </span>
           <h2 className="text-2xl font-display font-bold text-ink-primary">
-            Lệnh Giữ Phong Toả An Toàn (HOLD Orders)
+            {t("risk.hold.title", "Lệnh Giữ Phong Toả An Toàn (HOLD Orders)")}
           </h2>
           <p className="text-xs text-ink-secondary mt-0.5">
-            Ngăn chặn xuất xưởng khi phát hiện vi phạm MRL hoặc sai lệch chất lượng. Tuyệt đối không cho phép RELEASE tự do mà phải có quy trình cách ly vật lý.
+            {t(
+              "risk.hold.subtitle",
+              "Ngăn chặn xuất xưởng khi phát hiện vi phạm MRL hoặc sai lệch chất lượng. Tuyệt đối không cho phép RELEASE tự do mà phải có quy trình cách ly vật lý.",
+            )}
           </p>
         </div>
 
@@ -129,7 +154,7 @@ export const HoldManagementPage: React.FC = () => {
             type="button"
             onClick={loadHolds}
             className="p-2.5 rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-secondary hover:text-ink-primary transition-colors"
-            title="Tải lại dữ liệu"
+            title={t("common.refresh", "Tải lại dữ liệu")}
           >
             <ArrowsClockwise size={16} />
           </button>
@@ -139,7 +164,7 @@ export const HoldManagementPage: React.FC = () => {
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-danger text-white font-semibold text-xs hover:bg-red-700 transition-all shadow-xs"
           >
             <LockSimple size={16} weight="bold" />
-            <span>Ban hành Lệnh HOLD mới</span>
+            <span>{t("risk.hold.newHold", "Ban hành Lệnh HOLD mới")}</span>
           </button>
         </div>
       </div>
@@ -160,13 +185,20 @@ export const HoldManagementPage: React.FC = () => {
 
       {/* Warning Policy Box */}
       <div className="p-4 rounded-xl bg-functional-hold-bg dark:bg-functional-hold-bg/20 border border-functional-hold-border/40 flex items-start gap-3">
-        <ShieldWarning size={22} className="text-accent-danger shrink-0 mt-0.5" weight="fill" />
+        <ShieldWarning
+          size={22}
+          className="text-accent-danger shrink-0 mt-0.5"
+          weight="fill"
+        />
         <div className="text-xs space-y-1">
           <h4 className="font-bold text-accent-danger">
-            Quy tắc nghiệp vụ BR-15: Phong toả và Cô lập Dứt khoát
+            {t("risk.hold.policyTitle", "Phong toả và Cô lập Dứt khoát")}
           </h4>
           <p className="text-ink-secondary leading-relaxed">
-            Khi phát lệnh HOLD, lô hàng hoặc container bị khóa lập tức ở tầng sổ cái và không thể đưa vào bất kỳ phương án phối trộn hay xuất xưởng nào. Lệnh chỉ kết thúc khi có kết quả xét nghiệm lại đạt chuẩn hoặc lập phiếu chuyển phân loại thành phẩm.
+            {t(
+              "risk.hold.policyDesc",
+              "Khi phát lệnh HOLD, lô hàng hoặc container bị khóa lập tức ở tầng sổ cái và không thể đưa vào bất kỳ phương án phối trộn hay xuất xưởng nào. Lệnh chỉ kết thúc khi có kết quả xét nghiệm lại đạt chuẩn hoặc lập phiếu chuyển phân loại thành phẩm.",
+            )}
           </p>
         </div>
       </div>
@@ -175,14 +207,30 @@ export const HoldManagementPage: React.FC = () => {
       <div className="rounded-xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised overflow-hidden shadow-xs">
         {loading ? (
           <div className="py-16 flex justify-center">
-            <GrainLoader label="Đang đối soát danh sách phong toả..." />
+            <GrainLoader
+              label={t(
+                "risk.hold.loading",
+                "Đang đối soát danh sách phong toả...",
+              )}
+            />
           </div>
         ) : holds.length === 0 ? (
           <div className="py-16 text-center space-y-2">
-            <CheckCircle size={40} className="mx-auto text-accent-primary opacity-60" />
-            <p className="text-sm font-semibold text-ink-primary">Không có lô hàng nào bị phong toả HOLD</p>
+            <CheckCircle
+              size={40}
+              className="mx-auto text-accent-primary opacity-60"
+            />
+            <p className="text-sm font-semibold text-ink-primary">
+              {t(
+                "risk.hold.emptyTitle",
+                "Không có lô hàng nào bị phong toả HOLD",
+              )}
+            </p>
             <p className="text-xs text-ink-secondary max-w-sm mx-auto">
-              Toàn bộ tồn kho hiện tại đều an toàn và đạt tiêu chuẩn MRL theo các thị trường xuất khẩu.
+              {t(
+                "risk.hold.emptyDesc",
+                "Toàn bộ tồn kho hiện tại đều an toàn và đạt tiêu chuẩn MRL theo các thị trường xuất khẩu.",
+              )}
             </p>
           </div>
         ) : (
@@ -190,12 +238,24 @@ export const HoldManagementPage: React.FC = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-surface-raised dark:bg-surface-overlay border-b border-ink-tertiary/20 text-ink-secondary font-semibold uppercase tracking-wider text-[11px]">
                 <tr>
-                  <th className="py-3 px-4">Lô hàng bị phong toả</th>
-                  <th className="py-3 px-4">Lý do phát lệnh HOLD</th>
-                  <th className="py-3 px-4">Thời điểm ban hành</th>
-                  <th className="py-3 px-4">Ghi chú bằng chứng</th>
-                  <th className="py-3 px-4">Trạng thái</th>
-                  <th className="py-3 px-4 text-right">Thao tác xử lý</th>
+                  <th className="py-3 px-4">
+                    {t("risk.hold.thLot", "Lô hàng bị phong toả")}
+                  </th>
+                  <th className="py-3 px-4">
+                    {t("risk.hold.thReason", "Lý do phát lệnh HOLD")}
+                  </th>
+                  <th className="py-3 px-4">
+                    {t("risk.hold.thIssuedAt", "Thời điểm ban hành")}
+                  </th>
+                  <th className="py-3 px-4">
+                    {t("risk.hold.thNotes", "Ghi chú bằng chứng")}
+                  </th>
+                  <th className="py-3 px-4">
+                    {t("risk.hold.thStatus", "Trạng thái")}
+                  </th>
+                  <th className="py-3 px-4 text-right">
+                    {t("risk.hold.thActions", "Thao tác xử lý")}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-tertiary/10">
@@ -216,23 +276,40 @@ export const HoldManagementPage: React.FC = () => {
                     <td className="py-3 px-4 font-mono text-ink-secondary">
                       <span className="inline-flex items-center gap-1">
                         <Calendar size={13} />
-                        <span>{new Date(h.issuedAt).toLocaleDateString('vi-VN')}</span>
+                        <span>
+                          {new Date(h.issuedAt).toLocaleDateString("vi-VN")}
+                        </span>
                       </span>
                     </td>
                     <td className="py-3 px-4 text-ink-secondary max-w-xs truncate">
-                      {h.notes || 'Vượt ngưỡng an toàn phòng thí nghiệm'}
+                      {h.notes ||
+                        t(
+                          "risk.hold.defaultNotes",
+                          "Vượt ngưỡng an toàn phòng thí nghiệm",
+                        )}
                     </td>
                     <td className="py-3 px-4">
-                      <StatusBadge status="HOLD" label="ĐANG PHONG TOẢ" />
+                      <StatusBadge
+                        status="HOLD"
+                        label={t("risk.hold.statusActive", "ĐANG PHONG TOẢ")}
+                      />
                     </td>
                     <td className="py-3 px-4 text-right space-x-1">
                       <button
                         type="button"
-                        onClick={() => handleRespondHold(h, 'TRANSFER_QUARANTINE')}
+                        onClick={() =>
+                          handleRespondHold(h, "TRANSFER_QUARANTINE")
+                        }
                         className="px-2.5 py-1 rounded bg-amber-600 text-white font-semibold text-[11px] hover:bg-amber-700"
-                        title="Xác nhận chuyển kho cách ly vật lý"
+                        title={t(
+                          "risk.hold.btnTransferQuarantine",
+                          "Xác nhận chuyển kho cách ly vật lý",
+                        )}
                       >
-                        Chuyển kho cách ly
+                        {t(
+                          "risk.hold.btnTransferQuarantine",
+                          "Chuyển kho cách ly",
+                        )}
                       </button>
                     </td>
                   </tr>
@@ -250,7 +327,9 @@ export const HoldManagementPage: React.FC = () => {
             <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between">
               <h3 className="font-display font-bold text-base text-accent-danger flex items-center gap-2">
                 <LockSimple size={18} weight="fill" />
-                <span>Ban hành Lệnh HOLD Khẩn Cấp</span>
+                <span>
+                  {t("risk.hold.modalTitle", "Ban hành Lệnh HOLD Khẩn Cấp")}
+                </span>
               </h3>
               <button
                 type="button"
@@ -264,7 +343,10 @@ export const HoldManagementPage: React.FC = () => {
             <form onSubmit={handleIssueHold} className="p-5 space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Mã Lô hàng hoặc Container cần phong toả *
+                  {t(
+                    "risk.hold.lotCodeLabel",
+                    "Mã Lô hàng hoặc Container cần phong toả *",
+                  )}
                 </label>
                 <input
                   type="text"
@@ -278,24 +360,55 @@ export const HoldManagementPage: React.FC = () => {
 
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Mã Lý do phong toả (Reason Code) *
+                  {t(
+                    "risk.hold.reasonCodeLabel",
+                    "Mã Lý do phong toả (Reason Code) *",
+                  )}
                 </label>
                 <select
                   value={reasonCode}
                   onChange={(e) => setReasonCode(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/20 focus:border-accent-danger focus:outline-none"
                 >
-                  <option value="MRL_TRICYCLAZOLE_EXCEEDED">Vượt ngưỡng MRL Tricyclazole (EU LOQ 0.010)</option>
-                  <option value="MRL_HEXACONAZOLE_EXCEEDED">Vượt ngưỡng MRL Hexaconazole</option>
-                  <option value="MOISTURE_EXCESSIVE">Độ ẩm vượt quá tiêu chuẩn bảo quản (&gt;15%)</option>
-                  <option value="BROKEN_PERCENT_MISMATCH">Tỷ lệ hạt tấm không đồng nhất</option>
-                  <option value="CONTAMINATION_SUSPECTED">Nghi ngờ nhiễm bẩn cơ học hoặc sâu mọt</option>
+                  <option value="MRL_TRICYCLAZOLE_EXCEEDED">
+                    {t(
+                      "risk.hold.reasonMrlTricyclazole",
+                      "Vượt ngưỡng MRL Tricyclazole (EU LOQ 0.010)",
+                    )}
+                  </option>
+                  <option value="MRL_HEXACONAZOLE_EXCEEDED">
+                    {t(
+                      "risk.hold.reasonMrlHexaconazole",
+                      "Vượt ngưỡng MRL Hexaconazole",
+                    )}
+                  </option>
+                  <option value="MOISTURE_EXCESSIVE">
+                    {t(
+                      "risk.hold.reasonMoistureExcessive",
+                      "Độ ẩm vượt quá tiêu chuẩn bảo quản (>15%)",
+                    )}
+                  </option>
+                  <option value="BROKEN_PERCENT_MISMATCH">
+                    {t(
+                      "risk.hold.reasonBrokenMismatch",
+                      "Tỷ lệ hạt tấm không đồng nhất",
+                    )}
+                  </option>
+                  <option value="CONTAMINATION_SUSPECTED">
+                    {t(
+                      "risk.hold.reasonContamination",
+                      "Nghi ngờ nhiễm bẩn cơ học hoặc sâu mọt",
+                    )}
+                  </option>
                 </select>
               </div>
 
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Ghi chú chi tiết & Căn cứ phiếu thử nghiệm *
+                  {t(
+                    "risk.hold.notesLabel",
+                    "Ghi chú chi tiết & Căn cứ phiếu thử nghiệm *",
+                  )}
                 </label>
                 <textarea
                   required
@@ -312,14 +425,16 @@ export const HoldManagementPage: React.FC = () => {
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 rounded-lg border border-ink-tertiary/20 hover:bg-surface-raised font-semibold text-ink-secondary"
                 >
-                  Huỷ
+                  {t("common.cancel", "Huỷ")}
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
                   className="px-5 py-2 rounded-lg bg-accent-danger text-white font-semibold hover:bg-red-700 transition-colors disabled:opacity-60"
                 >
-                  {submitting ? 'Đang phát lệnh...' : 'Ban hành Lệnh HOLD'}
+                  {submitting
+                    ? t("risk.hold.submitting", "Đang phát lệnh...")
+                    : t("risk.hold.btnSubmit", "Ban hành Lệnh HOLD")}
                 </button>
               </div>
             </form>

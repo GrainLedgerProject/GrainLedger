@@ -9,6 +9,7 @@ import {
 } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 interface SearchResultItem {
@@ -72,6 +73,7 @@ const SEARCH_DATABASE: SearchResultItem[] = [
 ];
 
 export const GlobalSearchModal: React.FC = () => {
+  const { t } = useTranslation();
   const { isSearchOpen, setSearchOpen } = useUiStore();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -150,7 +152,7 @@ export const GlobalSearchModal: React.FC = () => {
                   setQuery(e.target.value);
                   setSelectedIndex(0);
                 }}
-                placeholder="Tìm kiếm mã lô, container, tên nông hộ, sự kiện (Cmd+K)..."
+                placeholder={t('common.searchPlaceholderFull', 'Tìm kiếm mã lô, container, tên nông hộ, sự kiện (Cmd+K)...')}
                 className="w-full bg-transparent text-sm text-ink-primary placeholder:text-ink-tertiary focus:outline-none"
               />
               <button
@@ -166,7 +168,7 @@ export const GlobalSearchModal: React.FC = () => {
             <div className="max-h-80 overflow-y-auto p-2 divide-y divide-ink-tertiary/10">
               {filteredResults.length === 0 ? (
                 <div className="p-8 text-center text-xs text-ink-tertiary">
-                  Không tìm thấy kết quả phù hợp với từ khóa &ldquo;{query}&rdquo;
+                  {t('common.noSearchResults', 'Không tìm thấy kết quả phù hợp với từ khóa')} &ldquo;{query}&rdquo;
                 </div>
               ) : (
                 filteredResults.map((item, idx) => (
@@ -199,8 +201,8 @@ export const GlobalSearchModal: React.FC = () => {
             {/* Footer with key hints */}
             <div className="px-4 py-2 bg-surface-raised dark:bg-surface-overlay border-t border-ink-tertiary/10 text-[11px] text-ink-tertiary flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span>Nhấn <kbd className="px-1 py-0.5 rounded bg-surface-base border border-ink-tertiary/30 font-mono">ESC</kbd> để đóng</span>
-                <span>Phạm vi: Trong công ty và cơ sở được cấp quyền</span>
+                <span>{t('common.escToClose', 'Nhấn ESC để đóng')}</span>
+                <span>{t('common.scopePermission', 'Phạm vi: Trong công ty và cơ sở được cấp quyền')}</span>
               </div>
               <span className="font-mono">GrainLedger Global Search</span>
             </div>

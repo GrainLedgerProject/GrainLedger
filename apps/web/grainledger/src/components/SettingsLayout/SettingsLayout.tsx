@@ -1,6 +1,7 @@
-import { LockSimple, ShieldCheck, User } from '@phosphor-icons/react';
-import React, { type ReactNode } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { LockSimple, ShieldCheck, User } from "@phosphor-icons/react";
+import React, { type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router-dom";
 
 export interface SettingsLayoutProps {
   children: ReactNode;
@@ -8,18 +9,22 @@ export interface SettingsLayoutProps {
 
 export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ children }) => {
   const location = useLocation();
+  const { t } = useTranslation();
 
   const navLinks = [
     {
-      label: 'Thông tin cá nhân',
-      description: 'Họ tên, ngôn ngữ, liên hệ',
-      path: '/settings/profile',
+      label: t("settings.profileTitle", "Thông tin cá nhân"),
+      description: t("settings.profileSubtitle", "Họ tên, ngôn ngữ, liên hệ"),
+      path: "/settings/profile",
       icon: User,
     },
     {
-      label: 'Bảo mật tài khoản',
-      description: 'Đổi mật khẩu và phiên đăng nhập',
-      path: '/settings/security',
+      label: t("settings.securityTitle", "Bảo mật tài khoản"),
+      description: t(
+        "settings.securitySubtitle",
+        "Đổi mật khẩu và phiên đăng nhập",
+      ),
+      path: "/settings/security",
       icon: LockSimple,
     },
   ];
@@ -28,10 +33,13 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ children }) => {
     <div className="max-w-5xl mx-auto py-8 px-4 space-y-6">
       <div className="border-b border-ink-tertiary/15 pb-4">
         <h1 className="text-2xl font-serif font-bold text-ink-primary">
-          Cài đặt tài khoản & Bảo mật
+          {t("settings.title", "Cài đặt tài khoản & Bảo mật")}
         </h1>
         <p className="text-sm text-ink-secondary mt-1">
-          Quản lý danh tính cá nhân và chứng thực quyền truy cập trên hệ thống GrainLedger.
+          {t(
+            "settings.desc",
+            "Quản lý danh tính cá nhân và chứng thực quyền truy cập trên hệ thống GrainLedger.",
+          )}
         </p>
       </div>
 
@@ -48,16 +56,22 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ children }) => {
                 to={item.path}
                 className={`flex items-start gap-3 p-3 rounded-lg text-xs transition-colors ${
                   isActive
-                    ? 'bg-surface-raised dark:bg-surface-overlay text-accent-primary font-semibold border-l-4 border-accent-primary shadow-xs'
-                    : 'text-ink-secondary hover:text-ink-primary hover:bg-surface-raised/50'
+                    ? "bg-surface-raised dark:bg-surface-overlay text-accent-primary font-semibold border-l-4 border-accent-primary shadow-xs"
+                    : "text-ink-secondary hover:text-ink-primary hover:bg-surface-raised/50"
                 }`}
               >
-                <Icon size={18} weight={isActive ? 'fill' : 'regular'} className="shrink-0 mt-0.5" />
+                <Icon
+                  size={18}
+                  weight={isActive ? "fill" : "regular"}
+                  className="shrink-0 mt-0.5"
+                />
                 <div>
                   <div className="font-medium text-sm leading-tight text-ink-primary">
                     {item.label}
                   </div>
-                  <div className="text-[11px] text-ink-tertiary mt-0.5">{item.description}</div>
+                  <div className="text-[11px] text-ink-tertiary mt-0.5">
+                    {item.description}
+                  </div>
                 </div>
               </Link>
             );
@@ -66,9 +80,16 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ children }) => {
           <div className="pt-4 px-3 text-[11px] text-ink-tertiary space-y-1 border-t border-ink-tertiary/10 mt-4">
             <div className="flex items-center gap-1.5 text-accent-primary font-semibold">
               <ShieldCheck size={14} />
-              <span>Chứng thực phiên an toàn</span>
+              <span>
+                {t("settings.authSecure", "Chứng thực phiên an toàn")}
+              </span>
             </div>
-            <p>Phiên đăng nhập được mã hoá JWT và giám sát thu hồi theo chuẩn bảo mật.</p>
+            <p>
+              {t(
+                "settings.jwtNotice",
+                "Phiên đăng nhập được mã hoá JWT và giám sát thu hồi theo chuẩn bảo mật.",
+              )}
+            </p>
           </div>
         </aside>
 

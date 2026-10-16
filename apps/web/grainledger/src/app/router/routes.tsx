@@ -16,7 +16,9 @@ import { ForgotPasswordPage } from "@/features/auth/pages/ForgotPasswordPage";
 import { SignInPage } from "@/features/auth/pages/SignInPage";
 import { MasterDataPage } from "@/features/catalogs/pages/MasterDataPage";
 import { MrlVersionsPage } from "@/features/catalogs/pages/MrlVersionsPage";
+import { LabSampleRegistrationPage } from "@/features/compliance/pages/LabSampleRegistrationPage";
 import { MrlComplianceCheckPage } from "@/features/compliance/pages/MrlComplianceCheckPage";
+import { SafetyMarginPolicyPage } from "@/features/compliance/pages/SafetyMarginPolicyPage";
 import { RoleHomePage } from "@/features/dashboard/pages/RoleHomePage";
 import { FarmerRegistrationPage } from "@/features/field/pages/FarmerRegistrationPage";
 import { OfflineSyncQueuePage } from "@/features/field/pages/OfflineSyncQueuePage";
@@ -24,8 +26,10 @@ import { PesticideDeclarationPage } from "@/features/field/pages/PesticideDeclar
 import { PlotRegistrationPage } from "@/features/field/pages/PlotRegistrationPage";
 import { ProcurementReceiptPage } from "@/features/field/pages/ProcurementReceiptPage";
 import { LandingPage } from "@/features/landing/pages/LandingPage";
-import { CorrectionManagementPage } from "@/features/mill/pages/CorrectionManagementPage";
+import { CorrectionRequestPage } from "@/features/mill/pages/CorrectionRequestPage";
 import { OperationEntryPage } from "@/features/mill/pages/OperationEntryPage";
+import { PendingCorrectionsPage } from "@/features/mill/pages/PendingCorrectionsPage";
+import { ReconciliationReviewPage } from "@/features/mill/pages/ReconciliationReviewPage";
 import { ReceivingTasksPage } from "@/features/mill/pages/ReceivingTasksPage";
 import { StockOverviewPage } from "@/features/mill/pages/StockOverviewPage";
 import { HoldManagementPage } from "@/features/risk/pages/HoldManagementPage";
@@ -143,7 +147,9 @@ export const router = createBrowserRouter([
       {
         path: "/field/farmers/new",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
+          >
             <FarmerRegistrationPage />
           </ProtectedRoute>
         ),
@@ -151,7 +157,9 @@ export const router = createBrowserRouter([
       {
         path: "/field/plots/new",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlotRegistrationPage />
           </ProtectedRoute>
         ),
@@ -159,7 +167,9 @@ export const router = createBrowserRouter([
       {
         path: "/field/declarations/new",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
+          >
             <PesticideDeclarationPage />
           </ProtectedRoute>
         ),
@@ -167,7 +177,9 @@ export const router = createBrowserRouter([
       {
         path: "/field/receipts/new",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
+          >
             <ProcurementReceiptPage />
           </ProtectedRoute>
         ),
@@ -175,10 +187,10 @@ export const router = createBrowserRouter([
       {
         path: "/field/samples/new",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlaceholderPage
-              screenCode="SC-13"
-              featureCode="F06"
               titleVi="Lấy Mẫu Niêm Phong Thu Mua (Procurement Sample)"
               titleEn="Procurement Sample"
               roles={["CUSTOMER_PROCUREMENT_OFFICER"]}
@@ -191,7 +203,9 @@ export const router = createBrowserRouter([
       {
         path: "/field/sync",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
+          >
             <OfflineSyncQueuePage />
           </ProtectedRoute>
         ),
@@ -201,7 +215,9 @@ export const router = createBrowserRouter([
       {
         path: "/mill/receiving",
         element: (
-          <ProtectedRoute allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}
+          >
             <ReceivingTasksPage />
           </ProtectedRoute>
         ),
@@ -209,7 +225,9 @@ export const router = createBrowserRouter([
       {
         path: "/mill/operations/new",
         element: (
-          <ProtectedRoute allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}
+          >
             <OperationEntryPage />
           </ProtectedRoute>
         ),
@@ -218,15 +236,25 @@ export const router = createBrowserRouter([
         path: "/mill/corrections/new",
         element: (
           <ProtectedRoute allowedRoles={["MILL_OPERATOR", "MILL_ADMIN"]}>
-            <CorrectionManagementPage />
+            <CorrectionRequestPage />
           </ProtectedRoute>
         ),
       },
       {
         path: "/mill/corrections/pending",
         element: (
-          <ProtectedRoute allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}>
-            <CorrectionManagementPage />
+          <ProtectedRoute
+            allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}
+          >
+            <PendingCorrectionsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/mill/reconciliations",
+        element: (
+          <ProtectedRoute allowedRoles={["MILL_MANAGER", "MILL_ADMIN"]}>
+            <ReconciliationReviewPage />
           </ProtectedRoute>
         ),
       },
@@ -234,7 +262,7 @@ export const router = createBrowserRouter([
         path: "/mill/reconciliations/:id",
         element: (
           <ProtectedRoute allowedRoles={["MILL_MANAGER", "MILL_ADMIN"]}>
-            <CorrectionManagementPage />
+            <ReconciliationReviewPage />
           </ProtectedRoute>
         ),
       },
@@ -243,8 +271,6 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={["MILL_OPERATOR", "MILL_ADMIN"]}>
             <PlaceholderPage
-              screenCode="SC-29"
-              featureCode="F16"
               titleVi="Thực thi Phương án Phối trộn đã Duyệt (Approved Plan Execution)"
               titleEn="Approved Plan Execution"
               roles={["MILL_OPERATOR"]}
@@ -267,10 +293,18 @@ export const router = createBrowserRouter([
 
       // --- Compliance & Lab Evidences (Customer Manager & Mill Admin) ---
       {
+        path: "/compliance/lab-samples",
+        element: (
+          <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
+            <LabSampleRegistrationPage defaultTab="LIST" />
+          </ProtectedRoute>
+        ),
+      },
+      {
         path: "/compliance/lab-samples/new",
         element: (
           <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
-            <MrlComplianceCheckPage />
+            <LabSampleRegistrationPage defaultTab="CREATE" />
           </ProtectedRoute>
         ),
       },
@@ -283,10 +317,18 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: "/compliance/safety-margin",
+        path: "/compliance/lab-results/:id",
         element: (
           <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
             <MrlComplianceCheckPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/compliance/safety-margin",
+        element: (
+          <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
+            <SafetyMarginPolicyPage />
           </ProtectedRoute>
         ),
       },
@@ -295,10 +337,10 @@ export const router = createBrowserRouter([
       {
         path: "/export/orders",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlaceholderPage
-              screenCode="SC-26"
-              featureCode="F13"
               titleVi="Đơn hàng Xuất khẩu & Mục tiêu Container (Export Order)"
               titleEn="Export Order"
               roles={["CUSTOMER_EXPORT_OFFICER"]}
@@ -311,10 +353,10 @@ export const router = createBrowserRouter([
       {
         path: "/export/orders/:orderId/containers/:containerId/plan",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlaceholderPage
-              screenCode="SC-27"
-              featureCode="F14"
               titleVi="Yêu cầu Phương án Phối trộn (Blend Plan Request)"
               titleEn="Blend Plan Request"
               roles={["CUSTOMER_EXPORT_OFFICER"]}
@@ -332,11 +374,13 @@ export const router = createBrowserRouter([
         path: "/export/plans/pending",
         element: (
           <ProtectedRoute
-            allowedRoles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+            allowedRoles={[
+              "CUSTOMER_MANAGER",
+              "CUSTOMER_EXPORT_OFFICER",
+              "MILL_ADMIN",
+            ]}
           >
             <PlaceholderPage
-              screenCode="SC-28"
-              featureCode="F15"
               titleVi="Duyệt hoặc Từ chối Phương án Phối trộn (Blend Plan Review)"
               titleEn="Blend Plan Review"
               roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}
@@ -350,11 +394,13 @@ export const router = createBrowserRouter([
         path: "/export/plans/:planId/review",
         element: (
           <ProtectedRoute
-            allowedRoles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+            allowedRoles={[
+              "CUSTOMER_MANAGER",
+              "CUSTOMER_EXPORT_OFFICER",
+              "MILL_ADMIN",
+            ]}
           >
             <PlaceholderPage
-              screenCode="SC-28"
-              featureCode="F15"
               titleVi="Chi tiết Thẩm định Phương án Phối trộn"
               titleEn="Blend Plan Review Detail"
               roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}
@@ -367,10 +413,10 @@ export const router = createBrowserRouter([
       {
         path: "/export/containers",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlaceholderPage
-              screenCode="SC-30"
-              featureCode="F16"
               titleVi="Danh sách & Giám sát Xếp Container"
               titleEn="Containers Overview"
               roles={["CUSTOMER_EXPORT_OFFICER"]}
@@ -383,10 +429,10 @@ export const router = createBrowserRouter([
       {
         path: "/export/containers/:id/loading",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlaceholderPage
-              screenCode="SC-30"
-              featureCode="F16"
               titleVi="Ghi nhận Xếp hàng lên Container (Container Loading)"
               titleEn="Container Loading"
               roles={["CUSTOMER_EXPORT_OFFICER"]}
@@ -399,10 +445,10 @@ export const router = createBrowserRouter([
       {
         path: "/export/containers/:id/closure",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlaceholderPage
-              screenCode="SC-31"
-              featureCode="F16"
               titleVi="Đóng Niêm Container (Container Closure)"
               titleEn="Container Closure"
               roles={["CUSTOMER_EXPORT_OFFICER"]}
@@ -415,10 +461,10 @@ export const router = createBrowserRouter([
       {
         path: "/export/dossiers",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlaceholderPage
-              screenCode="SC-32"
-              featureCode="F17"
               titleVi="Quản lý Chứng từ & Hồ sơ Tuân thủ (Compliance Dossiers)"
               titleEn="Shipment Documents and Dossier"
               roles={["CUSTOMER_EXPORT_OFFICER"]}
@@ -431,10 +477,10 @@ export const router = createBrowserRouter([
       {
         path: "/export/containers/:id/dossier",
         element: (
-          <ProtectedRoute allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}>
+          <ProtectedRoute
+            allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+          >
             <PlaceholderPage
-              screenCode="SC-32"
-              featureCode="F17"
               titleVi="Hồ sơ Tuân thủ Container Chi tiết"
               titleEn="Container Compliance Dossier"
               roles={["CUSTOMER_EXPORT_OFFICER"]}
@@ -450,11 +496,13 @@ export const router = createBrowserRouter([
         path: "/risk/traceback",
         element: (
           <ProtectedRoute
-            allowedRoles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
+            allowedRoles={[
+              "CUSTOMER_MANAGER",
+              "CUSTOMER_EXPORT_OFFICER",
+              "MILL_ADMIN",
+            ]}
           >
             <PlaceholderPage
-              screenCode="SC-33"
-              featureCode="F18"
               titleVi="Truy vết Hai chiều Đồ thị (Bidirectional Traceback)"
               titleEn="Traceback"
               roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}

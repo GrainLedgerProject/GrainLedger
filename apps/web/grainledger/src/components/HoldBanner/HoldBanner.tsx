@@ -1,6 +1,7 @@
 import { formatMessage } from '@/app/i18n/messages';
 import { LockSimple, ShieldWarning } from '@phosphor-icons/react';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 export interface HoldBannerProps {
   targetType: 'Lô hàng' | 'Container' | 'Thửa ruộng';
@@ -18,14 +19,24 @@ export interface HoldBannerProps {
 export const HoldBanner: React.FC<HoldBannerProps> = ({
   targetType,
   targetId,
-  reason = 'Phát hiện dư lượng hoạt chất Tricyclazole vượt cận an toàn theo kết quả phân tích phòng lab.',
+  reason,
   issuedAt = '15/10/2026 14:30',
   className = '',
 }) => {
-  const message = formatMessage('MSG09', {
-    target_type: targetType,
-    target_id: targetId,
-  });
+  const { t, i18n } = useTranslation();
+  const defaultReason = t(
+    'risk.holdDefaultReason',
+    'Phát hiện dư lượng hoạt chất Tricyclazole vượt cận an toàn theo kết quả phân tích phòng lab.'
+  );
+
+  const message = formatMessage(
+    'MSG09',
+    {
+      target_type: t(`risk.targetTypes.${targetType}`, targetType),
+      target_id: targetId,
+    },
+    i18n.language
+  );
 
   return (
     <div
@@ -43,18 +54,21 @@ export const HoldBanner: React.FC<HoldBannerProps> = ({
               <span>{message}</span>
             </span>
             <span className="text-xs font-mono text-ink-secondary bg-surface-base px-2 py-0.5 rounded border border-functional-hold-border/30">
-              Thời điểm ban hành: {issuedAt}
+              {t('risk.holdIssuedAt', 'Thời điểm ban hành')}: {issuedAt}
             </span>
           </div>
 
           <p className="text-xs text-ink-secondary leading-normal">
-            <strong>Lý do phong toả:</strong> {reason}
+            <strong>{t('risk.holdReason', 'Lý do phong toả')}:</strong> {reason || defaultReason}
           </p>
 
           <div className="flex items-center gap-2 pt-1 text-xs text-accent-danger font-medium">
             <ShieldWarning size={14} />
             <span>
-              Mọi hoạt động sấy, xay xát, phối trộn hoặc xếp hàng lên container liên quan đến đối tượng này đều bị chặn tự động ở tầng dữ liệu.
+              {t(
+                'risk.holdAutoBlockNotice',
+                'Mọi hoạt động sấy, xay xát, phối trộn hoặc xếp hàng lên container liên quan đến đối tượng này đều bị chặn tự động ở tầng dữ liệu.'
+              )}
             </span>
           </div>
         </div>
@@ -62,3 +76,4 @@ export const HoldBanner: React.FC<HoldBannerProps> = ({
     </div>
   );
 };
+

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { ledgerEndpoints } from '@/api/ledger';
-import { GrainLoader } from '@/components/GrainLoader/GrainLoader';
-import { StatusBadge } from '@/components/StatusBadge/StatusBadge';
+import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { ledgerEndpoints } from "@/api/ledger";
+import { GrainLoader } from "@/components/GrainLoader/GrainLoader";
+import { StatusBadge } from "@/components/StatusBadge/StatusBadge";
 import {
   Warehouse,
   Plus,
@@ -12,7 +13,7 @@ import {
   WarningCircle,
   X,
   Buildings,
-} from '@phosphor-icons/react';
+} from "@phosphor-icons/react";
 
 interface FacilityItem {
   id: string;
@@ -23,7 +24,7 @@ interface FacilityItem {
     id: string;
     code: string;
     name: string;
-    type: 'SILO' | 'BIN' | 'WAREHOUSE';
+    type: "SILO" | "BIN" | "WAREHOUSE";
     capacityKg: number;
     currentFillKg?: number;
   }>;
@@ -31,11 +32,12 @@ interface FacilityItem {
     id: string;
     code: string;
     name: string;
-    kind: 'DRYER' | 'MILL' | 'BLENDER' | 'PACKER';
+    kind: "DRYER" | "MILL" | "BLENDER" | "PACKER";
   }>;
 }
 
 export const FacilityConfigPage: React.FC = () => {
+  const { t } = useTranslation();
   const [setupData, setSetupData] = useState<any>(null);
   const [facilities, setFacilities] = useState<FacilityItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,10 +46,12 @@ export const FacilityConfigPage: React.FC = () => {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<'FACILITY' | 'LOCATION' | 'EQUIPMENT'>('FACILITY');
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [extra, setExtra] = useState('');
+  const [modalType, setModalType] = useState<
+    "FACILITY" | "LOCATION" | "EQUIPMENT"
+  >("FACILITY");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [extra, setExtra] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const loadData = async () => {
@@ -60,19 +64,55 @@ export const FacilityConfigPage: React.FC = () => {
       // Map facilities
       const facs: FacilityItem[] = (setup as any)?.facilities || [
         {
-          id: 'fac-1',
-          code: 'FAC-TIENGIANG-01',
-          name: 'Nhà máy Xay xát & Sấy lúa Tiền Giang',
-          address: 'Huyện Cái Bè, Tỉnh Tiền Giang',
+          id: "fac-1",
+          code: "FAC-TIENGIANG-01",
+          name: "Nhà máy Xay xát & Sấy lúa Tiền Giang",
+          address: "Huyện Cái Bè, Tỉnh Tiền Giang",
           locations: [
-            { id: 'loc-1', code: 'SILO-01', name: 'Silo lưu trữ lúa khô S1', type: 'SILO', capacityKg: 500000, currentFillKg: 120000 },
-            { id: 'loc-2', code: 'SILO-02', name: 'Silo lưu trữ lúa khô S2', type: 'SILO', capacityKg: 500000, currentFillKg: 0 },
-            { id: 'loc-3', code: 'BIN-01', name: 'Thùng trung chuyển gạo trắng', type: 'BIN', capacityKg: 80000, currentFillKg: 45000 },
+            {
+              id: "loc-1",
+              code: "SILO-01",
+              name: "Silo lưu trữ lúa khô S1",
+              type: "SILO",
+              capacityKg: 500000,
+              currentFillKg: 120000,
+            },
+            {
+              id: "loc-2",
+              code: "SILO-02",
+              name: "Silo lưu trữ lúa khô S2",
+              type: "SILO",
+              capacityKg: 500000,
+              currentFillKg: 0,
+            },
+            {
+              id: "loc-3",
+              code: "BIN-01",
+              name: "Thùng trung chuyển gạo trắng",
+              type: "BIN",
+              capacityKg: 80000,
+              currentFillKg: 45000,
+            },
           ],
           equipment: [
-            { id: 'eq-1', code: 'DRYER-LINE-A', name: 'Lò sấy vỉ ngang 50 tấn/mẻ', kind: 'DRYER' },
-            { id: 'eq-2', code: 'MILL-LINE-01', name: 'Dây chuyền bóc vỏ & xát trắng A', kind: 'MILL' },
-            { id: 'eq-3', code: 'BLEND-LINE-01', name: 'Máy trộn tỷ lệ tấm tự động', kind: 'BLENDER' },
+            {
+              id: "eq-1",
+              code: "DRYER-LINE-A",
+              name: "Lò sấy vỉ ngang 50 tấn/mẻ",
+              kind: "DRYER",
+            },
+            {
+              id: "eq-2",
+              code: "MILL-LINE-01",
+              name: "Dây chuyền bóc vỏ & xát trắng A",
+              kind: "MILL",
+            },
+            {
+              id: "eq-3",
+              code: "BLEND-LINE-01",
+              name: "Máy trộn tỷ lệ tấm tự động",
+              kind: "BLENDER",
+            },
           ],
         },
       ];
@@ -81,7 +121,7 @@ export const FacilityConfigPage: React.FC = () => {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Không thể tải cấu hình cơ sở.');
+        setError(t("admin.facility.errorLoad", "Không thể tải cấu hình cơ sở."));
       }
     } finally {
       setLoading(false);
@@ -92,11 +132,11 @@ export const FacilityConfigPage: React.FC = () => {
     void loadData();
   }, []);
 
-  const handleOpenAdd = (type: 'FACILITY' | 'LOCATION' | 'EQUIPMENT') => {
+  const handleOpenAdd = (type: "FACILITY" | "LOCATION" | "EQUIPMENT") => {
     setModalType(type);
-    setCode('');
-    setName('');
-    setExtra('');
+    setCode("");
+    setName("");
+    setExtra("");
     setIsModalOpen(true);
   };
 
@@ -106,14 +146,14 @@ export const FacilityConfigPage: React.FC = () => {
     setError(null);
 
     try {
-      if (modalType === 'FACILITY') {
+      if (modalType === "FACILITY") {
         await ledgerEndpoints.createFacility({ code, name, address: extra });
-      } else if (modalType === 'LOCATION') {
+      } else if (modalType === "LOCATION") {
         await ledgerEndpoints.createLocation({
           facilityId: facilities[0]?.id || crypto.randomUUID(),
           code,
           name,
-          type: 'SILO',
+          type: "SILO",
           capacityKg: parseFloat(extra) || 500000,
         });
       } else {
@@ -121,18 +161,20 @@ export const FacilityConfigPage: React.FC = () => {
           facilityId: facilities[0]?.id || crypto.randomUUID(),
           code,
           name,
-          kind: 'MILL',
+          kind: "MILL",
         });
       }
 
-      setSuccessMsg(`Đã tạo thành công ${name}`);
+      setSuccessMsg(
+        t("admin.facility.successCreate", "Đã tạo thành công {{name}}", { name })
+      );
       setIsModalOpen(false);
       await loadData();
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Thao tác không thành công.');
+        setError(t("admin.facility.errorCreate", "Thao tác không thành công."));
       }
     } finally {
       setSubmitting(false);
@@ -145,13 +187,16 @@ export const FacilityConfigPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-ink-tertiary/15 pb-4">
         <div>
           <span className="text-xs font-mono font-bold text-accent-primary uppercase tracking-wider block">
-            SC-05 · CẤU HÌNH NHÀ MÁY, SILO & THIẾT BỊ
+            {t("admin.facility.tag", "CẤU HÌNH NHÀ MÁY, SILO & THIẾT BỊ")}
           </span>
           <h2 className="text-2xl font-display font-bold text-ink-primary">
-            Cơ sở Vật chất & Vị trí Lưu trữ Silo
+            {t("admin.facility.title", "Cơ sở Vật chất & Vị trí Lưu trữ Silo")}
           </h2>
           <p className="text-xs text-ink-secondary mt-0.5">
-            Cấu hình các silo lưu trữ, máy sấy và dây chuyền chế biến để hệ thống hạch toán dòng chảy cân bằng khối lượng.
+            {t(
+              "admin.facility.subtitle",
+              "Cấu hình các silo lưu trữ, máy sấy và dây chuyền chế biến để hệ thống hạch toán dòng chảy cân bằng khối lượng."
+            )}
           </p>
         </div>
 
@@ -160,17 +205,17 @@ export const FacilityConfigPage: React.FC = () => {
             type="button"
             onClick={loadData}
             className="p-2.5 rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-secondary hover:text-ink-primary transition-colors"
-            title="Tải lại dữ liệu"
+            title={t("common.reload", "Tải lại dữ liệu")}
           >
             <ArrowsClockwise size={16} />
           </button>
           <button
             type="button"
-            onClick={() => handleOpenAdd('LOCATION')}
+            onClick={() => handleOpenAdd("LOCATION")}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-primary text-white font-semibold text-xs hover:bg-accent-primary-dim transition-all shadow-xs"
           >
             <Plus size={16} weight="bold" />
-            <span>Thêm Silo / Kho chứa</span>
+            <span>{t("admin.facility.addLocationBtn", "Thêm Silo / Kho chứa")}</span>
           </button>
         </div>
       </div>
@@ -192,7 +237,7 @@ export const FacilityConfigPage: React.FC = () => {
       {/* Facilities Cards */}
       {loading ? (
         <div className="py-16 flex justify-center">
-          <GrainLoader label="Đang kiểm tra sơ đồ cơ sở nhà máy..." />
+          <GrainLoader label={t("admin.facility.loading", "Đang kiểm tra sơ đồ cơ sở nhà máy...")} />
         </div>
       ) : (
         <div className="space-y-6">
@@ -212,7 +257,7 @@ export const FacilityConfigPage: React.FC = () => {
                     </span>
                   </div>
                   <span className="text-xs text-ink-secondary mt-0.5 block">
-                    {fac.address || 'Cái Bè, Tiền Giang, Việt Nam'}
+                    {fac.address || "Cái Bè, Tiền Giang, Việt Nam"}
                   </span>
                 </div>
               </div>
@@ -222,10 +267,12 @@ export const FacilityConfigPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-xs uppercase tracking-wider text-ink-primary flex items-center gap-1.5">
                     <Warehouse size={15} className="text-accent-primary" />
-                    <span>Hệ thống Silo & Kho chứa lúa</span>
+                    <span>{t("admin.facility.siloSystem", "Hệ thống Silo & Kho chứa lúa")}</span>
                   </h4>
                   <span className="text-xs text-ink-secondary">
-                    {fac.locations?.length || 0} vị trí
+                    {t("admin.facility.locationCount", "{{count}} vị trí", {
+                      count: fac.locations?.length || 0,
+                    })}
                   </span>
                 </div>
 
@@ -249,8 +296,12 @@ export const FacilityConfigPage: React.FC = () => {
                             </span>
                           </div>
                           <StatusBadge
-                            status={fillPercent > 0 ? 'BALANCED' : 'STALE'}
-                            label={fillPercent > 0 ? `${fillPercent}% đầy` : 'Trống'}
+                            status={fillPercent > 0 ? "BALANCED" : "STALE"}
+                            label={
+                              fillPercent > 0
+                                ? t("admin.facility.percentFull", "{{percent}}% đầy", { percent: fillPercent })
+                                : t("admin.facility.emptyBadge", "Trống")
+                            }
                           />
                         </div>
 
@@ -258,12 +309,21 @@ export const FacilityConfigPage: React.FC = () => {
                           <div className="w-full h-1.5 rounded-full bg-ink-tertiary/20 overflow-hidden">
                             <div
                               className="h-full bg-accent-primary rounded-full transition-all"
-                              style={{ width: `${Math.min(fillPercent, 100)}%` }}
+                              style={{
+                                width: `${Math.min(fillPercent, 100)}%`,
+                              }}
                             />
                           </div>
                           <div className="flex justify-between text-[11px] font-mono text-ink-secondary">
-                            <span>{loc.currentFillKg?.toLocaleString('vi-VN') || 0} kg</span>
-                            <span>Sức chứa: {loc.capacityKg.toLocaleString('vi-VN')} kg</span>
+                            <span>
+                              {loc.currentFillKg?.toLocaleString("vi-VN") || 0}{" "}
+                              kg
+                            </span>
+                            <span>
+                              {t("admin.facility.capacityLabel", "Sức chứa: {{val}} kg", {
+                                val: loc.capacityKg.toLocaleString("vi-VN"),
+                              })}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -277,10 +337,12 @@ export const FacilityConfigPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-xs uppercase tracking-wider text-ink-primary flex items-center gap-1.5">
                     <Wrench size={15} className="text-accent-primary" />
-                    <span>Dây chuyền máy móc & Thiết bị vận hành</span>
+                    <span>{t("admin.facility.equipmentSystem", "Dây chuyền máy móc & Thiết bị vận hành")}</span>
                   </h4>
                   <span className="text-xs text-ink-secondary">
-                    {fac.equipment?.length || 0} thiết bị
+                    {t("admin.facility.equipmentCount", "{{count}} thiết bị", {
+                      count: fac.equipment?.length || 0,
+                    })}
                   </span>
                 </div>
 
@@ -316,11 +378,11 @@ export const FacilityConfigPage: React.FC = () => {
           <div className="w-full max-w-md bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl shadow-xl overflow-hidden animate-ledger-in">
             <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between">
               <h3 className="font-display font-bold text-base text-ink-primary">
-                {modalType === 'LOCATION'
-                  ? 'Thêm Silo / Kho chứa Mới'
-                  : modalType === 'EQUIPMENT'
-                  ? 'Thêm Thiết bị / Dây chuyền Mới'
-                  : 'Thêm Cơ sở Nhà máy Mới'}
+                {modalType === "LOCATION"
+                  ? t("admin.facility.modalLocationTitle", "Thêm Silo / Kho chứa Mới")
+                  : modalType === "EQUIPMENT"
+                    ? t("admin.facility.modalEquipmentTitle", "Thêm Thiết bị / Dây chuyền Mới")
+                    : t("admin.facility.modalFacilityTitle", "Thêm Cơ sở Nhà máy Mới")}
               </h3>
               <button
                 type="button"
@@ -334,7 +396,7 @@ export const FacilityConfigPage: React.FC = () => {
             <form onSubmit={handleCreate} className="p-5 space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Mã Code định danh *
+                  {t("admin.facility.codeLabel", "Mã Code định danh *")}
                 </label>
                 <input
                   type="text"
@@ -348,7 +410,7 @@ export const FacilityConfigPage: React.FC = () => {
 
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Tên hiển thị *
+                  {t("admin.facility.nameLabel", "Tên hiển thị *")}
                 </label>
                 <input
                   type="text"
@@ -362,15 +424,19 @@ export const FacilityConfigPage: React.FC = () => {
 
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  {modalType === 'LOCATION'
-                    ? 'Sức chứa thiết kế (kg) *'
-                    : 'Địa chỉ / Ghi chú kỹ thuật'}
+                  {modalType === "LOCATION"
+                    ? t("admin.facility.capacityInputLabel", "Sức chứa thiết kế (kg) *")
+                    : t("admin.facility.noteInputLabel", "Địa chỉ / Ghi chú kỹ thuật")}
                 </label>
                 <input
                   type="text"
                   value={extra}
                   onChange={(e) => setExtra(e.target.value)}
-                  placeholder={modalType === 'LOCATION' ? '500000' : 'Huyện Cái Bè, Tiền Giang'}
+                  placeholder={
+                    modalType === "LOCATION"
+                      ? "500000"
+                      : "Huyện Cái Bè, Tiền Giang"
+                  }
                   className="w-full px-3 py-2 rounded-lg bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/20 focus:border-accent-primary focus:outline-none font-mono"
                 />
               </div>
@@ -381,14 +447,14 @@ export const FacilityConfigPage: React.FC = () => {
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 rounded-lg border border-ink-tertiary/20 hover:bg-surface-raised font-semibold text-ink-secondary"
                 >
-                  Huỷ
+                  {t("common.cancel", "Huỷ")}
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
                   className="px-5 py-2 rounded-lg bg-accent-primary text-white font-semibold hover:bg-accent-primary-dim transition-colors disabled:opacity-60"
                 >
-                  {submitting ? 'Đang tạo...' : 'Tạo mới'}
+                  {submitting ? t("common.saving", "Đang tạo...") : t("admin.facility.submitBtn", "Tạo mới")}
                 </button>
               </div>
             </form>

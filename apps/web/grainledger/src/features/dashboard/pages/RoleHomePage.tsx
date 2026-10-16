@@ -37,6 +37,7 @@ import {
   WarningCircle,
 } from '@phosphor-icons/react';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import {
   Bar,
@@ -49,6 +50,7 @@ import {
 } from 'recharts';
 
 export const RoleHomePage: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuthStore();
   const { pendingOfflineCount } = useUiStore();
 
@@ -69,7 +71,7 @@ export const RoleHomePage: React.FC = () => {
       <div className="p-3 bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/20 rounded-lg flex items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-2">
           <img src="/favicon.svg" alt="GrainLedger" className="w-8 h-8" />
-          <span className="font-semibold text-ink-primary">Bàn làm việc:</span>
+          <span className="font-semibold text-ink-primary">{t('common.workspace', 'Bàn làm việc')}:</span>
           {user && <RoleChip role={user.role} showCode />}
           {user?.organizationName && (
             <span className="text-ink-secondary">({user.organizationName})</span>
@@ -85,7 +87,7 @@ export const RoleHomePage: React.FC = () => {
           <div className="border-b border-ink-tertiary/15 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-2xl font-serif font-bold text-ink-primary">
-                Hôm nay tại dây chuyền chế biến
+                {t('dashboard.operatorTitle', 'Hôm nay tại dây chuyền chế biến')}
               </h2>
               <p className="text-xs text-ink-secondary mt-0.5">
                 Cơ sở: Nhà máy Xay xát Lúa gạo Tiền Giang — Dây chuyền Sấy & Xay Xát A
@@ -96,7 +98,7 @@ export const RoleHomePage: React.FC = () => {
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-accent-primary text-white font-semibold text-xs hover:bg-accent-primary-dim transition-all shadow-xs"
             >
               <Plus size={16} weight="bold" />
-              <span>Ghi bước chế biến mới</span>
+              <span>{t('dashboard.operatorNewStep', 'Ghi bước chế biến mới')}</span>
             </Link>
           </div>
 
@@ -223,7 +225,7 @@ export const RoleHomePage: React.FC = () => {
         <div className="space-y-6">
           <div className="border-b border-ink-tertiary/15 pb-4">
             <h2 className="text-2xl font-serif font-bold text-ink-primary">
-              Bàn điều hành Quản lý nhà máy
+              {t('dashboard.managerTitle', 'Bàn điều hành Quản lý nhà máy')}
             </h2>
             <p className="text-xs text-ink-secondary mt-0.5">
               Giám sát cân bằng dây chuyền, xác nhận đối soát bằng chứng và xử lý cách ly lệnh HOLD.
@@ -330,7 +332,7 @@ export const RoleHomePage: React.FC = () => {
         <div className="space-y-6">
           <div className="border-b border-ink-tertiary/15 pb-4">
             <h2 className="text-2xl font-serif font-bold text-ink-primary">
-              Điều phối Chất lượng & Rủi ro — {user?.organizationName}
+              {t('dashboard.customerManagerTitle', 'Điều phối Chất lượng & Rủi ro')} — {user?.organizationName}
             </h2>
             <p className="text-xs text-ink-secondary mt-0.5">
               Phê duyệt phương án phối trộn, theo dõi xét nghiệm dư lượng MRL và kích hoạt truy vết hai chiều.
@@ -389,7 +391,7 @@ export const RoleHomePage: React.FC = () => {
                 Mẫu LAB-TG-088 và LAB-TG-089 đã gửi viện kiểm nghiệm ISO 17025.
               </p>
               <Link
-                to="/compliance/lab-results"
+                to="/compliance/lab-samples"
                 className="inline-flex items-center gap-1 text-xs text-accent-info font-semibold hover:underline pt-1"
               >
                 <span>Xem danh sách mẫu</span>
@@ -460,7 +462,7 @@ export const RoleHomePage: React.FC = () => {
           <div className="border-b border-ink-tertiary/15 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-2xl font-serif font-bold text-ink-primary">
-                Đơn hàng & Xếp Container — {user?.organizationName}
+                {t('dashboard.exportOfficerTitle', 'Đơn hàng & Xếp Container')} — {user?.organizationName}
               </h2>
               <p className="text-xs text-ink-secondary mt-0.5">
                 Quản lý tiến độ đơn xuất khẩu, đóng niêm container và trích xuất hồ sơ tuân thủ.
@@ -545,7 +547,7 @@ export const RoleHomePage: React.FC = () => {
         <div className="space-y-6">
           <div className="border-b border-ink-tertiary/15 pb-4">
             <h2 className="text-2xl font-serif font-bold text-ink-primary">
-              Bàn làm việc Thu mua Hiện trường (Field Client)
+              {t('dashboard.procurementOfficerTitle', 'Bàn làm việc Thu mua Hiện trường (Field Client)')}
             </h2>
             <p className="text-xs text-ink-secondary mt-0.5">
               Hỗ trợ làm việc hoàn toàn ngoại tuyến tại ruộng lúa và đồng bộ khi có kết nối internet.
@@ -628,7 +630,7 @@ export const RoleHomePage: React.FC = () => {
         <div className="space-y-6">
           <div className="border-b border-ink-tertiary/15 pb-4">
             <h2 className="text-2xl font-serif font-bold text-ink-primary">
-              Trạng thái Hệ thống Quản trị Nhà máy
+              {t('dashboard.adminTitle', 'Trạng thái Hệ thống Quản trị Nhà máy')}
             </h2>
             <p className="text-xs text-ink-secondary mt-0.5">
               Cấu hình cơ sở vật chất, tài khoản phân quyền và quản lý phiên bản bảng giới hạn MRL.
@@ -680,7 +682,7 @@ export const RoleHomePage: React.FC = () => {
         <div className="space-y-6">
           <div className="border-b border-ink-tertiary/15 pb-4">
             <h2 className="text-2xl font-serif font-bold text-ink-primary">
-              Vị trí & Cơ cấu Tồn kho Khách hàng
+              {t('dashboard.stockViewerTitle', 'Vị trí & Cơ cấu Tồn kho Khách hàng')}
             </h2>
             <p className="text-xs text-ink-secondary mt-0.5">
               Quyền xem độc lập dữ liệu tồn kho theo vị trí kho, silo và cơ cấu nguồn gốc thửa ruộng.

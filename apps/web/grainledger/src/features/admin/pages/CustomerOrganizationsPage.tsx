@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { adminEndpoints, type OrganizationDto } from '@/api/admin';
-import { GrainLoader } from '@/components/GrainLoader/GrainLoader';
-import { StatusBadge } from '@/components/StatusBadge/StatusBadge';
+import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { adminEndpoints, type OrganizationDto } from "@/api/admin";
+import { GrainLoader } from "@/components/GrainLoader/GrainLoader";
+import { StatusBadge } from "@/components/StatusBadge/StatusBadge";
 import {
   Buildings,
   Plus,
@@ -12,9 +13,10 @@ import {
   Factory,
   Briefcase,
   Users,
-} from '@phosphor-icons/react';
+} from "@phosphor-icons/react";
 
 export const CustomerOrganizationsPage: React.FC = () => {
+  const { t } = useTranslation();
   const [organizations, setOrganizations] = useState<OrganizationDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,8 +24,8 @@ export const CustomerOrganizationsPage: React.FC = () => {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState<'Mill' | 'Customer'>('Customer');
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<"Mill" | "Customer">("Customer");
   const [submitting, setSubmitting] = useState(false);
 
   const loadOrgs = async () => {
@@ -36,7 +38,7 @@ export const CustomerOrganizationsPage: React.FC = () => {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Không thể tải danh sách tổ chức/doanh nghiệp.');
+        setError(t("admin.orgs.errorLoad", "Không thể tải danh sách tổ chức/doanh nghiệp."));
       }
     } finally {
       setLoading(false);
@@ -58,15 +60,19 @@ export const CustomerOrganizationsPage: React.FC = () => {
         name: name.trim(),
         kind,
       });
-      setSuccessMsg(`Đã thiết lập thành công doanh nghiệp "${name.trim()}"`);
-      setName('');
+      setSuccessMsg(
+        t("admin.orgs.successCreate", "Đã thiết lập thành công doanh nghiệp \"{{name}}\"", {
+          name: name.trim(),
+        })
+      );
+      setName("");
       setIsModalOpen(false);
       await loadOrgs();
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Không thể tạo doanh nghiệp.');
+        setError(t("admin.orgs.errorCreate", "Không thể tạo doanh nghiệp."));
       }
     } finally {
       setSubmitting(false);
@@ -79,13 +85,16 @@ export const CustomerOrganizationsPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-ink-tertiary/15 pb-4">
         <div>
           <span className="text-xs font-mono font-bold text-accent-primary uppercase tracking-wider block">
-            SC-03 · THIẾT LẬP RANH GIỚI KHÁCH HÀNG (TENANT ISOLATION)
+            {t("admin.orgs.tag", "THIẾT LẬP RANH GIỚI KHÁCH HÀNG (TENANT ISOLATION)")}
           </span>
           <h2 className="text-2xl font-display font-bold text-ink-primary">
-            Quản trị Doanh nghiệp & Khách hàng Xuất khẩu
+            {t("admin.orgs.title", "Quản trị Doanh nghiệp & Khách hàng Xuất khẩu")}
           </h2>
           <p className="text-xs text-ink-secondary mt-0.5">
-            Quản lý các công ty gửi lúa vào nhà máy sấy, lưu trữ silo và chế biến xuất khẩu. Dữ liệu lô hàng được cô lập 100% giữa các công ty.
+            {t(
+              "admin.orgs.subtitle",
+              "Quản lý các công ty gửi lúa vào nhà máy sấy, lưu trữ silo và chế biến xuất khẩu. Dữ liệu lô hàng được cô lập 100% giữa các công ty."
+            )}
           </p>
         </div>
 
@@ -94,7 +103,7 @@ export const CustomerOrganizationsPage: React.FC = () => {
             type="button"
             onClick={loadOrgs}
             className="p-2.5 rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-secondary hover:text-ink-primary transition-colors"
-            title="Tải lại danh sách"
+            title={t("common.reload", "Tải lại danh sách")}
           >
             <ArrowsClockwise size={16} />
           </button>
@@ -104,7 +113,7 @@ export const CustomerOrganizationsPage: React.FC = () => {
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-primary text-white font-semibold text-xs hover:bg-accent-primary-dim transition-all shadow-xs"
           >
             <Plus size={16} weight="bold" />
-            <span>Thêm Doanh nghiệp mới</span>
+            <span>{t("admin.orgs.createBtn", "Thêm Doanh nghiệp mới")}</span>
           </button>
         </div>
       </div>
@@ -126,7 +135,7 @@ export const CustomerOrganizationsPage: React.FC = () => {
       {/* Grid of Organizations */}
       {loading ? (
         <div className="py-16 flex justify-center">
-          <GrainLoader label="Đang kiểm tra ranh giới dữ liệu doanh nghiệp..." />
+          <GrainLoader label={t("admin.orgs.loading", "Đang kiểm tra ranh giới dữ liệu doanh nghiệp...")} />
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -137,11 +146,19 @@ export const CustomerOrganizationsPage: React.FC = () => {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="w-10 h-10 rounded-xl bg-accent-primary/10 text-accent-primary flex items-center justify-center shrink-0">
-                  {org.kind === 'Mill' ? <Factory size={22} weight="bold" /> : <Briefcase size={22} weight="bold" />}
+                  {org.kind === "Mill" ? (
+                    <Factory size={22} weight="bold" />
+                  ) : (
+                    <Briefcase size={22} weight="bold" />
+                  )}
                 </div>
                 <StatusBadge
-                  status={org.kind === 'Mill' ? 'BALANCED' : 'STALE'}
-                  label={org.kind === 'Mill' ? 'Đơn vị Vận hành Nhà máy' : 'Doanh nghiệp Xuất khẩu'}
+                  status={org.kind === "Mill" ? "BALANCED" : "STALE"}
+                  label={
+                    org.kind === "Mill"
+                      ? t("admin.orgs.millOperatorBadge", "Đơn vị Vận hành Nhà máy")
+                      : t("admin.orgs.customerBadge", "Doanh nghiệp Xuất khẩu")
+                  }
                 />
               </div>
 
@@ -157,7 +174,7 @@ export const CustomerOrganizationsPage: React.FC = () => {
               <div className="pt-3 border-t border-ink-tertiary/15 flex items-center justify-between text-xs text-ink-secondary">
                 <span className="inline-flex items-center gap-1">
                   <Users size={14} className="text-ink-tertiary" />
-                  <span>Cô lập Tenant riêng biệt</span>
+                  <span>{t("admin.orgs.tenantIsolation", "Cô lập Tenant riêng biệt")}</span>
                 </span>
                 <span className="font-bold text-accent-primary">ISO 22095</span>
               </div>
@@ -172,7 +189,7 @@ export const CustomerOrganizationsPage: React.FC = () => {
           <div className="w-full max-w-md bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl shadow-xl overflow-hidden animate-ledger-in">
             <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between">
               <h3 className="font-display font-bold text-base text-ink-primary">
-                Thiết lập Doanh nghiệp Khách hàng Mới
+                {t("admin.orgs.modalTitle", "Thiết lập Doanh nghiệp Khách hàng Mới")}
               </h3>
               <button
                 type="button"
@@ -186,29 +203,38 @@ export const CustomerOrganizationsPage: React.FC = () => {
             <form onSubmit={handleCreate} className="p-5 space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Tên Công ty / Đơn vị *
+                  {t("admin.orgs.nameLabel", "Tên Công ty / Đơn vị *")}
                 </label>
                 <input
                   type="text"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="VD: Công ty Cổ phần Xuất nhập khẩu Lúa Gạo Sông Tiền"
+                  placeholder={t(
+                    "admin.orgs.namePlaceholder",
+                    "VD: Công ty Cổ phần Xuất nhập khẩu Lúa Gạo Sông Tiền"
+                  )}
                   className="w-full px-3 py-2 rounded-lg bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/20 focus:border-accent-primary focus:outline-none"
                 />
               </div>
 
               <div>
                 <label className="block font-semibold text-ink-secondary mb-1">
-                  Phân loại tổ chức *
+                  {t("admin.orgs.kindLabel", "Phân loại tổ chức *")}
                 </label>
                 <select
                   value={kind}
-                  onChange={(e) => setKind(e.target.value as 'Mill' | 'Customer')}
+                  onChange={(e) =>
+                    setKind(e.target.value as "Mill" | "Customer")
+                  }
                   className="w-full px-3 py-2 rounded-lg bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/20 focus:border-accent-primary focus:outline-none"
                 >
-                  <option value="Customer">Khách hàng Xuất khẩu (Customer Exporter)</option>
-                  <option value="Mill">Ban Điều hành Nhà máy (Mill Operator)</option>
+                  <option value="Customer">
+                    {t("admin.orgs.kindCustomer", "Khách hàng Xuất khẩu (Customer Exporter)")}
+                  </option>
+                  <option value="Mill">
+                    {t("admin.orgs.kindMill", "Ban Điều hành Nhà máy (Mill Operator)")}
+                  </option>
                 </select>
               </div>
 
@@ -218,14 +244,14 @@ export const CustomerOrganizationsPage: React.FC = () => {
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 rounded-lg border border-ink-tertiary/20 hover:bg-surface-raised font-semibold text-ink-secondary"
                 >
-                  Huỷ
+                  {t("common.cancel", "Huỷ")}
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
                   className="px-5 py-2 rounded-lg bg-accent-primary text-white font-semibold hover:bg-accent-primary-dim transition-colors disabled:opacity-60"
                 >
-                  {submitting ? 'Đang tạo...' : 'Tạo doanh nghiệp'}
+                  {submitting ? t("admin.orgs.creating", "Đang tạo...") : t("admin.orgs.submitBtn", "Tạo doanh nghiệp")}
                 </button>
               </div>
             </form>
