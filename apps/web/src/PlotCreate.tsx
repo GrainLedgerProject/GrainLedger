@@ -1,5 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
+import { parsePlotPoint, type PlotPoint } from './plotCoordinates';
+import { useCurrentLocation } from './useCurrentLocation';
+import { PlotDuplicateNotice } from './DuplicateNotice';
+import { usePlotDuplicateCheck } from './useDuplicateCheck';
+
+const PlotMap = lazy(() => import('./PlotMap'));
 
 type RegisterPlotRequest = {
   deviceId: string;
@@ -55,19 +61,27 @@ export function PlotCreate({ farmerId, farmerName, userId, companyId, onCancel, 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const sending = useRef(false);
-  const longitudeInput = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+  const location = useCurrentLocation();
+  const selectedPoint = parsePlotPoint(longitude, latitude);
+  const duplicates = usePlotDuplicateCheck(selectedPoint, undefined, !!pending || busy);
 
-  useEffect(() => { longitudeInput.current?.focus(); }, []);
+  useEffect(() => { dialog.current?.focus(); }, []);
+
+  function selectPoint([lon, lat]: PlotPoint) {
+    location.invalidate();
+    setLongitude(String(lon));
+    setLatitude(String(lat));
+    setError('');
+  }
 
   async function save(event: FormEvent) {
     event.preventDefault();
     if (sending.current) return;
-    const lon = Number(longitude);
-    const lat = Number(latitude);
+    const coordinates = parsePlotPoint(longitude, latitude);
     const area = Number(areaHa);
     if (!pending && (!longitude.trim() || !latitude.trim() || !areaHa.trim() ||
-      !Number.isFinite(lon) || lon < -180 || lon > 180 ||
-      !Number.isFinite(lat) || lat < -90 || lat > 90 ||
+      !coordinates ||
       !Number.isFinite(area) || area <= 0 || area >= 1_000_000_000_000 ||
       !/^\d+(?:\.\d{1,12})?$/.test(areaHa.trim()))) {
       setError('Enter a longitude from -180 to 180, a latitude from -90 to 90, and a positive area in hectares (up to 12 decimal places).');
@@ -83,7 +97,7 @@ export function PlotCreate({ farmerId, farmerName, userId, companyId, onCancel, 
       capturedAt: new Date().toISOString(),
       payloadSchemaVersion: 1,
       payload: { entityId: crypto.randomUUID(), farmerId, code: code.trim() || null,
-        geometry: { type: 'Point', coordinates: [lon, lat] }, areaHa: area },
+        geometry: { type: 'Point', coordinates: coordinates! }, areaHa: area },
     };
     if (!pending) {
       setPending(request);
@@ -107,15 +121,25 @@ export function PlotCreate({ farmerId, farmerName, userId, companyId, onCancel, 
   }
 
   return <div className="farmer-modal-backdrop">
-    <section className="farmer-modal" role="dialog" aria-modal="true" aria-labelledby="add-plot-title" onKeyDown={event => { if (event.key === 'Escape' && !busy) onCancel(); }}>
+    <section ref={dialog} tabIndex={-1} className="farmer-modal capture-modal-wide" role="dialog" aria-modal="true" aria-labelledby="add-plot-title" onKeyDown={event => { if (event.key === 'Escape' && !busy) onCancel(); }}>
       <div className="farmer-modal-heading"><div><span className="eyebrow">FIELD RECORDS</span><h2 id="add-plot-title">Add plot</h2></div><button className="farmer-modal-close" type="button" onClick={onCancel} disabled={busy} aria-label="Close add plot form">×</button></div>
-      <p className="muted">Register a plot for <strong>{farmerName}</strong>. Coordinates use WGS84; enter longitude before latitude.</p>
+      <p className="muted">Register a plot for <strong>{farmerName}</strong>. Choose a point or enter WGS84 coordinates. Check that the selected point is on the plot.</p>
       <form onSubmit={save}>
         <label htmlFor="new-plot-code">Plot code <span className="optional">(optional)</span><input id="new-plot-code" value={code} onChange={event => setCode(event.target.value)} maxLength={40} disabled={busy || !!pending} placeholder="Leave blank to generate a code" /></label>
-        <div className="form-columns">
-          <label htmlFor="new-plot-longitude">Longitude <span className="required-mark">*</span><input ref={longitudeInput} id="new-plot-longitude" type="number" inputMode="decimal" step="any" min="-180" max="180" value={longitude} onChange={event => setLongitude(event.target.value)} required disabled={busy || !!pending} placeholder="106.35" /></label>
-          <label htmlFor="new-plot-latitude">Latitude <span className="required-mark">*</span><input id="new-plot-latitude" type="number" inputMode="decimal" step="any" min="-90" max="90" value={latitude} onChange={event => setLatitude(event.target.value)} required disabled={busy || !!pending} placeholder="10.4" /></label>
+        <div className="plot-map-heading">
+          <div><strong>Plot location</strong><span>Click the map or drag the marker. The starting view is not a saved location.</span></div>
+          <button type="button" className="secondary" onClick={() => location.locate(selectPoint)} disabled={busy || !!pending || location.locating}>{location.locating ? 'Finding location…' : 'Use device location'}</button>
         </div>
+        <Suspense fallback={<div className="plot-map-loading" role="status">Loading map…</div>}>
+          <PlotMap point={selectedPoint} onChange={selectPoint} disabled={busy || !!pending} />
+        </Suspense>
+        {location.locationError && <p className="plot-location-feedback" role="status">{location.locationError}</p>}
+        {location.accuracy !== null && <p className="plot-location-feedback" role="status">Device estimate: within approximately {Math.round(location.accuracy)} m. Confirm this is the plot location.</p>}
+        <div className="form-columns">
+          <label htmlFor="new-plot-longitude">Longitude <span className="required-mark">*</span><input id="new-plot-longitude" type="number" inputMode="decimal" step="any" min="-180" max="180" value={longitude} onChange={event => { location.invalidate(); setLongitude(event.target.value); }} required disabled={busy || !!pending} placeholder="106.35" /></label>
+          <label htmlFor="new-plot-latitude">Latitude <span className="required-mark">*</span><input id="new-plot-latitude" type="number" inputMode="decimal" step="any" min="-90" max="90" value={latitude} onChange={event => { location.invalidate(); setLatitude(event.target.value); }} required disabled={busy || !!pending} placeholder="10.4" /></label>
+        </div>
+        <PlotDuplicateNotice state={duplicates} />
         <label htmlFor="new-plot-area">Area (hectares) <span className="required-mark">*</span><input id="new-plot-area" type="number" inputMode="decimal" step="any" min="0.000000000001" value={areaHa} onChange={event => setAreaHa(event.target.value)} required disabled={busy || !!pending} placeholder="1.25" /></label>
         {pending && <div className="notice pending">The request may already have reached the server. Retry sends the same plot request to prevent a duplicate.</div>}
         {error && <div className="notice error" role="alert">{error}</div>}

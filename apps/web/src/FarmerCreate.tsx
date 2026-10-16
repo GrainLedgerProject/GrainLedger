@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
+import { FarmerDuplicateNotice } from './DuplicateNotice';
+import { useFarmerDuplicateCheck } from './useDuplicateCheck';
 
 type RegisterFarmerRequest = {
   deviceId: string;
@@ -53,6 +55,7 @@ export function FarmerCreate({ userId, companyId, onCancel, onCreated }: {
   const [error, setError] = useState('');
   const sending = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
+  const duplicates = useFarmerDuplicateCheck(name, contact, undefined, !!pending || busy);
 
   useEffect(() => { nameInput.current?.focus(); }, []);
 
@@ -94,6 +97,7 @@ export function FarmerCreate({ userId, companyId, onCancel, onCreated }: {
       <form onSubmit={save}>
         <label htmlFor="new-farmer-name">Full name <span className="required-mark">*</span><input ref={nameInput} id="new-farmer-name" value={name} onChange={event => setName(event.target.value)} required maxLength={200} disabled={busy || !!pending} autoComplete="name" placeholder="e.g. Nguyễn Văn A" /></label>
         <label htmlFor="new-farmer-contact">Contact <span className="optional">(optional)</span><input id="new-farmer-contact" value={contact} onChange={event => setContact(event.target.value)} disabled={busy || !!pending} placeholder="Phone number or other contact detail" /></label>
+        <FarmerDuplicateNotice state={duplicates} />
         {pending && <div className="notice pending">The request may already have reached the server. Retry will send the same request to prevent a duplicate farmer.</div>}
         {error && <div className="notice error" role="alert">{error}</div>}
         <div className="form-footer"><button type="button" className="secondary" onClick={onCancel} disabled={busy}>Cancel</button><button type="submit" disabled={busy || !name.trim()}>{busy ? 'Saving…' : pending ? 'Retry save' : 'Save farmer'}</button></div>

@@ -32,6 +32,7 @@ public static class PlotEndpoints
         var group = endpoints.MapGroup("/api/plots").RequireAuthorization()
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>();
         group.MapPost("", RegisterAsync).RequireAuthorization("farms.write");
+        group.MapPost("/duplicate-check", CaptureDuplicateEndpoints.CheckPlotAsync).RequireAuthorization("farms.write");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("farms.write");

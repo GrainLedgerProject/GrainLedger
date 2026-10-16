@@ -150,6 +150,8 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
 .plot-record-hero { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 34px; background: linear-gradient(110deg, #f2f6ec, #fff); border-bottom: 1px solid #e3e9dc; }
 .plot-record-hero h2 { font-size: 27px; margin: 7px 0; overflow-wrap: anywhere; }
 .plot-record-hero p { font-size: 13px; margin: 0; }
+.plot-hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.plot-hero-actions button, .farmer-edit-button { flex-shrink: 0; }
 .plot-area-badge { flex-shrink: 0; padding: 12px 16px; border-radius: 9px; background: #dce9d4; color: #245238; font-weight: 700; }
 .plot-record-facts, .plot-coordinates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
 .plot-record-facts { padding: 27px 34px 32px; }
@@ -191,13 +193,27 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
 .capture-stat-grid > div { padding: 16px; border: 1px solid #e5eade; border-radius: 9px; min-width: 0; }
 .capture-stat-grid span { display: block; color: #788779; font-size: 11px; margin-bottom: 8px; }
 .capture-stat-grid strong { font-size: 14px; overflow-wrap: anywhere; }
-.farmer-modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgba(12, 36, 24, .54); }
+.farmer-modal-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 20px; background: rgba(12, 36, 24, .54); }
 .farmer-modal { width: min(100%, 560px); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 30px; border: 1px solid #e3e7dc; border-radius: 16px; background: #fff; box-shadow: 0 25px 80px rgba(10, 32, 20, .25); }
 .farmer-modal-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
 .farmer-modal-heading h2 { font-size: 25px; margin: 8px 0 0; }
 .farmer-modal > p { font-size: 13px; margin: 12px 0 22px; }
 .farmer-modal-close { padding: 0; width: 32px; height: 32px; flex-shrink: 0; background: transparent; color: #5f7564; font-size: 25px; font-weight: 400; }
 .farmer-modal-close:hover { background: #eef3ea; }
+.plot-map-heading { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin: 20px 0 10px; }
+.plot-map-heading strong, .plot-map-heading span { display: block; }
+.plot-map-heading strong { color: #173f2e; font-size: 14px; }
+.plot-map-heading span, .plot-map-caption, .plot-location-feedback { color: #607364; font-size: 12px; line-height: 1.5; }
+.plot-map-heading button { flex-shrink: 0; font-size: 12px; }
+.plot-map-wrap { margin-bottom: 16px; }
+.plot-map { height: 280px; border: 1px solid #d8e1d4; border-radius: 11px; overflow: hidden; background: #f1f5ec; }
+.plot-map-loading { display: grid; place-items: center; height: 280px; border: 1px solid #d8e1d4; border-radius: 11px; color: #607364; }
+.plot-map-caption { margin: 7px 0 0; }
+.plot-location-feedback { margin: 6px 0 13px; }
+.plot-map-grid-tile { display: grid; place-items: center; width: 256px; height: 256px; box-sizing: border-box; border: 1px solid #dce7d7; background: linear-gradient(135deg, #f6f9f2, #edf4e9); color: #8ba18b; font-size: 11px; font-weight: 600; }
+.plot-map-marker { background: transparent; border: 0; }
+.plot-map-marker span { display: block; width: 22px; height: 22px; box-sizing: border-box; border: 4px solid #fff; border-radius: 50%; background: #d06e39; box-shadow: 0 2px 12px #163c2c88; }
+@media (max-width: 620px) { .plot-map-heading { align-items: flex-start; flex-direction: column; } .plot-map { height: 245px; } }
 .required-mark { color: #a04b41; }
 .list-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; margin: 14px 0; }
 .list-controls label { flex: 1 1 180px; min-width: 0; margin: 0; }

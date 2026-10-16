@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage } from './api';
 import { FarmerCreate } from './FarmerCreate';
+import { FarmerEdit } from './FarmerEdit';
 import { PlotCreate } from './PlotCreate';
 
 type Farmer = {
@@ -9,6 +10,7 @@ type Farmer = {
   name: string;
   contact: string | null;
   createdAt: string;
+  canEdit?: boolean;
 };
 
 type FarmerListResponse = {
@@ -40,6 +42,7 @@ export function Farmers({ selectedId, showCreateInitially, onSelect, onOpenPlot,
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(Boolean(showCreateInitially && canCreate));
   const [showPlotCreate, setShowPlotCreate] = useState(false);
+  const [showFarmerEdit, setShowFarmerEdit] = useState(false);
   const [plotsPage, setPlotsPage] = useState(1);
   const [plotsRetry, setPlotsRetry] = useState(0);
   const [plots, setPlots] = useState<PlotListResponse | null>(null);
@@ -103,7 +106,7 @@ export function Farmers({ selectedId, showCreateInitially, onSelect, onOpenPlot,
     {loading && <p role="status">Loading farmer…</p>}
     {error && <div className="notice error" role="alert">{error} <button className="text-button" onClick={() => setRetry(value => value + 1)}>Try again</button></div>}
     {farmer && <section className="panel farmer-detail">
-      <div className="farmer-detail-hero"><span className="farmer-monogram" aria-hidden="true">{farmer.name.slice(0, 1).toUpperCase()}</span><div><span className="eyebrow">REGISTERED FARMER</span><h2>{farmer.name}</h2><span className="farmer-code">{farmer.code}</span></div></div>
+      <div className="farmer-detail-hero"><span className="farmer-monogram" aria-hidden="true">{farmer.name.slice(0, 1).toUpperCase()}</span><div><span className="eyebrow">REGISTERED FARMER</span><h2>{farmer.name}</h2><span className="farmer-code">{farmer.code}</span></div>{farmer.canEdit && <button className="secondary farmer-edit-button" onClick={() => setShowFarmerEdit(true)}>Edit farmer</button>}</div>
       <div className="farmer-facts"><div><span>Contact</span><strong>{farmer.contact || 'Not provided'}</strong></div><div><span>Registered</span><strong>{new Date(farmer.createdAt).toLocaleString()}</strong></div></div>
     </section>}
     {farmer && <section className="panel farmer-plots">
@@ -114,6 +117,7 @@ export function Farmers({ selectedId, showCreateInitially, onSelect, onOpenPlot,
       {plots && <div className="farmer-pagination"><span>Page {plots.page}</span><button className="secondary" disabled={plotsPage === 1 || plotsLoading} onClick={() => setPlotsPage(value => value - 1)}>Previous</button><button className="secondary" disabled={!plots.hasMore || plotsLoading} onClick={() => setPlotsPage(value => value + 1)}>Next</button></div>}
     </section>}
     {farmer && showPlotCreate && canCreate && <PlotCreate farmerId={farmer.id} farmerName={farmer.name} userId={userId} companyId={companyId} onCancel={() => setShowPlotCreate(false)} onCreated={id => { setShowPlotCreate(false); onOpenPlot(id); }} />}
+    {farmer && showFarmerEdit && <FarmerEdit id={farmer.id} onCancel={() => setShowFarmerEdit(false)} onUpdated={() => { setShowFarmerEdit(false); setRetry(value => value + 1); }} />}
   </>;
 
   return <>

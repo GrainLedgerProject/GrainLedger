@@ -43,6 +43,7 @@ public static class CaptureModule
         var group = endpoints.MapGroup("/api/farmers").RequireAuthorization()
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>();
         group.MapPost("", RegisterAsync).RequireAuthorization("farms.write");
+        group.MapPost("/duplicate-check", CaptureDuplicateEndpoints.CheckFarmerAsync).RequireAuthorization("farms.write");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("farms.write");

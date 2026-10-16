@@ -14,6 +14,32 @@ const plotSeasonId = '06d238e3-d388-4a91-b142-24b90b5dba25';
 beforeEach(() => { vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset(); clearLocalSession(); window.sessionStorage.clear(); window.localStorage.clear(); window.history.replaceState({}, '', '/'); });
 
 describe('Capture journey', () => {
+  it('does not warn that the outcome is uncertain while a pesticide declaration is saving', async () => {
+    let finishSave: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementation(async url => {
+      if (url === '/api/auth/session') return json(staff);
+      if (url === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (url === `/api/plot-seasons/${plotSeasonId}`) return json({ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25' });
+      if (url === `/api/plots/${plotId}`) return json({ id: plotId, farmerId, code: 'TR-001' });
+      if (String(url).startsWith('/api/crop-seasons?')) return json({ items: [], page: 1, pageSize: 100, hasMore: false });
+      if (String(url).startsWith('/api/active-substances?')) return json({ items: [], page: 1, pageSize: 100, hasMore: false });
+      if (String(url).startsWith('/api/spray-declarations?')) return json({ items: [], page: 1, pageSize: 10, hasMore: false });
+      if (url === '/api/spray-declarations') return new Promise<Response>(resolve => { finishSave = resolve; });
+      return json({}, 404);
+    });
+    window.history.replaceState({}, '', `/capture/plot-seasons/${plotSeasonId}`);
+    render(<App />); const browser = userEvent.setup();
+    await browser.click(await screen.findByRole('button', { name: /Record application/ }));
+    await browser.type(screen.getByLabelText('Application date'), '2020-01-01');
+    await browser.type(screen.getByLabelText('Information source'), 'Farmer notebook');
+    await browser.type(screen.getByLabelText(/Product name/), 'Pesticide A');
+    await browser.click(screen.getByRole('button', { name: 'Save declaration' }));
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
+    finishSave?.(json({ id: 'spray-1', plotSeasonId, appliedOn: '2020-01-01', informationSource: 'Farmer notebook', evidenceRef: null, capturedAt: '2020-01-01T00:00:00Z', recordedAt: '2020-01-01T00:00:00Z', items: [] }, 201));
+    expect(await screen.findByRole('heading', { name: 'Pesticide declaration' })).toBeInTheDocument();
+  });
+
   it('records and reopens a pesticide declaration without spray rate', async () => {
     let saved: unknown = null;
     fetchMock.mockImplementation(async (url, init) => {
@@ -71,6 +97,8 @@ describe('Capture journey', () => {
     let receipt: Record<string, unknown> | null = null;
     let sourceLotId = '';
     let sample: Record<string, unknown> | null = null;
+    let finishSample: ((response: Response) => void) | undefined;
+    let finishHandover: ((response: Response) => void) | undefined;
     const handovers: object[] = [];
     fetchMock.mockImplementation(async (url, init) => {
       const path = String(url);
@@ -89,10 +117,10 @@ describe('Capture journey', () => {
       if (path.startsWith('/api/procurements/')) return json(receipt);
       if (path.startsWith('/api/source-lots/')) return json({ id: sourceLotId, lotId: 'lot-id', lotCode: 'LOT-1', procurementId: receipt?.id, procurementCode: 'PN-001', farmerId, plotId, plotSeasonId, riceVariety: 'ST25', receivedAt: receipt?.receivedAt, initialNetMassKg: '600', moisturePercent: '22.5', receivingStatus: 'PENDING_ARRIVAL', usableStockKg: '0', currentStock: [], stockAsOf: new Date().toISOString() });
       if (path === '/api/samples') {
-        const request = JSON.parse(String(init?.body)); sample = { id: request.payload.entityId, sourceLotId, code: request.payload.code, sealCode: request.payload.sealCode, collectedAt: request.payload.collectedAt, capturedAt: request.capturedAt, recordedAt: request.capturedAt, handoverCount: 0 }; return json(sample, 201);
+        const request = JSON.parse(String(init?.body)); sample = { id: request.payload.entityId, sourceLotId, code: request.payload.code, sealCode: request.payload.sealCode, collectedAt: request.payload.collectedAt, capturedAt: request.capturedAt, recordedAt: request.capturedAt, handoverCount: 0 }; return new Promise<Response>(resolve => { finishSample = resolve; });
       }
       if (path.startsWith('/api/samples?')) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
-      if (path.endsWith('/handovers') && init?.method === 'POST') { const request = JSON.parse(String(init.body)); handovers.push({ id: request.payload.entityId, sampleId: sample?.id, ...request.payload }); if (sample) sample.handoverCount = 1; return json(handovers[0], 201); }
+      if (path.endsWith('/handovers') && init?.method === 'POST') { const request = JSON.parse(String(init.body)); handovers.push({ id: request.payload.entityId, sampleId: sample?.id, ...request.payload }); if (sample) sample.handoverCount = 1; return new Promise<Response>(resolve => { finishHandover = resolve; }); }
       if (path.includes('/handovers?')) return json({ items: handovers, page: 1, pageSize: 20, hasMore: false });
       if (path.startsWith('/api/samples/')) return json(sample);
       return json({}, 404);
@@ -116,12 +144,18 @@ describe('Capture journey', () => {
     await browser.type(screen.getByLabelText('Sample code'), 'SAMPLE-001');
     await browser.type(screen.getByLabelText('Seal code'), 'SEAL-001');
     await browser.click(screen.getByRole('button', { name: 'Save sample' }));
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
+    finishSample?.(json(sample, 201));
     expect(await screen.findByRole('heading', { name: 'SAMPLE-001' })).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /Record handover/ }));
     await browser.type(screen.getByLabelText('From party'), 'Collection agent');
     await browser.type(screen.getByLabelText('To party'), 'Laboratory');
     await browser.type(screen.getByLabelText('Seal condition'), 'Intact');
     await browser.click(screen.getByRole('button', { name: 'Save handover' }));
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
+    finishHandover?.(json(handovers[0], 201));
     await waitFor(() => expect(screen.getByText('Laboratory')).toBeInTheDocument());
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/samples')).toBe(true);
