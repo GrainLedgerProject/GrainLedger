@@ -1,4 +1,6 @@
 using System.Net.Mail;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -22,6 +24,9 @@ public static partial class IdentityEndpoints
             .Produces<RegistrationPendingDto>(StatusCodes.Status202Accepted).ProducesProblem(StatusCodes.Status429TooManyRequests);
         auth.MapPost("/login", LoginLocalAsync).AllowAnonymous().WithMetadata(new CredentialEndpointMetadata()).RequireRateLimiting("authentication")
             .WithName("LoginLocalAccount").WithDescription("Sign in with a verified local email and password.").Produces<IssuedTokens>().ProducesProblem(StatusCodes.Status401Unauthorized);
+        auth.MapPost("/web-login", LoginBrowserAsync).AllowAnonymous().RequireRateLimiting("authentication")
+            .WithName("LoginBrowserAccount").WithDescription("Sign in with email/password using an HttpOnly session cookie. Requires X-CSRF-TOKEN.")
+            .Produces<SessionUserDto>().ProducesProblem(StatusCodes.Status400BadRequest).ProducesProblem(StatusCodes.Status401Unauthorized);
         auth.MapPost("/refresh", RefreshAsync).AllowAnonymous().WithMetadata(new CredentialEndpointMetadata()).RequireRateLimiting("authentication")
             .WithName("RefreshLocalTokens").WithDescription("Rotate a single-use refresh token.").Produces<IssuedTokens>().ProducesProblem(StatusCodes.Status401Unauthorized);
         auth.MapPost("/forgot-password", ForgotPasswordAsync).AllowAnonymous().WithMetadata(new CredentialEndpointMetadata()).RequireRateLimiting("authentication")
@@ -105,9 +110,15 @@ public static partial class IdentityEndpoints
         return Results.Accepted(value: new RegistrationPendingDto(attempt.Id, attempt.Email, 600));
     }
 
-    private static async Task<IResult> LoginLocalAsync(LoginRequest request, HttpContext http, IdentityDbContext db, LocalAuthService auth, TimeProvider clock, CancellationToken ct)
+    private static Task<IResult> LoginLocalAsync(LoginRequest request, HttpContext http, IdentityDbContext db, LocalAuthService auth, TimeProvider clock, CancellationToken ct)
+        => LoginAsync(request, http, db, auth, clock, false, ct);
+
+    private static Task<IResult> LoginBrowserAsync(LoginRequest request, HttpContext http, IdentityDbContext db, LocalAuthService auth, TimeProvider clock, CancellationToken ct)
+        => LoginAsync(request, http, db, auth, clock, true, ct);
+
+    private static async Task<IResult> LoginAsync(LoginRequest request, HttpContext http, IdentityDbContext db, LocalAuthService auth, TimeProvider clock, bool browser, CancellationToken ct)
     {
-        if (!auth.JwtConfigured) return Unavailable("Local authentication is not configured.");
+        if (!browser && !auth.JwtConfigured) return Unavailable("Local authentication is not configured.");
         if (!IsEmail(request.Email ?? "") || string.IsNullOrEmpty(request.Password) || request.Password.Length > 128) return Results.Unauthorized();
         var normalized = LocalAuthService.NormalizeEmail(request.Email ?? ""); var now = clock.GetUtcNow();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -120,6 +131,22 @@ public static partial class IdentityEndpoints
             return Results.Unauthorized();
         }
         user.FailedLoginCount = 0; user.LockoutEnd = null; db.AuditEvents.Add(IdentityHelpers.Audit(http, "auth.login", user.Id, user.Id, new { provider = "local" }));
+        if (browser)
+        {
+            var session = new LoginSession
+            {
+                User = user, CreatedAt = now, LastSeenAt = now, ExpiresAt = now.AddMinutes(15),
+                IpAddress = http.Connection.RemoteIpAddress?.ToString(),
+                UserAgent = http.Request.Headers.UserAgent.ToString()[..Math.Min(http.Request.Headers.UserAgent.ToString().Length, 512)]
+            };
+            db.Sessions.Add(session);
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            var claims = new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim("session_id", session.Id.ToString()) };
+            await http.SignInAsync(AuthSchemes.Application, new ClaimsPrincipal(new ClaimsIdentity(claims, AuthSchemes.Application)),
+                new AuthenticationProperties { IsPersistent = true, ExpiresUtc = session.ExpiresAt, AllowRefresh = true });
+            return Results.Ok(ToSessionDto(user));
+        }
         var tokens = await auth.IssueAsync(user, http, cancellationToken: ct); await tx.CommitAsync(ct); return Results.Ok(tokens);
     }
 

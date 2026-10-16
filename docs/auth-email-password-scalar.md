@@ -143,9 +143,9 @@ Lưu **cả accessToken và refreshToken mới** từ response, cập nhật Bea
 
 Access token có hạn 15 phút. Refresh token mới có hạn 30 ngày tính từ lúc cấp. Refresh thành công không thu hồi ngay access token trước đó; token đó còn dùng được đến khi hết hạn hoặc cả chuỗi session bị thu hồi. Logout từ bất kỳ access token còn hiệu lực nào trong chuỗi sẽ thu hồi cả chuỗi. Logout, reset password, khóa tài khoản hoặc đổi quyền có thể làm token mất hiệu lực sớm hơn thời hạn đó.
 
-Giao diện React giữ access token và refresh token của đăng nhập email/password trong bộ nhớ của tab, không ghi refresh token vào `localStorage` hay `sessionStorage`. Khi nhiều request cùng nhận `401`, giao diện chỉ thực hiện một lần refresh, lưu cả cặp token mới rồi thử lại request đúng một lần. Refresh thất bại sẽ xóa phiên local và đưa người dùng về màn hình đăng nhập; không có vòng lặp retry. Request Bearer không lấy hoặc gửi CSRF token. Request dùng cookie Google vẫn lấy CSRF mới trước các thao tác thay đổi dữ liệu.
+Giao diện React dùng `POST /api/auth/web-login` để đăng nhập email/password bằng cookie HttpOnly, cùng cơ chế phiên Google. Lấy `GET /api/auth/csrf` trước, gửi `X-CSRF-TOKEN` cùng email/password; response chỉ chứa profile, không chứa JWT/refresh token. Cookie có SameSite=Lax, Secure ở production. Web không lưu token vào localStorage hoặc sessionStorage.
 
-Đổi lại, tải lại trang sẽ mất phiên email/password trong bộ nhớ và người dùng cần đăng nhập lại. Phiên Google dùng cookie vẫn có thể được khôi phục bằng `GET /api/auth/session`. Đây là giới hạn chủ ý để refresh token không tồn tại lâu trong browser storage; nếu sau này cần giữ đăng nhập qua reload, nên chuyển refresh token sang cookie `HttpOnly`, `Secure`, `SameSite` do backend quản lý thay vì lưu bằng JavaScript.
+Khi F5, web gọi `GET /api/auth/session` bằng cookie để khôi phục phiên. Phiên hết hạn sau 15 phút không hoạt động và được gia hạn khi request hợp lệ; sau logout/thu hồi/hết hạn phải đăng nhập lại. Các mutation cookie cần CSRF mới theo danh tính hiện tại, kể cả web-login. Scalar tiếp tục dùng `/api/auth/login` và `/api/auth/refresh` với JSON/Bearer như hướng dẫn trên, không bị đổi contract. Xem [thiết kế và kiểm chứng](identity-session-permissions.md).
 
 ## 4. Logout
 
@@ -208,7 +208,7 @@ Integration tests dùng PostgreSQL riêng qua Testcontainers và mailbox giả l
 
 Kết quả kiểm tra ngày 09/10/2026: toàn bộ **31 integration tests passed**, gồm test hồi quy logout không ảnh hưởng tài khoản khác khi trùng family ID. Quét package NuGet của backend (gồm dependency gián tiếp) không phát hiện lỗ hổng đã biết tại thời điểm kiểm tra. Đã kiểm tra Scalar hiển thị ô Bearer token trên trình duyệt. Chưa kiểm thử gửi mail thật vì chưa có SMTP.
 
-Frontend có test cho đăng ký và chuyển bước OTP, liên kết `registrationId`, cooldown gửi lại, response `202` không body của forgot password, thông báo `503`, cookie/CSRF, Bearer refresh singleflight, retry bằng token đã xoay và cô lập response đến muộn từ phiên cũ. Build TypeScript/Vite cũng được kiểm tra.
+Frontend có test cho đăng ký và chuyển bước OTP, liên kết `registrationId`, cooldown gửi lại, response `202` không body của forgot password, thông báo `503`, cookie/CSRF, khôi phục phiên sau remount, logout và cô lập response đến muộn từ phiên cũ. Build TypeScript/Vite cũng được kiểm tra.
 
 Migration mới cấp family ID riêng cho từng session Google cũ; không gom chung các phiên cũ khi logout. Chưa áp dụng migration lên database làm việc của bạn trong đợt này; chạy lệnh `--migrate` ở trên trước khi dùng API mới.
 

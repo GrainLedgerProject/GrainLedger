@@ -43,7 +43,7 @@ public static class IdentityModuleRegistration
         services.AddScoped<IAuthorizationHandler>(sp => sp.GetRequiredService<PermissionAuthorizationHandler>());
         services.AddAuthorization(o =>
         {
-            foreach (var permission in Roles.All.Values.SelectMany(role => role.Permissions).Distinct())
+            foreach (var permission in Permissions.All)
                 o.AddPolicy(permission, p => p.RequireAuthenticatedUser().AddRequirements(new PermissionRequirement(permission)));
         });
         services.AddAntiforgery(o =>
