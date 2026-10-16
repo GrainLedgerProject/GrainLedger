@@ -11,7 +11,7 @@ public static partial class IdentityEndpoints
 {
     private static void MapAdministrationEndpoints(RouteGroupBuilder group)
     {
-        var admin = group.MapGroup("/admin").RequireAuthorization("identity.manage").WithTags("Administration");
+        var admin = group.MapGroup("/admin").RequireAuthorization(Permissions.IdentityManage).WithTags("Administration");
         admin.MapGet("/roles", () => Results.Ok(Roles.All.Values.Select(x => new
         {
             name = x.Name, organizationKind = x.OrganizationKind, permissions = x.Permissions

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, clearLocalSession, errorMessage, hasLocalSession, roleLabel, type User } from './api';
+import { api, ApiError, clearLocalSession, errorMessage, roleLabel, type User } from './api';
 import { Administration } from './Administration';
 import { LedgerWorkspace, ledgerSections } from './LedgerWorkspace';
 import { googleLoginError } from './auth-errors';
@@ -122,7 +122,7 @@ function Profile({ user, onUpdate, onReload, onLogoutAll, signingOut }: { user: 
         <section className="panel"><div className="panel-heading"><h2>Workspace access</h2><p className="muted">Assigned by your administrator.</p></div><dl><dt>Organization</dt><dd>{user.organizationName || 'Not assigned'}</dd><dt>Role</dt><dd><span className="badge">{roleLabel(user.role)}</span></dd><dt>Account status</dt><dd><span className="status-dot" /> {user.role ? 'Active' : 'Pending assignment'}</dd></dl>
           {user.permissions.length > 0 && <details><summary>Your permissions ({user.permissions.length})</summary><ul className="permissions">{user.permissions.map(p => <li key={p}>{p}</li>)}</ul></details>}
         </section>
-        <section className="panel security"><h2>Sign-in & security</h2><p className="muted">Your current session uses {hasLocalSession() ? 'email and password with rotating security tokens' : 'Google sign-in'}. Use the button below if you no longer trust another signed-in device.</p><button className="secondary" disabled={signingOut} onClick={onLogoutAll}>{signingOut ? 'Signing out…' : 'Sign out on all devices'}</button></section>
+        <section className="panel security"><h2>Sign-in & security</h2><p className="muted">Your session is protected by a secure browser cookie. Use the button below if you no longer trust another signed-in device.</p><button className="secondary" disabled={signingOut} onClick={onLogoutAll}>{signingOut ? 'Signing out…' : 'Sign out on all devices'}</button></section>
       </div>
     </div>
   </>;

@@ -128,10 +128,11 @@ describe('Account experience', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ email: 'member@example.com', otp: '654321', newPassword: 'ChangedPass!456' });
   });
 
-  it('uses Bearer without CSRF for local profile changes and logout', async () => {
+  it('uses cookie and CSRF for password login, profile changes and logout', async () => {
     fetchMock.mockImplementation(async (url, init) => {
       if (url === '/api/auth/session') return json({}, 401);
-      if (url === '/api/auth/login') return json({ accessToken: 'local-access', refreshToken: 'local-refresh', tokenType: 'Bearer', expiresIn: 900, user });
+      if (url === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (url === '/api/auth/web-login') return json(user);
       if (url === '/api/profile') return json({ ...user, ...JSON.parse(String(init?.body)) });
       if (url === '/api/auth/logout') return new Response(null, { status: 204 });
       return json({}, 404);
@@ -147,11 +148,13 @@ describe('Account experience', () => {
     await screen.findByText('Changes saved.');
     await browser.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('button', { name: 'Đăng nhập' })).toBeInTheDocument();
-    for (const path of ['/api/profile', '/api/auth/logout']) {
+    for (const path of ['/api/auth/web-login', '/api/profile', '/api/auth/logout']) {
       const [, init] = fetchMock.mock.calls.find(([url]) => url === path)!;
-      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer local-access');
+      expect(new Headers(init?.headers).get('Authorization')).toBeNull();
+      expect(new Headers(init?.headers).get('X-CSRF-TOKEN')).toBe('csrf');
+      expect(init?.credentials).toBe('include');
     }
-    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/csrf')).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/csrf')).toBe(true);
   });
 
   it('shows a useful email-service message for registration 503', async () => {
@@ -198,30 +201,38 @@ it('explains stale admin edits instead of claiming success', async () => {
   await expect(api('/api/admin/users/1/access', { method: 'PUT', body: '{}' })).rejects.toThrow('This account changed');
 });
 
-it('uses one refresh request for concurrent bearer failures and retries with the rotated access token', async () => {
-  fetchMock.mockImplementation(async (url, init) => {
-    if (url === '/api/auth/login') return json({ accessToken: 'old-access', refreshToken: 'old-refresh', tokenType: 'Bearer', expiresIn: 900, user });
-    if (url === '/api/auth/refresh') return json({ accessToken: 'new-access', refreshToken: 'new-refresh', tokenType: 'Bearer', expiresIn: 900, user });
-    if (url === '/resource') return new Headers(init?.headers).get('Authorization') === 'Bearer new-access' ? json({ ok: true }) : json({}, 401);
+it('restores a password session after remount and stays signed out after logout and remount', async () => {
+  let signedIn = false;
+  fetchMock.mockImplementation(async url => {
+    if (url === '/api/auth/csrf') return json({ token: 'csrf' });
+    if (url === '/api/auth/web-login') { signedIn = true; return json(user); }
+    if (url === '/api/auth/session') return signedIn ? json(user) : json({}, 401);
+    if (url === '/api/auth/logout') { signedIn = false; return new Response(null, { status: 204 }); }
     return json({}, 404);
   });
   await loginWithPassword('staff@example.com', 'StrongPass!123');
-  await expect(Promise.all([api('/resource'), api('/resource')])).resolves.toEqual([{ ok: true }, { ok: true }]);
-  expect(fetchMock.mock.calls.filter(([url]) => url === '/api/auth/refresh')).toHaveLength(1);
-  expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/csrf')).toBe(false);
+  clearLocalSession(); // Simulate losing all JS session state on reload; the browser retains its cookie.
+  const first = render(<App />);
+  expect(await screen.findByLabelText('Full name')).toHaveValue('Nguyen An');
+  first.unmount();
+  const reloaded = render(<App />);
+  await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+  await screen.findByRole('button', { name: 'Đăng nhập' });
+  reloaded.unmount();
+  render(<App />);
+  expect(await screen.findByRole('button', { name: 'Đăng nhập' })).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/refresh')).toBe(false);
+  for (const [, init] of fetchMock.mock.calls) expect(new Headers(init?.headers).has('Authorization')).toBe(false);
 });
 
-it('does not let a late 401 from an old login refresh or clear a newer login', async () => {
+it('does not let a late 401 from an old session clear a newer login', async () => {
   let finishOldRequest!: (response: Response) => void;
   const oldRequest = new Promise<Response>(resolve => { finishOldRequest = resolve; });
-  let loginCount = 0;
-  fetchMock.mockImplementation(async (url, init) => {
-    if (url === '/api/auth/login') {
-      loginCount++;
-      return json({ accessToken: `access-${loginCount}`, refreshToken: `refresh-${loginCount}`, tokenType: 'Bearer', expiresIn: 900, user });
-    }
+  fetchMock.mockImplementation(async url => {
+    if (url === '/api/auth/csrf') return json({ token: 'csrf' });
+    if (url === '/api/auth/web-login') return json(user);
     if (url === '/slow') return oldRequest;
-    if (url === '/current') return new Headers(init?.headers).get('Authorization') === 'Bearer access-2' ? json({ ok: true }) : json({}, 401);
+    if (url === '/current') return json({ ok: true });
     if (url === '/api/auth/refresh') return json({}, 500);
     return json({}, 404);
   });
@@ -240,7 +251,8 @@ it('ignores a delayed cookie response after a local login starts', async () => {
   const cookieRequest = new Promise<Response>(resolve => { finishCookieRequest = resolve; });
   fetchMock.mockImplementation(async url => {
     if (url === '/cookie-session') return cookieRequest;
-    if (url === '/api/auth/login') return json({ accessToken: 'local-access', refreshToken: 'local-refresh', tokenType: 'Bearer', expiresIn: 900, user });
+    if (url === '/api/auth/csrf') return json({ token: 'csrf' });
+    if (url === '/api/auth/web-login') return json(user);
     return json({}, 404);
   });
   const stale = api('/cookie-session');

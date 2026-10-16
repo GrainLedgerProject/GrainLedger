@@ -84,7 +84,7 @@ Requires .NET SDK 10, Node.js 24, npm and Docker (or PostgreSQL).
 
 See [the Vietnamese authentication and Scalar guide](docs/auth-email-password-scalar.md) for SMTP/JWT configuration, registration and verification, login, refresh, logout, password recovery, and example requests.
 
-Run the database migrations, start the backend, and open **http://localhost:5080/scalar/v1** in Development. Login returns `accessToken`, `refreshToken`, and the user profile. Paste the access token into Scalar's Bearer field to test protected endpoints without browser cookies or CSRF tokens. SMTP must be configured for real verification/reset email delivery. The React UI supports both Google sign-in and email/password registration, verification, login, and password recovery. See [development accounts](docs/development-accounts.md) to seed six local role accounts and one demo customer organization.
+Run the database migrations, start the backend, and open **http://localhost:5080/scalar/v1** in Development. The Scalar/API login returns `accessToken`, `refreshToken`, and the user profile. React uses a separate CSRF-protected cookie login and restores its session after reload; see [session and permissions](docs/identity-session-permissions.md). Paste the access token into Scalar's Bearer field to test protected endpoints without browser cookies or CSRF tokens. SMTP must be configured for real verification/reset email delivery. The React UI supports both Google sign-in and email/password registration, verification, login, and password recovery. See [development accounts](docs/development-accounts.md) to seed six local role accounts and one demo customer organization.
 
 ## First administrator and account lifecycle
 

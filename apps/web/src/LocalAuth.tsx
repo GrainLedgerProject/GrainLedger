@@ -119,7 +119,7 @@ export function LocalAuth({ oauthError, connectionError, onAuthenticated, onRetr
       <div className="auth-divider"><span>hoặc</span></div>
       <a className="button google" href="/api/auth/google"><span aria-hidden="true" className="google-mark">G</span> Tiếp tục với Google <span aria-hidden="true">↗</span></a>
       <p className="auth-switch">Chưa có tài khoản? <button className="text-button" onClick={() => changeView('register')} disabled={busy}>Đăng ký</button></p>
-      <p className="small muted session-note">Khi đăng nhập bằng email/password, tải lại trang sẽ yêu cầu bạn đăng nhập lại.</p>
+      <p className="small muted session-note">Phiên đăng nhập được giữ khi tải lại trang và hết hạn sau 15 phút không hoạt động.</p>
       {connectionError && <button className="text-button" onClick={onRetry}>Thử kết nối lại</button>}
     </>}
     {view === 'register' && <form className="auth-form" onSubmit={register}>
