@@ -76,6 +76,8 @@ nav button span { font-size: 19px; margin-right: 5px; }
 label { display: flex; flex-direction: column; gap: 9px; font-size: 12px; font-weight: 600; margin: 19px 0; }
 input, select { width: 100%; border: 1px solid #dce2d7; border-radius: 7px; background: #fff; color: #294333; padding: 12px 13px; font-weight: 400; min-width: 0; }
 input[readonly] { background: #f7f8f4; color: #83907f; }
+.capture-form-page [aria-invalid="true"] { border-color: #b94f42; box-shadow: 0 0 0 2px #f8e3df; }
+.field-validation { color: #923f35; font-size: 11px; font-weight: 500; line-height: 1.4; }
 .field-help { font-size: 11px; color: #8c9589; margin-top: -12px; }
 .optional { color: #8c9589; font-weight: 400; }
 .form-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 28px; padding-top: 23px; border-top: 1px solid #edf0e8; }

@@ -90,6 +90,37 @@ describe('Capture journey', () => {
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(false);
   });
 
+  it('identifies the receipt line and field when moisture includes a percent sign', async () => {
+    const siteId = '11111111-1111-4111-8111-111111111111';
+    const locationId = '22222222-2222-4222-8222-222222222222';
+    fetchMock.mockImplementation(async url => {
+      const path = String(url);
+      if (path === '/api/auth/session') return json(staff);
+      if (path.startsWith('/api/procurements?')) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
+      if (path.startsWith('/api/procurement-reference-data?')) return json({ receivingOptions: [{ collectionSiteId: siteId, collectionSiteCode: 'SITE-1', collectionSiteName: 'Site One', receivingLocationId: locationId, receivingLocationCode: 'LOC-1' }], commodity: { id: 'commodity-id', code: 'PADDY', name: 'Paddy' }, massUnits: [{ code: 'KG', name: 'Kilogram', kgFactor: '1' }], page: 1, pageSize: 100, hasMore: false, maxLinesPerReceipt: 100 });
+      if (path.startsWith('/api/farmers?')) return json({ items: [{ id: farmerId, code: 'ND-1', name: 'Farmer A' }], page: 1, pageSize: 100, hasMore: false });
+      if (path.startsWith('/api/plots?')) return json({ items: [{ id: plotId, farmerId, code: 'TR-1' }], page: 1, pageSize: 100, hasMore: false });
+      if (path.startsWith('/api/plot-seasons?')) return json({ items: [{ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25' }], page: 1, pageSize: 100, hasMore: false });
+      return json({}, 404);
+    });
+    render(<App />); const browser = userEvent.setup();
+    await browser.click(await screen.findByRole('button', { name: /Paddy intake/ }));
+    await browser.click(await screen.findByRole('button', { name: /Record intake/ }));
+    await browser.selectOptions(await screen.findByLabelText('Farmer'), farmerId);
+    await browser.selectOptions(await screen.findByLabelText('Collection site'), siteId);
+    await browser.selectOptions(screen.getByLabelText('Receiving location'), locationId);
+    await browser.selectOptions(await screen.findByLabelText('Plot season'), plotSeasonId);
+    await browser.type(screen.getByLabelText('Measured mass'), '200');
+    await browser.type(screen.getByLabelText('Moisture (%)'), '30%');
+    await browser.click(screen.getByRole('button', { name: 'Register procurement' }));
+    expect(screen.getByText('Line 1: enter moisture from 0 to 100 as a number, without the % sign.')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Moisture \(%\)/)).toHaveAttribute('aria-invalid', 'true');
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(false);
+    await browser.clear(screen.getByLabelText(/Moisture \(%\)/));
+    await browser.type(screen.getByLabelText(/Moisture \(%\)/), '30');
+    expect(screen.queryByText(/Line 1: enter moisture/)).not.toBeInTheDocument();
+  });
+
   it('connects procurement, source lot, sample, and handover when the backend accepts them', async () => {
     const siteId = '11111111-1111-4111-8111-111111111111';
     const locationId = '22222222-2222-4222-8222-222222222222';
@@ -141,13 +172,17 @@ describe('Capture journey', () => {
     expect((await screen.findAllByText('600 kg')).length).toBeGreaterThan(0);
     expect(screen.getByText('0 kg')).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /Take sample/ }));
-    await browser.type(screen.getByLabelText('Sample code'), 'SAMPLE-001');
+    const generatedCode = (screen.getByLabelText('Sample code') as HTMLInputElement).value;
+    expect(generatedCode).toMatch(/^SMP-\d{8}-[A-F0-9]{16}$/);
+    expect(screen.getByLabelText('Sample code')).toHaveAttribute('readonly');
     await browser.type(screen.getByLabelText('Seal code'), 'SEAL-001');
     await browser.click(screen.getByRole('button', { name: 'Save sample' }));
     expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
     expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
+    const samplePost = fetchMock.mock.calls.find(([url]) => url === '/api/samples')!;
+    expect(JSON.parse(String(samplePost[1]?.body)).payload.code).toBe(generatedCode);
     finishSample?.(json(sample, 201));
-    expect(await screen.findByRole('heading', { name: 'SAMPLE-001' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: generatedCode })).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /Record handover/ }));
     await browser.type(screen.getByLabelText('From party'), 'Collection agent');
     await browser.type(screen.getByLabelText('To party'), 'Laboratory');

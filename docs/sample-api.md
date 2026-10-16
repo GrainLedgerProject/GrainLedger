@@ -10,7 +10,7 @@ The Purchasing Staff records a physical sample against one accepted source lot. 
 | POST | `/api/samples/{id}/handovers` | Append a handover. Requires `purchases.write`. |
 | GET | `/api/samples/{id}/handovers?page=1&pageSize=20` | Read handover history. Same read permissions. |
 
-All requests are scoped to the authenticated customer company. `sourceLotId` is the ID of `capture.source_lots`, not the Ledger `lotId`. The source must have a committed procurement and its acceptance event. The app creates `entityId`, `clientOperationId`, `deviceId`, and `capturedAt`; the employee selects the source lot and records the physical sample and seal codes.
+All requests are scoped to the authenticated customer company. `sourceLotId` is the ID of `capture.source_lots`, not the Ledger `lotId`. The source must have a committed procurement and its acceptance event. The app creates `entityId`, `clientOperationId`, `deviceId`, and `capturedAt`. The web form also generates a sample code in the form `SMP-YYYYMMDD-<16 hex characters>` from the local collection date and sample ID. The employee records the code printed on the physical seal. The generated sample code must be written or printed on the sample bag.
 
 ## Create sample
 
