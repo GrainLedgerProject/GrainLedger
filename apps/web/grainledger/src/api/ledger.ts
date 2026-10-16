@@ -27,8 +27,33 @@ export interface CorrectionRequest {
 export const ledgerEndpoints = {
   getSetup: () => apiFetch<unknown>('/api/ledger/setup'),
   getLookups: () => apiFetch<unknown>('/api/ledger/lookups'),
-  getLots: () => apiFetch<unknown>('/api/ledger/lots'),
+  getLots: (params?: Record<string, string | number | undefined>) => {
+    if (!params) return apiFetch<unknown>('/api/ledger/lots');
+    const filtered = Object.fromEntries(
+      Object.entries(params).filter(([_, v]) => v !== undefined && v !== '')
+    ) as Record<string, string>;
+    const qs = new URLSearchParams(filtered).toString();
+    return apiFetch<unknown>(`/api/ledger/lots${qs ? '?' + qs : ''}`);
+  },
   getLot: (id: string) => apiFetch<unknown>(`/api/ledger/lots/${id}`),
+
+  // Facilities, Locations, Equipment
+  getFacilities: () => apiFetch<unknown>('/api/ledger/facilities'),
+  createFacility: (req: unknown) =>
+    apiFetch<unknown>('/api/ledger/facilities', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  createLocation: (req: unknown) =>
+    apiFetch<unknown>('/api/ledger/locations', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  createEquipment: (req: unknown) =>
+    apiFetch<unknown>('/api/ledger/equipment', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
 
   // Operations
   getOperations: () => apiFetch<unknown>('/api/ledger/operations'),
@@ -56,7 +81,17 @@ export const ledgerEndpoints = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+  createHold: (req: HoldRequest | unknown) =>
+    apiFetch<unknown>('/api/ledger/holds', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
   respondHold: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/ledger/holds/${id}/respond`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  respondToHold: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/ledger/holds/${id}/respond`, {
       method: 'POST',
       body: JSON.stringify(req),
@@ -98,11 +133,25 @@ export const ledgerEndpoints = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+  recordReceivingMeasurement: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/ledger/receiving/${id}/measurements`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
   postReceivingReviews: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/ledger/receiving/${id}/reviews`, {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+  reviewReceiving: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/ledger/receiving/${id}/reviews`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  // Policies & Compatibilities
+  getPolicies: () => apiFetch<unknown>('/api/ledger/policies'),
+  getCompatibilities: () => apiFetch<unknown>('/api/ledger/compatibilities'),
 
   // Unchanged lot transfer
   postTransfer: (req: unknown) =>

@@ -1,5 +1,11 @@
 import { apiFetch } from './client';
 
+export interface FarmerInput {
+  code: string;
+  name: string;
+  contact: string;
+}
+
 export interface RegisterFarmerRequest {
   deviceId?: string | null;
   clientOperationId: string;
@@ -25,6 +31,15 @@ export interface RegisterPlotRequest {
     geometry: unknown;
     areaHa: number;
   };
+}
+
+export interface ProcurementInput {
+  farmerId: string;
+  plotSeasonId: string;
+  commodityId: string;
+  receivingLocationId: string;
+  measuredGrossKg: string;
+  moisturePercent: string;
 }
 
 export interface RegisterProcurementRequest {
@@ -74,6 +89,7 @@ export interface RecordSprayDeclarationRequest {
 
 export const procurementEndpoints = {
   getReferenceData: () => apiFetch<unknown>('/api/procurement-reference-data'),
+  getProcurementReferenceData: () => apiFetch<unknown>('/api/procurement-reference-data'),
   getSourceLot: (id: string) => apiFetch<unknown>(`/api/source-lots/${id}`),
 
   // Farmers
@@ -86,6 +102,16 @@ export const procurementEndpoints = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+  updateFarmer: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/farmers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    }),
+  deleteFarmer: (id: string, req?: unknown) =>
+    apiFetch<unknown>(`/api/farmers/${id}`, {
+      method: 'DELETE',
+      body: req ? JSON.stringify(req) : undefined,
+    }),
   getFarmer: (id: string) => apiFetch<unknown>(`/api/farmers/${id}`),
 
   // Plots
@@ -97,6 +123,16 @@ export const procurementEndpoints = {
     apiFetch<unknown>('/api/plots', {
       method: 'POST',
       body: JSON.stringify(req),
+    }),
+  updatePlot: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/plots/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    }),
+  deletePlot: (id: string, req?: unknown) =>
+    apiFetch<unknown>(`/api/plots/${id}`, {
+      method: 'DELETE',
+      body: req ? JSON.stringify(req) : undefined,
     }),
   getPlot: (id: string) => apiFetch<unknown>(`/api/plots/${id}`),
 

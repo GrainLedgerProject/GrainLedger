@@ -5,6 +5,25 @@ export interface CreateOrganizationRequest {
   kind: 'Mill' | 'Customer';
 }
 
+export interface OrganizationDto {
+  id: string;
+  name: string;
+  kind: 'Mill' | 'Customer';
+  createdAt?: string;
+}
+
+export interface AdminUserDto {
+  id: string;
+  email: string;
+  displayName?: string;
+  role?: string | null;
+  organizationId?: string | null;
+  organizationName?: string | null;
+  isActive: boolean;
+  etag?: string;
+  updatedAt?: string;
+}
+
 export interface UpdateAccessRequest {
   role?: string | null;
   organizationId?: string | null;

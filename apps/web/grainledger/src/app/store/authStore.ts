@@ -1,5 +1,12 @@
 import type { UserRole } from '@/shared/types/roles';
 import { normalizeUserRole, ROLE_DEFINITIONS } from '@/shared/types/roles';
+import {
+  clearAuthCookies,
+  COOKIE_KEYS,
+  deleteCookie,
+  getCookie,
+  setCookie,
+} from '@/shared/utils/cookies';
 import { create } from 'zustand';
 
 export interface UserProfile {
@@ -26,9 +33,9 @@ interface AuthState {
 
   // Actions
   setUser: (user: UserProfile | null) => void;
-  setTokens: (access: string | null, refresh: string | null) => void;
+  setTokens: (access: string | null, refresh: string | null, rememberMe?: boolean) => void;
   setHasUnsavedDrafts: (hasDrafts: boolean) => void;
-  loginSuccess: (user: UserProfile, tokens?: { access: string; refresh: string }) => void;
+  loginSuccess: (user: UserProfile, tokens?: { access: string; refresh: string }, rememberMe?: boolean) => void;
   logout: () => void;
   updateProfile: (updates: Partial<UserProfile>) => void;
 }
@@ -121,46 +128,120 @@ export const DEMO_USERS: Record<UserRole, UserProfile> = {
   },
 };
 
-// Initial state checks localStorage for session persistence
-const storedUser = localStorage.getItem('grainledger_user');
-const initialUser: UserProfile | null = storedUser ? JSON.parse(storedUser) : null;
+// Immediate cleanup of any legacy auth data from localStorage
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('grainledger_user');
+    localStorage.removeItem('grainledger_access_token');
+    localStorage.removeItem('grainledger_refresh_token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('auth');
+  } catch {
+    // Ignore restricted local storage environments
+  }
+}
+
+// Initial state: load user and tokens exclusively from cookies
+const parseUserFromCookie = (): UserProfile | null => {
+  const cookieStr = getCookie(COOKIE_KEYS.USER);
+  if (!cookieStr) return null;
+  try {
+    return JSON.parse(cookieStr) as UserProfile;
+  } catch {
+    return null;
+  }
+};
+
+const initialUser = parseUserFromCookie();
+const initialAccess =
+  getCookie(COOKIE_KEYS.ACCESS_TOKEN) ||
+  (initialUser?.id?.startsWith('user-') ? `mock-access-token-${initialUser.role.toLowerCase()}` : null);
+const initialRefresh =
+  getCookie(COOKIE_KEYS.REFRESH_TOKEN) ||
+  (initialUser?.id?.startsWith('user-') ? `mock-refresh-token-${initialUser.role.toLowerCase()}` : null);
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: initialUser,
-  accessToken: null,
-  refreshToken: null,
-  isAuthenticated: !!initialUser,
+  accessToken: initialAccess,
+  refreshToken: initialRefresh,
+  isAuthenticated: !!(initialUser && (initialAccess || initialRefresh)),
   isLoading: false,
   hasUnsavedDrafts: false,
 
   setUser: (user) => {
     if (user) {
-      localStorage.setItem('grainledger_user', JSON.stringify(user));
+      setCookie(COOKIE_KEYS.USER, JSON.stringify(user), 7);
     } else {
-      localStorage.removeItem('grainledger_user');
+      deleteCookie(COOKIE_KEYS.USER);
     }
     set({ user, isAuthenticated: !!user });
   },
 
-  setTokens: (access, refresh) => {
+  setTokens: (access, refresh, rememberMe = true) => {
+    const accessDays = rememberMe ? 7 : undefined;
+    const refreshDays = rememberMe ? 30 : undefined;
+
+    if (access) {
+      setCookie(COOKIE_KEYS.ACCESS_TOKEN, access, accessDays);
+    } else {
+      deleteCookie(COOKIE_KEYS.ACCESS_TOKEN);
+    }
+
+    if (refresh) {
+      setCookie(COOKIE_KEYS.REFRESH_TOKEN, refresh, refreshDays);
+    } else {
+      deleteCookie(COOKIE_KEYS.REFRESH_TOKEN);
+    }
+
     set({ accessToken: access, refreshToken: refresh });
   },
 
   setHasUnsavedDrafts: (hasDrafts) => set({ hasUnsavedDrafts: hasDrafts }),
 
-  loginSuccess: (user, tokens) => {
-    localStorage.setItem('grainledger_user', JSON.stringify(user));
+  loginSuccess: (user, tokens, rememberMe = true) => {
+    const access = tokens?.access || `mock-access-token-${user.role.toLowerCase()}`;
+    const refresh = tokens?.refresh || `mock-refresh-token-${user.role.toLowerCase()}`;
+
+    const accessDays = rememberMe ? 7 : undefined;
+    const refreshDays = rememberMe ? 30 : undefined;
+
+    // Store exclusively in Cookies
+    setCookie(COOKIE_KEYS.USER, JSON.stringify(user), accessDays);
+    setCookie(COOKIE_KEYS.ACCESS_TOKEN, access, accessDays);
+    setCookie(COOKIE_KEYS.REFRESH_TOKEN, refresh, refreshDays);
+
     set({
       user,
       isAuthenticated: true,
-      accessToken: tokens?.access || 'mock-access-token',
-      refreshToken: tokens?.refresh || 'mock-refresh-token',
+      accessToken: access,
+      refreshToken: refresh,
       isLoading: false,
     });
   },
 
   logout: () => {
-    localStorage.removeItem('grainledger_user');
+    // Clear cookies
+    clearAuthCookies();
+
+    // Complete cleanup of any lingering localStorage tokens
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('grainledger_user');
+        localStorage.removeItem('grainledger_access_token');
+        localStorage.removeItem('grainledger_refresh_token');
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('auth');
+      } catch {
+        // ignore
+      }
+    }
+
     set({
       user: null,
       accessToken: null,
@@ -174,7 +255,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set((state) => {
       if (!state.user) return state;
       const updatedUser = { ...state.user, ...updates };
-      localStorage.setItem('grainledger_user', JSON.stringify(updatedUser));
+      setCookie(COOKIE_KEYS.USER, JSON.stringify(updatedUser), 7);
       return { user: updatedUser };
     });
   },

@@ -4,6 +4,7 @@
  * Base URL: http://localhost:5080 (or proxied via /api)
  */
 import { useAuthStore } from '@/app/store/authStore';
+import { COOKIE_KEYS, getCookie } from '@/shared/utils/cookies';
 import { logger } from '@/shared/utils/logger';
 
 export interface ProblemDetails {
@@ -31,7 +32,8 @@ export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const { accessToken, setTokens, logout } = useAuthStore.getState();
+  const { accessToken: stateToken, setTokens, logout } = useAuthStore.getState();
+  const accessToken = stateToken || getCookie(COOKIE_KEYS.ACCESS_TOKEN);
 
   const headers = new Headers(options.headers || {});
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
@@ -42,11 +44,18 @@ export async function apiFetch<T>(
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
+  // Include cookies automatically in cross-origin / same-origin API requests
+  const fetchOptions: RequestInit = {
+    credentials: 'include',
+    ...options,
+    headers,
+  };
+
   const url = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
   let response: Response;
   try {
-    response = await fetch(url, { ...options, headers });
+    response = await fetch(url, fetchOptions);
   } catch (netErr) {
     logger.warn(`Network error on ${url}:`, netErr);
     throw new ApiError(0, 'Không thể kết nối đến máy chủ backend (Port 5080).');
@@ -54,8 +63,10 @@ export async function apiFetch<T>(
 
   // Handle 401 Unauthorized with token refresh single-flight
   if (response.status === 401 && endpoint !== '/api/auth/login' && endpoint !== '/api/auth/refresh') {
-    const { refreshToken } = useAuthStore.getState();
-    if (refreshToken) {
+    const { refreshToken, accessToken } = useAuthStore.getState();
+    const isMock = accessToken?.startsWith('mock-') || refreshToken?.startsWith('mock-');
+
+    if (refreshToken && !isMock) {
       try {
         const refreshRes = await fetch('/api/auth/refresh', {
           method: 'POST',
@@ -78,6 +89,9 @@ export async function apiFetch<T>(
         logout();
         throw new ApiError(401, 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
       }
+    } else if (isMock) {
+      logger.info(`Endpoint ${url} returned 401 for mock session, falling back safely.`);
+      throw new ApiError(401, 'Phiên cục bộ chưa kết nối máy chủ backend. Chuyển sang dữ liệu mô phỏng.');
     } else {
       logout();
       throw new ApiError(401, 'Yêu cầu đăng nhập để tiếp tục.');

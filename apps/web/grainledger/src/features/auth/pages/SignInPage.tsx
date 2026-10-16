@@ -80,8 +80,8 @@ export const SignInPage: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const user = await authApi.login(values.email, values.password);
-      loginSuccess(user);
+      const { user, tokens } = await authApi.login(values.email, values.password);
+      loginSuccess(user, tokens, values.rememberMe);
 
       // Determine redirect destination
       const targetPath = returnUrl || getRedirectPathForRole(user.role);

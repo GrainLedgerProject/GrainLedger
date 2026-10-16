@@ -1,10 +1,10 @@
-import { AppHeader } from '@/components/AppHeader/AppHeader';
-import { AppSidebar } from '@/components/AppSidebar/AppSidebar';
-import { CompanyContextBar } from '@/components/CompanyContextBar/CompanyContextBar';
-import { ErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
-import { GlobalSearchModal } from '@/components/GlobalSearchModal/GlobalSearchModal';
-import React from 'react';
-import { Outlet } from 'react-router-dom';
+import { AppHeader } from "@/components/AppHeader/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar/AppSidebar";
+import { CompanyContextBar } from "@/components/CompanyContextBar/CompanyContextBar";
+import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
+import { GlobalSearchModal } from "@/components/GlobalSearchModal/GlobalSearchModal";
+import React from "react";
+import { Outlet } from "react-router-dom";
 
 export const AppLayout: React.FC = () => {
   return (
@@ -26,12 +26,18 @@ export const AppLayout: React.FC = () => {
 
         {/* Minimal Operational Footer */}
         <footer className="border-t border-ink-tertiary/15 py-3 px-6 text-xs text-ink-tertiary flex flex-col sm:flex-row items-center justify-between gap-2 bg-surface-base/80">
-          <div className="flex items-center gap-2">
-            <img src="/favicon.svg" alt="GrainLedger" />
-            <span>
-              GrainLedger © 2026 GFA26SE137 (FA26SE272) — Tiền Giang, Vietnam
-            </span>
-          </div>
+          <footer className="h-16 flex items-center px-4">
+            <div className="flex items-center gap-2 h-full">
+              <img
+                src="/favicon.svg"
+                alt="GrainLedger"
+                className="h-full w-auto shrink-0 object-contain"
+              />
+              <span>
+                GrainLedger © 2026 GFA26SE137 (FA26SE272) — Tiền Giang, Vietnam
+              </span>
+            </div>
+          </footer>
           <div className="flex items-center gap-4 text-[11px]">
             <span>Tuân thủ mô hình Mass Balance ISO 22095:2020</span>
             <span>Phiên bản v1.0.0-prod</span>

@@ -9,20 +9,29 @@ export const authApi = {
    * Performs login against POST /api/auth/login.
    * If backend is reachable, delegates to server; if in local demo mode, verifies credentials.
    */
-  login: async (email: string, password: string): Promise<UserProfile> => {
+  login: async (
+    email: string,
+    password: string
+  ): Promise<{ user: UserProfile; tokens?: { access: string; refresh: string } }> => {
     try {
       const tokens = await authEndpoints.login({ email, password });
       if (tokens && tokens.user) {
         return {
-          id: tokens.user.id,
-          email: tokens.user.email,
-          displayName: tokens.user.displayName,
-          phoneNumber: tokens.user.phoneNumber || undefined,
-          role: normalizeUserRole(tokens.user.role),
-          organizationId: tokens.user.organizationId || undefined,
-          organizationName: tokens.user.organizationName || undefined,
-          isActive: tokens.user.isActive,
-          permissions: tokens.user.permissions || [],
+          user: {
+            id: tokens.user.id,
+            email: tokens.user.email,
+            displayName: tokens.user.displayName,
+            phoneNumber: tokens.user.phoneNumber || undefined,
+            role: normalizeUserRole(tokens.user.role),
+            organizationId: tokens.user.organizationId || undefined,
+            organizationName: tokens.user.organizationName || undefined,
+            isActive: tokens.user.isActive,
+            permissions: tokens.user.permissions || [],
+          },
+          tokens: {
+            access: tokens.accessToken,
+            refresh: tokens.refreshToken,
+          },
         };
       }
     } catch (err) {
@@ -37,7 +46,13 @@ export const authApi = {
 
     if (demoProfile) {
       await new Promise((res) => setTimeout(res, 200));
-      return demoProfile;
+      return {
+        user: demoProfile,
+        tokens: {
+          access: `mock-access-token-${demoProfile.role.toLowerCase()}`,
+          refresh: `mock-refresh-token-${demoProfile.role.toLowerCase()}`,
+        },
+      };
     }
 
     throw new Error('Sai email hoặc mật khẩu. Kiểm tra lại thông tin đăng nhập hoặc liên hệ Quản trị nhà máy.');
