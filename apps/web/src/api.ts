@@ -80,7 +80,7 @@ async function rotateTokens(failedAccessToken: string, requestGeneration: number
   return refreshPromise;
 }
 
-async function request<T>(path: string, init: RequestInit, anonymous: boolean, allowRefresh: boolean): Promise<T> {
+async function request<T>(path: string, init: RequestInit, anonymous: boolean, allowRefresh: boolean, onResponse?: (response: Response) => void): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body) headers.set('Content-Type', 'application/json');
   const bearer = !anonymous ? accessToken : null;
@@ -97,7 +97,7 @@ async function request<T>(path: string, init: RequestInit, anonymous: boolean, a
   }
   if (response.status === 401 && bearer && allowRefresh && await rotateTokens(bearer, requestGeneration)) {
     if (authGeneration !== requestGeneration) throw new ApiError(401, 'Your session changed while the request was running.');
-    return request<T>(path, init, false, false);
+    return request<T>(path, init, false, false, onResponse);
   }
   if (!response.ok) {
     if (response.status === 401 && !anonymous) {
@@ -112,6 +112,7 @@ async function request<T>(path: string, init: RequestInit, anonymous: boolean, a
     }
     throw error;
   }
+  onResponse?.(response);
   if (response.status === 204) return undefined as T;
   const body = await response.text();
   if (!anonymous && authGeneration !== requestGeneration) throw new ApiError(401, 'Your session changed while the request was running.');
@@ -120,6 +121,12 @@ async function request<T>(path: string, init: RequestInit, anonymous: boolean, a
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return request<T>(path, init, false, true);
+}
+
+export async function apiWithEtag<T>(path: string, init: RequestInit = {}): Promise<{ data: T; etag: string | null }> {
+  let etag: string | null = null;
+  const data = await request<T>(path, init, false, true, response => { etag = response.headers.get('ETag'); });
+  return { data, etag };
 }
 
 export async function anonymousApi<T>(path: string, init: RequestInit = {}): Promise<T> {

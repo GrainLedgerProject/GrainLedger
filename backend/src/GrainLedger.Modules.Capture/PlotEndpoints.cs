@@ -171,7 +171,10 @@ public static class PlotEndpoints
         };
         var rows = await ordered.ThenBy(x => x.Id).Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
         var canManage = await access.HasPermissionAsync("farms.write", ct);
-        var items = rows.Select(x => ToListItem(x, actor.Value.UserId, canManage)).ToArray();
+        var ids = rows.Select(x => x.Id).ToArray();
+        var inUse = (await db.PlotSeasons.AsNoTracking().Where(x => x.CompanyId == actor.Value.CompanyId && ids.Contains(x.PlotId))
+            .Select(x => x.PlotId).Distinct().ToArrayAsync(ct)).ToHashSet();
+        var items = rows.Select(x => ToListItem(x, actor.Value.UserId, canManage && !inUse.Contains(x.Id))).ToArray();
         return Results.Ok(new PlotListResponse(items, currentPage, size, totalCount,
             (long)currentPage * size < totalCount));
     }
@@ -185,7 +188,8 @@ public static class PlotEndpoints
         var plot = await db.Plots.AsNoTracking().SingleOrDefaultAsync(x => x.CompanyId == actor.Value.CompanyId && x.Id == id, ct);
         if (plot is null) return Problem(404, "PLOT_NOT_FOUND", "Plot not found.");
         var canManage = await access.HasPermissionAsync("farms.write", ct);
-        return Results.Ok(ToReferenceResponse(plot, actor.Value.UserId, canManage));
+        return Results.Ok(ToReferenceResponse(plot, actor.Value.UserId,
+            canManage && !await db.PlotSeasons.AsNoTracking().AnyAsync(x => x.CompanyId == actor.Value.CompanyId && x.PlotId == id, ct)));
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, UpdatePlotRequest request,

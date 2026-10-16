@@ -260,11 +260,15 @@ it('gates Catalog and submits commodity and unit DTOs', async () => {
  rerender(<LedgerWorkspace user={{ ...actor, permissions: ['platform.configure'] }} />);
  await userEvent.setup().click(await screen.findByRole('button', { name: 'Setup' }));
  await screen.findByLabelText('Search commodities');
- const catalog = within(screen.getByRole('heading', { name: 'Commodity catalog' }).closest('section')!);
+ await userEvent.click(screen.getByRole('button', { name: '+ Add commodity' }));
+ const catalog = within(screen.getByRole('dialog', { name: 'Add commodity' }));
  await userEvent.type(catalog.getByLabelText('Code'), 'PADDY');
  await userEvent.type(catalog.getByLabelText('Name'), 'Paddy');
  await userEvent.click(screen.getByRole('button', { name: 'Create commodity' }));
- const units = within(screen.getByRole('heading', { name: 'Measurement units' }).closest('section')!);
+ await userEvent.click(screen.getByRole('button', { name: 'Measurement units' }));
+ await screen.findByLabelText('Search measurement units');
+ await userEvent.click(screen.getByRole('button', { name: '+ Add unit' }));
+ const units = within(screen.getByRole('dialog', { name: 'Add measurement unit' }));
  await userEvent.type(units.getByLabelText('Code'), 'MASS');
  await userEvent.type(units.getByLabelText('Name'), 'Kilogram');
  await userEvent.click(screen.getByRole('button', { name: 'Create measurement unit' }));

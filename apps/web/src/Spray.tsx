@@ -4,11 +4,24 @@ import { newRequest, pendingRequest, submitCapture, wasRejected, type Envelope }
 
 type SprayItem = { id?: string; productName: string | null; substanceId: string | null };
 type Spray = { id: string; plotSeasonId: string; appliedOn: string; informationSource: string; evidenceRef: string | null; capturedAt: string; recordedAt: string; items: SprayItem[] };
-type SpraySummary = { id: string; appliedOn: string; itemCount: number; recordedAt: string };
+type SpraySummary = { id: string; plotSeasonId: string; plotCode?: string | null; seasonName?: string | null; appliedOn: string; itemCount: number; recordedAt: string };
 type SprayList = { items: SpraySummary[]; page: number; hasMore: boolean };
 type Substance = { id: string; code: string; name: string };
 type SubstanceList = { items: Substance[]; hasMore: boolean };
 type SprayPayload = { entityId: string; plotSeasonId: string; appliedOn: string; informationSource: string; evidenceRef: string | null; items: { productName: string | null; substanceId: string | null }[] };
+
+export function SprayDeclarations({ onOpen, onOpenPlotSeason, initialPage = 1, onPageChange }: { onOpen: (id: string) => void; onOpenPlotSeason: (id: string) => void; initialPage?: number; onPageChange?: (page: number) => void }) {
+  const [page, setPage] = useState(initialPage); const [retry, setRetry] = useState(0);
+  const [list, setList] = useState<SprayList | null>(null); const [error, setError] = useState(''); const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let active = true; const controller = new AbortController(); setLoading(true); setError(''); setList(null);
+    void api<SprayList>(`/api/spray-declarations?page=${page}&pageSize=20`, { signal: controller.signal })
+      .then(value => { if (active) setList(value); }).catch(cause => { if (active) setError(errorMessage(cause)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [page, retry]);
+  return <><div className="page-heading"><span className="eyebrow">FIELD RECORDS</span><h1>Spray declarations</h1><p className="muted">Pesticide applications reported for your company.</p></div><section className="panel"><h2>All declarations</h2>{loading && <p role="status">Loading declarations…</p>}{error && <div className="notice error" role="alert">{error} <button className="text-button" type="button" onClick={() => setRetry(value => value + 1)}>Try again</button></div>}{list && (list.items.length ? <div className="table-scroll"><table><thead><tr><th>Applied on</th><th>Plot season</th><th>Products</th><th>Recorded</th><th>Detail</th></tr></thead><tbody>{list.items.map(item => <tr key={item.id}><td>{item.appliedOn}</td><td><button className="text-button" type="button" onClick={() => onOpenPlotSeason(item.plotSeasonId)}>{item.plotCode ?? item.plotSeasonId} · {item.seasonName ?? 'Season'} ↗</button></td><td>{item.itemCount}</td><td>{new Date(item.recordedAt).toLocaleString()}</td><td><button className="text-button" type="button" onClick={() => onOpen(item.id)}>Open ↗</button></td></tr>)}</tbody></table></div> : <p className="empty">No spray declarations found.</p>)}{list && <div className="farmer-pagination"><span>Page {list.page}</span><button className="secondary" type="button" disabled={page === 1 || loading} onClick={() => { const next = page - 1; setPage(next); onPageChange?.(next); }}>Previous</button><button className="secondary" type="button" disabled={!list.hasMore || loading} onClick={() => { const next = page + 1; setPage(next); onPageChange?.(next); }}>Next</button></div>}</section></>;
+}
 
 function vietnamToday() { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
 
@@ -101,7 +114,7 @@ function SprayCreate({ plotSeasonId, userId, companyId, onCancel, onCreated }: {
   </section></div>;
 }
 
-export function SprayDetail({ id, onBack }: { id: string; onBack: (plotSeasonId: string | null) => void }) {
+export function SprayDetail({ id, onBack, backLabel = 'Back to plot season' }: { id: string; onBack: (plotSeasonId: string | null) => void; backLabel?: string }) {
   const [record, setRecord] = useState<Spray | null>(null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -111,7 +124,7 @@ export function SprayDetail({ id, onBack }: { id: string; onBack: (plotSeasonId:
       .then(value => { if (active) setRecord(value); }).catch(cause => { if (active) setError(errorMessage(cause)); });
     return () => { active = false; controller.abort(); };
   }, [id, retry]);
-  return <><div className="page-heading"><span className="eyebrow">SOURCE EVIDENCE</span><h1>Pesticide declaration</h1><p className="muted">Farmer-reported information, not a laboratory result.</p></div><button className="text-button" onClick={() => onBack(record?.plotSeasonId ?? null)}>← Back to plot season</button>
+  return <><div className="page-heading"><span className="eyebrow">SOURCE EVIDENCE</span><h1>Pesticide declaration</h1><p className="muted">Farmer-reported information, not a laboratory result.</p></div><button className="text-button" onClick={() => onBack(record?.plotSeasonId ?? null)}>← {backLabel}</button>
     {!record && !error && <p role="status">Loading declaration…</p>}{error && <div className="notice error" role="alert">{error} <button className="text-button" onClick={() => setRetry(n => n + 1)}>Try again</button></div>}
     {record && <section className="panel capture-detail"><h2>Applied on {record.appliedOn}</h2><dl><dt>Information source</dt><dd>{record.informationSource}</dd><dt>Evidence reference</dt><dd>{record.evidenceRef || 'Not provided'}</dd><dt>Captured</dt><dd>{new Date(record.capturedAt).toLocaleString()}</dd></dl><h3 className="capture-form-subheading">Declared items</h3><div className="table-scroll"><table><thead><tr><th>Product</th><th>Active substance ID</th></tr></thead><tbody>{record.items.map((item, index) => <tr key={item.id ?? index}><td>{item.productName || '—'}</td><td>{item.substanceId || '—'}</td></tr>)}</tbody></table></div></section>}
   </>;

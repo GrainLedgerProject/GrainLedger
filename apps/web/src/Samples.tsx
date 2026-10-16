@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
 import { newRequest, pendingRequest, submitCapture, wasRejected, type Envelope } from './captureWrite';
 import { type Page } from './procurementTypes';
+import { type SourceLot } from './procurementTypes';
 
 type Sample = { id: string; sourceLotId: string; code: string; sealCode: string; collectedBy: string; collectedAt: string; capturedAt: string; recordedAt: string; handoverCount: number };
 type SampleSummary = Pick<Sample, 'id' | 'sourceLotId' | 'code' | 'sealCode' | 'collectedAt' | 'handoverCount'>;
@@ -71,8 +72,9 @@ function SampleCreate({ sourceLotId, userId, companyId, onCancel, onCreated }: {
   </form></section></div>;
 }
 
-export function SampleDetail({ id, userId, companyId, canHandover, onBack }: { id: string; userId: string; companyId: string; canHandover: boolean; onBack: (sourceLotId: string | null) => void }) {
+export function SampleDetail({ id, userId, companyId, canHandover, canReadSourceLot = false, onBack, onOpenProcurement, onOpenFarmer, onOpenPlot }: { id: string; userId: string; companyId: string; canHandover: boolean; canReadSourceLot?: boolean; onBack: (sourceLotId: string | null) => void; onOpenProcurement?: (id: string) => void; onOpenFarmer?: (id: string) => void; onOpenPlot?: (id: string) => void }) {
   const [sample, setSample] = useState<Sample | null>(null); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
+  const [origin, setOrigin] = useState<SourceLot | null>(null);
   const [handovers, setHandovers] = useState<Page<Handover> | null>(null); const [handoverError, setHandoverError] = useState(''); const [handoverPage, setHandoverPage] = useState(1); const [handoverRetry, setHandoverRetry] = useState(0); const [creating, setCreating] = useState(false);
   useEffect(() => {
     let active = true; const controller = new AbortController(); setSample(null); setError('');
@@ -81,6 +83,13 @@ export function SampleDetail({ id, userId, companyId, canHandover, onBack }: { i
     return () => { active = false; controller.abort(); };
   }, [id, retry]);
   useEffect(() => {
+    if (!sample?.sourceLotId || !canReadSourceLot) { setOrigin(null); return; }
+    let active = true; const controller = new AbortController();
+    void api<SourceLot>(`/api/source-lots/${sample.sourceLotId}`, { signal: controller.signal })
+      .then(value => { if (active) setOrigin(value); }).catch(() => { if (active) setOrigin(null); });
+    return () => { active = false; controller.abort(); };
+  }, [sample?.sourceLotId, canReadSourceLot]);
+  useEffect(() => {
     let active = true; const controller = new AbortController(); setHandovers(null); setHandoverError('');
     void api<Page<Handover>>(`/api/samples/${encodeURIComponent(id)}/handovers?page=${handoverPage}&pageSize=20`, { signal: controller.signal })
       .then(value => { if (active) setHandovers(value); }).catch(cause => { if (active) setHandoverError(errorMessage(cause)); });
@@ -88,7 +97,7 @@ export function SampleDetail({ id, userId, companyId, canHandover, onBack }: { i
   }, [id, handoverPage, handoverRetry]);
   return <><div className="page-heading"><span className="eyebrow">SAMPLE CUSTODY</span><h1>Sample details</h1><p className="muted">A physical sample and its handover history; not a lab result.</p></div><button className="text-button" onClick={() => onBack(sample?.sourceLotId ?? null)}>← Back to source lot</button>
     {!sample && !error && <p role="status">Loading sample…</p>}{error && <div className="notice error" role="alert">{error} <button className="text-button" onClick={() => setRetry(n => n + 1)}>Try again</button></div>}
-    {sample && <><section className="panel capture-detail"><h2>{sample.code}</h2><div className="capture-stat-grid"><div><span>Seal</span><strong>{sample.sealCode}</strong></div><div><span>Collected</span><strong>{new Date(sample.collectedAt).toLocaleString()}</strong></div><div><span>Handovers</span><strong>{sample.handoverCount}</strong></div></div></section>
+    {sample && <><section className="panel capture-detail"><h2>{sample.code}</h2><div className="capture-stat-grid"><div><span>Seal</span><strong>{sample.sealCode}</strong></div><div><span>Collected</span><strong>{new Date(sample.collectedAt).toLocaleString()}</strong></div><div><span>Handovers</span><strong>{sample.handoverCount}</strong></div></div><p>Source lot: {canReadSourceLot ? <button className="text-button" onClick={() => onBack(sample.sourceLotId)}>{origin?.lotCode ?? sample.sourceLotId} ↗</button> : sample.sourceLotId}</p>{origin && <><p>Receipt: {onOpenProcurement ? <button className="text-button" onClick={() => onOpenProcurement(origin.procurementId)}>{origin.procurementCode} ↗</button> : origin.procurementCode}</p><p>Farmer: {onOpenFarmer ? <button className="text-button" onClick={() => onOpenFarmer(origin.farmerId)}>{origin.farmerName ?? origin.farmerCode ?? origin.farmerId} ↗</button> : origin.farmerName ?? origin.farmerCode ?? origin.farmerId}</p><p>Plot: {onOpenPlot ? <button className="text-button" onClick={() => onOpenPlot(origin.plotId)}>{origin.plotCode ?? origin.plotId} ↗</button> : origin.plotCode ?? origin.plotId}</p><p>Season: {origin.seasonName ?? origin.plotSeasonId} · {origin.riceVariety}</p></>}</section>
       <section className="panel capture-section"><div className="capture-section-heading"><div><span className="eyebrow">CHAIN OF CUSTODY</span><h2>Handovers</h2></div>{canHandover && <button onClick={() => setCreating(true)}>+ Record handover</button>}</div>
         {handoverError && <div className="notice error" role="alert">{handoverError} <button className="text-button" onClick={() => setHandoverRetry(n => n + 1)}>Try again</button></div>}
         {handovers && (handovers.items.length ? <div className="table-scroll"><table><thead><tr><th>Time</th><th>From</th><th>To</th><th>Seal</th><th>Evidence</th></tr></thead><tbody>{handovers.items.map(item => <tr key={item.id}><td>{new Date(item.handedOverAt).toLocaleString()}</td><td>{item.fromParty}</td><td>{item.toParty}</td><td>{item.sealCondition}</td><td>{item.evidenceRef || '—'}</td></tr>)}</tbody></table></div> : <p className="empty">No handover recorded yet.</p>)}

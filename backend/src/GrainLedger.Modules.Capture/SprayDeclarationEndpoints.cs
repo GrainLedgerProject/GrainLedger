@@ -25,7 +25,8 @@ public sealed record SprayDeclarationResponse(Guid Id, Guid PlotSeasonId, DateOn
     string InformationSource, string? EvidenceRef, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt,
     Guid RecordedBy, IReadOnlyList<SprayItemResponse> Items);
 public sealed record SprayDeclarationSummary(Guid Id, Guid PlotSeasonId, DateOnly AppliedOn,
-    DateTimeOffset RecordedAt, Guid RecordedBy, string? EvidenceRef, int ItemCount);
+    DateTimeOffset RecordedAt, Guid RecordedBy, string? EvidenceRef, int ItemCount,
+    string? PlotCode = null, string? SeasonName = null);
 public sealed record SprayDeclarationListResponse(IReadOnlyList<SprayDeclarationSummary> Items,
     int Page, int PageSize, bool HasMore);
 
@@ -152,12 +153,15 @@ public static class SprayDeclarationEndpoints
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["query"] = ["Invalid filter or pagination value."] });
         var query = db.SprayDeclarations.AsNoTracking().Where(x => x.CompanyId == companyId.Value);
         if (plotSeasonId is { } id) query = query.Where(x => x.PlotSeasonId == id);
-        var rows = await query.OrderByDescending(x => x.AppliedOn).ThenBy(x => x.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize + 1)
-            .Select(x => new SprayDeclarationSummary(x.Id, x.PlotSeasonId, x.AppliedOn,
-                x.RecordedAt, x.RecordedBy, x.EvidenceRef,
-                db.SprayItems.Count(item => item.CompanyId == companyId.Value && item.DeclarationId == x.Id)))
-            .ToListAsync(ct);
+        var rows = await (from declaration in query.OrderByDescending(x => x.AppliedOn).ThenBy(x => x.Id)
+            join plotSeason in db.PlotSeasons.AsNoTracking() on new { declaration.CompanyId, Id = declaration.PlotSeasonId } equals new { plotSeason.CompanyId, plotSeason.Id }
+            join plot in db.Plots.AsNoTracking() on new { plotSeason.CompanyId, Id = plotSeason.PlotId } equals new { plot.CompanyId, plot.Id }
+            join season in db.CropSeasons.AsNoTracking() on new { plotSeason.CompanyId, Id = plotSeason.SeasonId } equals new { season.CompanyId, season.Id }
+            select new SprayDeclarationSummary(declaration.Id, declaration.PlotSeasonId, declaration.AppliedOn,
+                declaration.RecordedAt, declaration.RecordedBy, declaration.EvidenceRef,
+                db.SprayItems.Count(item => item.CompanyId == companyId.Value && item.DeclarationId == declaration.Id),
+                plot.Code, season.Name))
+            .Skip((page - 1) * pageSize).Take(pageSize + 1).ToListAsync(ct);
         return Results.Ok(new SprayDeclarationListResponse(rows.Take(pageSize).ToArray(),
             page, pageSize, rows.Count > pageSize));
     }

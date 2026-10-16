@@ -1,19 +1,24 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, clearLocalSession, errorMessage, hasLocalSession, roleLabel, type User } from './api';
-import { Administration } from './Administration';
+import { AdminWorkspace, type AdminSection } from './AdminWorkspace';
 import { Farmers } from './Farmers';
 import { PlotDetail } from './PlotDetail';
 import { PlotSeasonDetail } from './PlotSeasonDetail';
-import { SprayDetail } from './Spray';
-import { Procurements, ProcurementDetail, SourceLotDetail } from './Procurement';
+import { SprayDeclarations, SprayDetail } from './Spray';
+import { Procurements, ProcurementDetail, SourceLotDetail, type IntakeListState } from './Procurement';
 import { ProcurementForm } from './ProcurementForm';
 import { SampleDetail, SampleList } from './Samples';
 import { LedgerWorkspace, ledgerSections } from './LedgerWorkspace';
 import { googleLoginError } from './auth-errors';
 import { LocalAuth } from './LocalAuth';
+import { MrlLookup } from './MrlLookup';
 
-type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples';
+type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'mrl' | 'sprays';
 function tabForPath(path: string): Tab {
+  if (path.startsWith('/mrl')) return 'mrl';
+  if (path === '/capture/spray-declarations' || path === '/capture/spray-declarations/') return 'sprays';
+  if (path.startsWith('/capture/spray-declarations/') && window.history.state?.fromSprayList) return 'sprays';
+  if (path.startsWith('/admin')) return 'administration';
   if (path.startsWith('/ledger')) return 'ledger';
   if (path.startsWith('/capture/procurements') || path.startsWith('/capture/source-lots/')) return 'procurements';
   if (path.startsWith('/capture/samples')) return 'samples';
@@ -28,6 +33,8 @@ export function App() {
   const [tab, setTab] = useState<Tab>(tabForPath(window.location.pathname));
   const [path, setPath] = useState(window.location.pathname);
   const [signingOut, setSigningOut] = useState(false);
+  const [intakeListState, setIntakeListState] = useState<IntakeListState>({ page: 1, receiptQuery: '', farmerId: '', from: '', to: '', sortBy: 'receivedAt', sortDirection: 'desc' });
+  const [sprayListPage, setSprayListPage] = useState(1);
 
   async function loadSession() {
     setLoading(true);
@@ -50,7 +57,7 @@ export function App() {
   }, []);
 
   function openTab(next: Tab) {
-    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'ledger' ? '/ledger' : '/';
+    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : '/';
     window.history.pushState({}, '', nextPath);
     setPath(nextPath);
     setTab(next);
@@ -81,9 +88,16 @@ export function App() {
     const nextPath = `/capture/spray-declarations/${encodeURIComponent(id)}`;
     window.history.pushState({}, '', nextPath); setPath(nextPath); setTab('farmers');
   }
+  function selectSprayFromList(id: string) {
+    const nextPath = `/capture/spray-declarations/${encodeURIComponent(id)}`;
+    window.history.pushState({ fromSprayList: true }, '', nextPath); setPath(nextPath); setTab('sprays');
+  }
 
   function openCapturePath(nextPath: string, nextTab: Tab) {
     window.history.pushState({}, '', nextPath); setPath(nextPath); setTab(nextTab);
+  }
+  function openAdminSection(section: AdminSection) {
+    openCapturePath(section === 'people' ? '/admin' : `/admin/${section}`, 'administration');
   }
 
   async function logout(all = false) {
@@ -129,6 +143,7 @@ export function App() {
   const procurementPathId = path.match(/^\/capture\/procurements\/([^/]+)\/?$/)?.[1] ?? null;
   const selectedSourceLotId = path.match(/^\/capture\/source-lots\/([^/]+)\/?$/)?.[1] ?? null;
   const samplePathId = path.match(/^\/capture\/samples\/([^/]+)\/?$/)?.[1] ?? null;
+  const adminSection: AdminSection = path.startsWith('/admin/mrl-lookup') ? 'mrl-lookup' : path.startsWith('/admin/mrl') ? 'mrl' : path.startsWith('/admin/catalogs') ? 'catalogs' : path.startsWith('/admin/crop-seasons') ? 'crop-seasons' : 'people';
   const canOpenLedger = ledgerSections.some(section => section.permissions.some(permission => user.permissions.includes(permission)));
 
   return <div className="workspace">
@@ -140,35 +155,44 @@ export function App() {
         {canOpenLedger && <button aria-current={tab === 'ledger' ? 'page' : undefined} onClick={() => openTab('ledger')}><span aria-hidden="true">▤</span> Ledger</button>}
         {user.role === 'Administrator' && <button aria-current={tab === 'administration' ? 'page' : undefined} onClick={() => openTab('administration')}><span aria-hidden="true">▦</span> Administration</button>}
         {canReadFarmers && <button aria-current={tab === 'farmers' ? 'page' : undefined} onClick={() => openTab('farmers')}><span aria-hidden="true">▤</span> Farmers</button>}
+        {canReadFarmers && <button aria-current={tab === 'sprays' ? 'page' : undefined} onClick={() => openTab('sprays')}><span aria-hidden="true">◈</span> Spray declarations</button>}
         {canReadPurchases && <button aria-current={tab === 'procurements' ? 'page' : undefined} onClick={() => openTab('procurements')}><span aria-hidden="true">▣</span> Paddy intake</button>}
         {canReadSamples && <button aria-current={tab === 'samples' ? 'page' : undefined} onClick={() => openTab('samples')}><span aria-hidden="true">◇</span> Samples</button>}
+        {user.permissions.includes('mrl.read') && user.role !== 'Administrator' && <button aria-current={tab === 'mrl' ? 'page' : undefined} onClick={() => openTab('mrl')}><span aria-hidden="true">▤</span> Applicable MRL</button>}
       </nav>
       <div className="sidebar-bottom"><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span>{roleLabel(user.role)}</span></div></div>
     </aside>
     <div className="workspace-body">
-      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'procurements' ? 'Paddy intake' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
+      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
       <main className="content">
         {error && <div className="notice error" role="alert">{error}</div>}
-        {tab === 'administration' && user.role === 'Administrator' ? <Administration currentUser={user} />
+        {tab === 'mrl' && user.permissions.includes('mrl.read') ? <MrlLookup />
+          : tab === 'administration' && user.role === 'Administrator' ? <AdminWorkspace user={user} section={adminSection} onSelect={openAdminSection} />
           : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} />
           : tab === 'procurements' && selectedSourceLotId ? (canReadPurchases
-            ? <SourceLotDetail id={selectedSourceLotId} canWriteSamples={canWritePurchases} userId={user.id} companyId={user.organizationId || ''} onBack={id => id ? openCapturePath(`/capture/procurements/${id}`, 'procurements') : openTab('procurements')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} />
+            ? <SourceLotDetail id={selectedSourceLotId} canWriteSamples={canWritePurchases} userId={user.id} companyId={user.organizationId || ''} onBack={id => id ? openCapturePath(`/capture/procurements/${id}`, 'procurements') : openTab('procurements')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenFarmer={canReadFarmers ? id => selectFarmer(id) : undefined} onOpenPlot={canReadFarmers ? selectPlot : undefined} onOpenPlotSeason={canReadFarmers ? selectPlotSeason : undefined} />
             : <div className="notice error" role="alert">Your account cannot view source lots.</div>)
           : tab === 'procurements' && procurementPathId === 'new' ? (canWritePurchases
             ? <ProcurementForm userId={user.id} companyId={user.organizationId || ''} onBack={() => openTab('procurements')} onCreated={id => openCapturePath(`/capture/procurements/${id}`, 'procurements')} />
             : <div className="notice error" role="alert">Your account cannot record procurement.</div>)
           : tab === 'procurements' && procurementPathId ? (canReadPurchases
-            ? <ProcurementDetail id={procurementPathId} onBack={() => openTab('procurements')} onOpenSourceLot={id => openCapturePath(`/capture/source-lots/${id}`, 'procurements')} />
+            ? <ProcurementDetail id={procurementPathId} onBack={() => openTab('procurements')} onOpenSourceLot={id => openCapturePath(`/capture/source-lots/${id}`, 'procurements')} onOpenFarmer={canReadFarmers ? id => selectFarmer(id) : undefined} onOpenPlot={canReadFarmers ? selectPlot : undefined} onOpenPlotSeason={canReadFarmers ? selectPlotSeason : undefined} />
             : <div className="notice error" role="alert">Your account cannot view procurement.</div>)
           : tab === 'procurements' ? (canReadPurchases
-            ? <Procurements canCreate={canWritePurchases} onCreate={() => openCapturePath('/capture/procurements/new', 'procurements')} onOpen={id => openCapturePath(`/capture/procurements/${id}`, 'procurements')} />
+            ? <Procurements canCreate={canWritePurchases} onCreate={() => openCapturePath('/capture/procurements/new', 'procurements')} onOpen={id => openCapturePath(`/capture/procurements/${id}`, 'procurements')} initialState={intakeListState} onStateChange={setIntakeListState} />
             : <div className="notice error" role="alert">Your account cannot view procurement.</div>)
           : tab === 'samples' && samplePathId ? (canReadSamples
-            ? <SampleDetail id={samplePathId} userId={user.id} companyId={user.organizationId || ''} canHandover={canWritePurchases} onBack={id => id && canReadPurchases ? openCapturePath(`/capture/source-lots/${id}`, 'procurements') : openTab('samples')} />
+            ? <SampleDetail id={samplePathId} userId={user.id} companyId={user.organizationId || ''} canHandover={canWritePurchases} canReadSourceLot={canReadPurchases} onBack={id => id && canReadPurchases ? openCapturePath(`/capture/source-lots/${id}`, 'procurements') : openTab('samples')} onOpenProcurement={id => openCapturePath(`/capture/procurements/${id}`, 'procurements')} onOpenFarmer={canReadFarmers ? id => selectFarmer(id) : undefined} onOpenPlot={canReadFarmers ? selectPlot : undefined} />
             : <div className="notice error" role="alert">Your account cannot view samples.</div>)
           : tab === 'samples' ? (canReadSamples
             ? <><div className="page-heading"><span className="eyebrow">SAMPLE CUSTODY</span><h1>Samples</h1><p className="muted">Reopen a sample to review or add handovers.</p></div><SampleList onOpen={id => openCapturePath(`/capture/samples/${id}`, 'samples')} /></>
             : <div className="notice error" role="alert">Your account cannot view samples.</div>)
+          : tab === 'sprays' && selectedSprayId ? (canReadFarmers
+            ? <SprayDetail id={selectedSprayId} backLabel="Back to declarations" onBack={plotSeasonId => window.history.state?.fromSprayList ? openTab('sprays') : plotSeasonId ? selectPlotSeason(plotSeasonId) : openTab('sprays')} />
+            : <div className="notice error" role="alert">Your account cannot view spray declarations.</div>)
+          : tab === 'sprays' ? (canReadFarmers
+            ? <SprayDeclarations onOpen={selectSprayFromList} onOpenPlotSeason={selectPlotSeason} initialPage={sprayListPage} onPageChange={setSprayListPage} />
+            : <div className="notice error" role="alert">Your account cannot view spray declarations.</div>)
           : tab === 'farmers' && selectedSprayId ? (canReadFarmers
             ? <SprayDetail id={selectedSprayId} onBack={plotSeasonId => plotSeasonId ? selectPlotSeason(plotSeasonId) : openTab('farmers')} />
             : <div className="notice error" role="alert">Your account does not have access to pesticide declarations.</div>)

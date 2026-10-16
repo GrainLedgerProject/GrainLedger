@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, errorMessage } from './api';
+import { api, ApiError, errorMessage } from './api';
 import { FarmerCreate } from './FarmerCreate';
 import { FarmerEdit } from './FarmerEdit';
 import { PlotCreate } from './PlotCreate';
@@ -11,6 +11,8 @@ type Farmer = {
   contact: string | null;
   createdAt: string;
   canEdit?: boolean;
+  canDelete?: boolean;
+  version?: number;
 };
 
 type FarmerListResponse = {
@@ -48,6 +50,9 @@ export function Farmers({ selectedId, showCreateInitially, onSelect, onOpenPlot,
   const [plots, setPlots] = useState<PlotListResponse | null>(null);
   const [plotsLoading, setPlotsLoading] = useState(false);
   const [plotsError, setPlotsError] = useState('');
+  const [archiveTarget, setArchiveTarget] = useState<Farmer | null>(null);
+  const [archiveError, setArchiveError] = useState('');
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => { if (showCreateInitially && canCreate) setShowCreate(true); }, [showCreateInitially, canCreate]);
 
@@ -94,6 +99,17 @@ export function Farmers({ selectedId, showCreateInitially, onSelect, onOpenPlot,
     onSelect(id);
   }
 
+  async function archiveFarmer() {
+    if (!archiveTarget?.version || archiving) return;
+    setArchiving(true); setArchiveError('');
+    try {
+      await api(`/api/farmers/${archiveTarget.id}`, { method: 'DELETE', body: JSON.stringify({ version: archiveTarget.version }) });
+      setArchiveTarget(null); setFarmer(null); onSelect(null); setPage(1); setRetry(value => value + 1);
+    } catch (cause) {
+      setArchiveError(cause instanceof ApiError && cause.status === 412 ? 'This farmer changed. Close this dialog and reload the record before archiving.' : errorMessage(cause));
+    } finally { setArchiving(false); }
+  }
+
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     setPage(1);
@@ -106,7 +122,7 @@ export function Farmers({ selectedId, showCreateInitially, onSelect, onOpenPlot,
     {loading && <p role="status">Loading farmer…</p>}
     {error && <div className="notice error" role="alert">{error} <button className="text-button" onClick={() => setRetry(value => value + 1)}>Try again</button></div>}
     {farmer && <section className="panel farmer-detail">
-      <div className="farmer-detail-hero"><span className="farmer-monogram" aria-hidden="true">{farmer.name.slice(0, 1).toUpperCase()}</span><div><span className="eyebrow">REGISTERED FARMER</span><h2>{farmer.name}</h2><span className="farmer-code">{farmer.code}</span></div>{farmer.canEdit && <button className="secondary farmer-edit-button" onClick={() => setShowFarmerEdit(true)}>Edit farmer</button>}</div>
+      <div className="farmer-detail-hero"><span className="farmer-monogram" aria-hidden="true">{farmer.name.slice(0, 1).toUpperCase()}</span><div><span className="eyebrow">REGISTERED FARMER</span><h2>{farmer.name}</h2><span className="farmer-code">{farmer.code}</span></div><div className="admin-form-actions">{farmer.canEdit && <button className="secondary farmer-edit-button" onClick={() => setShowFarmerEdit(true)}>Edit farmer</button>}{farmer.canDelete && <button className="secondary" onClick={() => { setArchiveTarget(farmer); setArchiveError(''); }}>Archive farmer</button>}</div></div>
       <div className="farmer-facts"><div><span>Contact</span><strong>{farmer.contact || 'Not provided'}</strong></div><div><span>Registered</span><strong>{new Date(farmer.createdAt).toLocaleString()}</strong></div></div>
     </section>}
     {farmer && <section className="panel farmer-plots">
@@ -118,6 +134,7 @@ export function Farmers({ selectedId, showCreateInitially, onSelect, onOpenPlot,
     </section>}
     {farmer && showPlotCreate && canCreate && <PlotCreate farmerId={farmer.id} farmerName={farmer.name} userId={userId} companyId={companyId} onCancel={() => setShowPlotCreate(false)} onCreated={id => { setShowPlotCreate(false); onOpenPlot(id); }} />}
     {farmer && showFarmerEdit && <FarmerEdit id={farmer.id} onCancel={() => setShowFarmerEdit(false)} onUpdated={() => { setShowFarmerEdit(false); setRetry(value => value + 1); }} />}
+    {archiveTarget && <div className="farmer-modal-backdrop"><section className="farmer-modal" role="dialog" aria-modal="true" aria-label="Archive farmer"><div className="farmer-modal-heading"><h2>Archive farmer</h2><button className="farmer-modal-close" type="button" disabled={archiving} aria-label="Close" onClick={() => setArchiveTarget(null)}>×</button></div><p>Archive <strong>{archiveTarget.name} · {archiveTarget.code}</strong>? The record will no longer appear in active lists. Historical records remain available.</p>{archiveError && <div className="notice error" role="alert">{archiveError}</div>}<div className="admin-form-actions"><button className="secondary" type="button" disabled={archiving} onClick={() => setArchiveTarget(null)}>Cancel</button><button type="button" disabled={archiving} onClick={() => void archiveFarmer()}>{archiving ? 'Archiving…' : 'Archive farmer'}</button></div></section></div>}
   </>;
 
   return <>

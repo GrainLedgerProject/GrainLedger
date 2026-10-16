@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
 import { loadCropSeasons, type CropSeason } from './cropSeasons';
+import { RiceVarietyInput } from './RiceVarietyInput';
 
 type RegisterPlotSeasonRequest = {
   deviceId: string;
@@ -117,7 +118,7 @@ export function PlotSeasonCreate({ plotId, plotCode, userId, companyId, onCancel
           <option value="">Select a season</option>
           {visibleSeasons.map(item => <option key={item.id} value={item.id}>{item.name} ({item.startsOn} – {item.endsOn})</option>)}
         </select></label>
-        <label htmlFor="new-rice-variety">Rice variety <span className="required-mark">*</span><input id="new-rice-variety" value={riceVariety} onChange={event => setRiceVariety(event.target.value)} required disabled={busy || !!pending} placeholder="e.g. ST25" /></label>
+        <RiceVarietyInput value={riceVariety} onChange={setRiceVariety} disabled={busy || !!pending} />
         {pending && <div className="notice pending">The request may already have reached the server. Retry sends the same registration to prevent a duplicate.</div>}
         {error && <div className="notice error" role="alert">{error}</div>}
         <div className="form-footer"><button type="button" className="secondary" onClick={onCancel} disabled={busy}>Cancel</button><button type="submit" disabled={busy || (!pending && (seasonsLoading || seasons.length === 0 || !seasonId || !riceVariety.trim()))}>{busy ? 'Saving…' : pending ? 'Retry save' : 'Register season'}</button></div>

@@ -27,11 +27,13 @@ public sealed record ProcurementInitialStock(Guid LocationId, string ReceivedKg)
 public sealed record ProcurementLineResponse(Guid Id, int LineNo, Guid PlotSeasonId, Guid PlotId,
     Guid SeasonId, string RiceVariety, string MeasuredValue, string MeasuredUnit,
     string NetMassKg, string MoisturePercent, Guid SourceLotId, Guid LotId,
-    string LotCode, string Stage, ProcurementInitialStock InitialStock);
+    string LotCode, string Stage, ProcurementInitialStock InitialStock,
+    string? PlotCode = null, string? SeasonName = null);
 public sealed record ProcurementResponse(Guid Id, string Code, Guid FarmerId, Guid CollectionSiteId,
     Guid ReceivingLocationId, Guid CommodityId, string Status, Guid ReceivedBy,
     DateTimeOffset ReceivedAt, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt,
-    Guid EventId, string TotalNetMassKg, IReadOnlyList<ProcurementLineResponse> Items, int ReceivingVersion = 0);
+    Guid EventId, string TotalNetMassKg, IReadOnlyList<ProcurementLineResponse> Items, int ReceivingVersion = 0,
+    string? FarmerName = null, string? FarmerCode = null);
 public sealed record ProcurementSummary(Guid Id, string Code, Guid FarmerId, string FarmerName,
     DateTimeOffset ReceivedAt, string Status, int ItemCount, string TotalNetMassKg);
 public sealed record ProcurementListResponse(IReadOnlyList<ProcurementSummary> Items,
@@ -47,7 +49,8 @@ public sealed record SourceLotResponse(Guid Id, Guid LotId, string LotCode, Guid
     DateTimeOffset ReceivedAt, Guid CollectionSiteId, Guid InitialReceivingLocationId,
     string InitialNetMassKg, string MoisturePercent,
     IReadOnlyList<ProcurementStockPosition> CurrentStock, DateTimeOffset StockAsOf,
-    string ReceivingStatus, string UsableStockKg);
+    string ReceivingStatus, string UsableStockKg, string? FarmerName = null,
+    string? FarmerCode = null, string? PlotCode = null, string? SeasonName = null);
 internal sealed record ReceivingProjection(Guid ProcurementId, string Status, int Version);
 
 public static class ProcurementEndpoints
@@ -343,7 +346,27 @@ public static class ProcurementEndpoints
         if (result is null) return Problem(500, "PROCUREMENT_EVENT_INVALID", "The procurement history is incomplete.");
         var state = await ledger.GetReceivingStateAsync(id, ct);
         if (state is null && result.Status == "PENDING_ARRIVAL") return LedgerUnavailable();
-        return Results.Ok(state is null ? result : result with { Status = state.Status, ReceivingVersion = state.Version });
+        var farmer = await db.Farmers.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.Id == result.FarmerId)
+            .Select(x => new { x.Name, x.Code }).SingleOrDefaultAsync(ct);
+        var plotIds = result.Items.Select(x => x.PlotId).Distinct().ToArray();
+        var seasonIds = result.Items.Select(x => x.SeasonId).Distinct().ToArray();
+        var plots = await db.Plots.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.CompanyId == companyId && plotIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.Code }).ToDictionaryAsync(x => x.Id, x => x.Code, ct);
+        var seasons = await db.CropSeasons.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.CompanyId == companyId && seasonIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name }).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        var enriched = result with
+        {
+            Status = state?.Status ?? result.Status, ReceivingVersion = state?.Version ?? result.ReceivingVersion,
+            FarmerName = farmer?.Name, FarmerCode = farmer?.Code,
+            Items = result.Items.Select(x => x with
+            {
+                PlotCode = plots.GetValueOrDefault(x.PlotId), SeasonName = seasons.GetValueOrDefault(x.SeasonId)
+            }).ToArray()
+        };
+        return Results.Ok(enriched);
     }
 
     private static async Task<IResult> GetSourceLotAsync(Guid id, ClaimsPrincipal principal, ICurrentAccess access,
@@ -367,12 +390,22 @@ public static class ProcurementEndpoints
             if (state is null && snapshot.Status == "PENDING_ARRIVAL") return LedgerUnavailable();
             var accepted = state is null || state.Status is "RECEIVED_MATCHED" or "RECEIVED_SHORTAGE_APPROVED";
             IReadOnlyList<ProcurementStockPosition> stock = accepted ? await ledger.GetCurrentStockAsync(companyId.Value, source.LotId, ct) : [];
+            var farmer = await db.Farmers.IgnoreQueryFilters().AsNoTracking()
+                .Where(x => x.CompanyId == companyId && x.Id == header.FarmerId)
+                .Select(x => new { x.Name, x.Code }).SingleOrDefaultAsync(ct);
+            var plotCode = await db.Plots.IgnoreQueryFilters().AsNoTracking()
+                .Where(x => x.CompanyId == companyId && x.Id == line.PlotId)
+                .Select(x => x.Code).SingleOrDefaultAsync(ct);
+            var seasonName = await db.CropSeasons.IgnoreQueryFilters().AsNoTracking()
+                .Where(x => x.CompanyId == companyId && x.Id == line.SeasonId)
+                .Select(x => x.Name).SingleOrDefaultAsync(ct);
             return Results.Ok(new SourceLotResponse(source.Id, source.LotId, line.LotCode,
                 snapshot.CommodityId, line.Stage, header.Id, header.Code, item.Id, header.FarmerId,
                 line.PlotId, line.SeasonId, line.PlotSeasonId, line.RiceVariety, header.ReceivedAt,
                 header.CollectionSiteId, snapshot.ReceivingLocationId, line.NetMassKg,
                 line.MoisturePercent, stock, clock.GetUtcNow(), state?.Status ?? snapshot.Status,
-                Number(stock.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture)))));
+                Number(stock.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture))),
+                farmer?.Name, farmer?.Code, plotCode, seasonName));
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }

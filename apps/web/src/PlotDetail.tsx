@@ -1,12 +1,12 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { api, errorMessage } from './api';
+import { api, ApiError, errorMessage } from './api';
 import { loadCropSeasons, type CropSeason } from './cropSeasons';
 import { PlotSeasonCreate } from './PlotSeasonCreate';
 import { PlotEdit } from './PlotEdit';
 
 type Point = { type: 'Point'; coordinates: [number, number] };
 type Polygon = { type: 'Polygon'; coordinates: number[][][] };
-type Plot = { id: string; farmerId: string; code: string; areaHa: number; geometry: Point | Polygon; canEdit?: boolean };
+type Plot = { id: string; farmerId: string; code: string; areaHa: number; geometry: Point | Polygon; canEdit?: boolean; canDelete?: boolean; version?: number };
 type Farmer = { id: string; name: string; code: string };
 type PlotSeason = { id: string; plotId: string; seasonId: string; riceVariety: string };
 type PlotSeasonList = { items: PlotSeason[]; page: number; pageSize: number; hasMore: boolean };
@@ -27,6 +27,17 @@ export function PlotDetail({ id, onBack, onOpenPlotSeason, canCreate, userId, co
   const [seasonNamesError, setSeasonNamesError] = useState('');
   const [showSeasonCreate, setShowSeasonCreate] = useState(false);
   const [showPlotEdit, setShowPlotEdit] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveError, setArchiveError] = useState('');
+  const [archiving, setArchiving] = useState(false);
+
+  async function archivePlot() {
+    if (!plot?.version || archiving) return;
+    setArchiving(true); setArchiveError('');
+    try { await api(`/api/plots/${plot.id}`, { method: 'DELETE', body: JSON.stringify({ version: plot.version }) }); setArchiveOpen(false); onBack(plot.farmerId); }
+    catch (cause) { setArchiveError(cause instanceof ApiError && cause.status === 412 ? 'This plot changed. Reload it before archiving.' : errorMessage(cause)); }
+    finally { setArchiving(false); }
+  }
 
   useEffect(() => {
     let active = true;
@@ -94,7 +105,7 @@ export function PlotDetail({ id, onBack, onOpenPlotSeason, canCreate, userId, co
     {error && <div className="notice error" role="alert">{error} <button className="text-button" onClick={() => setRetry(value => value + 1)}>Try again</button></div>}
     {plot && <>
       <section className="panel plot-record">
-        <div className="plot-record-hero"><div><span className="eyebrow">REGISTERED PLOT</span><h2>{plot.code}</h2><p className="muted">{farmer ? `Farmer: ${farmer.name} · ${farmer.code}` : 'Linked farmer record'}</p></div><div className="plot-hero-actions"><span className="plot-area-badge">{plot.areaHa} ha</span>{plot.canEdit && <button className="secondary" onClick={() => setShowPlotEdit(true)}>Edit plot</button>}</div></div>
+        <div className="plot-record-hero"><div><span className="eyebrow">REGISTERED PLOT</span><h2>{plot.code}</h2><p className="muted">{farmer ? `Farmer: ${farmer.name} · ${farmer.code}` : 'Linked farmer record'}</p></div><div className="plot-hero-actions"><span className="plot-area-badge">{plot.areaHa} ha</span>{plot.canEdit && <button className="secondary" onClick={() => setShowPlotEdit(true)}>Edit plot</button>}{plot.canDelete && <button className="secondary" onClick={() => { setArchiveOpen(true); setArchiveError(''); }}>Archive plot</button>}</div></div>
         <div className="plot-record-facts">
           <div><span>Location type</span><strong>{point ? 'Point' : polygon ? 'Boundary polygon' : 'Unknown'}</strong></div>
           <div><span>Area</span><strong>{plot.areaHa} hectares</strong></div>
@@ -120,6 +131,7 @@ export function PlotDetail({ id, onBack, onOpenPlotSeason, canCreate, userId, co
       </section>
       {showSeasonCreate && canCreate && <PlotSeasonCreate plotId={plot.id} plotCode={plot.code} userId={userId} companyId={companyId} onCancel={() => setShowSeasonCreate(false)} onCreated={createdId => { setShowSeasonCreate(false); onOpenPlotSeason(createdId); }} />}
       {showPlotEdit && <PlotEdit id={plot.id} onCancel={() => setShowPlotEdit(false)} onUpdated={() => { setShowPlotEdit(false); setRetry(value => value + 1); }} />}
+      {archiveOpen && <div className="farmer-modal-backdrop"><section className="farmer-modal" role="dialog" aria-modal="true" aria-label="Archive plot"><div className="farmer-modal-heading"><h2>Archive plot</h2><button className="farmer-modal-close" type="button" disabled={archiving} aria-label="Close" onClick={() => setArchiveOpen(false)}>×</button></div><p>Archive plot <strong>{plot.code}</strong>? It will no longer appear in active lists. Historical records remain available.</p>{archiveError && <div className="notice error" role="alert">{archiveError}</div>}<div className="admin-form-actions"><button className="secondary" type="button" disabled={archiving} onClick={() => setArchiveOpen(false)}>Cancel</button><button type="button" disabled={archiving} onClick={() => void archivePlot()}>{archiving ? 'Archiving…' : 'Archive plot'}</button></div></section></div>}
     </>}
   </>;
 }
