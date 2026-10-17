@@ -141,7 +141,7 @@ export function PlotCreate({ farmerId, farmerName, userId, companyId, onCancel, 
         </div>
         <PlotDuplicateNotice state={duplicates} />
         <label htmlFor="new-plot-area">Area (hectares) <span className="required-mark">*</span><input id="new-plot-area" type="number" inputMode="decimal" step="any" min="0.000000000001" value={areaHa} onChange={event => setAreaHa(event.target.value)} required disabled={busy || !!pending} placeholder="1.25" /></label>
-        {pending && <div className="notice pending">The request may already have reached the server. Retry sends the same plot request to prevent a duplicate.</div>}
+        {pending && !busy && <div className="notice pending">The previous save did not return a result. Retry save sends the same plot request to prevent a duplicate.</div>}
         {error && <div className="notice error" role="alert">{error}</div>}
         <div className="form-footer"><button type="button" className="secondary" onClick={onCancel} disabled={busy}>Cancel</button><button type="submit" disabled={busy}>{busy ? 'Saving…' : pending ? 'Retry save' : 'Save plot'}</button></div>
       </form>
