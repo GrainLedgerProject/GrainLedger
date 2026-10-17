@@ -166,9 +166,9 @@ internal sealed class LedgerScenario : IDisposable
 
     public object OperationBody(Guid id, string kind, (Guid LotId, string Quantity)[] inputs, (string Stage, string Quantity)[] outputs, string loss = "0", Guid? ownerId = null, Guid? inputLocationId = null, Guid? outputLocationId = null, string? productIdentity = null) => new
     {
-        id, ownerId = ownerId ?? OwnerId, facilityId = FacilityId, kind, occurredAt = DateTimeOffset.UtcNow, equipmentId = EquipmentId,
+        id, ownerId = ownerId ?? OwnerId, facilityId = FacilityId, kind, occurredAt = DateTimeOffset.UtcNow.AddMinutes(-1), equipmentId = EquipmentId,
         inputs = inputs.Select(input => new { lotId = input.LotId, locationId = inputLocationId ?? LocationId, quantityKg = input.Quantity }).ToArray(),
-        outputs = outputs.Select(output => new { id = Guid.NewGuid(), code = $"OUT-{Guid.NewGuid():N}", commodityId = CommodityId, stage = output.Stage, productIdentity = productIdentity ?? output.Stage, locationId = outputLocationId ?? LocationId, quantityKg = output.Quantity }).ToArray(),
+        outputs = outputs.Select(output => new { id = Guid.NewGuid(), code = "", commodityId = CommodityId, stage = output.Stage, productIdentity = productIdentity ?? output.Stage, locationId = outputLocationId ?? LocationId, quantityKg = output.Quantity }).ToArray(),
         declaredLossKg = loss
     };
 

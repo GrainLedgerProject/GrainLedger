@@ -17,7 +17,9 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     {
         using var s = await CreateAsync(factory);
         var source = Lots(await s.ReceiptAsync("10"))[0];
-        await s.CommitAsync(await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]));
+        var draft = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
+        Assert.Matches(@"^DRY-\d{8}-\d{6,}$", draft.GetProperty("outputs")[0].GetProperty("code").GetString()!);
+        await s.CommitAsync(draft);
         Assert.Equal(0m, Quantity(await s.LotAsync(source)));
         var hold = await s.HoldAsync(source);
         var (unassigned, session) = await factory.SeedUserAsync(GrainLedger.Modules.Identity.Roles.MillManager, s.Accounts["manager"].User.OrganizationId);
@@ -330,6 +332,96 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     }
 
     [Fact]
+    public async Task Explicit_same_product_correction_reuses_code_with_new_lot_identity()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var original = await s.CommitAsync(await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]));
+        var originalLotId = Output(original);
+        var originalCode = original.GetProperty("outputs")[0].GetProperty("code").GetString();
+        var correctionId = Guid.NewGuid();
+        await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/corrections", new
+        {
+            id = correctionId, operationId = original.GetProperty("id").GetGuid(), reason = "Correct source observation"
+        });
+        var replacementId = Guid.NewGuid();
+        var replacementLotId = Guid.NewGuid();
+        await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", new
+        {
+            id = replacementId, ownerId = s.OwnerId, facilityId = s.FacilityId, kind = "DRYING",
+            occurredAt = DateTimeOffset.UtcNow.AddMinutes(-1), equipmentId = s.EquipmentId,
+            inputs = new[] { new { lotId = source, locationId = s.LocationId, quantityKg = "10" } },
+            outputs = new[] { new { id = replacementLotId, originalLotId, code = "", commodityId = s.CommodityId,
+                stage = "DRIED_PADDY", productIdentity = "DRIED_PADDY", locationId = s.LocationId, quantityKg = "10" } },
+            declaredLossKg = "0"
+        });
+        var replacement = await GetAsync(s.Operator, $"/api/ledger/operations/{replacementId}");
+        Assert.Equal(originalCode, replacement.GetProperty("outputs")[0].GetProperty("code").GetString());
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/corrections/{correctionId}/reconcile", new
+        {
+            evidenceId = s.EvidenceId,
+            reconciliation = new[] { new { lotId = originalLotId, locationId = s.LocationId, quantityKg = "10" } },
+            replacementOperationId = replacementId,
+            replacementVersion = replacement.GetProperty("version").GetString(),
+            reason = "Verified physical output"
+        });
+        await SendAsync(s.Operator, HttpMethod.Post, $"/api/ledger/corrections/{correctionId}/commit",
+            new { replacementOperationId = replacementId });
+        Assert.NotEqual(originalLotId, replacementLotId);
+        Assert.Equal(originalCode, (await s.LotAsync(replacementLotId)).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Draft_retry_preserves_assigned_output_code_and_rejects_client_code()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var operationId = Guid.NewGuid();
+        var body = s.OperationBody(operationId, "DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
+        var first = await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", body);
+        var retried = await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", body);
+        var code = first.GetProperty("outputs")[0].GetProperty("code").GetString();
+        Assert.Equal(code, retried.GetProperty("outputs")[0].GetProperty("code").GetString());
+        Assert.Matches(@"^DRY-\d{8}-\d{6,}$", code!);
+        Assert.Equal(1L, await ScalarAsync<long>(
+            "SELECT count(*) FROM ledger.lot_code_reservations WHERE context_id=@id", operationId));
+        await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", new
+        {
+            id = Guid.NewGuid(), ownerId = s.OwnerId, facilityId = s.FacilityId, kind = "DRYING",
+            occurredAt = DateTimeOffset.UtcNow.AddMinutes(-1), equipmentId = s.EquipmentId,
+            inputs = new[] { new { lotId = source, locationId = s.LocationId, quantityKg = "10" } },
+            outputs = new[] { new { id = Guid.NewGuid(), code = "MANUAL", commodityId = s.CommodityId,
+                stage = "DRIED_PADDY", productIdentity = "DRIED_PADDY", locationId = s.LocationId,
+                quantityKg = "10" } }, declaredLossKg = "0"
+        });
+    }
+
+    [Fact]
+    public async Task Runtime_cannot_bypass_code_issuer_or_call_legacy_command()
+    {
+        using var s = await CreateAsync(factory);
+        await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
+        await runtime.OpenAsync();
+        foreach (var sql in new[]
+        {
+            "SELECT nextval('ledger.lot_code_serial')",
+            "SELECT ledger.reserve_lot_code_internal($1,$2,'OPERATION',$3,'DRIED_PADDY','DRIED_PADDY')",
+            "SELECT ledger.command_legacy($1,'draft','{}'::jsonb)"
+        })
+        {
+            await using var command = new NpgsqlCommand(sql, runtime);
+            if (sql.Contains("$1", StringComparison.Ordinal))
+                command.Parameters.AddWithValue(s.Accounts["operator"].User.Id);
+            if (sql.Contains("$2", StringComparison.Ordinal))
+                command.Parameters.AddWithValue(s.OwnerId);
+            if (sql.Contains("$3", StringComparison.Ordinal))
+                command.Parameters.AddWithValue(Guid.NewGuid());
+            var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync());
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
+        }
+    }
+
+    [Fact]
     public async Task Correction_after_transfer_requires_actual_location_reconciliation()
     {
         using var s = await CreateAsync(factory);
@@ -437,6 +529,12 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
             ("BAGGING", Output(milling), "BAGGED_RICE", "BAGGED_RICE")
         })
         {
+            if (stage == "BAGGED_RICE" && identity == "BAGGED_RICE")
+            {
+                await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations",
+                    s.OperationBody(Guid.NewGuid(), kind, [(input, "1")], [(stage, "1")], productIdentity: identity));
+                continue;
+            }
             var invalid = await s.DraftAsync(kind, [(input, "1")], [(stage, "1")], productIdentity: identity);
             await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{invalid.GetProperty("id").GetGuid()}/commit", new { });
         }

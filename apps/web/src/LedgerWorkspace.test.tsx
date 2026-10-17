@@ -145,7 +145,6 @@ it('derives processing output payloads by kind while preserving exact strings an
  await browser.click(within(editor).getByRole('button', { name: 'Add actual output' }));
  await browser.selectOptions(within(editor).getAllByLabelText('Produced fraction')[1], 'HUSK');
  const outputs = editor.querySelectorAll('fieldset');
- await browser.type(within(outputs[2] as HTMLElement).getByLabelText('Output lot code'), 'Husk lot');
  await browser.selectOptions(within(outputs[2] as HTMLElement).getByLabelText('Output physical location'), 'store');
  await browser.type(within(outputs[2] as HTMLElement).getByLabelText('Actual output (kg)'), '1');
  await browser.click(within(editor).getByRole('button', { name: 'Save draft changes' }));
@@ -155,7 +154,8 @@ it('derives processing output payloads by kind while preserving exact strings an
  expect(request.outputs.map((row: Record<string, string>) => [row.stage, row.productIdentity, row.commodityId])).toEqual([['BRAN', 'BRAN', 'rice'], ['HUSK', 'HUSK', 'rice']]);
  expect(request.outputs[0].quantityKg).toBe('9.000001');
  expect(request.inputs[0]).toMatchObject({ lotId: 'source', locationId: 'store', quantityKg: '10.000001' });
- expect(request.outputs[0].id).toBe('dried');
+ expect(request.outputs[0].id).not.toBe('dried');
+ expect(request.outputs[0].code).toBe('');
 });
 it('retains bagging identity and blend commodity choice in saved payload', async () => {
  const riceLot = { ...lot, stage: 'HEAD_RICE', productIdentity: 'HEAD_RICE' };
@@ -173,7 +173,6 @@ it('retains bagging identity and blend commodity choice in saved payload', async
  await browser.selectOptions(within(form).getByLabelText('Input lot'), 'source');
  await browser.selectOptions(within(form).getByLabelText('Input stock position'), 'store');
  await browser.type(within(form).getByLabelText('Allocated input (kg)'), '10');
- await browser.type(within(form).getByLabelText('Output lot code'), 'bagged');
  await browser.selectOptions(within(form).getByLabelText('Output physical location'), 'store');
  await browser.type(within(form).getByLabelText('Actual output (kg)'), '10');
  await browser.click(within(form).getByRole('button', { name: 'Save processing draft' }));
@@ -198,7 +197,6 @@ it('keeps selected blend commodity and fixed blended identity in payload', async
  await browser.selectOptions(within(form).getByLabelText('Input stock position'), 'store');
  await browser.type(within(form).getByLabelText('Allocated input (kg)'), '10');
  await browser.selectOptions(within(form).getByLabelText('Output commodity'), 'blend');
- await browser.type(within(form).getByLabelText('Output lot code'), 'blend-lot');
  await browser.selectOptions(within(form).getByLabelText('Output physical location'), 'store');
  await browser.type(within(form).getByLabelText('Actual output (kg)'), '10');
  await browser.click(within(form).getByRole('button', { name: 'Save processing draft' }));
@@ -221,7 +219,6 @@ it('derives merge stage and underlying identity separately for bagged input', as
  await browser.selectOptions(within(form).getByLabelText('Input lot'), 'source');
  await browser.selectOptions(within(form).getByLabelText('Input stock position'), 'store');
  await browser.type(within(form).getByLabelText('Allocated input (kg)'), '10');
- await browser.type(within(form).getByLabelText('Output lot code'), 'merged-bag');
  await browser.selectOptions(within(form).getByLabelText('Output physical location'), 'store');
  await browser.type(within(form).getByLabelText('Actual output (kg)'), '10');
  await browser.click(within(form).getByRole('button', { name: 'Save processing draft' }));
@@ -393,7 +390,7 @@ it('filters mixed processing queues on server pages and preserves unsaved editor
  await browser.click(screen.getByText('Create processing draft', { selector: 'summary' }));
  const editor = within(screen.getByLabelText('Stock owner').closest('section')!);
  await browser.selectOptions(editor.getByLabelText('Stock owner'), 'customer');
- await browser.type(editor.getByLabelText('Output lot code'), 'Unsaved output');
+ await browser.type(editor.getByLabelText('Actual output (kg)'), '7');
  await browser.selectOptions(screen.getByLabelText('Processing owner filter'), 'customer');
  await browser.selectOptions(screen.getByLabelText('Processing kind filter'), 'DRYING');
  await browser.selectOptions(screen.getByLabelText('Draft queue filter'), 'true');
@@ -410,11 +407,11 @@ it('filters mixed processing queues on server pages and preserves unsaved editor
  expect(screen.queryByText(/DRYING: Drying 0.*DRAFT/)).not.toBeInTheDocument();
  expect(screen.queryByText(/Milling row.*DRAFT/)).not.toBeInTheDocument();
  expect(screen.queryByText(/Other owner row.*DRAFT/)).not.toBeInTheDocument();
- expect(editor.getByLabelText('Output lot code')).toHaveValue('Unsaved output');
+ expect(editor.getByLabelText('Actual output (kg)')).toHaveValue('7');
  expect(editor.getByLabelText('Stock owner')).toHaveValue('customer');
  await browser.selectOptions(screen.getByLabelText('Sort processing drafts by'), 'kind');
  await waitFor(() => expect(screen.getByRole('button', { name: 'Page 1 of processing drafts' })).toHaveAttribute('aria-current', 'page'));
- expect(editor.getByLabelText('Output lot code')).toHaveValue('Unsaved output');
+ expect(editor.getByLabelText('Actual output (kg)')).toHaveValue('7');
 });
 
 it('deletes own drafts with expected version, clamps last page, and protects committed records', async () => {

@@ -23,6 +23,8 @@ public interface IProcurementLedgerPort
         Guid companyId, Guid collectionSiteId, Guid receivingLocationId, CancellationToken ct);
     Task RegisterPendingAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
         Guid actorId, Guid procurementId, CancellationToken ct);
+    Task<string> ReserveSourceLotCodeAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid actorId, Guid companyId, Guid procurementId, Guid lotId, CancellationToken ct);
     Task<ProcurementReceivingState?> GetReceivingStateAsync(Guid procurementId, CancellationToken ct);
     Task<IReadOnlyList<ProcurementStockPosition>> GetCurrentStockAsync(Guid companyId, Guid lotId, CancellationToken ct);
 }

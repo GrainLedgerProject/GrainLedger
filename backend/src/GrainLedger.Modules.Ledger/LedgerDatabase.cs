@@ -155,7 +155,7 @@ public static class LedgerDatabase
             GRANT EXECUTE ON FUNCTION
                 ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.lock_writes(),
                 ledger.provision_catalog_commodities(uuid),
-                ledger.register_pending_procurement(uuid,uuid),
+                ledger.register_pending_procurement(uuid,uuid),ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid),
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
                 ledger.procurement_stock(uuid,uuid),
                 ledger.arrival_command(uuid,uuid,text,jsonb),
@@ -220,6 +220,7 @@ public static class LedgerDatabase
         if (Equals(await command.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("API database role must not be superuser, schema/table owner or owner-role member. Configure separate migration and runtime credentials.");
         await using var required = new NpgsqlCommand("""
             SELECT has_function_privilege(current_user,'ledger.register_pending_procurement(uuid,uuid)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.arrival_command(uuid,uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.lock_writes()','EXECUTE')
                AND has_function_privilege(current_user,'ledger.provision_catalog_commodities(uuid)','EXECUTE')

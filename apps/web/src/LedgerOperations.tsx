@@ -138,7 +138,7 @@ export function LedgerOperations({ user, active = true }: { user: User; active?:
 function OperationEditor({ look, lots, operation, replacement, command, onSaved }: { look: Lookup; lots: Lot[]; operation: Operation | null; replacement: boolean; command: (path: string, body: Row, method?: string) => Promise<Row>; onSaved: () => void }) {
   const action = useAction(), [operationId] = useState(replacement || !operation ? id() : operation.id), [owner, setOwner] = useState(operation?.ownerId || ''), [facility, setFacility] = useState(operation?.facilityId || ''), [kind, setKind] = useState(operation?.kind || 'DRYING'), [equipment, setEquipment] = useState(operation?.equipmentId || ''), [when, setWhen] = useState(operation ? localTime(operation.occurredAt) : now()), [loss, setLoss] = useState(operation?.declaredLossKg || '0');
   const [inputs, setInputs] = useState<Row[]>(operation ? operation.inputs.map(row => ({ ...row })) : [{ lotId: '', locationId: '', quantityKg: '' }]);
-  const [outputs, setOutputs] = useState<Row[]>(operation ? operation.outputs.map(row => ({ ...row, id: replacement ? id() : row.id, code: replacement ? `${row.code}-corrected` : row.code, productIdentity: row.productIdentity || row.stage })) : [{ id: id(), code: '', commodityId: '', stage: 'DRIED_PADDY', productIdentity: 'DRIED_PADDY', locationId: '', quantityKg: '' }]);
+  const [outputs, setOutputs] = useState<Row[]>(operation ? operation.outputs.map(row => ({ ...row, id: replacement ? id() : row.id, code: replacement ? '' : row.code, originalLotId: replacement ? row.id : row.originalLotId, productIdentity: row.productIdentity || row.stage })) : [{ id: id(), code: '', commodityId: '', stage: 'DRIED_PADDY', productIdentity: 'DRIED_PADDY', locationId: '', quantityKg: '' }]);
   const [selectedLots, setSelectedLots] = useState<Lot[]>(() => lots.filter(lot => operation?.inputs.some(input => input.lotId === lot.id)));
   const [pinsReady, setPinsReady] = useState(!operation);
   useEffect(() => {
@@ -165,14 +165,30 @@ function OperationEditor({ look, lots, operation, replacement, command, onSaved 
   }
   function changeKind(value: string) {
     setKind(value);
-    setOutputs(rows => rows.map(row => ({ ...row, stage: value === 'MILLING' ? (fractions.includes(row.stage) ? row.stage : 'HEAD_RICE') : row.stage })));
+    setOutputs(rows => rows.map(row => {
+      const stage = value === 'DRYING' ? 'DRIED_PADDY' : value === 'MILLING'
+        ? (fractions.includes(row.stage) ? row.stage : 'HEAD_RICE') : value === 'BLENDING'
+          ? 'BLENDED_RICE' : value === 'BAGGING' ? 'BAGGED_RICE' : value === 'MERGE'
+            ? firstLot?.stage || row.stage : row.stage;
+      const productIdentity = value === 'BAGGING' || value === 'MERGE'
+        ? firstLot?.productIdentity || firstLot?.stage || '' : stage;
+      const changed = stage !== row.stage || productIdentity !== row.productIdentity;
+      return changed && (row.code || row.originalLotId)
+        ? { ...row, stage, productIdentity, id: id(), code: '', originalLotId: undefined }
+        : { ...row, stage, productIdentity };
+    }));
   }
   const owners = look.owners;
   function updateInput(index: number, patch: Row) {
     setInputs(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
     if (index === 0 && patch.lotId !== undefined) setOutputs(rows => rows.map(row => outputRules(row)));
   }
-  function updateOutput(index: number, patch: Row) { setOutputs(rows => rows.map((row, i) => i === index ? outputRules({ ...row, ...patch }) : row)); }
+  function updateOutput(index: number, patch: Row) { setOutputs(rows => rows.map((row, i) => {
+    if (i !== index) return row;
+    const next = outputRules({ ...row, ...patch });
+    return (row.code || row.originalLotId) && (next.stage !== row.stage || next.productIdentity !== row.productIdentity)
+      ? { ...next, id: id(), code: '', originalLotId: undefined } : next;
+  })); }
   async function save(event: FormEvent) { event.preventDefault(); await action.run(async () => {
     await command(operation && !replacement ? `operations/${operation.id}` : 'operations', {
       id: operationId, ownerId: owner, facilityId: facility, kind, equipmentId: equipment, occurredAt: iso(when), inputs,
@@ -200,7 +216,7 @@ function OperationEditor({ look, lots, operation, replacement, command, onSaved 
     <p>Milling records every actual positive fraction. Never fabricate missing fractions or hide bran/husk as loss. Bagging retains underlying product identity.</p>
     {outputs.map((output, index) => <fieldset key={output.id}>
       <legend>Output {index + 1}</legend>
-      <label>Output lot code<input required value={output.code} onChange={e => updateOutput(index, { code: e.target.value })} /></label>
+      <p>Output lot code: {output.code || 'Assigned when draft is saved'}</p>
       {kind === 'BLENDING' ? <label>Output commodity<Choice rows={look.commodities} value={output.commodityId} onChange={value => updateOutput(index, { commodityId: value })} /></label> : <label>Output commodity<input readOnly value={name(look.commodities, firstLot?.commodityId || '')} aria-label="Output commodity (derived from first input)" /></label>}
       {kind === 'MILLING' ? <label>Produced fraction<Enum values={fractions} value={output.stage} onChange={value => updateOutput(index, { stage: value })} /></label> : <p>Output stage: {outputRules(output).stage}</p>}
       {kind === 'BAGGING' || kind === 'MERGE' ? <p>Underlying product identity: {outputRules(output).productIdentity || 'Set first input lot to derive'}</p> : null}
