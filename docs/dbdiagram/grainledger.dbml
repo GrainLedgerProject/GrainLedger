@@ -236,15 +236,15 @@ Table spray_items {
   declaration_id uuid [not null]
   product_name text [null]
   substance_id uuid [null]
-  rate numeric(24,12) [not null]
-  rate_unit varchar(40) [not null]
+  rate numeric(24,12) [null, note: 'Historical value only; new F05 requests do not collect or write this field.']
+  rate_unit varchar(40) [null, note: 'Historical value only; new F05 requests do not collect or write this field.']
   indexes {
     (company_id, id) [unique]
     declaration_id
     substance_id
   }
-  Note: '''CHECK: rate > 0
-CHECK: product_name IS NOT NULL OR substance_id IS NOT NULL'''
+  Note: '''CHECK: product_name IS NOT NULL OR substance_id IS NOT NULL
+Rate and rate_unit remain nullable to preserve prior declarations. New declarations leave them NULL.'''
 }
 
 Table procurements {

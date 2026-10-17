@@ -57,8 +57,8 @@ erDiagram
         uuid declaration_id FK "NN"
         text product_name "NULL"
         uuid substance_id FK "NULL"
-        numeric(24,12) rate "NN"
-        varchar(40) rate_unit "NN"
+        numeric(24,12) rate "NULL; historical only"
+        varchar(40) rate_unit "NULL; historical only"
     }
     procurements {
         uuid id PK "NN"

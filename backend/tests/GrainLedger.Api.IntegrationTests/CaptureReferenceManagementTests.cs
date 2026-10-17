@@ -34,6 +34,13 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
         await AddCsrfAsync(otherAdminClient);
         var ids = await SeedPagedReferencesAsync(company.Id, owner.Id, admin.Id);
 
+        var usedFarmer = await ownerClient.GetFromJsonAsync<FarmerReferenceItem>($"/api/farmers/{ids.SupportFarmer}");
+        var usedPlot = await ownerClient.GetFromJsonAsync<PlotReferenceResponse>($"/api/plots/{ids.SupportPlotA}");
+        var usedSeason = await adminClient.GetFromJsonAsync<CropSeasonReferenceItem>($"/api/crop-seasons/{ids.SupportSeason}");
+        Assert.False(usedFarmer!.CanEdit || usedFarmer.CanDelete);
+        Assert.False(usedPlot!.CanEdit || usedPlot.CanDelete);
+        Assert.False(usedSeason!.CanEdit || usedSeason.CanDelete);
+
         var farmers = await ownerClient.GetFromJsonAsync<FarmerListResponse>(
             "/api/farmers?search=Owned&page=1&pageSize=1&sortBy=name&sortDirection=desc");
         Assert.Equal(2, farmers!.TotalCount);

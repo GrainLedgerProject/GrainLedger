@@ -155,7 +155,14 @@ public static class PlotSeasonEndpoints
             .Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
         var canManage = await access.HasPermissionAsync("farms.write", ct);
         var actorId = GetUserId(principal);
-        var items = rows.Select(x => ToReferenceItem(x.Item, x.PlotCode, x.SeasonName, actorId, canManage)).ToArray();
+        var ids = rows.Select(x => x.Item.Id).ToArray();
+        var procurementRefs = await db.ProcurementItems.AsNoTracking().Where(x => x.CompanyId == companyId.Value && ids.Contains(x.PlotSeasonId))
+            .Select(x => x.PlotSeasonId).Distinct().ToArrayAsync(ct);
+        var sprayRefs = await db.SprayDeclarations.AsNoTracking().Where(x => x.CompanyId == companyId.Value && ids.Contains(x.PlotSeasonId))
+            .Select(x => x.PlotSeasonId).Distinct().ToArrayAsync(ct);
+        var inUse = procurementRefs.Concat(sprayRefs).ToHashSet();
+        var items = rows.Select(x => ToReferenceItem(x.Item, x.PlotCode, x.SeasonName, actorId,
+            canManage && !inUse.Contains(x.Item.Id))).ToArray();
         return Results.Ok(new PlotSeasonListResponse(items, currentPage, size, totalCount,
             (long)currentPage * size < totalCount));
     }
@@ -172,7 +179,8 @@ public static class PlotSeasonEndpoints
             select new { Item = item, PlotCode = plot.Code, SeasonName = season.Name }).SingleOrDefaultAsync(ct);
         if (row is null) return Problem(404, "PLOT_SEASON_NOT_FOUND", "Plot-season not found.");
         var canManage = await access.HasPermissionAsync("farms.write", ct);
-        return Results.Ok(ToReferenceResponse(row.Item, row.PlotCode, row.SeasonName, GetUserId(principal), canManage));
+        return Results.Ok(ToReferenceResponse(row.Item, row.PlotCode, row.SeasonName, GetUserId(principal),
+            canManage && !await PlotSeasonInUseAsync(db, companyId.Value, id, ct)));
     }
     private static async Task<IResult> UpdateAsync(Guid id, UpdatePlotSeasonRequest request,
         ClaimsPrincipal principal, ICurrentAccess access, IdentityDbContext identityDb,

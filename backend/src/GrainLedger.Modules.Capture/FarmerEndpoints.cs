@@ -39,9 +39,11 @@ public static class CaptureModule
 
     public static IEndpointRouteBuilder MapCaptureModule(this IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapSampleEndpoints();
         var group = endpoints.MapGroup("/api/farmers").RequireAuthorization()
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>();
         group.MapPost("", RegisterAsync).RequireAuthorization("farms.write");
+        group.MapPost("/duplicate-check", CaptureDuplicateEndpoints.CheckFarmerAsync).RequireAuthorization("farms.write");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("farms.write");
@@ -175,7 +177,13 @@ public static class CaptureModule
         };
         var rows = await ordered.ThenBy(x => x.Id).Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
         var canManage = await access.HasPermissionAsync("farms.write", ct);
-        var items = rows.Select(x => ToReferenceItem(x, actor.Value.UserId, canManage)).ToArray();
+        var ids = rows.Select(x => x.Id).ToArray();
+        var plotOwners = await db.Plots.AsNoTracking().Where(x => x.CompanyId == actor.Value.CompanyId && ids.Contains(x.FarmerId))
+            .Select(x => x.FarmerId).Distinct().ToArrayAsync(ct);
+        var procurementOwners = await db.Procurements.AsNoTracking().Where(x => x.CompanyId == actor.Value.CompanyId && ids.Contains(x.FarmerId))
+            .Select(x => x.FarmerId).Distinct().ToArrayAsync(ct);
+        var inUse = plotOwners.Concat(procurementOwners).ToHashSet();
+        var items = rows.Select(x => ToReferenceItem(x, actor.Value.UserId, canManage && !inUse.Contains(x.Id))).ToArray();
         return Results.Ok(new FarmerListResponse(items, currentPage, size, totalCount,
             (long)currentPage * size < totalCount));
     }
@@ -189,7 +197,8 @@ public static class CaptureModule
         var farmer = await db.Farmers.AsNoTracking().SingleOrDefaultAsync(x => x.CompanyId == actor.Value.CompanyId && x.Id == id, ct);
         if (farmer is null) return Problem(404, "FARMER_NOT_FOUND", "Farmer not found.");
         var canManage = await access.HasPermissionAsync("farms.write", ct);
-        return Results.Ok(ToReferenceItem(farmer, actor.Value.UserId, canManage));
+        return Results.Ok(ToReferenceItem(farmer, actor.Value.UserId,
+            canManage && !await FarmerInUseAsync(db, actor.Value.CompanyId, id, ct)));
     }
 
 

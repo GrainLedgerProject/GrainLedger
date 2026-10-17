@@ -133,7 +133,10 @@ public static class CropSeasonEndpoints
         var rows = await ordered.ThenBy(x => x.Id).Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
         if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var actorId)) return Results.Forbid();
         var canManage = canConfigure || await access.HasPermissionAsync("farms.write", ct);
-        var items = rows.Select(x => ToReferenceItem(x, actorId, canManage)).ToArray();
+        var ids = rows.Select(x => x.Id).ToArray();
+        var inUse = (await db.PlotSeasons.AsNoTracking().Where(x => x.CompanyId == targetCompanyId && ids.Contains(x.SeasonId))
+            .Select(x => x.SeasonId).Distinct().ToArrayAsync(ct)).ToHashSet();
+        var items = rows.Select(x => ToReferenceItem(x, actorId, canManage && !inUse.Contains(x.Id))).ToArray();
         return Results.Ok(new CropSeasonListResponse(items, currentPage, size, totalCount,
             (long)currentPage * size < totalCount));
     }
@@ -159,7 +162,8 @@ public static class CropSeasonEndpoints
             if (companyId != season.CompanyId) return Problem(404, "CROP_SEASON_NOT_FOUND", "Crop season not found.");
         }
         var canManage = canConfigure || await access.HasPermissionAsync("farms.write", ct);
-        return Results.Ok(ToReferenceItem(season, actorId, canManage));
+        return Results.Ok(ToReferenceItem(season, actorId,
+            canManage && !await CropSeasonInUseAsync(db, season.CompanyId, id, ct)));
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, UpdateCropSeasonRequest request,

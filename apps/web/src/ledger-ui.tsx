@@ -39,7 +39,7 @@ export function useAction() {
     catch (e) { setError(errorMessage(e)); return undefined; }
     finally { setBusy(false); }
   }
-  return { error, status, busy, run, setStatus };
+  return { error, status, busy, run, setStatus, setError };
 }
 export const mutate = <T,>(path: string, body: Row, method = 'POST') => api<T>(path, { method, body: JSON.stringify(body) });
 export function Feedback({ error, status }: { error?: string; status?: string }) { return <>{error && <div className="notice error" role="alert">{error}</div>}{status && <div className="notice" role="status">{status}</div>}</>; }

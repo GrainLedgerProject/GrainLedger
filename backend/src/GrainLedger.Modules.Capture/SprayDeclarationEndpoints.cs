@@ -3,6 +3,8 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using GrainLedger.Modules.Catalogs;
 using GrainLedger.Modules.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -12,17 +14,19 @@ using Npgsql;
 
 namespace GrainLedger.Modules.Capture;
 
-public sealed record SprayItemInput(string? ProductName, Guid? SubstanceId, decimal Rate, string? RateUnit);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record SprayItemInput(string? ProductName, Guid? SubstanceId);
 public sealed record SprayDeclarationInput(Guid EntityId, Guid PlotSeasonId, DateOnly AppliedOn,
     string? InformationSource, string? EvidenceRef, IReadOnlyList<SprayItemInput?>? Items);
 public sealed record RecordSprayDeclarationRequest(string? DeviceId, Guid ClientOperationId,
     DateTimeOffset CapturedAt, int PayloadSchemaVersion, SprayDeclarationInput? Payload);
-public sealed record SprayItemResponse(Guid Id, string? ProductName, Guid? SubstanceId, decimal Rate, string RateUnit);
+public sealed record SprayItemResponse(Guid Id, string? ProductName, Guid? SubstanceId);
 public sealed record SprayDeclarationResponse(Guid Id, Guid PlotSeasonId, DateOnly AppliedOn,
     string InformationSource, string? EvidenceRef, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt,
     Guid RecordedBy, IReadOnlyList<SprayItemResponse> Items);
 public sealed record SprayDeclarationSummary(Guid Id, Guid PlotSeasonId, DateOnly AppliedOn,
-    DateTimeOffset RecordedAt, Guid RecordedBy, string? EvidenceRef, int ItemCount);
+    DateTimeOffset RecordedAt, Guid RecordedBy, string? EvidenceRef, int ItemCount,
+    string? PlotCode = null, string? SeasonName = null);
 public sealed record SprayDeclarationListResponse(IReadOnlyList<SprayDeclarationSummary> Items,
     int Page, int PageSize, bool HasMore);
 
@@ -57,8 +61,7 @@ public static class SprayDeclarationEndpoints
         var appliedOn = payload.AppliedOn;
         var informationSource = payload.InformationSource!.Trim();
         var evidenceRef = Clean(payload.EvidenceRef);
-        var inputs = payload.Items!.Select(x => new SprayItemInput(Clean(x!.ProductName), x.SubstanceId,
-            x.Rate, x.RateUnit!.Trim().ToUpperInvariant())).ToArray();
+        var inputs = payload.Items!.Select(x => new SprayItemInput(Clean(x!.ProductName), x.SubstanceId)).ToArray();
         var canonical = JsonSerializer.Serialize(new { operationType = EventType, request.PayloadSchemaVersion,
             capturedAt, payload.EntityId, payload.PlotSeasonId, appliedOn, informationSource, evidenceRef, items = inputs });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
@@ -94,29 +97,20 @@ public static class SprayDeclarationEndpoints
         if (knownSubstances.Count != substanceIds.Length)
             return Results.ValidationProblem(new Dictionary<string, string[]> {
                 ["payload.items"] = ["An active substance does not exist in the catalog."] });
-        var unitCodes = inputs.Select(x => x.RateUnit!).Distinct().ToArray();
-        var knownUnits = await db.Database
-            .SqlQuery<string>($"SELECT code AS \"Value\" FROM catalog.measurement_units WHERE code=ANY({unitCodes}) AND quantity_kind='APPLICATION_RATE' AND is_deleted=false")
-            .ToListAsync(ct);
-        if (knownUnits.Count != unitCodes.Length)
-            return Results.ValidationProblem(new Dictionary<string, string[]> {
-                ["payload.items"] = ["Each rate unit must be an APPLICATION_RATE unit in the catalog."] });
-
         var now = clock.GetUtcNow();
         var header = new SprayDeclaration { Id = payload.EntityId, CompanyId = companyId.Value,
             PlotSeasonId = payload.PlotSeasonId, AppliedOn = appliedOn, RecordedBy = actorId,
             RecordedAt = now, EvidenceRef = evidenceRef };
         var items = inputs.Select(x => new SprayItem { Id = Guid.NewGuid(), CompanyId = companyId.Value,
-            DeclarationId = header.Id, ProductName = x.ProductName, SubstanceId = x.SubstanceId,
-            Rate = x.Rate, RateUnit = x.RateUnit! }).OrderBy(x => x.Id).ToArray();
-        var itemResponses = items.Select(x => new SprayItemResponse(x.Id, x.ProductName, x.SubstanceId,
-            x.Rate, x.RateUnit)).ToArray();
+            DeclarationId = header.Id, ProductName = x.ProductName, SubstanceId = x.SubstanceId })
+            .OrderBy(x => x.Id).ToArray();
+        var itemResponses = items.Select(x => new SprayItemResponse(x.Id, x.ProductName, x.SubstanceId)).ToArray();
         var result = new SprayDeclarationResponse(header.Id, header.PlotSeasonId, header.AppliedOn,
             informationSource, header.EvidenceRef, capturedAt, now, actorId, itemResponses);
         var businessEvent = new CaptureBusinessEvent { CompanyId = companyId, ActorId = actorId,
             EventType = EventType, OccurredAt = capturedAt, RecordedAt = now,
             CorrelationId = request.ClientOperationId,
-            Payload = JsonSerializer.Serialize(new { schemaVersion = 1, sprayDeclarationId = header.Id,
+            Payload = JsonSerializer.Serialize(new { schemaVersion = 2, sprayDeclarationId = header.Id,
                 header.PlotSeasonId, appliedOn, informationSource, evidenceRef, items = itemResponses }) };
         db.SprayDeclarations.Add(header);
         db.SprayItems.AddRange(items);
@@ -159,12 +153,15 @@ public static class SprayDeclarationEndpoints
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["query"] = ["Invalid filter or pagination value."] });
         var query = db.SprayDeclarations.AsNoTracking().Where(x => x.CompanyId == companyId.Value);
         if (plotSeasonId is { } id) query = query.Where(x => x.PlotSeasonId == id);
-        var rows = await query.OrderByDescending(x => x.AppliedOn).ThenBy(x => x.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize + 1)
-            .Select(x => new SprayDeclarationSummary(x.Id, x.PlotSeasonId, x.AppliedOn,
-                x.RecordedAt, x.RecordedBy, x.EvidenceRef,
-                db.SprayItems.Count(item => item.CompanyId == companyId.Value && item.DeclarationId == x.Id)))
-            .ToListAsync(ct);
+        var rows = await (from declaration in query.OrderByDescending(x => x.AppliedOn).ThenBy(x => x.Id)
+            join plotSeason in db.PlotSeasons.AsNoTracking() on new { declaration.CompanyId, Id = declaration.PlotSeasonId } equals new { plotSeason.CompanyId, plotSeason.Id }
+            join plot in db.Plots.AsNoTracking() on new { plotSeason.CompanyId, Id = plotSeason.PlotId } equals new { plot.CompanyId, plot.Id }
+            join season in db.CropSeasons.AsNoTracking() on new { plotSeason.CompanyId, Id = plotSeason.SeasonId } equals new { season.CompanyId, season.Id }
+            select new SprayDeclarationSummary(declaration.Id, declaration.PlotSeasonId, declaration.AppliedOn,
+                declaration.RecordedAt, declaration.RecordedBy, declaration.EvidenceRef,
+                db.SprayItems.Count(item => item.CompanyId == companyId.Value && item.DeclarationId == declaration.Id),
+                plot.Code, season.Name))
+            .Skip((page - 1) * pageSize).Take(pageSize + 1).ToListAsync(ct);
         return Results.Ok(new SprayDeclarationListResponse(rows.Take(pageSize).ToArray(),
             page, pageSize, rows.Count > pageSize));
     }
@@ -191,7 +188,7 @@ public static class SprayDeclarationEndpoints
         var items = await db.SprayItems.AsNoTracking().Where(x =>
             x.CompanyId == companyId.Value && x.DeclarationId == header.Id)
             .OrderBy(x => x.Id).Select(x => new SprayItemResponse(x.Id, x.ProductName,
-                x.SubstanceId, x.Rate, x.RateUnit)).ToListAsync(ct);
+                x.SubstanceId)).ToListAsync(ct);
         return Results.Ok(new SprayDeclarationResponse(header.Id, header.PlotSeasonId, header.AppliedOn,
             source.GetString()!, header.EvidenceRef, businessEvent.OccurredAt, header.RecordedAt,
             header.RecordedBy, items));
@@ -204,7 +201,7 @@ public static class SprayDeclarationEndpoints
             errors["deviceId"] = ["Device ID is required and must not exceed 100 characters."];
         if (request.ClientOperationId == Guid.Empty) errors["clientOperationId"] = ["Operation ID is required."];
         if (request.CapturedAt == default) errors["capturedAt"] = ["Capture time is required."];
-        if (request.PayloadSchemaVersion != 1) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
+        if (request.PayloadSchemaVersion != 2) errors["payloadSchemaVersion"] = ["Unsupported payload version. Use 2 for spray declarations without rate."];
         if (request.Payload is null) { errors["payload"] = ["Spray data is required."]; return errors; }
         var payload = request.Payload;
         if (payload.EntityId == Guid.Empty) errors["payload.entityId"] = ["Declaration ID is required."];
@@ -227,11 +224,6 @@ public static class SprayDeclarationEndpoints
                 errors[$"payload.items[{i}].productName"] = ["Provide a product name or an active substance."];
             if (item.SubstanceId == Guid.Empty)
                 errors[$"payload.items[{i}].substanceId"] = ["Active substance ID must not be empty."];
-            if (item.Rate <= 0 || item.Rate >= 1_000_000_000_000m ||
-                decimal.Truncate(item.Rate * 1_000_000_000_000m) != item.Rate * 1_000_000_000_000m)
-                errors[$"payload.items[{i}].rate"] = ["Rate must be positive and fit numeric(24,12) exactly."];
-            if (string.IsNullOrWhiteSpace(item.RateUnit) || item.RateUnit.Trim().Length > 40)
-                errors[$"payload.items[{i}].rateUnit"] = ["Rate unit is required and must not exceed 40 characters."];
         }
         return errors;
     }

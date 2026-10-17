@@ -15,7 +15,7 @@ export type Role = { name: string; organizationKind: Organization['kind']; permi
 export type RegistrationPending = { registrationId: string; email: string; expiresIn: number };
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public code?: string, public errors?: Record<string, string[]>, public traceId?: string) { super(message); }
 }
 
 let authGeneration = 0;
@@ -32,10 +32,10 @@ async function parseError(response: Response): Promise<ApiError> {
     : response.status === 412 ? 'This account changed while you were editing. Reload accounts and try again.'
     : response.status === 429 ? 'Too many requests. Please wait a moment and try again.'
     : validation || problem.detail || problem.title || 'The request could not be completed. Please try again.';
-  return new ApiError(response.status, message);
+  return new ApiError(response.status, message, problem.code, problem.errors, problem.traceId);
 }
 
-async function request<T>(path: string, init: RequestInit, anonymous: boolean): Promise<T> {
+async function request<T>(path: string, init: RequestInit, anonymous: boolean, onResponse?: (response: Response) => void): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body) headers.set('Content-Type', 'application/json');
   const requestGeneration = authGeneration;
@@ -59,6 +59,7 @@ async function request<T>(path: string, init: RequestInit, anonymous: boolean): 
     }
     throw error;
   }
+  onResponse?.(response);
   if (response.status === 204) return undefined as T;
   const body = await response.text();
   if (!anonymous && authGeneration !== requestGeneration) throw new ApiError(401, 'Your session changed while the request was running.');
@@ -67,6 +68,12 @@ async function request<T>(path: string, init: RequestInit, anonymous: boolean): 
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return request<T>(path, init, false);
+}
+
+export async function apiWithEtag<T>(path: string, init: RequestInit = {}): Promise<{ data: T; etag: string | null }> {
+  let etag: string | null = null;
+  const data = await request<T>(path, init, false, response => { etag = response.headers.get('ETag'); });
+  return { data, etag };
 }
 
 export async function anonymousApi<T>(path: string, init: RequestInit = {}): Promise<T> {
