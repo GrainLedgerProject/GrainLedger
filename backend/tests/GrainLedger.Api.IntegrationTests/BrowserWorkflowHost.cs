@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Net.Http.Json;
+using GrainLedger.Modules.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -16,6 +18,16 @@ public sealed class BrowserWorkflowHost
         if (string.IsNullOrWhiteSpace(sessionFile)) return;
         var factory = new ApiFactory { BrowserCookies = true };
         await factory.InitializeAsync();
+        // Synthetic password account only in the disposable browser-test database.
+        using (var client = factory.CreateClient())
+        {
+            const string email = "browser-password@example.com";
+            var registration = await client.PostAsJsonAsync("/api/auth/register", new { email, password = "BrowserPass!123", displayName = "Browser Password User" });
+            registration.EnsureSuccessStatusCode();
+            var pending = (await registration.Content.ReadFromJsonAsync<RegistrationPendingDto>())!;
+            var verification = await client.PostAsJsonAsync("/api/auth/verify-email", new { email, registrationId = pending.RegistrationId, otp = factory.Email.VerificationCode(email) });
+            verification.EnsureSuccessStatusCode();
+        }
         using var scenario = await LedgerScenario.CreateAsync(factory);
         await scenario.ReceiptAsync("10");
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
