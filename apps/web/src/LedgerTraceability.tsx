@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { api, errorMessage, type User } from './api';
 import { Feedback, Pagination, Panel, emptyLookup } from './ledger-ui';
 import { LedgerLotPicker } from './LedgerLotPicker';
+import { TraceFlowchart } from './TraceFlowchart';
+import { traceLotOrder } from './trace-flow';
 
 type Contribution = { sourceLotId: string; quantityKg: string; denominatorKg: string; percentage: string };
 type TraceLot = { id: string; code: string; stage: string; producedKg: string; restrictions: string[]; contributions: Contribution[] | null;
@@ -18,6 +20,12 @@ export function LedgerTraceability({ user, active = true }: { user: User; active
   const [lotId, setLotId] = useState(''), [direction, setDirection] = useState<'forward' | 'backward'>('forward'), [view, setView] = useState<'current' | 'history'>('current');
   const [result, setResult] = useState<LotTrace | null>(null), [selectedId, setSelectedId] = useState(''), [page, setPage] = useState(1), [edgePage, setEdgePage] = useState(1);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [display, setDisplay] = useState<'table' | 'flowchart'>('table');
+  const orderedLots = useMemo(() => {
+    if (!result) return [];
+    const byId = new Map(result.lots.map(lot => [lot.id, lot]));
+    return traceLotOrder(result).map(id => byId.get(id)!);
+  }, [result]);
   const request = useRef(0), controller = useRef<AbortController | null>(null);
   const global = user.permissions.includes('trace.read.all');
   const canTrace = global || user.permissions.includes('trace.read.tenant');
@@ -60,19 +68,22 @@ export function LedgerTraceability({ user, active = true }: { user: User; active
         <p role="status">Complete {result.direction} trace: {result.lotCount} lots, {result.edgeCount} relationships. {result.view === 'history' ? 'Historical operations include superseded records.' : 'Superseded operations excluded.'}</p>
         <p>Snapshot: {new Date(result.asOf).toLocaleString()} · Reference: {result.traceId}</p>
         <p>Quantities at different processing stages overlap. Do not add every row as a total affected mass.</p>
-        <div className="table-scroll"><table aria-label="Traced lots"><thead><tr><th>Lot</th><th>Stage</th><th>Original output (kg)</th><th>Current stock / available (kg)</th><th>Restrictions</th></tr></thead><tbody>{result.lots.slice((page - 1) * 25, page * 25).map(lot => <tr key={lot.id}>
-          <td><button type="button" aria-pressed={selectedId === lot.id} onClick={() => setSelectedId(lot.id)}>{lot.code}</button><small>{lot.id}</small></td><td>{lot.stage}</td><td>{lot.producedKg}</td>
+        <div className="trace-display-options" role="group" aria-label="Trace result display"><button type="button" aria-pressed={display === 'table'} onClick={() => setDisplay('table')}>Table</button><button type="button" aria-pressed={display === 'flowchart'} onClick={() => setDisplay('flowchart')}>Flowchart</button></div>
+        {display === 'flowchart' ? <TraceFlowchart key={result.traceId} trace={result} selectedId={selectedId} onSelect={setSelectedId} onShowTable={() => setDisplay('table')} /> : <>
+        <div className="table-scroll"><table aria-label="Traced lots"><thead><tr><th>Lot</th><th>Stage</th><th>Original output (kg)</th><th>Current stock / available (kg)</th><th>Restrictions</th></tr></thead><tbody>{orderedLots.slice((page - 1) * 25, page * 25).map(lot => <tr key={lot.id}>
+          <td><button type="button" aria-pressed={selectedId === lot.id} onClick={() => setSelectedId(lot.id)}>{lot.code}</button>{lot.id === result.targetLotId && <span className="trace-start-badge">Starting lot</span>}<small>{lot.id}</small></td><td>{lot.stage}</td><td>{lot.producedKg}</td>
           <td>{lot.positions.map(position => <p key={position.locationId}>{position.quantityKg} / {position.availableKg} · {position.locationId}</p>)}</td><td>{lot.restrictions.join(', ') || 'None'}</td>
         </tr>)}</tbody></table></div>
         <Pagination label="traced lots" page={page} pageSize={25} totalCount={result.lots.length} onChange={setPage} />
+        </>}
       </Panel>
-      <Panel title="Processing relationships">
+      {display === 'table' && <Panel title="Processing relationships">
         <p>Input consumed and output produced belong to the operation. They are not source-attributed kilograms for each edge. Transfers preserve lot identity.</p>
         {!result.edges.length ? <p>No processing relationships in this direction and view.</p> : <div className="table-scroll"><table aria-label="Processing relationships"><thead><tr><th>Input lot</th><th>Operation</th><th>Output lot</th><th>Input consumed (kg)</th><th>Output produced (kg)</th></tr></thead><tbody>{result.edges.slice((edgePage - 1) * 25, edgePage * 25).map(edge => <tr key={`${edge.operationId}/${edge.inputLotId}/${edge.outputLotId}`}>
           <td>{lots.get(edge.inputLotId)?.code || edge.inputLotId}</td><td>{operations.get(edge.operationId)?.kind} · {operations.get(edge.operationId)?.status}<small>{edge.operationId}</small></td><td>{lots.get(edge.outputLotId)?.code || edge.outputLotId}</td><td>{edge.inputConsumedKg}</td><td>{edge.outputProducedKg}</td>
         </tr>)}</tbody></table></div>}
         <Pagination label="trace relationships" page={edgePage} pageSize={25} totalCount={result.edges.length} onChange={setEdgePage} />
-      </Panel>
+      </Panel>}
       {result.sourceContributionsVisible && selected && <Panel title={`Source composition — ${selected.code}`}>
         <p>Allocated output kg / original output kg; percentages are rounded for display. A zero allocation after rounding does not erase a recorded source relationship.</p>
         <div className="table-scroll"><table aria-label="Traced source contributions"><thead><tr><th>Source Ledger lot</th><th>Allocated kg / output kg</th><th>Share</th><th>Recorded origin</th></tr></thead><tbody>{selected.contributions?.map(contribution => {

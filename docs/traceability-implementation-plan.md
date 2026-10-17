@@ -94,3 +94,19 @@ Sau yêu cầu trực tiếp “chạy migration đi”, đã thực hiện quy 
 - Migration process exit code 0; chỉ migration Ledger trên được áp dụng, kèm runtime grants theo `LedgerDatabase.ConfigureRuntimeRoleAsync`.
 - Postflight chỉ đọc: cả bốn module không còn pending migration; routine `ledger.trace_lot(uuid,uuid,text,text)` tồn tại, restricted runtime có EXECUTE, runtime validation vẫn pass.
 - Không gọi trace thực tế trên shared DB vì thao tác đó ghi audit, không chạy data-changing smoke hoặc tự tạo dữ liệu mẫu. Browser/API smoke trước đó vẫn thuộc database cô lập.
+
+### 6.5. Mở rộng hiển thị Flowchart
+
+Theo yêu cầu bổ sung graph cho Trace result và Processing relationships, giao diện có lựa chọn **Table / Flowchart** trên cùng kết quả. Sơ đồ kết hợp lô → công đoạn → lô, hỗ trợ nhánh tách/gộp, chọn lô, zoom/fit và focus lô bắt đầu. Mũi tên giữ chiều vật liệu cho cả forward/backward. Table cũng đưa Starting lot lên đầu thay vì theo UUID.
+
+Không đổi API, số học khối lượng hoặc quyền; không thêm dependency/migration. Không tự vẽ correction thành cạnh vật liệu. Flowchart lớn hơn 250 node hoặc 500 quan hệ API chuyển sang thông báo dùng Table cho toàn bộ kết quả; không cắt bớt graph âm thầm. Chi tiết sử dụng tại [API/UI contract](traceability-api.md#table--flowchart-trên-web).
+
+Kiểm chứng bổ sung đã chạy:
+
+- `npm test`: PASS 65/65 (8 regression tests mới cho topology, bảng/flowchart, lựa chọn node, zoom, scope nguồn và fallback sơ đồ lớn).
+- `npm run build`: PASS TypeScript và Vite production build; không thêm dependency hoặc thay lockfile.
+- T3 browser + BrowserWorkflowHost/Testcontainers cô lập: tạo MILLING hợp lệ từ 8 kg lúa khô thành bốn đầu ra và loss 0,5 kg; forward hiện 5 node lô + 1 node công đoạn với 5 mũi tên. Backward từ cám hiện 3 lô + 2 công đoạn, mũi tên vẫn theo chiều vật liệu, lô bắt đầu nằm bên phải và được đánh dấu.
+- Chọn node cám cập nhật chi tiết stock/source; chuyển Table/Flowchart giữ nguyên số request trace (không audit mới). Table đưa Starting lot lên đầu. Mobile 390 px cuộn graph trong khung, không tràn ngang toàn trang; không có console error hoặc nội dung tràn card trong fixture.
+- `git diff --check` và link tài liệu: PASS. Không chạy lại toàn bộ backend suite vì phần mở rộng chỉ thay frontend/docs; browser dùng API thật của host test cô lập.
+
+Không chạy trace, seed hoặc migration trên Supabase dùng chung trong đợt mở rộng UI này. Môi trường browser/test bridge tạm được dừng sau smoke. Phần mở rộng Flowchart được tách thành commit riêng trước khi bổ sung chi tiết nguồn ruộng/vụ; chưa push từ phiên làm việc này.

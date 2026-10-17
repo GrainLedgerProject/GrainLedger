@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { LedgerTraceability, type LotTrace } from './LedgerTraceability';
@@ -63,4 +63,77 @@ it('ignores a request finishing after the user leaves the section', async () => 
   screenView.rerender(<LedgerTraceability user={actor} active={false} />);
   await act(async () => complete(response(trace)));
   expect(screen.queryByRole('table', { name: 'Traced lots' })).not.toBeInTheDocument();
+});
+
+const childId = '00000000-0000-0000-0000-000000000001';
+const branchingTrace: LotTrace = { ...trace, direction: 'forward', lotCount: 2, edgeCount: 1,
+  lots: [{ ...trace.lots[0], id: childId, code: 'CHILD', producedKg: '0.000001' }, trace.lots[0]],
+  edges: [{ operationId: 'op', inputLotId: lotId, outputLotId: childId, inputConsumedKg: '0.000002', outputProducedKg: '0.000001' }],
+  operations: [{ id: 'op', kind: 'DRYING', status: 'COMMITTED', occurredAt: trace.asOf, declaredLossKg: '0.000001', varianceKg: '0.000000' }] };
+
+it('switches Table and Flowchart without fetching again and selects a node to inspect the same source detail', async () => {
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : response(branchingTrace));
+  const browser = userEvent.setup(); render(<LedgerTraceability user={actor} />);
+  await browser.type(screen.getByLabelText('Ledger lot ID'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  const table = await screen.findByRole('table', { name: 'Traced lots' });
+  expect(within(table).getAllByRole('row')[1]).toHaveTextContent('LOT-TRACE');
+  expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Starting lot');
+  await browser.click(screen.getByRole('button', { name: 'Flowchart' }));
+  const graph = screen.getByRole('region', { name: 'Trace flowchart' });
+  expect(within(graph).getByRole('button', { name: 'Select lot LOT-TRACE — starting lot' })).toHaveAttribute('aria-pressed', 'true');
+  expect(within(graph).getByRole('group', { name: 'DRYING operation op' })).toHaveTextContent('COMMITTED');
+  await browser.click(within(graph).getByRole('button', { name: 'Select lot CHILD' }));
+  expect(screen.getByRole('heading', { name: 'Source composition — CHILD' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Selected graph lot' })).toHaveTextContent('0.000001');
+  await browser.click(screen.getByRole('button', { name: 'Focus starting lot' }));
+  expect(within(graph).getByRole('button', { name: /starting lot/ })).toHaveFocus();
+  await browser.click(screen.getByRole('button', { name: 'Table' }));
+  expect(screen.getByRole('table', { name: 'Traced lots' })).toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/api/ledger/trace')).toHaveLength(1);
+});
+
+it('displays a lone starting lot and zoom controls without inventing downstream steps', async () => {
+  const browser = userEvent.setup(); render(<LedgerTraceability user={actor} />);
+  await browser.type(screen.getByLabelText('Ledger lot ID'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  await screen.findByRole('table', { name: 'Traced lots' });
+  await browser.click(screen.getByRole('button', { name: 'Flowchart' }));
+  expect(screen.getByText(/starting lot is shown on its own/)).toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: 'Zoom in' }));
+  expect(screen.getByLabelText('Graph zoom')).toHaveTextContent('120%');
+  await browser.click(screen.getByRole('button', { name: 'Reset zoom' }));
+  expect(screen.getByLabelText('Graph zoom')).toHaveTextContent('100%');
+  const chart = screen.getByRole('region', { name: 'Trace flowchart' });
+  expect(within(chart).getAllByRole('button')).toHaveLength(1);
+});
+
+it('keeps source data hidden in the Export Staff flowchart as in the API response', async () => {
+  const exported: LotTrace = { ...branchingTrace, sourceContributionsVisible: false, sources: [], lots: branchingTrace.lots.map(lot => ({ ...lot, contributions: null })) };
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : String(url).startsWith('/api/ledger/lots?') ? response({ items: [branchingTrace.lots[1]], page: 1, pageSize: 25, totalCount: 1, hasMore: false }) : response(exported));
+  const browser = userEvent.setup(); render(<LedgerTraceability user={{ ...actor, role: 'ExportStaff', permissions: ['trace.read.tenant'] }} />);
+  await screen.findByRole('option', { name: /LOT-TRACE/ });
+  await browser.selectOptions(screen.getByLabelText('Starting lot'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  await screen.findByRole('table', { name: 'Traced lots' });
+  await browser.click(screen.getByRole('button', { name: 'Flowchart' }));
+  await browser.click(within(screen.getByRole('region', { name: 'Trace flowchart' })).getByRole('button', { name: 'Select lot CHILD' }));
+  expect(screen.queryByRole('heading', { name: /Source composition/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('table', { name: 'Traced source contributions' })).not.toBeInTheDocument();
+});
+
+it('keeps the complete table available when a result is too large to draw', async () => {
+  const large = { ...trace, lotCount: 251, lots: [trace.lots[0], ...Array.from({ length: 250 }, (_, i) => ({ ...trace.lots[0], id: `extra-${i}`, code: `Extra ${i}` }))] };
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : response(large));
+  const browser = userEvent.setup(); render(<LedgerTraceability user={actor} />);
+  await browser.type(screen.getByLabelText('Ledger lot ID'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  await screen.findByRole('table', { name: 'Traced lots' });
+  await browser.click(screen.getByRole('button', { name: 'Flowchart' }));
+  expect(screen.getByText(/Flowchart supports up to/)).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Trace flowchart' })).not.toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: 'Show table' }));
+  expect(screen.getByRole('table', { name: 'Traced lots' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Last traced lots page' })).toBeEnabled();
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/api/ledger/trace')).toHaveLength(1);
 });

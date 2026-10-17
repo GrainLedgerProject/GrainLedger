@@ -69,6 +69,20 @@ Graph, positions, restrictions và attribution được đọc theo tập trong 
 
 API trả toàn bộ graph trong giới hạn; UI phân trang cục bộ phần trình bày (25 dòng) sau khi nhận tập hoàn chỉnh. Không lấy pagination inventory làm giới hạn traversal. Version đầu chưa có export/batch traversal lớn hơn guard.
 
+## Table / Flowchart trên web
+
+Sau **Run trace**, chọn **Table** hoặc **Flowchart** tại phần Trace result. Flowchart kết hợp danh sách lô và Processing relationships thành sơ đồ **lô đầu vào → công đoạn → lô đầu ra**, dùng đúng snapshot đã tải. Chuyển cách hiển thị, chọn node và zoom không gọi lại trace API hoặc tạo thêm audit.
+
+- Mũi tên luôn theo chiều vật liệu từ trái sang phải. Với Backward, các tổ tiên nằm bên trái lô bắt đầu; không đảo cạnh thành quá trình vật lý ngược.
+- Lô bắt đầu có nhãn **Starting lot**, khác với node đang được chọn. **Focus starting lot** cuộn và đặt focus về node đó; có zoom, Fit graph và cuộn khi sơ đồ lớn.
+- Chọn một node lô để xem stock/restrictions và phần source composition được API cho phép. Export Staff vẫn không có source composition.
+- Mỗi công đoạn chỉ có một node dùng chung cho các nhánh vào/ra. Quan hệ chỉ hiển thị trong phạm vi trace được trả; một công đoạn có thể còn inputs/outputs khác nằm ngoài hướng truy hiện tại. Các kg input/output xem trong **Operation quantities and exact relationships**, giữ nguyên decimal string, không cộng lặp các cặp input–output.
+- Correction references vẫn tách riêng, không dựng cạnh vật liệu ngược hay cạnh tự động original → replacement. Bản CORRECTED trong History giữ đúng status trên node công đoạn.
+- Để giữ thao tác tương tác gọn, Flowchart hỗ trợ tối đa **250 node lô/công đoạn và 500 quan hệ API**. Quá giới hạn thì thông báo rõ và cho **Show table**; không vẽ một phần rồi coi là đầy đủ. Giới hạn API 5.000 lô/20.000 cạnh vẫn giữ nguyên.
+- Table hiện xếp lô bắt đầu trước, sau đó theo từng tầng truy xuất và mã lô trong cùng nhánh. Thứ tự hiển thị không còn phụ thuộc UUID và không thay đổi dữ liệu API.
+
+Flowchart được vẽ bằng HTML/SVG với React đang có; không thêm dependency, không cần migration mới và không thay đổi authorization/accounting backend.
+
 ## Deployment
 
 Forward migration Ledger `20261017000000_AddLotTraceability` thêm `ledger.trace_lot(uuid,uuid,text,text)`. Runtime chỉ được EXECUTE entry routine; các grant được cập nhật trong `LedgerDatabase.ConfigureRuntimeRoleAsync` khi chạy migration workflow hiện có. Không sửa migration cũ hay grant PUBLIC. Trước khi dùng trên shared Supabase, owner cần phê duyệt và thực hiện migration/runtime grant theo quy trình repository; normal startup không tự migrate.
