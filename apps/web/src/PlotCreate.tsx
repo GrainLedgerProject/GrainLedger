@@ -11,11 +11,11 @@ type RegisterPlotRequest = {
   deviceId: string;
   clientOperationId: string;
   capturedAt: string;
-  payloadSchemaVersion: 1;
+  payloadSchemaVersion: 1 | 2;
   payload: {
     entityId: string;
     farmerId: string;
-    code: string | null;
+    code?: string | null;
     geometry: { type: 'Point'; coordinates: [number, number] };
     areaHa: number;
   };
@@ -54,7 +54,6 @@ export function PlotCreate({ farmerId, farmerName, userId, companyId, onCancel, 
 }) {
   const key = `grainledger:plot-create:${userId}:${companyId}:${farmerId}`;
   const [pending, setPending] = useState<RegisterPlotRequest | null>(() => readPending(key, farmerId));
-  const [code, setCode] = useState(() => readPending(key, farmerId)?.payload.code ?? '');
   const [longitude, setLongitude] = useState(() => String(readPending(key, farmerId)?.payload.geometry.coordinates[0] ?? ''));
   const [latitude, setLatitude] = useState(() => String(readPending(key, farmerId)?.payload.geometry.coordinates[1] ?? ''));
   const [areaHa, setAreaHa] = useState(() => String(readPending(key, farmerId)?.payload.areaHa ?? ''));
@@ -95,8 +94,8 @@ export function PlotCreate({ farmerId, farmerName, userId, companyId, onCancel, 
       deviceId: deviceId(),
       clientOperationId: crypto.randomUUID(),
       capturedAt: new Date().toISOString(),
-      payloadSchemaVersion: 1,
-      payload: { entityId: crypto.randomUUID(), farmerId, code: code.trim() || null,
+      payloadSchemaVersion: 2,
+      payload: { entityId: crypto.randomUUID(), farmerId,
         geometry: { type: 'Point', coordinates: coordinates! }, areaHa: area },
     };
     if (!pending) {
@@ -125,7 +124,7 @@ export function PlotCreate({ farmerId, farmerName, userId, companyId, onCancel, 
       <div className="farmer-modal-heading"><div><span className="eyebrow">FIELD RECORDS</span><h2 id="add-plot-title">Add plot</h2></div><button className="farmer-modal-close" type="button" onClick={onCancel} disabled={busy} aria-label="Close add plot form">×</button></div>
       <p className="muted">Register a plot for <strong>{farmerName}</strong>. Choose a point or enter WGS84 coordinates. Check that the selected point is on the plot.</p>
       <form onSubmit={save}>
-        <label htmlFor="new-plot-code">Plot code <span className="optional">(optional)</span><input id="new-plot-code" value={code} onChange={event => setCode(event.target.value)} maxLength={40} disabled={busy || !!pending} placeholder="Leave blank to generate a code" /></label>
+        <p className="field-help">The plot code is assigned after saving.</p>
         <div className="plot-map-heading">
           <div><strong>Plot location</strong><span>Click the map or drag the marker. The starting view is not a saved location.</span></div>
           <button type="button" className="secondary" onClick={() => location.locate(selectPoint)} disabled={busy || !!pending || location.locating}>{location.locating ? 'Finding location…' : 'Use device location'}</button>

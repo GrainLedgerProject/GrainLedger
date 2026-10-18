@@ -205,7 +205,8 @@ public static class ProcurementEndpoints
         var businessEvent = new CaptureBusinessEvent { CompanyId = companyId, ActorId = actorId,
             EventType = EventType, OccurredAt = receivedAt, RecordedAt = now,
             CorrelationId = request.ClientOperationId, Payload = "{}" };
-        var code = $"TM-{payload.EntityId:N}".ToUpperInvariant();
+        var code = request.PayloadSchemaVersion == 1 ? $"TM-{payload.EntityId:N}".ToUpperInvariant()
+            : await CaptureCodes.DatedAsync(db, companyId.Value, "PRC", receivedAt, ct);
         var header = new Procurement { Id = payload.EntityId, CompanyId = companyId.Value,
             Code = code, FarmerId = farmer.Id, CollectionSiteId = payload.CollectionSiteId,
             ReceivedBy = actorId, ReceivedAt = receivedAt, Status = "COMMITTED", EventId = businessEvent.Id };
@@ -425,7 +426,7 @@ public static class ProcurementEndpoints
         if (string.IsNullOrWhiteSpace(request.DeviceId) || request.DeviceId.Trim().Length > 100) errors["deviceId"] = ["Device ID is required and must not exceed 100 characters."];
         if (request.ClientOperationId == Guid.Empty) errors["clientOperationId"] = ["Operation ID is required."];
         if (request.CapturedAt == default) errors["capturedAt"] = ["Capture time is required."];
-        if (request.PayloadSchemaVersion != 1) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
+        if (request.PayloadSchemaVersion is not (1 or 2)) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
         if (request.Payload is null) { errors["payload"] = ["Procurement data is required."]; lines = []; return errors; }
         var p = request.Payload;
         if (p.EntityId == Guid.Empty) errors["payload.entityId"] = ["Procurement ID is required."];

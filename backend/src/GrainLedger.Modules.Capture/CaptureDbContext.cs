@@ -7,6 +7,7 @@ public sealed class Farmer
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
     public required string Code { get; set; }
+    public long? CodeNumber { get; set; }
     public required string Name { get; set; }
     public string? Contact { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -48,6 +49,7 @@ public sealed class CaptureBusinessEvent
 public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options) : DbContext(options)
 {
     public DbSet<Farmer> Farmers => Set<Farmer>();
+    public DbSet<CaptureCodeCounter> CodeCounters => Set<CaptureCodeCounter>();
     public DbSet<Plot> Plots => Set<Plot>();
     public DbSet<CropSeason> CropSeasons => Set<CropSeason>();
     public DbSet<PlotSeason> PlotSeasons => Set<PlotSeason>();
@@ -66,6 +68,15 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
         // InitialCapture adds foreign keys to identity tables in its migration.
         // Those tables belong to the Identity DbContext and are not remapped here.
         modelBuilder.HasDefaultSchema("capture");
+        modelBuilder.Entity<CaptureCodeCounter>(b =>
+        {
+            b.ToTable("code_counters");
+            b.HasKey(x => new { x.CompanyId, x.Kind, x.Scope });
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.Kind).HasColumnName("kind").HasMaxLength(3);
+            b.Property(x => x.Scope).HasColumnName("scope").HasMaxLength(32);
+            b.Property(x => x.NextValue).HasColumnName("next_value");
+        });
         modelBuilder.Entity<Farmer>(b =>
         {
             b.ToTable("farmers");
@@ -73,6 +84,9 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             b.Property(x => x.CompanyId).HasColumnName("company_id");
             b.Property(x => x.Code).HasColumnName("code").HasMaxLength(40).IsRequired();
+            b.Property(x => x.CodeNumber).HasColumnName("code_number");
+            b.HasIndex(x => new { x.CompanyId, x.CodeNumber }).IsUnique()
+                .HasDatabaseName("ux_farmers_company_code_number");
             b.Property(x => x.Name).HasColumnName("name").IsRequired();
             b.Property(x => x.Contact).HasColumnName("contact");
             b.Property(x => x.CreatedAt).HasColumnName("created_at");

@@ -7,7 +7,7 @@ type RegisterFarmerRequest = {
   deviceId: string;
   clientOperationId: string;
   capturedAt: string;
-  payloadSchemaVersion: 1;
+  payloadSchemaVersion: 1 | 2;
   payload: { entityId: string; name: string; contact: string | null };
 };
 
@@ -69,7 +69,7 @@ export function FarmerCreate({ userId, companyId, onCancel, onCreated }: {
       deviceId: deviceId(),
       clientOperationId: crypto.randomUUID(),
       capturedAt: new Date().toISOString(),
-      payloadSchemaVersion: 1,
+      payloadSchemaVersion: 2,
       payload: { entityId: crypto.randomUUID(), name: name.trim(), contact: contact.trim() || null },
     };
     if (!pending) { setPending(request); rememberPending(key, request); }

@@ -74,7 +74,7 @@ it('registers source procurement with exact expected quantity', async () => {
  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(true));
  const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/procurements')!;
  const request = JSON.parse(String(init?.body));
- expect(request).toMatchObject({ deviceId: 'grainledger-web', payloadSchemaVersion: 1, payload: { farmerId: 'farmer', collectionSiteId: 'site', receivingLocationId: 'loc', commodityId: 'paddy', items: [{ lineNo: 1, plotSeasonId: 'ps', measuredValue: '600.000001', measuredUnit: 'KG', moisturePercent: '22.5' }] } });
+ expect(request).toMatchObject({ deviceId: 'grainledger-web', payloadSchemaVersion: 2, payload: { farmerId: 'farmer', collectionSiteId: 'site', receivingLocationId: 'loc', commodityId: 'paddy', items: [{ lineNo: 1, plotSeasonId: 'ps', measuredValue: '600.000001', measuredUnit: 'KG', moisturePercent: '22.5' }] } });
  expect(request.payload.items[0].lotId).toBeTruthy(); expect(request.payload.items[0].sourceLotId).toBeTruthy();
  expect(new Headers(init?.headers).get('X-CSRF-TOKEN')).toBe('csrf');
 });
@@ -179,6 +179,52 @@ it('retains bagging identity and blend commodity choice in saved payload', async
  await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/ledger/operations' && init?.method === 'POST')).toBe(true));
  const request = JSON.parse(String(fetchMock.mock.calls.find(([url, init]) => url === '/api/ledger/operations' && init?.method === 'POST')![1]?.body));
  expect(request.outputs[0]).toMatchObject({ stage: 'BAGGED_RICE', productIdentity: 'HEAD_RICE', commodityId: 'rice' });
+});
+it('shows the server-assigned processing lot code after saving a draft', async () => {
+ const originalFetch = fetchMock.getMockImplementation()!;
+ fetchMock.mockImplementation(async (url, init) => {
+  if (url === '/api/ledger/operations' && init?.method === 'POST') {
+   const request = JSON.parse(String(init.body));
+   expect(request.outputs[0].code).toBe('');
+   return response({ ...request, outputs: [{ ...request.outputs[0], code: 'DRY-20261018-000123' }] });
+  }
+  return originalFetch(url, init);
+ });
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByRole('button', { name: 'Process & correct' }));
+ await browser.click(await screen.findByText('Create processing draft', { selector: 'summary' }));
+ const form = screen.getByRole('heading', { name: 'New processing draft' }).closest('section')!;
+ await browser.selectOptions(within(form).getByLabelText('Stock owner'), 'customer');
+ await browser.selectOptions(within(form).getByLabelText('Processing facility'), 'facility');
+ await browser.selectOptions(within(form).getByLabelText('Equipment'), 'dryer');
+ await within(within(form).getByLabelText('Input lot')).findByRole('option', { name: /Source lot/ });
+ await browser.selectOptions(within(form).getByLabelText('Input lot'), 'source');
+ await browser.selectOptions(within(form).getByLabelText('Input stock position'), 'store');
+ await browser.type(within(form).getByLabelText('Allocated input (kg)'), '10');
+ await browser.selectOptions(within(form).getByLabelText('Output physical location'), 'store');
+ await browser.type(within(form).getByLabelText('Actual output (kg)'), '9');
+ await browser.click(within(form).getByRole('button', { name: 'Save processing draft' }));
+ expect(await screen.findByText(/Output lot code assigned by the server: DRY-20261018-000123/)).toBeInTheDocument();
+});
+it('drops a reserved output code when changing the first input changes its product identity', async () => {
+ routes['/api/ledger/operations'] = page([{ ...draft, kind: 'MERGE', outputs: [{ ...draft.outputs[0], code: 'RAW-20261018-000123', stage: 'RAW_PADDY', productIdentity: 'RAW_PADDY' }] }]);
+ routes['/api/ledger/lots'] = page([lot, { ...lot, id: 'head', code: 'HDR-20261018-000124', stage: 'HEAD_RICE', productIdentity: 'HEAD_RICE' }]);
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByText(/MERGE:.*DRAFT/));
+ await browser.click(screen.getByRole('button', { name: 'Edit processing draft' }));
+ const editor = screen.getByRole('heading', { name: 'Edit processing draft' }).closest('section')!;
+ expect(within(editor).getByText('Output lot code: RAW-20261018-000123')).toBeInTheDocument();
+ await within(editor).findByRole('option', { name: /HDR-20261018-000124/ });
+ await browser.selectOptions(within(editor).getByLabelText('Input lot'), 'head');
+ expect(await within(editor).findByText('Output lot code: Assigned when draft is saved')).toBeInTheDocument();
+ await browser.selectOptions(within(editor).getByLabelText('Input stock position'), 'store');
+ await browser.click(within(editor).getByRole('button', { name: 'Save draft changes' }));
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/ledger/operations/draft' && init?.method === 'PUT')).toBe(true));
+ const request = JSON.parse(String(fetchMock.mock.calls.find(([url, init]) => url === '/api/ledger/operations/draft' && init?.method === 'PUT')![1]?.body));
+ expect(request.outputs[0]).toMatchObject({ code: '', stage: 'HEAD_RICE', productIdentity: 'HEAD_RICE' });
+ expect(request.outputs[0].id).not.toBe('dried');
 });
 it('keeps selected blend commodity and fixed blended identity in payload', async () => {
  routes['/api/ledger/lots'] = page([{ ...lot, stage: 'HEAD_RICE', productIdentity: 'HEAD_RICE' }]);

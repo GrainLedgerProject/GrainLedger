@@ -144,7 +144,9 @@ describe('Account experience', () => {
     expect(posts).toHaveLength(2);
     expect(posts[0][1]?.body).toBe(posts[1][1]?.body);
     const submitted = JSON.parse(String(posts[0][1]?.body));
-    expect(submitted.payload).toMatchObject({ farmerId: farmer.id, code: null, geometry: { type: 'Point', coordinates: [106.35, 10.4] }, areaHa: 1.25 });
+    expect(submitted.payload).toMatchObject({ farmerId: farmer.id, geometry: { type: 'Point', coordinates: [106.35, 10.4] }, areaHa: 1.25 });
+    expect(submitted.payload).not.toHaveProperty('code');
+    expect(submitted.payloadSchemaVersion).toBe(2);
     expect(submitted.payload.entityId).toBeTruthy();
     expect(submitted.clientOperationId).toBeTruthy();
   });
