@@ -8,6 +8,8 @@ Existing historical procurement evidence and Ledger stock are grandfathered unch
 
 Forward Ledger migrations add the protected Capture/Ledger integration and package validation (`20261014010000_UseOfficialCaptureBoundary`) and receiving-threshold configuration/snapshots (`20261019000000_ReceivingLossThreshold`, resource `ReceivingLossThreshold.sql`). The threshold migration initializes 2% with migration-origin history, leaves overrides absent and historical measurement snapshots absent. Preserve generated migration history and existing stock. Shared database migration requires explicit owner approval; no shared database migration was applied for threshold verification.
 
+After `20261017000000_UnifiedLotCodes` and the threshold migration, owner-applied forward migration **`20261019010000_RepairReceivingLotCodeBoundary`** (`RepairReceivingLotCodeBoundary.sql`) is required. Previously installed threshold functions can still expect `LL-…` codes while schema-version-2 Capture snapshots reserve `RAW-…` codes, causing `Pending source package incomplete`. The repair replaces only `ledger.procurement_package_complete` and `ledger.receiving_detail`, retaining threshold behavior and all historical stock, source evidence and applied snapshots. Changing historical migration files does not repair databases that already recorded them; retain migration history and apply the forward migration through the approved owner job. No shared deployment or live fix is claimed.
+
 The API routes are:
 
 | Method | Path | Purpose |

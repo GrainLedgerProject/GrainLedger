@@ -98,8 +98,10 @@ public sealed class ReceivingMigrationTests
         stock.Parameters.AddWithValue("lot", lot); Assert.Equal(10m, await stock.ExecuteScalarAsync());
     }
 
-    [Fact]
-    public async Task Threshold_upgrade_preserves_accepted_history_and_pending_reviews_without_backfilling_snapshots()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Threshold_upgrade_preserves_accepted_history_and_pending_reviews_without_backfilling_snapshots(bool repairInstalledBoundary)
     {
         await using var postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("threshold_upgrade")
             .WithUsername("postgres").WithPassword("postgres").Build();
@@ -144,18 +146,25 @@ public sealed class ReceivingMigrationTests
             await seed.ExecuteNonQueryAsync();
         }
 
-        async Task<JsonElement> Register()
+        async Task<JsonElement> Register(bool unifiedCode = false)
         {
             var procurement = Guid.NewGuid(); var item = Guid.NewGuid(); var lot = Guid.NewGuid(); var source = Guid.NewGuid();
             var ev = Guid.NewGuid(); var operation = Guid.NewGuid();
             var now = DateTimeOffset.UtcNow; now = new DateTimeOffset(now.UtcTicks / 10 * 10, TimeSpan.Zero);
             var code = $"TM-{procurement:N}".ToUpperInvariant(); var lotCode = $"LL-{lot:N}".ToUpperInvariant();
+            await using var tx = await owner.BeginTransactionAsync();
+            if (unifiedCode)
+            {
+                await using var reserve = new NpgsqlCommand("SELECT ledger.reserve_source_lot_code(@actor,@company,@procurement,@lot)", owner, tx);
+                reserve.Parameters.AddWithValue("actor", purchaser.Id); reserve.Parameters.AddWithValue("company", company.Id);
+                reserve.Parameters.AddWithValue("procurement", procurement); reserve.Parameters.AddWithValue("lot", lot);
+                lotCode = (string)(await reserve.ExecuteScalarAsync())!;
+            }
             var snapshot = new ProcurementResponse(procurement, code, farmer, facility, location, commodity.Id, "PENDING_ARRIVAL", purchaser.Id,
                 now, now, now, ev, "100", [new ProcurementLineResponse(item, 1, plotSeason, plot, season, "ST25", "100", "KG", "100", "22.5", source, lot, lotCode, "RAW_PADDY", new ProcurementInitialStock(location, "0"))]);
-            await using var tx = await owner.BeginTransactionAsync();
             await using var seed = new NpgsqlCommand("""
                 INSERT INTO capture.business_events(id,company_id,actor_id,event_type,occurred_at,recorded_at,correlation_id,payload)
-                    VALUES(@ev,@company,@actor,'PROCUREMENT_COMMITTED',@now,@now,@operation,jsonb_build_object('schemaVersion',1,'procurementId',@procurement,'result',@snapshot));
+                    VALUES(@ev,@company,@actor,'PROCUREMENT_COMMITTED',@now,@now,@operation,jsonb_build_object('schemaVersion',@schemaVersion,'procurementId',@procurement,'result',@snapshot));
                 INSERT INTO capture.procurements(id,company_id,code,farmer_id,collection_site_id,received_by,received_at,status,event_id)
                     VALUES(@procurement,@company,@code,@farmer,@facility,@actor,@now,'COMMITTED',@ev);
                 INSERT INTO capture.procurement_items(id,company_id,procurement_id,line_no,plot_season_id,net_mass_kg,measured_value,measured_unit,moisture_percent)
@@ -169,6 +178,7 @@ public sealed class ReceivingMigrationTests
                 ("procurement", procurement), ("farmer", farmer), ("facility", facility), ("item", item), ("plotSeason", plotSeason), ("source", source), ("lot", lot) })
                 seed.Parameters.AddWithValue(key, value);
             seed.Parameters.AddWithValue("now", now); seed.Parameters.AddWithValue("code", code);
+            seed.Parameters.AddWithValue("schemaVersion", unifiedCode ? 2 : 1);
             seed.Parameters.AddWithValue("snapshot", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(snapshot));
             await seed.ExecuteNonQueryAsync(); await tx.CommitAsync();
             return JsonSerializer.SerializeToElement(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -209,7 +219,7 @@ public sealed class ReceivingMigrationTests
                 'contributions',(SELECT jsonb_agg(to_jsonb(t) ORDER BY lot_id,source_lot_id) FROM ledger.contributions t))::text
             """;
         await using var history = new NpgsqlCommand(historySql, owner); var before = await history.ExecuteScalarAsync();
-        await ledger.Database.MigrateAsync();
+        await ledger.GetService<IMigrator>().MigrateAsync(repairInstalledBoundary ? "20261019000000_ReceivingLossThreshold" : null);
         Assert.Equal(before, await history.ExecuteScalarAsync());
         await using (var check = new NpgsqlCommand("""
             SELECT (SELECT count(*)=3 FROM ledger.arrival_measurement_sets
@@ -240,5 +250,93 @@ public sealed class ReceivingMigrationTests
         Assert.Equal(99m, LedgerScenario.Decimal(remeasured.GetProperty("usableStockKg")));
         await using var valid = new NpgsqlCommand("SELECT bool_and(ledger.procurement_package_complete(id)) FROM capture.procurements", owner);
         Assert.Equal(true, await valid.ExecuteScalarAsync());
+
+        if (repairInstalledBoundary)
+        {
+            // Reproduce functions already installed by the pre-fix threshold migration, not a fresh corrected database.
+            using var stream = typeof(RepairReceivingLotCodeBoundary).Assembly.GetManifestResourceStream(
+                "GrainLedger.Modules.Ledger.Sql.RepairReceivingLotCodeBoundary.sql")!;
+            using var reader = new StreamReader(stream);
+            var repairedFunctions = await reader.ReadToEndAsync();
+            Assert.Contains("ledger.source_lot_code(r,row.lot_id)", repairedFunctions);
+            Assert.Contains("ledger.source_lot_code(r,sl.lot_id)", repairedFunctions);
+            var installedFunctions = repairedFunctions
+                .Replace("ledger.source_lot_code(r,row.lot_id)", "upper('LL-'||replace(row.lot_id::text,'-',''))", StringComparison.Ordinal)
+                .Replace("ledger.source_lot_code(r,sl.lot_id)", "upper('LL-'||replace(sl.lot_id::text,'-',''))", StringComparison.Ordinal);
+            await using (var install = new NpgsqlCommand(installedFunctions, owner))
+                await install.ExecuteNonQueryAsync();
+            await using (var installed = new NpgsqlCommand("""
+                SELECT EXISTS(SELECT 1 FROM ledger."__EFMigrationsHistory" WHERE "MigrationId"='20261019000000_ReceivingLossThreshold')
+                    AND NOT EXISTS(SELECT 1 FROM ledger."__EFMigrationsHistory" WHERE "MigrationId"='20261019010000_RepairReceivingLotCodeBoundary')
+                """, owner))
+                Assert.Equal(true, await installed.ExecuteScalarAsync());
+
+            // Include applied threshold snapshots, policy history, provenance and code reservations in preservation check.
+            var repairHistorySql = historySql.Replace(
+                "to_jsonb(t)-'threshold_company_id'-'threshold_percentage'-'threshold_source'-'threshold_revision'",
+                "to_jsonb(t)", StringComparison.Ordinal).Replace(
+                "SELECT jsonb_build_object(", """
+                SELECT jsonb_build_object(
+                    'procurements',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.procurements t),
+                    'items',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.procurement_items t),
+                    'sources',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.source_lots t),
+                    'reservations',(SELECT jsonb_agg(to_jsonb(t) ORDER BY lot_id) FROM ledger.lot_code_reservations t),
+                    'codes',(SELECT jsonb_agg(to_jsonb(t) ORDER BY code) FROM ledger.lot_codes t),
+                    'thresholdDefault',(SELECT to_jsonb(t) FROM ledger.receiving_threshold_default t),
+                    'thresholdOverrides',(SELECT jsonb_agg(to_jsonb(t) ORDER BY company_id) FROM ledger.receiving_threshold_overrides t),
+                    'thresholdHistory',(SELECT jsonb_agg(to_jsonb(t) ORDER BY revision) FROM ledger.receiving_threshold_history t),
+                """, StringComparison.Ordinal);
+            await using var repairHistory = new NpgsqlCommand(repairHistorySql, owner);
+            var beforeRepair = await repairHistory.ExecuteScalarAsync();
+            var rejected = await Assert.ThrowsAsync<PostgresException>(() => Register(unifiedCode: true));
+            Assert.Equal("23514", rejected.SqlState);
+            Assert.Equal("Pending source package incomplete", rejected.MessageText);
+            Assert.Equal(beforeRepair, await repairHistory.ExecuteScalarAsync());
+
+            await ledger.GetService<IMigrator>().MigrateAsync("20261019010000_RepairReceivingLotCodeBoundary");
+            Assert.Equal(beforeRepair, await repairHistory.ExecuteScalarAsync());
+            await using (var applied = new NpgsqlCommand("""
+                SELECT count(*)=1 FROM ledger."__EFMigrationsHistory"
+                WHERE "MigrationId"='20261019010000_RepairReceivingLotCodeBoundary'
+                """, owner))
+                Assert.Equal(true, await applied.ExecuteScalarAsync());
+
+            var unified = await Register(unifiedCode: true);
+            var unifiedId = unified.GetProperty("id").GetGuid();
+            var unifiedLot = unified.GetProperty("items")[0].GetProperty("lotId").GetGuid();
+            var unifiedCode = unified.GetProperty("items")[0].GetProperty("lotCode").GetString();
+            Assert.Matches("^RAW-[0-9]{8}-[0-9]{6,}$", unifiedCode!);
+            await using (var detail = new NpgsqlCommand("SELECT ledger.receiving_detail(@actor,@id)", owner))
+            {
+                detail.Parameters.AddWithValue("actor", op.Id); detail.Parameters.AddWithValue("id", unifiedId);
+                var state = JsonSerializer.Deserialize<JsonElement>((string)(await detail.ExecuteScalarAsync())!);
+                Assert.Equal("PENDING_ARRIVAL", state.GetProperty("status").GetString());
+                Assert.Equal(unifiedCode, state.GetProperty("items")[0].GetProperty("lotCode").GetString());
+                Assert.Equal(0m, LedgerScenario.Decimal(state.GetProperty("usableStockKg")));
+                Assert.Equal(2m, LedgerScenario.Decimal(state.GetProperty("effectiveThreshold").GetProperty("percentage")));
+            }
+            var accepted = await Call(op.Id, unifiedId, "measurements", LedgerScenario.MeasurementBody(unified, actual: ["98"]));
+            Assert.Equal("RECEIVED_WITHIN_TOLERANCE", accepted.GetProperty("status").GetString());
+            Assert.Equal(unifiedCode, accepted.GetProperty("items")[0].GetProperty("lotCode").GetString());
+            Assert.Equal(98m, LedgerScenario.Decimal(accepted.GetProperty("usableStockKg")));
+            Assert.Equal(2m, LedgerScenario.Decimal(accepted.GetProperty("measurementSets")[0].GetProperty("threshold").GetProperty("percentage")));
+            Assert.Empty(accepted.GetProperty("reviews").EnumerateArray());
+            await using var stock = new NpgsqlCommand("""
+                SELECT ledger.procurement_package_complete(h.id)
+                    AND ev.payload->>'schemaVersion'='2'
+                    AND ev.payload->'result'->'Items'->0->>'LotCode'=@code
+                    AND o.result_payload=ev.payload->'result'
+                    AND l.code=@code AND reservation.code=@code AND p.quantity_kg=98
+                FROM capture.procurements h JOIN capture.business_events ev ON ev.id=h.event_id
+                JOIN capture.offline_operations o ON o.applied_event_id=ev.id
+                JOIN ledger.lots l ON l.receipt_id=h.id
+                JOIN ledger.lot_code_reservations reservation ON reservation.lot_id=l.id
+                JOIN ledger.positions p ON p.lot_id=l.id
+                WHERE h.id=@id AND l.id=@lot
+                """, owner);
+            stock.Parameters.AddWithValue("id", unifiedId); stock.Parameters.AddWithValue("lot", unifiedLot);
+            stock.Parameters.AddWithValue("code", unifiedCode!);
+            Assert.Equal(true, await stock.ExecuteScalarAsync());
+        }
     }
 }

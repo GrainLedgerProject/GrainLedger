@@ -138,6 +138,8 @@ docker build -t grainledger:local .
 
 `.env` excluded from image. Store runtime and migration-owner secrets in protected secret storage. Provision separate PostgreSQL roles before migration. Run one-shot image `--migrate` with migration-owner credentials and `Ledger:RuntimeRole`; migration order is Identity → Catalog → Capture → Ledger. Long-running app receives runtime credential only and does not migrate or seed on normal startup. Do not put migration-owner secret in normal app environment. Back up before migrations. Shared database migration, seed or schema/role/grant changes require explicit database-owner approval. Migrations preserve existing Ledger stock/history; no automatic synthetic-record conversion occurs.
 
+Receiving/code deployments require Ledger `20261017000000_UnifiedLotCodes`, `20261019000000_ReceivingLossThreshold`, then **`20261019010000_RepairReceivingLotCodeBoundary`** (`RepairReceivingLotCodeBoundary.sql`). Databases that already recorded the threshold migration may retain its pre-fix hardcoded `LL-…` functions and reject schema-version-2 procurement with `Pending source package incomplete`; editing an applied migration does not update installed functions. The new forward repair replaces only threshold-aware package validation and receiving detail with unified-code versions, without rewriting stock, evidence or threshold snapshots. Apply through the approved migration-owner job; do not rerun historical SQL or remove migration-history rows. This repair has not been applied to the shared database; source changes alone do not establish a live fix.
+
 Serve UI/API from one origin behind HTTPS reverse proxy. Configure:
 
 | Environment variable | Purpose |
