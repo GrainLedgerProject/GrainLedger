@@ -15,6 +15,8 @@ Exact complete matches post measured stock immediately. A complete positive set 
 Relevant implementation:
 
 - [Receiving commands, projections and package invariants](../backend/src/GrainLedger.Modules.Ledger/Sql/ReceivingLossThreshold.sql): threshold configuration/history, measurement snapshots, `ledger.arrival_command`, receiving detail and accepted-stock validation.
+
+- Compatibility: the threshold migration replaces package validation and receiving detail after the unified-lot-code migration. Those overrides must use `ledger.source_lot_code` so procurement, receiving, and accepted stock retain same persisted source-lot code.
 - [Measured-stock posting](../backend/src/GrainLedger.Modules.Ledger/Sql/ManageActiveResources.sql): `ledger.accept_arrival`; [original receiving schema](../backend/src/GrainLedger.Modules.Ledger/Sql/PhysicalReceiving.sql): immutable observations/reviews.
 - [Setup management routes](../backend/src/GrainLedger.Modules.Ledger/LedgerManagementEndpoints.cs): existing `platform.configure` authorization and version checks.
 - [Receiving UI](../apps/web/src/LedgerReceiving.tsx) and [Setup UI](../apps/web/src/LedgerSetup.tsx).
@@ -176,5 +178,6 @@ Exercised on isolated PostgreSQL with real HTTP/cookie sessions:
 - Setup and manager views were exercised at 375 px; body width remained 375 px and wide tables contained local horizontal overflow. Browser reported no errors.
 - Backend build passed with existing NU1902/NU1903 Pkcs 10.0.0 and unread-access CS9113 warnings. Full `dotnet test GrainLedger.slnx --no-build`: 273 passed, 4 failed of 277. All 34 `Receiving*` cases passed, including migration, threshold concurrency/strict inputs, and inherited-column runtime denial. Three unrelated SampleTests fail because SeedSourceAsync commits `payload {}` before procurement and provenance trigger rejects it; Identity reciprocal admin-demotion race returned 401 + 200 where existing test expects 409.
 - Web `npm test`: 87 passed across 17 files; `npm run build` passed.
+- After merging unified-code changes from `dev`, isolated receiving/code regressions passed **38/38**. Real cookie-session HTTP smoke accepted **12 + 8 kg expected → 11.76 + 7.84 kg actual**, posted **19.600000 kg**, and retained matching unified `RAW-20261019-…` codes across receiving details and accepted lots.
 
 These results are isolated verification only, not a shared database deployment or full-green backend-suite claim.

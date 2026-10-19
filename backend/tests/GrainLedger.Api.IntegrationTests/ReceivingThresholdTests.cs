@@ -66,6 +66,12 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
         if (accepted)
         {
             Assert.Equal(decimal.Parse(actual, CultureInfo.InvariantCulture), Quantity(await s.LotAsync(Lots(receipt)[0])));
+            var lotCode = receipt.GetProperty("items")[0].GetProperty("lotCode").GetString();
+            Assert.StartsWith("RAW-", lotCode);
+            Assert.Equal(lotCode, result.GetProperty("items")[0].GetProperty("lotCode").GetString());
+            Assert.Equal(lotCode, (await s.LotAsync(Lots(receipt)[0])).GetProperty("code").GetString());
+            Assert.Equal(lotCode, (await GetAsync(s.Operator, $"/api/ledger/receiving/{id}"))
+                .GetProperty("items")[0].GetProperty("lotCode").GetString());
             Assert.Equal(decimal.Parse(actual, CultureInfo.InvariantCulture), await ScalarAsync<decimal>("SELECT quantity_kg FROM ledger.contributions WHERE lot_id=@id", Lots(receipt)[0]));
             var source = await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()}");
             Assert.Equal("100", source!.InitialNetMassKg);
