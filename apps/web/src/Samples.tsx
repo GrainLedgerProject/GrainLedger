@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, errorMessage } from './api';
+import { api, errorMessage } from './api';
 import { newRequest, pendingRequest, submitCapture, wasRejected, type Envelope } from './captureWrite';
 import { type Page } from './procurementTypes';
 import { type SourceLot } from './procurementTypes';
@@ -7,13 +7,9 @@ import { type SourceLot } from './procurementTypes';
 type Sample = { id: string; sourceLotId: string; code: string; sealCode: string; collectedBy: string; collectedAt: string; capturedAt: string; recordedAt: string; handoverCount: number };
 type SampleSummary = Pick<Sample, 'id' | 'sourceLotId' | 'code' | 'sealCode' | 'collectedAt' | 'handoverCount'>;
 type Handover = { id: string; sampleId: string; fromParty: string; toParty: string; handedOverAt: string; sealCondition: string; evidenceRef: string | null };
-type SamplePayload = { entityId: string; sourceLotId: string; code: string; sealCode: string; collectedAt: string };
+type SamplePayload = { entityId: string; sourceLotId: string; code?: string; sealCode: string; collectedAt: string };
 type HandoverPayload = { entityId: string; fromParty: string; toParty: string; handedOverAt: string; sealCondition: string; evidenceRef: string | null };
 function localDateTime(value: string) { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
-function sampleCode(collectedAt: string, entityId: string) {
-  return `SMP-${collectedAt.slice(0, 10).replaceAll('-', '')}-${entityId.replaceAll('-', '').slice(0, 16).toUpperCase()}`;
-}
-
 export function SampleList({ sourceLotId, onOpen, onCreate, canCreate }: { sourceLotId?: string; onOpen: (id: string) => void; onCreate?: () => void; canCreate?: boolean }) {
   const [page, setPage] = useState(1); const [retry, setRetry] = useState(0);
   const [list, setList] = useState<Page<SampleSummary> | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
@@ -43,10 +39,9 @@ function SampleCreate({ sourceLotId, userId, companyId, onCancel, onCreated }: {
   const [pending, setPending] = useState<Envelope<SamplePayload> | null>(() => {
     const value = pendingRequest<SamplePayload>(key); return value?.payload.sourceLotId === sourceLotId ? value : null;
   });
-  const [entityId, setEntityId] = useState(pending?.payload.entityId ?? crypto.randomUUID());
+  const [entityId] = useState(pending?.payload.entityId ?? crypto.randomUUID());
   const [sealCode, setSealCode] = useState(pending?.payload.sealCode ?? '');
   const [collectedAt, setCollectedAt] = useState(pending ? localDateTime(pending.payload.collectedAt) : localDateTime(new Date().toISOString()));
-  const code = pending?.payload.code ?? sampleCode(collectedAt, entityId);
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   async function save(event: FormEvent) {
     event.preventDefault(); if (busy) return;
@@ -54,20 +49,17 @@ function SampleCreate({ sourceLotId, userId, companyId, onCancel, onCreated }: {
       setError('Enter the code on the physical seal and a collection time no later than now.'); return;
     }
     setBusy(true); setError('');
-    const request = pending ?? newRequest<SamplePayload>({ entityId, sourceLotId, code, sealCode: sealCode.trim(), collectedAt: new Date(collectedAt).toISOString() });
+    const request = pending ?? newRequest<SamplePayload>({ entityId, sourceLotId, sealCode: sealCode.trim(), collectedAt: new Date(collectedAt).toISOString() }, 2);
     if (!pending) setPending(request);
     try { const result = await submitCapture<SamplePayload, Sample>(key, '/api/samples', request); onCreated(result.id); }
     catch (cause) {
       if (wasRejected(cause)) setPending(null);
-      if (cause instanceof ApiError && cause.code === 'SAMPLE_CODE_EXISTS') {
-        setEntityId(crypto.randomUUID());
-        setError('The generated sample code was already used. A new code is ready; save again.');
-      } else setError(errorMessage(cause));
+      setError(errorMessage(cause));
     }
     finally { setBusy(false); }
   }
   return <div className="farmer-modal-backdrop"><section className="farmer-modal" role="dialog" aria-modal="true" aria-labelledby="sample-create-title" onKeyDown={e => { if (e.key === 'Escape' && !busy) onCancel(); }}><div className="farmer-modal-heading"><div><span className="eyebrow">SAMPLE CUSTODY</span><h2 id="sample-create-title">Take sample</h2></div><button className="farmer-modal-close" aria-label="Close sample form" type="button" disabled={busy} onClick={onCancel}>×</button></div><p className="muted">Record a physical sample. Handover can be added later.</p><form onSubmit={save}>
-    <label>Sample code<input value={code} readOnly aria-describedby="sample-code-help" /></label><p id="sample-code-help" className="field-help">Generated automatically. Write or print this code on the sample bag.</p><label>Seal code<input value={sealCode} maxLength={100} onChange={e => setSealCode(e.target.value)} required disabled={busy || !!pending} /></label><p className="field-help">Enter the code printed on the physical seal.</p><label>Collected at<input type="datetime-local" value={collectedAt} onChange={e => setCollectedAt(e.target.value)} required disabled={busy || !!pending} /></label>
+    <p className="field-help">The sample code is assigned after saving. Copy it from sample details onto the bag.</p><label>Seal code<input value={sealCode} maxLength={100} onChange={e => setSealCode(e.target.value)} required disabled={busy || !!pending} /></label><p className="field-help">Enter the code printed on the physical seal.</p><label>Collected at<input type="datetime-local" value={collectedAt} onChange={e => setCollectedAt(e.target.value)} required disabled={busy || !!pending} /></label>
     {pending && !busy && <div className="notice pending">The outcome is uncertain. Retry sends the exact same sample request.</div>}{error && <div className="notice error" role="alert">{error}</div>}<div className="form-footer"><button className="secondary" type="button" onClick={onCancel} disabled={busy}>Cancel</button><button type="submit" disabled={busy}>{busy ? 'Saving…' : pending ? 'Retry save' : 'Save sample'}</button></div>
   </form></section></div>;
 }

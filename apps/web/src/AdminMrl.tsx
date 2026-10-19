@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, apiWithEtag, ApiError, errorMessage } from './api';
 import { loadAllPages, type Page } from './procurementTypes';
+import { readMrlFile, type ImportGroup, type ImportPreview } from './mrlImport';
 
 type Option = { id: string; code: string; name: string };
 type Unit = Option & { quantityKind: string };
 type MrlVersion = { id: string; marketId: string; commodityId: string; versionNo: number; status: 'DRAFT' | 'PUBLISHED'; effectiveFrom: string; effectiveTo: string | null; publishedBy: string | null; publishedAt: string | null; sourceRef: string };
 type MrlLimit = { id: string; mrlVersionId: string; substanceId: string; limitValue: number; unit: string };
-type Feedback = { scope: 'list' | 'create' | 'details' | 'limits' | 'publish'; kind: 'error' | 'success'; message: string };
+type Feedback = { scope: 'list' | 'create' | 'import' | 'details' | 'limits' | 'publish'; kind: 'error' | 'success'; message: string };
 const limitNumber = /^(?:0|[1-9]\d{0,11})(?:\.\d{1,12})?$/;
 function localDateTime(value: string) { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
 function displayDate(value: string | null) { return value ? new Date(value).toLocaleString() : 'Open-ended'; }
@@ -44,6 +45,15 @@ export function AdminMrl({ onOpenCatalogs }: { onOpenCatalogs: () => void }) {
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [importGroupKey, setImportGroupKey] = useState('');
+  const [importMarketId, setImportMarketId] = useState('');
+  const [importCommodityId, setImportCommodityId] = useState('');
+  const [importFrom, setImportFrom] = useState('');
+  const [importTo, setImportTo] = useState('');
+  const [importSource, setImportSource] = useState('');
   const [editingDetails, setEditingDetails] = useState(false);
   const [limitFormOpen, setLimitFormOpen] = useState(false);
 
@@ -114,6 +124,55 @@ export function AdminMrl({ onOpenCatalogs }: { onOpenCatalogs: () => void }) {
     }, 'Draft created. Add verified limits before publishing.', 'create', 'details');
   }
 
+  function chooseImportGroup(group: ImportGroup) {
+    setImportGroupKey(group.key);
+    setImportMarketId(markets.find(item => item.code.toUpperCase() === group.market)?.id || '');
+    setImportCommodityId(commodities.find(item => item.code.toUpperCase() === group.commodityCode.toUpperCase())?.id ||
+      commodities.find(item => item.name.toUpperCase() === group.commodityName.toUpperCase())?.id || '');
+    // A date-only file cell does not establish the legal effective time or timezone.
+    setImportFrom('');
+    setImportTo('');
+    setImportSource(group.sources.length === 1 ? group.sources[0] : '');
+    setFeedback(null);
+  }
+
+  async function loadImportFile(file: File | undefined) {
+    setImportPreview(null); setImportGroupKey(''); setFeedback(null);
+    if (!file) return;
+    setImportLoading(true);
+    try {
+      const preview = await readMrlFile(file);
+      setImportPreview(preview);
+      const first = preview.groups.find(group => group.limits.length > 0);
+      if (first) chooseImportGroup(first);
+      else setFeedback({ scope: 'import', kind: 'error', message: 'No ACTIVE rows with numeric mg/kg limits were found.' });
+    } catch (cause) { setFeedback({ scope: 'import', kind: 'error', message: errorMessage(cause) }); }
+    finally { setImportLoading(false); }
+  }
+
+  function importDraft(event: FormEvent) {
+    event.preventDefault();
+    const group = importPreview?.groups.find(item => item.key === importGroupKey);
+    if (!group || group.issues.length || !unitReady || !importMarketId || !importCommodityId || !importSource.trim()) return;
+    if (importTo && new Date(importTo) <= new Date(importFrom)) {
+      setFeedback({ scope: 'import', kind: 'error', message: 'Effective end must be after the start.' }); return;
+    }
+    const catalogCodes = new Set(substances.map(item => item.code.toUpperCase()));
+    const unknown = group.limits.map(item => item.substanceCode).filter(code => !catalogCodes.has(code));
+    if (unknown.length) {
+      setFeedback({ scope: 'import', kind: 'error', message: `Create these active substances in Catalogs first: ${unknown.join(', ')}.` }); return;
+    }
+    void mutate(async () => {
+      const draft = await api<MrlVersion>('/api/mrl-versions/import', { method: 'POST', body: JSON.stringify({
+        marketId: importMarketId, commodityId: importCommodityId,
+        effectiveFrom: new Date(importFrom).toISOString(), effectiveTo: importTo ? new Date(importTo).toISOString() : null,
+        sourceRef: importSource.trim(), limits: group.limits.map(row => ({ substanceCode: row.substanceCode,
+          limitValue: row.limitValue, unit: row.unit })),
+      }) });
+      setSelectedId(draft.id); setLimitPage(1); setImportOpen(false); setImportPreview(null);
+    }, `${group.limits.length} limits imported into a draft. Review the source and values before publishing.`, 'import', 'details');
+  }
+
   function saveHeader(event: FormEvent) {
     event.preventDefault(); if (!selected || !etag) return;
     if (editTo && new Date(editTo) <= new Date(editFrom)) { setFeedback({ scope: 'details', kind: 'error', message: 'Effective end must be after the start.' }); return; }
@@ -143,9 +202,12 @@ export function AdminMrl({ onOpenCatalogs }: { onOpenCatalogs: () => void }) {
   }
 
   const draft = selected?.status === 'DRAFT';
+  const importGroup = importPreview?.groups.find(item => item.key === importGroupKey);
+  const importedUnknownCodes = importGroup?.limits.map(item => item.substanceCode)
+    .filter(code => !substances.some(substance => substance.code.toUpperCase() === code)) ?? [];
   return <div className="admin-mrl">
     <div className="page-heading"><span className="eyebrow">RESIDUE RULES</span><h1>MRL tables</h1><p className="muted">Create versions for each export market and commodity. Only published versions can be used for compliance decisions.</p></div>
-    {!selectedId && <section className="panel admin-mrl-panel" aria-label="MRL versions"><div className="section-toolbar"><div><h2>Versions</h2><p className="muted">Select a version to review its legal source and substance limits.</p></div><button type="button" onClick={() => { setFeedback(null); setCreateOpen(true); }}>+ Create draft</button></div>
+    {!selectedId && <section className="panel admin-mrl-panel" aria-label="MRL versions"><div className="section-toolbar"><div><h2>Versions</h2><p className="muted">Select a version to review its legal source and substance limits.</p></div><div className="admin-form-actions"><button className="secondary" type="button" onClick={() => { setFeedback(null); setCreateOpen(false); setImportPreview(null); setImportGroupKey(''); setImportOpen(true); }}>Import CSV / Excel</button><button type="button" onClick={() => { setFeedback(null); setImportOpen(false); setCreateOpen(true); }}>+ Create draft</button></div></div>
       {showFeedback('list')}
       {optionsError && <div className="notice error" role="alert">Catalogs could not be loaded: {optionsError} <button className="text-button" onClick={() => setOptionsRetry(n => n + 1)}>Try again</button></div>}
       <div className="admin-form-grid"><label>Market<select value={marketFilter} onChange={event => { setPage(1); setMarketFilter(event.target.value); }}><option value="">All markets</option>{markets.map(item => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}</select></label><label>Commodity<select value={commodityFilter} onChange={event => { setPage(1); setCommodityFilter(event.target.value); }}><option value="">All commodities</option>{commodities.map(item => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}</select></label><label>Status<select value={statusFilter} onChange={event => { setPage(1); setStatusFilter(event.target.value); }}><option value="">All statuses</option><option value="DRAFT">Draft</option><option value="PUBLISHED">Published</option></select></label></div>
@@ -155,6 +217,33 @@ export function AdminMrl({ onOpenCatalogs }: { onOpenCatalogs: () => void }) {
       <div className="admin-form-grid"><label>Market<select value={marketId} onChange={event => setMarketId(event.target.value)} required><option value="">Select market</option>{markets.map(item => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}</select></label><label>Commodity<select value={commodityId} onChange={event => setCommodityId(event.target.value)} required><option value="">Select commodity</option>{commodities.map(item => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}</select></label><label>Effective from<input type="datetime-local" value={effectiveFrom} onChange={event => setEffectiveFrom(event.target.value)} required /></label><label>Effective to <span className="optional">(optional)</span><input type="datetime-local" value={effectiveTo} onChange={event => setEffectiveTo(event.target.value)} /></label></div>
       <label>Regulatory source reference<textarea value={sourceRef} onChange={event => setSourceRef(event.target.value)} required placeholder="Document title, publication date and applicable clause" /></label><div className="admin-form-actions"><button className="secondary" type="button" disabled={busy} onClick={() => { setCreateOpen(false); setFeedback(null); }}>Cancel</button><button disabled={busy || !marketId || !commodityId || !effectiveFrom || !sourceRef.trim()}>{busy ? 'Saving…' : 'Create draft'}</button></div>
     </form></div></div>}
+    {!selectedId && importOpen && <div className="farmer-modal-backdrop"><div className="farmer-modal capture-modal-wide" role="dialog" aria-modal="true" aria-label="Import MRL draft"><div className="farmer-modal-heading"><div><span className="eyebrow">MRL IMPORT</span><h2>Import MRL draft</h2></div><button className="farmer-modal-close" type="button" aria-label="Close" disabled={busy} onClick={() => { setImportOpen(false); setFeedback(null); }}>×</button></div>
+      <p className="muted">Choose a group from the file and map it to one market and commodity. Import creates a draft; it does not publish legal limits.</p>
+      {showFeedback('import')}
+      {optionsError && <div className="notice error" role="alert">Catalogs could not be loaded: {optionsError}</div>}
+      <label>MRL file (.csv or .xlsx)<input type="file" accept=".csv,.xlsx" onChange={event => void loadImportFile(event.target.files?.[0])} /></label>
+      {importLoading && <p role="status">Reading file…</p>}
+      {importPreview && <><p className="muted">{importPreview.totalRows} data rows; {importPreview.excludedRows} rows with statuses other than ACTIVE excluded. Only numeric mg/kg limits can be imported.</p>
+        <p className="muted">The current MRL model does not store file fields such as NO_MRL, LOD flag, per-substance notes or regulation URL. Review these separately before publication.</p>
+        <form onSubmit={importDraft}>
+          <label>File group<select value={importGroupKey} onChange={event => { const group = importPreview.groups.find(item => item.key === event.target.value); if (group) chooseImportGroup(group); }} required><option value="">Select group</option>{importPreview.groups.filter(group => group.limits.length > 0).map(group => <option key={group.key} value={group.key}>{group.market} · {group.commodityCode || group.commodityName} · {group.version} · {group.effectiveDate || 'date not supplied'} ({group.limits.length} limits)</option>)}</select></label>
+          {importGroup && <><p className="muted">File commodity: {importGroup.commodityName}. {importGroup.excludedRows.length} non-ACTIVE rows excluded from this group.</p>
+            {importGroup.excludedRows.length > 0 && <details><summary>Show excluded file rows</summary><ul>{importGroup.excludedRows.map(row => <li key={row.row}>Row {row.row}: {row.substanceCode} — {row.status}</li>)}</ul></details>}
+            <div className="notice">A file group may contain only part of a legal MRL table. Check every required substance and the effective dates before publishing; an imported draft is not a compliance decision.</div>
+            {importGroup.sources.length > 1 && <div className="notice">This group contains {importGroup.sources.length} regulatory references. Enter a source that accurately covers every imported limit.</div>}
+            {importGroup.issues.length > 0 && <div className="notice error" role="alert">{importGroup.issues.map(issue => <p key={issue}>{issue}</p>)}</div>}
+            {importedUnknownCodes.length > 0 && <div className="notice error" role="alert">Create these active substances in Catalogs first: {importedUnknownCodes.join(', ')}.</div>}
+            {!unitReady && <div className="notice error" role="alert">Configure MG/KG as a residue-concentration unit in Catalogs first.</div>}
+            <div className="notice">File dates: from {importGroup.effectiveDate || 'not supplied'}, to {importGroup.effectiveTo || 'not supplied'}. Dates have no timezone; enter and verify the effective time before importing.</div>
+            <div className="admin-form-grid"><label>Market<select value={importMarketId} onChange={event => setImportMarketId(event.target.value)} required><option value="">Select market</option>{markets.map(item => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}</select></label><label>Commodity<select value={importCommodityId} onChange={event => setImportCommodityId(event.target.value)} required><option value="">Select commodity</option>{commodities.map(item => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}</select></label><label>Effective from<input type="datetime-local" value={importFrom} onChange={event => setImportFrom(event.target.value)} required /></label><label>Effective to <span className="optional">(optional)</span><input type="datetime-local" value={importTo} onChange={event => setImportTo(event.target.value)} /></label></div>
+            {importFrom && new Date(importFrom).getTime() < Date.now() && <div className="notice">This file date is in the past. The current publication rule will reject a draft with an effective start before publication time. Adjust the start before publishing if appropriate.</div>}
+            <label>Regulatory source reference<textarea value={importSource} onChange={event => setImportSource(event.target.value)} required placeholder="Verified document title and applicable clauses" /></label>
+            <div className="table-scroll"><table><thead><tr><th>File row</th><th>Substance code</th><th>Name</th><th>Limit</th><th>Unit</th></tr></thead><tbody>{importGroup.limits.slice(0, 20).map(limit => <tr key={limit.row}><td>{limit.row}</td><td>{limit.substanceCode}</td><td>{limit.substanceName}</td><td>{limit.limitValue}</td><td>{limit.unit}</td></tr>)}</tbody></table></div>{importGroup.limits.length > 20 && <p className="muted">Showing the first 20 of {importGroup.limits.length} limits.</p>}
+          </>}
+          <div className="admin-form-actions"><button className="secondary" type="button" disabled={busy} onClick={() => { setImportOpen(false); setFeedback(null); }}>Cancel</button><button disabled={busy || !importGroup || !!importGroup.issues.length || !!importedUnknownCodes.length || !unitReady || !importMarketId || !importCommodityId || !importFrom || !importSource.trim()}>{busy ? 'Importing…' : `Create draft with ${importGroup?.limits.length ?? 0} limits`}</button></div>
+        </form>
+      </>}
+    </div></div>}
     {selectedId && <><button className="text-button admin-mrl-back" type="button" onClick={() => { setSelectedId(''); setEditingDetails(false); setLimitFormOpen(false); setFeedback(null); }}>← Back to versions</button>
     {!selected && <section className="panel admin-mrl-panel" aria-label="Selected MRL version">{showFeedback('details') || <p className="muted">Loading version…</p>}</section>}
     {selected && <><section className="panel admin-mrl-panel" aria-label="Selected MRL version"><div className="section-toolbar"><div><span className="eyebrow">{selected.status} · VERSION {selected.versionNo}</span><h2>{label(markets, selected.marketId)} / {label(commodities, selected.commodityId)}</h2></div><div className="admin-form-actions"><button className="secondary" type="button" onClick={() => { setFeedback(null); refresh(); }}>Refresh</button>{draft && !editingDetails && <button className="secondary" type="button" onClick={() => { setEditingDetails(true); setFeedback(null); }}>Edit details</button>}</div></div>

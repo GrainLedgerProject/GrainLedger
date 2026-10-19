@@ -155,6 +155,31 @@ namespace GrainLedger.Modules.Capture.Migrations
                     b.ToTable("offline_operations", "capture");
                 });
 
+            modelBuilder.Entity("GrainLedger.Modules.Capture.CaptureCodeCounter", b =>
+                {
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Scope")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("scope");
+
+                    b.Property<long>("NextValue")
+                        .HasColumnType("bigint")
+                        .HasColumnName("next_value");
+
+                    b.HasKey("CompanyId", "Kind", "Scope");
+
+                    b.ToTable("code_counters", "capture");
+                });
+
             modelBuilder.Entity("GrainLedger.Modules.Capture.CropSeason", b =>
                 {
                     b.Property<Guid>("Id")
@@ -219,6 +244,10 @@ namespace GrainLedger.Modules.Capture.Migrations
                         .HasColumnType("character varying(40)")
                         .HasColumnName("code");
 
+                    b.Property<long?>("CodeNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("code_number");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid")
                         .HasColumnName("company_id");
@@ -254,6 +283,10 @@ namespace GrainLedger.Modules.Capture.Migrations
                     b.HasIndex("CompanyId", "Code")
                         .IsUnique()
                         .HasDatabaseName("ux_farmers_company_code");
+
+                    b.HasIndex("CompanyId", "CodeNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ux_farmers_company_code_number");
 
                     b.HasIndex("CompanyId", "Id")
                         .IsUnique()
