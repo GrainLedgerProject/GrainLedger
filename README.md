@@ -19,6 +19,9 @@ Identity, Catalog, Capture and Ledger run in one host and own separate schemas/c
 
 In Development, API serves Scalar at `http://localhost:5080/scalar/v1` and OpenAPI at `http://localhost:5080/openapi/v1.json`. Use an access token in Scalar's Bearer field to test authenticated APIs.
 
+Backend modules using Npgsql 10.0.3 pin `Microsoft.EntityFrameworkCore.Relational` to 10.0.13. Keep EF Core runtime packages aligned at 10.0.13 across API and transitive project graphs; Npgsql provider patch can remain 10.0.3.
+Identity also pins `System.Security.Cryptography.Pkcs` to 10.0.13 to patch the vulnerable 10.0.0 dependency inherited through MailKit/MimeKit.
+
 ## Run locally
 
 Requires .NET SDK 10, Node.js 24, npm and Docker (or PostgreSQL).

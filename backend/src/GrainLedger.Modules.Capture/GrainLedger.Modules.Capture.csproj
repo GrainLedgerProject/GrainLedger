@@ -7,6 +7,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.13" />
     <PackageReference Include="NetTopologySuite" Version="2.6.0" />
     <ProjectReference Include="../GrainLedger.Modules.Identity/GrainLedger.Modules.Identity.csproj" />
     <ProjectReference Include="../GrainLedger.Modules.Catalogs/GrainLedger.Modules.Catalogs.csproj" />
