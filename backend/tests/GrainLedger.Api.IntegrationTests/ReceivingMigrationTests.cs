@@ -97,4 +97,148 @@ public sealed class ReceivingMigrationTests
         await using var stock = new NpgsqlCommand("SELECT quantity_kg FROM ledger.positions WHERE lot_id=@lot", owner);
         stock.Parameters.AddWithValue("lot", lot); Assert.Equal(10m, await stock.ExecuteScalarAsync());
     }
+
+    [Fact]
+    public async Task Threshold_upgrade_preserves_accepted_history_and_pending_reviews_without_backfilling_snapshots()
+    {
+        await using var postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("threshold_upgrade")
+            .WithUsername("postgres").WithPassword("postgres").Build();
+        await postgres.StartAsync(); var cs = postgres.GetConnectionString();
+        await using var identity = new IdentityDbContext(new DbContextOptionsBuilder<IdentityDbContext>().UseNpgsql(cs).Options);
+        await identity.Database.MigrateAsync();
+        var company = new Organization { Name = "Pre-threshold customer", Kind = OrganizationKind.Customer };
+        var mill = new Organization { Name = "Pre-threshold mill", Kind = OrganizationKind.Mill };
+        User Actor(string role, Guid organization) => new() { Email = $"{Guid.NewGuid():N}@example.com", DisplayName = role,
+            Provider = "google", ProviderSubject = Guid.NewGuid().ToString(), Role = role, OrganizationId = organization, IsActive = true };
+        var purchaser = Actor(Roles.PurchasingStaff, company.Id); var op = Actor(Roles.MillOperator, mill.Id);
+        var manager = Actor(Roles.MillManager, mill.Id); var admin = Actor(Roles.Administrator, mill.Id);
+        identity.AddRange(company, mill, purchaser, op, manager, admin); await identity.SaveChangesAsync();
+        await using var catalog = new CatalogDbContext(new DbContextOptionsBuilder<CatalogDbContext>().UseNpgsql(cs).Options);
+        await catalog.Database.MigrateAsync();
+        var commodity = new Commodity { Id = Guid.NewGuid(), Code = "PADDY", Name = "Upgrade paddy" };
+        catalog.AddRange(commodity, new MeasurementUnit { Id = Guid.NewGuid(), Code = "KG", Name = "Kilogram", QuantityKind = "MASS" });
+        await catalog.SaveChangesAsync();
+        await using var capture = new CaptureDbContext(new DbContextOptionsBuilder<CaptureDbContext>().UseNpgsql(cs).Options);
+        await capture.Database.MigrateAsync();
+        await using var ledger = new LedgerDbContext(new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(cs,
+            n => n.MigrationsHistoryTable("__EFMigrationsHistory", "ledger")).Options);
+        await ledger.GetService<IMigrator>().MigrateAsync("20261014210000_PaginateLedgerLists");
+        await using var owner = new NpgsqlConnection(cs); await owner.OpenAsync();
+        var facility = Guid.NewGuid(); var location = Guid.NewGuid(); var farmer = Guid.NewGuid(); var plot = Guid.NewGuid();
+        var season = Guid.NewGuid(); var plotSeason = Guid.NewGuid(); var evidence = Guid.NewGuid();
+        await using (var seed = new NpgsqlCommand("""
+            INSERT INTO ledger.facilities(id,name) VALUES(@facility,'Upgrade mill');
+            INSERT INTO ledger.locations(id,facility_id,name,kind) VALUES(@location,@facility,'Upgrade store','STORE');
+            INSERT INTO ledger.assignments(user_id,facility_id) VALUES(@operator,@facility),(@manager,@facility);
+            INSERT INTO ledger.evidence(id,owner_id,facility_id,file_name,content_type,content,sha256,actor_id)
+                VALUES(@evidence,@company,@facility,'upgrade.txt','text/plain',decode('78','hex'),'upgrade',@operator);
+            INSERT INTO capture.farmers(id,company_id,code,name,created_at) VALUES(@farmer,@company,'UPGRADE-FARMER','Upgrade source',clock_timestamp());
+            INSERT INTO capture.plots(id,company_id,farmer_id,code,boundary_geojson,area_ha) VALUES(@plot,@company,@farmer,'UPGRADE-PLOT','{}',1);
+            INSERT INTO capture.crop_seasons(id,company_id,name,starts_on,ends_on) VALUES(@season,@company,'Upgrade season','2026-01-01','2026-12-31');
+            INSERT INTO capture.plot_seasons(id,company_id,plot_id,season_id,rice_variety) VALUES(@plotSeason,@company,@plot,@season,'ST25');
+            """, owner))
+        {
+            foreach (var (key, value) in new[] { ("facility", facility), ("location", location), ("operator", op.Id), ("manager", manager.Id),
+                ("evidence", evidence), ("company", company.Id), ("farmer", farmer), ("plot", plot), ("season", season), ("plotSeason", plotSeason) })
+                seed.Parameters.AddWithValue(key, value);
+            await seed.ExecuteNonQueryAsync();
+        }
+
+        async Task<JsonElement> Register()
+        {
+            var procurement = Guid.NewGuid(); var item = Guid.NewGuid(); var lot = Guid.NewGuid(); var source = Guid.NewGuid();
+            var ev = Guid.NewGuid(); var operation = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow; now = new DateTimeOffset(now.UtcTicks / 10 * 10, TimeSpan.Zero);
+            var code = $"TM-{procurement:N}".ToUpperInvariant(); var lotCode = $"LL-{lot:N}".ToUpperInvariant();
+            var snapshot = new ProcurementResponse(procurement, code, farmer, facility, location, commodity.Id, "PENDING_ARRIVAL", purchaser.Id,
+                now, now, now, ev, "100", [new ProcurementLineResponse(item, 1, plotSeason, plot, season, "ST25", "100", "KG", "100", "22.5", source, lot, lotCode, "RAW_PADDY", new ProcurementInitialStock(location, "0"))]);
+            await using var tx = await owner.BeginTransactionAsync();
+            await using var seed = new NpgsqlCommand("""
+                INSERT INTO capture.business_events(id,company_id,actor_id,event_type,occurred_at,recorded_at,correlation_id,payload)
+                    VALUES(@ev,@company,@actor,'PROCUREMENT_COMMITTED',@now,@now,@operation,jsonb_build_object('schemaVersion',1,'procurementId',@procurement,'result',@snapshot));
+                INSERT INTO capture.procurements(id,company_id,code,farmer_id,collection_site_id,received_by,received_at,status,event_id)
+                    VALUES(@procurement,@company,@code,@farmer,@facility,@actor,@now,'COMMITTED',@ev);
+                INSERT INTO capture.procurement_items(id,company_id,procurement_id,line_no,plot_season_id,net_mass_kg,measured_value,measured_unit,moisture_percent)
+                    VALUES(@item,@company,@procurement,1,@plotSeason,100,100,'KG',22.5);
+                INSERT INTO capture.source_lots(id,company_id,lot_id,procurement_item_id) VALUES(@source,@company,@lot,@item);
+                INSERT INTO capture.offline_operations(id,company_id,submitted_by,device_id,client_operation_id,payload_hash,payload,captured_at,received_at,status,applied_event_id,result_payload)
+                    VALUES(gen_random_uuid(),@company,@actor,'upgrade-device',@operation,'immutable-upgrade-hash','{"operationType":"PROCUREMENT_COMMITTED"}',@now,@now,'APPLIED',@ev,@snapshot);
+                SELECT ledger.register_pending_procurement(@actor,@procurement);
+                """, owner, tx);
+            foreach (var (key, value) in new[] { ("ev", ev), ("company", company.Id), ("actor", purchaser.Id), ("operation", operation),
+                ("procurement", procurement), ("farmer", farmer), ("facility", facility), ("item", item), ("plotSeason", plotSeason), ("source", source), ("lot", lot) })
+                seed.Parameters.AddWithValue(key, value);
+            seed.Parameters.AddWithValue("now", now); seed.Parameters.AddWithValue("code", code);
+            seed.Parameters.AddWithValue("snapshot", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(snapshot));
+            await seed.ExecuteNonQueryAsync(); await tx.CommitAsync();
+            return JsonSerializer.SerializeToElement(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+        async Task<JsonElement> Call(Guid actor, Guid id, string kind, object body)
+        {
+            await using var cmd = new NpgsqlCommand("SELECT ledger.arrival_command(@actor,@id,@kind,@body)", owner);
+            cmd.Parameters.AddWithValue("actor", actor); cmd.Parameters.AddWithValue("id", id); cmd.Parameters.AddWithValue("kind", kind);
+            cmd.Parameters.AddWithValue("body", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(body));
+            return JsonSerializer.Deserialize<JsonElement>((string)(await cmd.ExecuteScalarAsync())!);
+        }
+        object Review(JsonElement state, string action) => new
+        {
+            operationId = Guid.NewGuid(), expectedReceivingVersion = state.GetProperty("receivingVersion").GetInt32(),
+            measurementSetId = state.GetProperty("latestMeasurementSetId").GetGuid(), action, evidenceId = evidence, reason = "Upgrade scoped physical review"
+        };
+        var exact = await Register(); var approved = await Register(); var pending = await Register(); var unmeasured = await Register();
+        var exactId = exact.GetProperty("id").GetGuid(); var approvedId = approved.GetProperty("id").GetGuid(); var pendingId = pending.GetProperty("id").GetGuid();
+        await Call(op.Id, exactId, "measurements", LedgerScenario.MeasurementBody(exact));
+        var approvedReview = await Call(op.Id, approvedId, "measurements", LedgerScenario.MeasurementBody(approved, actual: ["97.5"]));
+        await Call(manager.Id, approvedId, "reviews", Review(approvedReview, "APPROVE_SHORTAGE"));
+        var pendingBody = LedgerScenario.MeasurementBody(pending, actual: ["99"]);
+        var beforePending = await Call(op.Id, pendingId, "measurements", pendingBody);
+        Assert.Equal("AWAITING_MANAGER_REVIEW", beforePending.GetProperty("status").GetString());
+        const string historySql = """
+            SELECT jsonb_build_object(
+                'captureEvents',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.business_events t),
+                'captureOperations',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.offline_operations t),
+                'receiving',(SELECT jsonb_agg(to_jsonb(t) ORDER BY procurement_id) FROM ledger.receiving t),
+                'sets',(SELECT jsonb_agg(to_jsonb(t)-'threshold_company_id'-'threshold_percentage'-'threshold_source'-'threshold_revision' ORDER BY id) FROM ledger.arrival_measurement_sets t),
+                'measurements',(SELECT jsonb_agg(to_jsonb(t) ORDER BY measurement_set_id,procurement_item_id) FROM ledger.arrival_measurements t),
+                'reviews',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM ledger.arrival_reviews t),
+                'arrivalOperations',(SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id) FROM ledger.arrival_operations t),
+                'lots',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM ledger.lots t),
+                'events',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM ledger.events t),
+                'postings',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM ledger.postings t),
+                'positions',(SELECT jsonb_agg(to_jsonb(t) ORDER BY lot_id,location_id) FROM ledger.positions t),
+                'contributions',(SELECT jsonb_agg(to_jsonb(t) ORDER BY lot_id,source_lot_id) FROM ledger.contributions t))::text
+            """;
+        await using var history = new NpgsqlCommand(historySql, owner); var before = await history.ExecuteScalarAsync();
+        await ledger.Database.MigrateAsync();
+        Assert.Equal(before, await history.ExecuteScalarAsync());
+        await using (var check = new NpgsqlCommand("""
+            SELECT (SELECT count(*)=3 FROM ledger.arrival_measurement_sets
+                WHERE threshold_company_id IS NULL AND threshold_percentage IS NULL AND threshold_source IS NULL AND threshold_revision IS NULL)
+                AND NOT EXISTS(SELECT 1 FROM ledger.receiving_threshold_overrides)
+                AND (SELECT count(*)=1 FROM ledger.receiving_threshold_history WHERE action='INITIALIZE' AND actor_id IS NULL AND migration_id='20261019000000_ReceivingLossThreshold')
+                AND NOT EXISTS(SELECT 1 FROM capture.procurements WHERE NOT ledger.procurement_package_complete(id))
+            """, owner))
+            Assert.Equal(true, await check.ExecuteScalarAsync());
+        Assert.Equal(beforePending.GetRawText(), (await Call(op.Id, pendingId, "measurements", pendingBody)).GetRawText());
+        await using (var detail = new NpgsqlCommand("SELECT ledger.receiving_detail(@actor,@id)", owner))
+        {
+            detail.Parameters.AddWithValue("actor", op.Id); detail.Parameters.AddWithValue("id", pendingId);
+            var state = JsonSerializer.Deserialize<JsonElement>((string)(await detail.ExecuteScalarAsync())!);
+            Assert.Equal("AWAITING_MANAGER_REVIEW", state.GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, state.GetProperty("measurementSets")[0].GetProperty("threshold").ValueKind);
+            Assert.Equal(0m, LedgerScenario.Decimal(state.GetProperty("usableStockKg")));
+        }
+        var arrival = await Call(op.Id, unmeasured.GetProperty("id").GetGuid(), "measurements", LedgerScenario.MeasurementBody(unmeasured, actual: ["98"]));
+        Assert.Equal("RECEIVED_WITHIN_TOLERANCE", arrival.GetProperty("status").GetString());
+        Assert.Equal(2m, LedgerScenario.Decimal(arrival.GetProperty("measurementSets")[0].GetProperty("threshold").GetProperty("percentage")));
+        var requested = await Call(manager.Id, pendingId, "reviews", Review(beforePending, "REQUEST_REMEASUREMENT"));
+        var remeasured = await Call(op.Id, pendingId, "measurements", LedgerScenario.MeasurementBody(pending,
+            version: requested.GetProperty("receivingVersion").GetInt32(), actual: ["99"]));
+        Assert.Equal("RECEIVED_WITHIN_TOLERANCE", remeasured.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, remeasured.GetProperty("measurementSets")[0].GetProperty("threshold").ValueKind);
+        Assert.Equal(2m, LedgerScenario.Decimal(remeasured.GetProperty("measurementSets")[1].GetProperty("threshold").GetProperty("percentage")));
+        Assert.Equal(99m, LedgerScenario.Decimal(remeasured.GetProperty("usableStockKg")));
+        await using var valid = new NpgsqlCommand("SELECT bool_and(ledger.procurement_package_complete(id)) FROM capture.procurements", owner);
+        Assert.Equal(true, await valid.ExecuteScalarAsync());
+    }
 }

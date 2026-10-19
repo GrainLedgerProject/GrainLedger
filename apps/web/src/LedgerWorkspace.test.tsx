@@ -9,7 +9,7 @@ const actor: User = { id: 'actor', email: 'staff@example.com', displayName: 'Sta
 const look = { owners: [{ id: 'customer', name: 'Customer Company' }], facilities: [{ id: 'facility', name: 'Mill facility' }], locations: [{ id: 'store', facilityId: 'facility', name: 'Main store', kind: 'STORE' }, { id: 'isolation', facilityId: 'facility', name: 'Isolation', kind: 'ISOLATION' }], commodities: [{ id: 'rice', name: 'Rice' }], equipment: [{ id: 'dryer', facilityId: 'facility', name: 'Dryer' }] };
 const lot = { id: 'source', code: 'Source lot', ownerId: 'customer', commodityId: 'rice', stage: 'RAW_PADDY', productIdentity: 'RAW_PADDY', positions: [{ locationId: 'store', facilityId: 'facility', quantityKg: '10.000001', availableKg: '10.000001' }], restrictions: [] };
 const draft = { id: 'draft', ownerId: 'customer', facilityId: 'facility', kind: 'DRYING', occurredAt: '2026-01-01T00:00:00Z', equipmentId: 'dryer', inputs: [{ lotId: 'source', locationId: 'store', quantityKg: '10.000001' }], outputs: [{ id: 'dried', code: 'Dried lot', commodityId: 'rice', stage: 'DRIED_PADDY', productIdentity: 'DRIED_PADDY', locationId: 'store', quantityKg: '9.000001' }], declaredLossKg: '1', status: 'DRAFT', version: 'version-1', confirmedVersion: 'version-1', varianceKg: '0', allowedVarianceKg: '0', createdBy: 'actor', canEdit: true, canDelete: true };
-const receivingTask = { id: 'arrival', code: 'ARR-1', ownerCompanyId: 'customer', ownerCompanyName: 'Customer Company', facilityId: 'facility', facilityName: 'Mill facility', receivingLocationId: 'store', receivingLocationName: 'Main store', status: 'PENDING_ARRIVAL', receivingVersion: 0, expectedTotalKg: '10', actualTotalKg: null, usableStockKg: '0', latestMeasurementSetId: null, receivedAt: '2026-10-14T00:00:00Z', items: [{ id: 'item-1', lineNo: 1, sourceLotId: 'source-lot', lotId: 'source', lotCode: 'Source lot', plotSeasonId: 'ps', riceVariety: 'IR', expectedValue: '10', expectedUnit: 'KG', expectedKg: '10', actualValue: null, actualUnit: null, actualKg: null }], measurementSets: [], reviews: [] };
+const receivingTask = { id: 'arrival', code: 'ARR-1', ownerCompanyId: 'customer', ownerCompanyName: 'Customer Company', facilityId: 'facility', facilityName: 'Mill facility', receivingLocationId: 'store', receivingLocationName: 'Main store', status: 'PENDING_ARRIVAL', receivingVersion: 0, effectiveThreshold: { companyId: 'customer', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'default-r1' }, expectedTotalKg: '10', actualTotalKg: null, usableStockKg: '0', latestMeasurementSetId: null, receivedAt: '2026-10-14T00:00:00Z', items: [{ id: 'item-1', lineNo: 1, sourceLotId: 'source-lot', lotId: 'source', lotCode: 'Source lot', plotSeasonId: 'ps', riceVariety: 'IR', expectedValue: '10', expectedUnit: 'KG', expectedKg: '10', actualValue: null, actualUnit: null, actualKg: null }], measurementSets: [], reviews: [] };
 const fetchMock = vi.fn<typeof fetch>();
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const page = (items: unknown[]) => ({ items, page: 1, pageSize: 25, totalCount: items.length, hasMore: false });
@@ -36,7 +36,7 @@ beforeEach(() => {
  routes = {
   '/api/auth/csrf': { token: 'csrf' }, '/api/ledger/lookups': look, '/api/ledger/lots': page([lot]), '/api/ledger/lots/source': lot, '/api/ledger/holds': page([]), '/api/ledger/notifications': page([]), '/api/ledger/history': page([]), '/api/ledger/operations': page([draft]), '/api/ledger/corrections': page([]),
   '/api/ledger/setup': { ...look, assignments: [], policies: [], compatibilities: [] }, '/api/admin/users': [], '/api/commodities': page([]), '/api/measurement-units': page([]),
-  '/api/admin/organizations': [{ id: 'company', name: 'Customer', kind: 'Customer' }],
+  '/api/admin/organizations': [{ id: 'company', name: 'Customer', kind: 'Customer' }], '/api/ledger/receiving-thresholds/own-company': { companyId: 'company', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'default-r1' },
   '/api/farmers': page([{ id: 'farmer', name: 'Farmer', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plots': page([{ id: 'plot', farmerId: 'farmer', code: 'Plot', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/crop-seasons': page([{ id: 'season', name: 'Season', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plot-seasons': page([{ id: 'ps', plotId: 'plot', seasonId: 'season', riceVariety: 'IR', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]),
   '/api/procurement-reference-data': { receivingOptions: [{ collectionSiteId: 'site', collectionSiteCode: 'SITE', collectionSiteName: 'Site', receivingLocationId: 'loc', receivingLocationCode: 'Store' }], commodity: { id: 'paddy' }, massUnits: [{ code: 'KG', name: 'kg' }], page: 1, pageSize: 100, totalCount: 1, hasMore: false, maxLinesPerReceipt: 100 }, '/api/procurements': page([]),
   '/api/ledger/receiving-tasks': page([receivingTask]), '/api/ledger/receiving/arrival': receivingTask,
@@ -103,6 +103,46 @@ it('submits complete operator measurements with exact decimals and explicit arri
  expect(request).toMatchObject({ expectedReceivingVersion: 0, observations: '', items: [{ procurementItemId: 'item-1', measuredValue: '10.000001', measuredUnit: 'KG' }] });
  expect(request.operationId).toBe(firstRequest.operationId);
  expect(request.capturedAt).toBe(firstRequest.capturedAt);
+});
+it('previews exact threshold boundary with decimal arithmetic and marks one micro-kg beyond for review', async () => {
+ const task = { ...receivingTask, effectiveThreshold: { companyId: 'customer', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'default-r1' }, expectedTotalKg: '100', items: [{ ...receivingTask.items[0], expectedValue: '100', expectedKg: '100' }] };
+ routes['/api/ledger/receiving-tasks'] = page([task]); routes['/api/ledger/receiving/arrival'] = task;
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['lots.receive'] }} />);
+ const browser = userEvent.setup();
+ await browser.selectOptions(await screen.findByLabelText('Assigned facility'), 'facility');
+ await browser.click(await screen.findByRole('button', { name: /ARR-1.*Pending mill arrival/ }));
+ await browser.type(await screen.findByLabelText('Actual received quantity'), '97.999999');
+ await browser.selectOptions(screen.getByLabelText('Actual unit'), 'KG');
+ expect(await screen.findByText(/Manager review — over threshold/)).toBeInTheDocument();
+ await browser.clear(screen.getByLabelText('Actual received quantity'));
+ await browser.type(screen.getByLabelText('Actual received quantity'), '98');
+ expect(await screen.findByText('Within threshold')).toBeInTheDocument();
+ expect(screen.getByText(/Preview is advisory/)).toBeInTheDocument();
+});
+it('shows stored measurement threshold rather than changed current setting and labels legacy sets pre-feature', async () => {
+ const task = {
+  ...receivingTask, status: 'RECEIVED_WITHIN_TOLERANCE', effectiveThreshold: { companyId: 'customer', percentage: '3', source: 'COMPANY_OVERRIDE', revision: 'current-r2' },
+  actualTotalKg: '98', latestMeasurementSetId: 'set-current',
+  items: [{ ...receivingTask.items[0], expectedValue: '100', expectedKg: '100', actualValue: '98', actualUnit: 'KG', actualKg: '98' }],
+  measurementSets: [
+   { id: 'set-legacy', recordedAt: '2026-10-13T00:00:00Z', observations: '', threshold: null, items: [{ procurementItemId: 'item-1', measuredValue: '99', measuredUnit: 'KG', actualKg: '99' }] },
+   { id: 'set-current', recordedAt: '2026-10-14T00:00:00Z', observations: '', threshold: { companyId: 'customer', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'old-r1' }, items: [{ procurementItemId: 'item-1', measuredValue: '98', measuredUnit: 'KG', actualKg: '98' }] },
+  ],
+ };
+ routes['/api/ledger/receiving-tasks'] = page([task]); routes['/api/ledger/receiving/arrival'] = task;
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['lots.receive'] }} />);
+ const browser = userEvent.setup();
+ await browser.selectOptions(await screen.findByLabelText('Assigned facility'), 'facility');
+ await browser.click(await screen.findByRole('button', { name: /ARR-1.*Received — within tolerance/ }));
+ expect(screen.getByText(/Effective threshold for new measurements: 3% · Company override/)).toBeInTheDocument();
+ const disclosures = screen.getAllByText('View 1 measured lines');
+ await browser.click(disclosures[0]);
+ const legacyHistory = within(disclosures[0].closest('details')!);
+ expect(await legacyHistory.findByText(/threshold not recorded/)).toBeInTheDocument();
+ await browser.click(disclosures[1]);
+ const currentHistory = within(disclosures[1].closest('details')!);
+ expect(await currentHistory.findByText('Within threshold')).toBeInTheDocument();
+ expect(await currentHistory.findByText(/Applied threshold: 2% · System default · revision old-r1/)).toBeInTheDocument();
 });
 it('disables shortage approval whenever any received line has surplus', async () => {
  const surplusTask = { ...receivingTask, status: 'AWAITING_MANAGER_REVIEW', actualTotalKg: '10.5', latestMeasurementSetId: 'set-1', items: [{ ...receivingTask.items[0], actualValue: '10.5', actualUnit: 'KG', actualKg: '10.5' }], measurementSets: [{ id: 'set-1', operationId: 'op-1', operatorId: 'operator', capturedAt: '2026-10-14T01:00:00Z', recordedAt: '2026-10-14T01:01:00Z', observations: 'Scale checked', items: [{ procurementItemId: 'item-1', measuredValue: '10.5', measuredUnit: 'KG', actualKg: '10.5' }] }], reviews: [] };

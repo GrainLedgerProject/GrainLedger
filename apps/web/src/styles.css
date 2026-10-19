@@ -365,3 +365,8 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
   .ledger-task-nav button { white-space: normal; }
   .ledger-workspace .ledger-disclosure { padding: 12px 16px; }
 }
+.receiving-detail .notice-row { background: #fff1ee; }
+.receiving-detail .notice-row th, .receiving-detail .notice-row td { color: #713b33; }
+.receiving-detail table caption { padding: 12px; text-align: left; font-weight: 650; color: #526557; }
+.receiving-detail table { min-width: 840px; table-layout: auto; }
+.receiving-detail th, .receiving-detail td { overflow-wrap: normal; word-break: normal; }
