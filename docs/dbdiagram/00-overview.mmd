@@ -1,43 +1,9 @@
-erDiagram
-    organizations ||..o{ procurements : purchases
-    farmers ||..o{ plots : owns
-    plots ||..o{ plot_seasons : grows_in
-    procurements ||..o{ procurement_items : contains
-    plot_seasons ||..o{ procurement_items : source
-    procurement_items ||..o| source_lots : creates
-    lots ||..o| source_lots : source_details
-    lots ||..o{ stock_positions : located_at
-    locations ||..o{ stock_positions : holds
-    conversions ||..o{ conversion_inputs : consumes
-    lots ||..o{ conversion_inputs : input
-    conversions ||..o{ conversion_outputs : produces
-    lots ||..o| conversion_outputs : output
-    conversion_inputs ||..o{ mass_contributions : source_mass
-    conversion_outputs ||..o{ mass_contributions : attributed_mass
-    source_lots ||..o{ samples : sampled
-    samples ||..o{ lab_reports : tested
-    lab_reports ||..o{ lab_results : reports
-    lab_results o|..o{ bound_evidence : supports
-    residue_bounds ||..o{ bound_evidence : justified_by
-    lots ||..o{ residue_bounds : evidence
-    export_orders ||..o{ containers : fulfilled_by
-    containers ||..o{ blend_plans : plan_versions
-    blend_plans o|..o{ assessments : assessed
-    containers ||..o{ assessments : assessment_scope
-    mrl_versions o|..o{ assessments : applied_limit
-    blend_plans ||..o{ plan_reviews : reviewed
-    blend_plans ||..o{ plan_output_allocations : assigns_output
-    conversion_outputs ||..o{ plan_output_allocations : produced_output
-    plan_output_allocations o|..o{ stock_reservations : output_quota
-    blend_plans ||..o{ stock_reservations : reserves
-    stock_reservations ||..o{ reservation_events : accounting
-    reservation_events o|..o| reservation_events : reverses_consumption
-    correction_requests o|..o{ reservation_events : correction_accounting
-    stock_positions ||..o{ stock_reservations : reserved_quantity
-    blend_plans o|..o{ conversions : executed_by
-    containers ||..o{ loadings : receives
-    loadings ||..o{ loading_items : contains
-    stock_positions ||..o{ loading_items : loaded_from
-    containers ||..o| dossiers : evidence_snapshot
-    lots o|..o{ holds : lot_target
-    containers o|..o{ holds : container_target
+flowchart TB
+    %% Schema-level aggregation of physical cross-schema foreign keys from the live catalog.
+    %% Table-level constraints are in diagrams 01-08 and DBML; arrows run child schema -> parent schema.
+    capture -->|FK| identity
+    capture -->|FK| catalog
+    catalog -->|FK| identity
+    ledger -->|FK| identity
+    ledger -->|FK| capture
+    ledger -->|FK| catalog

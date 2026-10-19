@@ -77,6 +77,14 @@ public sealed class LedgerService(IConfiguration configuration, IHttpContextAcce
         }
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
+    public async Task<JsonElement> ReceivingThresholdAsync(bool command, string action, JsonObject payload, CancellationToken ct = default)
+    {
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        var routine = command ? "ledger.receiving_threshold_command" : "ledger.receiving_threshold_read";
+        var value = await ExecuteAsync(connection, null, $"SELECT {routine}($1,$2,$3)::text", ct, actor, action, payload);
+        return JsonSerializer.Deserialize<JsonElement>((string)value!);
+    }
     public async Task<bool> CanAccessEvidenceAsync(Guid evidenceId, Guid ownerId, Guid facilityId, CancellationToken ct = default)
     {
         await using var connection = await OpenAsync(ct);

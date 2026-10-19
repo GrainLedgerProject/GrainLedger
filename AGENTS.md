@@ -10,10 +10,11 @@ GrainLedger is a modular monolith: ASP.NET Core 10, PostgreSQL, and React/TypeSc
 - `backend/src/GrainLedger.Modules.Identity/`: authentication, sessions, organizations, permissions, and `identity` schema.
 - `backend/src/GrainLedger.Modules.Catalogs/`: Catalog APIs and catalog schema.
 - `backend/src/GrainLedger.Modules.Capture/`: official farmer/procurement APIs and `capture` schema.
+- `backend/src/GrainLedger.Modules.Ledger/`: receiving, stock, processing, corrections, HOLDs, evidence, and `ledger` schema.
 - `backend/tests/GrainLedger.Api.IntegrationTests/`: backend integration tests using isolated Docker/Testcontainers PostgreSQL.
 - `apps/web/`: working web UI; `apps/mobile/` remains a placeholder.
 
-Read `README.md` for setup and `docs/architecture.md` for module, authorization, transaction, and numeric contracts. Read `docs/ledger-implementation-plan.md` when changing ledger workflows. Authentication setup lives in `docs/auth-email-password-scalar.md`; seed-account instructions live in `docs/development-accounts.md`.
+Read `README.md` for the project overview and `docs/setup-and-deployment.md` for environment, database-role, migration, seed, and deployment setup. Read `docs/architecture.md` for module, authorization, transaction, and numeric contracts, and `docs/ledger-implementation-plan.md` when changing ledger workflows. Authentication setup lives in `docs/auth-email-password-scalar.md`; seed-account instructions live in `docs/development-accounts.md`. Lot-code rules live in `docs/unified-lot-code-guide.md`. `docs/dbdiagram/README.md` indexes deployed-schema diagrams; these are dated snapshots, not migration sources or proof that unapplied migrations are installed.
 
 ## Development commands
 
@@ -42,7 +43,6 @@ Use `http://localhost:5173`; Vite proxies `/api` and `/signin-google` to backend
 - `ConnectionStrings__GrainLedger` is the restricted runtime connection. `ConnectionStrings__GrainLedgerMigration` is migration-owner access, not normal application access. Never bypass runtime-role validation or use elevated credentials to make application startup succeed.
 - Never print or commit credentials, tokens, `.env`, or real evidence files. Never expose backend secrets through `VITE_` variables.
 - Capture owns official procurement source records; `POST /api/procurements` registers source expectation, while assigned-facility arrival measurement and review routes live in Ledger. Source status remains immutable `COMMITTED`; Ledger receiving projection supplies outward workflow state. Do not convert historical synthetic records automatically or alter existing Ledger stock/history.
-- Obtain explicit owner approval before shared database migrations, seeds, schema/role/grant changes or data-changing checks.
 
 ## Correctness boundaries
 
