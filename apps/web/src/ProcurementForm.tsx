@@ -97,7 +97,7 @@ export function ProcurementForm({ userId, companyId, onBack, onCreated }: { user
     setBusy(true); setError('');
     const request = pending ?? newRequest<ProcurementPayload>({ entityId: crypto.randomUUID(), farmerId, collectionSiteId: siteId,
       receivingLocationId: locationId, commodityId: reference!.commodity.id, receivedAt: new Date(receivedAt).toISOString(),
-      items: lines.map((line, index) => ({ ...line, itemId: crypto.randomUUID(), lineNo: index + 1, lotId: crypto.randomUUID(), sourceLotId: crypto.randomUUID() })) });
+      items: lines.map((line, index) => ({ ...line, itemId: crypto.randomUUID(), lineNo: index + 1, lotId: crypto.randomUUID(), sourceLotId: crypto.randomUUID() })) }, 2);
     if (!pending) setPending(request);
     try {
       const created = await submitCapture<ProcurementPayload, Procurement>(key, '/api/procurements', request);

@@ -148,7 +148,7 @@ describe('Capture journey', () => {
       if (path.startsWith('/api/procurements/')) return json(receipt);
       if (path.startsWith('/api/source-lots/')) return json({ id: sourceLotId, lotId: 'lot-id', lotCode: 'LOT-1', procurementId: receipt?.id, procurementCode: 'PN-001', farmerId, plotId, plotSeasonId, riceVariety: 'ST25', receivedAt: receipt?.receivedAt, initialNetMassKg: '600', moisturePercent: '22.5', receivingStatus: 'PENDING_ARRIVAL', usableStockKg: '0', currentStock: [], stockAsOf: new Date().toISOString() });
       if (path === '/api/samples') {
-        const request = JSON.parse(String(init?.body)); sample = { id: request.payload.entityId, sourceLotId, code: request.payload.code, sealCode: request.payload.sealCode, collectedAt: request.payload.collectedAt, capturedAt: request.capturedAt, recordedAt: request.capturedAt, handoverCount: 0 }; return new Promise<Response>(resolve => { finishSample = resolve; });
+        const request = JSON.parse(String(init?.body)); sample = { id: request.payload.entityId, sourceLotId, code: 'SMP-261017-0008', sealCode: request.payload.sealCode, collectedAt: request.payload.collectedAt, capturedAt: request.capturedAt, recordedAt: request.capturedAt, handoverCount: 0 }; return new Promise<Response>(resolve => { finishSample = resolve; });
       }
       if (path.startsWith('/api/samples?')) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
       if (path.endsWith('/handovers') && init?.method === 'POST') { const request = JSON.parse(String(init.body)); handovers.push({ id: request.payload.entityId, sampleId: sample?.id, ...request.payload }); if (sample) sample.handoverCount = 1; return new Promise<Response>(resolve => { finishHandover = resolve; }); }
@@ -172,17 +172,16 @@ describe('Capture journey', () => {
     expect((await screen.findAllByText('600 kg')).length).toBeGreaterThan(0);
     expect(screen.getByText('0 kg')).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /Take sample/ }));
-    const generatedCode = (screen.getByLabelText('Sample code') as HTMLInputElement).value;
-    expect(generatedCode).toMatch(/^SMP-\d{8}-[A-F0-9]{16}$/);
-    expect(screen.getByLabelText('Sample code')).toHaveAttribute('readonly');
+    expect(screen.getByText(/sample code is assigned after saving/i)).toBeInTheDocument();
     await browser.type(screen.getByLabelText('Seal code'), 'SEAL-001');
     await browser.click(screen.getByRole('button', { name: 'Save sample' }));
     expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
     expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
     const samplePost = fetchMock.mock.calls.find(([url]) => url === '/api/samples')!;
-    expect(JSON.parse(String(samplePost[1]?.body)).payload.code).toBe(generatedCode);
+    expect(JSON.parse(String(samplePost[1]?.body)).payload).not.toHaveProperty('code');
+    expect(JSON.parse(String(samplePost[1]?.body)).payloadSchemaVersion).toBe(2);
     finishSample?.(json(sample, 201));
-    expect(await screen.findByRole('heading', { name: generatedCode })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'SMP-261017-0008' })).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /Record handover/ }));
     await browser.type(screen.getByLabelText('From party'), 'Collection agent');
     await browser.type(screen.getByLabelText('To party'), 'Laboratory');

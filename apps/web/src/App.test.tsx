@@ -103,12 +103,13 @@ describe('Account experience', () => {
     const staff = { ...user, role: 'PurchasingStaff', organizationId: 'company-1', organizationName: 'Customer A', permissions: ['farms.write'] };
     const farmer = { id: '11111111-1111-4111-8111-111111111111', code: 'ND-001', name: 'Nguyen Van A', contact: null, createdAt: '2026-10-10T00:00:00Z' };
     let attempts = 0;
+    let rejectFirst: ((reason?: unknown) => void) | undefined;
     fetchMock.mockImplementation(async (url, init) => {
       if (url === '/api/auth/session') return json(staff);
       if (url === '/api/auth/csrf') return json({ token: 'csrf-value' });
       if (url === '/api/plots') {
         attempts++;
-        if (attempts === 1) throw new Error('Connection interrupted');
+        if (attempts === 1) return new Promise<Response>((_resolve, reject) => { rejectFirst = reject; });
         const request = JSON.parse(String(init?.body));
         return json({ id: request.payload.entityId, farmerId: farmer.id, code: 'TR-TEST', areaHa: 1.25, geometry: request.payload.geometry }, 201);
       }
@@ -131,14 +132,21 @@ describe('Account experience', () => {
     await browser.type(screen.getByLabelText(/Latitude/), '10.4');
     await browser.type(screen.getByLabelText(/Area \(hectares\)/), '1.25');
     await browser.click(screen.getByRole('button', { name: 'Save plot' }));
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+    await waitFor(() => expect(rejectFirst).toBeDefined());
+    expect(screen.queryByText(/The previous save did not return a result/)).not.toBeInTheDocument();
+    rejectFirst?.(new Error('Connection interrupted'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Connection interrupted');
+    expect(screen.getByText(/The previous save did not return a result/)).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: 'Retry save' }));
     expect(await screen.findByRole('heading', { name: 'TR-TEST' })).toBeInTheDocument();
     const posts = fetchMock.mock.calls.filter(([url]) => url === '/api/plots');
     expect(posts).toHaveLength(2);
     expect(posts[0][1]?.body).toBe(posts[1][1]?.body);
     const submitted = JSON.parse(String(posts[0][1]?.body));
-    expect(submitted.payload).toMatchObject({ farmerId: farmer.id, code: null, geometry: { type: 'Point', coordinates: [106.35, 10.4] }, areaHa: 1.25 });
+    expect(submitted.payload).toMatchObject({ farmerId: farmer.id, geometry: { type: 'Point', coordinates: [106.35, 10.4] }, areaHa: 1.25 });
+    expect(submitted.payload).not.toHaveProperty('code');
+    expect(submitted.payloadSchemaVersion).toBe(2);
     expect(submitted.payload.entityId).toBeTruthy();
     expect(submitted.clientOperationId).toBeTruthy();
   });

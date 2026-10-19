@@ -82,3 +82,44 @@ it('creates an MRL draft, writes a limit and publishes with the latest ETag', as
   expect(await within(detail).findByText('MRL version published.')).toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([url]) => String(url) === `/api/mrl-versions/${versionId}/publish`)).toBe(true);
 });
+
+it('imports a CSV group as one open-ended draft with its numeric limits', async () => {
+  const imported: unknown[] = [];
+  fetchMock.mockImplementation(async (url, init) => {
+    const path = String(url).split('?')[0];
+    if (path === '/api/auth/csrf') return response({ token: 'csrf' });
+    if (path === '/api/markets') return response({ items: [{ id: marketId, code: 'EU', name: 'European Union' }], hasMore: false });
+    if (path === '/api/commodities') return response({ items: [{ id: commodityId, code: 'RICE', name: 'Rice' }], hasMore: false });
+    if (path === '/api/active-substances') return response({ items: [{ id: substanceId, code: 'TCZ001', name: 'Tricyclazole' }], hasMore: false });
+    if (path === '/api/measurement-units') return response({ items: [{ id: 'unit', code: 'MG/KG', quantityKind: 'RESIDUE_CONCENTRATION' }], hasMore: false });
+    if (path === '/api/mrl-versions/import' && init?.method === 'POST') {
+      imported.push(JSON.parse(String(init.body)));
+      return response({ id: versionId, marketId, commodityId, versionNo: 1, status: 'DRAFT', effectiveFrom: '2027-01-01T00:00:00Z', effectiveTo: null, sourceRef: 'Regulation', publishedAt: null }, 201);
+    }
+    if (path === '/api/mrl-versions') return response({ items: [], page: 1, pageSize: 20, hasMore: false });
+    if (path === `/api/mrl-versions/${versionId}`) return response({ id: versionId, marketId, commodityId, versionNo: 1, status: 'DRAFT', effectiveFrom: '2027-01-01T00:00:00Z', effectiveTo: null, sourceRef: 'Regulation', publishedAt: null }, 200, '"1"');
+    if (path === `/api/mrl-versions/${versionId}/limits`) return response({ items: [{ id: 'limit', substanceId, limitValue: 0.01, unit: 'mg/kg' }], page: 1, pageSize: 20, hasMore: false });
+    return response({}, 404);
+  });
+  render(<AdminMrl onOpenCatalogs={() => {}} />);
+  const browser = userEvent.setup();
+  await waitFor(() => expect(screen.getByRole('option', { name: 'EU · European Union' })).toBeInTheDocument());
+  await browser.click(screen.getByRole('button', { name: 'Import CSV / Excel' }));
+  const dialog = screen.getByRole('dialog', { name: 'Import MRL draft' });
+  const file = new File([
+    'substance_id,substance_name,commodity_code,commodity_name_en,market,regulation_reference,mrl_value_mg_kg,mrl_unit,effective_date,version,status\n',
+    'TCZ001,Tricyclazole,0500060,Rice,EU,Regulation,0.01,mg/kg,2027-01-01,EU-v1,ACTIVE\n',
+    'IPT002,Isoprothiolane,0500060,Rice,EU,Regulation,,mg/kg,2027-01-01,EU-v1,NO_MRL\n',
+  ], 'mrl.csv', { type: 'text/csv' });
+  await browser.upload(within(dialog).getByLabelText('MRL file (.csv or .xlsx)'), file);
+  expect(await within(dialog).findByText(/1 rows with statuses other than ACTIVE excluded/)).toBeInTheDocument();
+  expect(within(dialog).getByLabelText('Market')).toHaveValue(marketId);
+  await browser.selectOptions(within(dialog).getByLabelText('Commodity'), commodityId);
+  fireEvent.change(within(dialog).getByLabelText('Effective from'), { target: { value: '2027-01-01T00:00' } });
+  expect(within(dialog).getByLabelText('Effective to (optional)')).toHaveValue('');
+  await browser.click(within(dialog).getByRole('button', { name: 'Create draft with 1 limits' }));
+  await waitFor(() => expect(imported).toHaveLength(1));
+  expect(imported[0]).toMatchObject({ marketId, commodityId, effectiveTo: null,
+    limits: [{ substanceCode: 'TCZ001', limitValue: '0.01', unit: 'mg/kg' }] });
+  expect(await screen.findByText(/1 limits imported into a draft/)).toBeInTheDocument();
+});

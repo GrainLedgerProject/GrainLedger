@@ -205,39 +205,46 @@ public static class ProcurementEndpoints
         var businessEvent = new CaptureBusinessEvent { CompanyId = companyId, ActorId = actorId,
             EventType = EventType, OccurredAt = receivedAt, RecordedAt = now,
             CorrelationId = request.ClientOperationId, Payload = "{}" };
-        var code = $"TM-{payload.EntityId:N}".ToUpperInvariant();
+        var code = request.PayloadSchemaVersion == 1 ? $"TM-{payload.EntityId:N}".ToUpperInvariant()
+            : await CaptureCodes.DatedAsync(db, companyId.Value, "PRC", receivedAt, ct);
         var header = new Procurement { Id = payload.EntityId, CompanyId = companyId.Value,
             Code = code, FarmerId = farmer.Id, CollectionSiteId = payload.CollectionSiteId,
             ReceivedBy = actorId, ReceivedAt = receivedAt, Status = "COMMITTED", EventId = businessEvent.Id };
         var newItems = new List<ProcurementItem>();
         var newSources = new List<SourceLot>();
-        var itemResponses = lines.Select(x =>
+        foreach (var x in lines)
         {
-            var source = sources.Single(s => s.Id == x.Input.PlotSeasonId);
-            var lotCode = $"LL-{x.Input.LotId:N}".ToUpperInvariant();
             newItems.Add(new ProcurementItem { Id = x.Input.ItemId, CompanyId = companyId.Value,
                 ProcurementId = payload.EntityId, LineNo = x.Input.LineNo, PlotSeasonId = x.Input.PlotSeasonId,
                 NetMassKg = x.Kg, MeasuredValue = x.Measured, MeasuredUnit = x.Unit,
                 MoisturePercent = x.Moisture });
             newSources.Add(new SourceLot { Id = x.Input.SourceLotId, CompanyId = companyId.Value,
                 LotId = x.Input.LotId, ProcurementItemId = x.Input.ItemId });
-            return new ProcurementLineResponse(x.Input.ItemId, x.Input.LineNo, x.Input.PlotSeasonId,
-                source.PlotId, source.SeasonId, source.RiceVariety, Number(x.Measured), x.Unit,
-                Number(x.Kg), Number(x.Moisture), x.Input.SourceLotId, x.Input.LotId,
-                lotCode, "RAW_PADDY", new ProcurementInitialStock(payload.ReceivingLocationId, "0"));
-        }).ToArray();
+        }
         var total = lines.Sum(x => x.Kg);
-        var result = new ProcurementResponse(payload.EntityId, code, farmer.Id, payload.CollectionSiteId,
-            payload.ReceivingLocationId, payload.CommodityId, "PENDING_ARRIVAL", actorId, receivedAt,
-            capturedAt, now, businessEvent.Id, Number(total), itemResponses);
-        businessEvent.Payload = JsonSerializer.Serialize(new { schemaVersion = 1, procurementId = payload.EntityId,
-            result });
-        var operation = new CaptureOperation { CompanyId = companyId.Value, SubmittedBy = actorId,
-            DeviceId = deviceId, ClientOperationId = request.ClientOperationId, PayloadHash = hash,
-            Payload = canonical, CapturedAt = capturedAt, ReceivedAt = now, Status = "APPLIED",
-            AppliedEventId = businessEvent.Id, ResultPayload = JsonSerializer.Serialize(result) };
+        ProcurementResponse? result = null;
         try
         {
+            var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+            var dbTransaction = (NpgsqlTransaction)transaction.GetDbTransaction();
+            var codes = new Dictionary<Guid, string>();
+            foreach (var line in lines)
+                codes.Add(line.Input.LotId, await ledger.ReserveSourceLotCodeAsync(connection, dbTransaction,
+                    actorId, companyId.Value, payload.EntityId, line.Input.LotId, ct));
+            var itemResponses = lines.Select(x =>
+            {
+                var source = sources.Single(s => s.Id == x.Input.PlotSeasonId);
+                return new ProcurementLineResponse(x.Input.ItemId, x.Input.LineNo, x.Input.PlotSeasonId,
+                    source.PlotId, source.SeasonId, source.RiceVariety, Number(x.Measured), x.Unit,
+                    Number(x.Kg), Number(x.Moisture), x.Input.SourceLotId, x.Input.LotId,
+                    codes[x.Input.LotId], "RAW_PADDY",
+                    new ProcurementInitialStock(payload.ReceivingLocationId, "0"));
+            }).ToArray();
+            result = new ProcurementResponse(payload.EntityId, code, farmer.Id, payload.CollectionSiteId,
+                payload.ReceivingLocationId, payload.CommodityId, "PENDING_ARRIVAL", actorId, receivedAt,
+                capturedAt, now, businessEvent.Id, Number(total), itemResponses);
+            businessEvent.Payload = JsonSerializer.Serialize(new { schemaVersion = 2, procurementId = payload.EntityId,
+                result });
             // Immutable source package is registered atomically; arrival creates stock later.
             db.BusinessEvents.Add(businessEvent);
             await db.SaveChangesAsync(ct);
@@ -246,10 +253,11 @@ public static class ProcurementEndpoints
             db.ProcurementItems.AddRange(newItems);
             await db.SaveChangesAsync(ct);
             db.SourceLots.AddRange(newSources);
-            db.OfflineOperations.Add(operation);
+            db.OfflineOperations.Add(new CaptureOperation { CompanyId = companyId.Value, SubmittedBy = actorId,
+                DeviceId = deviceId, ClientOperationId = request.ClientOperationId, PayloadHash = hash,
+                Payload = canonical, CapturedAt = capturedAt, ReceivedAt = now, Status = "APPLIED",
+                AppliedEventId = businessEvent.Id, ResultPayload = JsonSerializer.Serialize(result) });
             await db.SaveChangesAsync(ct);
-            var connection = (NpgsqlConnection)db.Database.GetDbConnection();
-            var dbTransaction = (NpgsqlTransaction)transaction.GetDbTransaction();
             await ledger.RegisterPendingAsync(connection, dbTransaction, actorId, payload.EntityId, ct);
             await transaction.CommitAsync(ct);
         }
@@ -418,7 +426,7 @@ public static class ProcurementEndpoints
         if (string.IsNullOrWhiteSpace(request.DeviceId) || request.DeviceId.Trim().Length > 100) errors["deviceId"] = ["Device ID is required and must not exceed 100 characters."];
         if (request.ClientOperationId == Guid.Empty) errors["clientOperationId"] = ["Operation ID is required."];
         if (request.CapturedAt == default) errors["capturedAt"] = ["Capture time is required."];
-        if (request.PayloadSchemaVersion != 1) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
+        if (request.PayloadSchemaVersion is not (1 or 2)) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
         if (request.Payload is null) { errors["payload"] = ["Procurement data is required."]; lines = []; return errors; }
         var p = request.Payload;
         if (p.EntityId == Guid.Empty) errors["payload.entityId"] = ["Procurement ID is required."];

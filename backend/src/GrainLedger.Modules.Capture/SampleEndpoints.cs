@@ -61,15 +61,18 @@ public static class SampleEndpoints
         var companyId = await CompanyAsync(principal, access, identityDb, ct);
         if (companyId is null) return Results.Forbid();
         var errors = ValidateEnvelope(request.DeviceId, request.ClientOperationId,
-            request.CapturedAt, request.PayloadSchemaVersion);
+            request.CapturedAt, request.PayloadSchemaVersion, allowGeneratedCode: true);
         var payload = request.Payload;
         if (payload is null) errors["payload"] = ["Sample data is required."];
         else
         {
             if (payload.EntityId == Guid.Empty) errors["payload.entityId"] = ["Sample ID is required."];
             if (payload.SourceLotId == Guid.Empty) errors["payload.sourceLotId"] = ["Source lot ID is required."];
-            if (string.IsNullOrWhiteSpace(payload.Code) || payload.Code.Trim().Length > 60)
+            if (request.PayloadSchemaVersion == 1 &&
+                (string.IsNullOrWhiteSpace(payload.Code) || payload.Code.Trim().Length > 60))
                 errors["payload.code"] = ["Sample code is required and must not exceed 60 characters."];
+            if (request.PayloadSchemaVersion == 2 && payload.Code is not null)
+                errors["payload.code"] = ["The server assigns the sample code."];
             if (string.IsNullOrWhiteSpace(payload.SealCode) || payload.SealCode.Trim().Length > 100)
                 errors["payload.sealCode"] = ["Seal code is required and must not exceed 100 characters."];
             if (payload.CollectedAt == default || request.CapturedAt != default && payload.CollectedAt > request.CapturedAt)
@@ -81,14 +84,16 @@ public static class SampleEndpoints
         var capturedAt = request.CapturedAt.ToUniversalTime();
         var collectedAt = payload!.CollectedAt.ToUniversalTime();
         var deviceId = request.DeviceId!.Trim();
-        var code = payload.Code!.Trim();
+        var legacyCode = payload.Code?.Trim();
         var sealCode = payload.SealCode!.Trim();
         var canonical = JsonSerializer.Serialize(new { operationType = SampleEvent,
-            request.PayloadSchemaVersion, capturedAt, payload.EntityId, payload.SourceLotId, code,
+            request.PayloadSchemaVersion, capturedAt, payload.EntityId, payload.SourceLotId,
+            code = request.PayloadSchemaVersion == 1 ? legacyCode : null,
             sealCode, collectedAt });
         var hash = Hash(canonical);
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
         await LockAsync(db, companyId.Value, deviceId, request.ClientOperationId, ct);
         var prior = await FindOperationAsync(db, companyId.Value, deviceId, request.ClientOperationId, ct);
         if (prior is not null) return Replay<SampleResponse>(prior, hash);
@@ -97,6 +102,8 @@ public static class SampleEndpoints
             return Problem(409, "SOURCE_RECORD_NOT_READY", "The source lot has not been accepted.");
         if (await db.Samples.AsNoTracking().AnyAsync(x => x.Id == payload.EntityId, ct))
             return Problem(409, "ENTITY_ALREADY_EXISTS", "The sample ID already exists.");
+        var code = request.PayloadSchemaVersion == 1 ? legacyCode!
+            : await CaptureCodes.DatedAsync(db, companyId.Value, "SMP", collectedAt, ct);
         if (await db.Samples.AsNoTracking().AnyAsync(x => x.CompanyId == companyId && x.Code == code, ct))
             return Problem(409, "SAMPLE_CODE_EXISTS", "The sample code already exists in this company.");
 
@@ -278,14 +285,15 @@ public static class SampleEndpoints
             select source.Id).AnyAsync(ct);
 
     private static Dictionary<string, string[]> ValidateEnvelope(string? deviceId, Guid operationId,
-        DateTimeOffset capturedAt, int version)
+        DateTimeOffset capturedAt, int version, bool allowGeneratedCode = false)
     {
         var errors = new Dictionary<string, string[]>();
         if (string.IsNullOrWhiteSpace(deviceId) || deviceId.Trim().Length > 100)
             errors["deviceId"] = ["Device ID is required and must not exceed 100 characters."];
         if (operationId == Guid.Empty) errors["clientOperationId"] = ["Operation ID is required."];
         if (capturedAt == default) errors["capturedAt"] = ["Capture time is required."];
-        if (version != 1) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
+        if (version != 1 && (!allowGeneratedCode || version != 2))
+            errors["payloadSchemaVersion"] = ["Unsupported payload version."];
         return errors;
     }
 

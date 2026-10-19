@@ -119,7 +119,7 @@ export function PlotSeasonCreate({ plotId, plotCode, userId, companyId, onCancel
           {visibleSeasons.map(item => <option key={item.id} value={item.id}>{item.name} ({item.startsOn} – {item.endsOn})</option>)}
         </select></label>
         <RiceVarietyInput value={riceVariety} onChange={setRiceVariety} disabled={busy || !!pending} />
-        {pending && <div className="notice pending">The request may already have reached the server. Retry sends the same registration to prevent a duplicate.</div>}
+        {pending && !busy && <div className="notice pending">The previous save did not return a result. Retry save sends the same registration to prevent a duplicate.</div>}
         {error && <div className="notice error" role="alert">{error}</div>}
         <div className="form-footer"><button type="button" className="secondary" onClick={onCancel} disabled={busy}>Cancel</button><button type="submit" disabled={busy || (!pending && (seasonsLoading || seasons.length === 0 || !seasonId || !riceVariety.trim()))}>{busy ? 'Saving…' : pending ? 'Retry save' : 'Register season'}</button></div>
       </form>

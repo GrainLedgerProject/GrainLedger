@@ -68,7 +68,7 @@ public static class CaptureModule
         if (errors.Count != 0) return Results.ValidationProblem(errors);
         var payload = request.Payload!;
         var deviceId = request.DeviceId!.Trim();
-        var code = payload.Code is null
+        var legacyCode = payload.Code is null
             ? $"ND-{payload.EntityId.ToString("N")[..12].ToUpperInvariant()}"
             : payload.Code.Trim();
         var name = payload.Name!.Trim();
@@ -77,7 +77,7 @@ public static class CaptureModule
         var canonical = JsonSerializer.Serialize(new
         {
             operationType = "FARMER_REGISTERED", request.PayloadSchemaVersion, capturedAt,
-            payload.EntityId, code, name, contact
+            payload.EntityId, code = request.PayloadSchemaVersion == 1 ? legacyCode : null, name, contact
         });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         var lockKey = $"{companyId:N}:{deviceId}:{request.ClientOperationId:N}";
@@ -101,13 +101,15 @@ public static class CaptureModule
 
         if (await db.Farmers.AnyAsync(x => x.CompanyId == companyId && x.Id == payload.EntityId, ct))
             return Problem(409, "ENTITY_ALREADY_EXISTS", "The farmer ID already exists.");
+        var (number, generatedCode) = await CaptureCodes.FarmerAsync(db, companyId, ct);
+        var code = request.PayloadSchemaVersion == 1 ? legacyCode : generatedCode;
         if (await db.Farmers.AnyAsync(x => x.CompanyId == companyId && x.Code == code, ct))
             return Problem(409, "FARMER_CODE_EXISTS", "The farmer code already exists.");
 
         var now = clock.GetUtcNow();
         var farmer = new Farmer
         {
-            Id = payload.EntityId, CompanyId = companyId, Code = code,
+            Id = payload.EntityId, CompanyId = companyId, Code = code, CodeNumber = number,
             Name = name, Contact = contact, CreatedAt = now, CreatedBy = actor.Value.UserId
         };
         var result = ToResponse(farmer);
@@ -224,11 +226,9 @@ public static class CaptureModule
         if (farmer.Version != request.ExpectedVersion) return Problem(412, "REFERENCE_STALE", "The farmer changed. Reload before editing.");
         if (await FarmerInUseAsync(db, actor.Value.CompanyId, id, ct))
             return Problem(409, "REFERENCE_IN_USE", "A referenced farmer cannot be edited.");
-        var code = request.Code?.Trim() ?? $"ND-{id.ToString("N")[..12].ToUpperInvariant()}";
-        if (await db.Farmers.AnyAsync(x => x.CompanyId == actor.Value.CompanyId && x.Id != id && x.Code == code, ct))
-            return Problem(409, "FARMER_CODE_EXISTS", "The farmer code already exists.");
+        if (request.Code is not null && request.Code.Trim() != farmer.Code)
+            return Problem(409, "CODE_IMMUTABLE", "The farmer code cannot be changed.");
         var before = new { farmer.Code, farmer.Name, farmer.Contact, farmer.Version };
-        farmer.Code = code;
         farmer.Name = request.Name.Trim();
         farmer.Contact = string.IsNullOrWhiteSpace(request.Contact) ? null : request.Contact.Trim();
         farmer.Version++;
@@ -328,7 +328,9 @@ public static class CaptureModule
         if (string.IsNullOrWhiteSpace(request.DeviceId) || request.DeviceId.Trim().Length > 100) errors["deviceId"] = ["Device ID is required and must not exceed 100 characters."];
         if (request.ClientOperationId == Guid.Empty) errors["clientOperationId"] = ["Operation ID is required."];
         if (request.CapturedAt == default) errors["capturedAt"] = ["Capture time is required."];
-        if (request.PayloadSchemaVersion != 1) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
+        if (request.PayloadSchemaVersion is not (1 or 2)) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
+        if (request.PayloadSchemaVersion == 2 && request.Payload?.Code is not null)
+            errors["payload.code"] = ["The server assigns the farmer code."];
         if (request.Payload is null) { errors["payload"] = ["Farmer data is required."]; return errors; }
         if (request.Payload.EntityId == Guid.Empty) errors["payload.entityId"] = ["Farmer ID is required."];
         if (request.Payload.Code is not null &&
