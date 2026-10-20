@@ -45,7 +45,7 @@ Kiểm tra role/permission từ trạng thái persisted, đồng thời kiểm t
 
 Khối lượng là decimal string, kg giữ precision của dữ liệu đã ghi. `producedKg` là tổng attribution lúc tạo lô; không cộng qua các tầng để ra tổng tồn/ảnh hưởng. `percentage` được backend làm tròn sáu chữ số để hiển thị; số liệu đối chiếu chính là `quantityKg / denominatorKg`. Không dùng JavaScript float cho khối lượng. Không suy dư lượng hoặc compliance verdict từ tỷ lệ.
 
-Source metadata được Capture cung cấp theo tập từ immutable procurement event snapshot, cùng connection/transaction do caller quản lý. Không đọc mutable master-data labels để ghi đè nguồn lịch sử, không xuất contacts/geometry/evidence files. Source expectation vẫn giữ nguyên ngay cả khi accepted shortage tạo stock theo actual mass khác kỳ vọng.
+Source metadata được Capture cung cấp theo tập từ immutable procurement event snapshot, cùng connection/transaction do caller quản lý. Không đọc mutable master-data labels để ghi đè nguồn lịch sử, không xuất contacts/geometry/evidence files. `provenance.currentReferenceLabels` bổ sung `farmerCode`, `farmerName`, `plotCode`, `seasonName` (nullable), tra theo ID trong snapshot và cùng owner, kể cả reference đã soft-delete. Các nhãn này là giá trị hiện tại khi enrichment, không phải historical snapshot và không thay thế các ID nguồn đã ghi nhận. Source expectation vẫn giữ nguyên ngay cả khi accepted shortage tạo stock theo actual mass khác kỳ vọng.
 
 ## Hành vi đồ thị
 
@@ -83,8 +83,31 @@ Sau **Run trace**, chọn **Table** hoặc **Flowchart** tại phần Trace resu
 
 Flowchart được vẽ bằng HTML/SVG với React đang có; không thêm dependency, không cần migration mới và không thay đổi authorization/accounting backend.
 
+## Chi tiết nguồn ruộng/vụ
+
+Trong **Source composition** của lô đang chọn, mở **View field / season origin** ở từng nguồn đóng góp. Có thể mở từ cả Table và Flowchart; không fetch lại, không tạo audit mới. Phần này hiển thị nông dân → thửa/vụ (giống đã ghi nhận) → phiếu và dòng thu mua → source Ledger lot, kèm allocated kg/tỷ lệ của lô đang chọn.
+
+Đây là chuỗi nguồn gốc, không phải công đoạn chuyển đổi vật liệu hoặc lịch sử đăng ký thửa. Source expectation được ghi riêng với allocated kg, không coi là arrival measurement. Tên/mã danh mục được ghi rõ là current reference labels; khi thiếu nhãn vẫn hiện ID bất biến và báo unavailable, không suy diễn dữ liệu. Legacy không có hồ sơ nguồn vẫn báo thiếu. Chỉ Customer Manager đúng owner và Administrator theo quyền trace hiện có được đọc; Export Staff không được bổ sung dữ liệu nguồn.
+
+Không cần migration hoặc grant mới. Capture đọc metadata theo tập trên connection/transaction hiện có; UI không gọi lần lượt API nông dân/thửa/vụ.
+
 ## Deployment
 
 Forward migration Ledger `20261017000000_AddLotTraceability` thêm `ledger.trace_lot(uuid,uuid,text,text)`. Runtime chỉ được EXECUTE entry routine; các grant được cập nhật trong `LedgerDatabase.ConfigureRuntimeRoleAsync` khi chạy migration workflow hiện có. Không sửa migration cũ hay grant PUBLIC. Trước khi dùng trên shared Supabase, owner cần phê duyệt và thực hiện migration/runtime grant theo quy trình repository; normal startup không tự migrate.
 
 Kiểm thử và browser smoke của đợt phát triển dùng database Testcontainers cô lập. Sau yêu cầu trực tiếp của người dùng, migration đã được áp dụng vào database được cấu hình, cùng runtime EXECUTE grant; postflight xác nhận không còn pending migration và runtime validation pass. Không chạy seed hoặc data-changing smoke trên shared DB. Chi tiết tại mục 6.4 của [implementation plan](traceability-implementation-plan.md).
+
+## Chẩn đoán `permission denied for function trace_lot`
+
+Đây là thiếu quyền PostgreSQL `EXECUTE` của backend runtime login, khác với lỗi business role/owner bên trong routine. Customer Manager vẫn có quyền trace theo owner; đổi role của tài khoản người dùng không khắc phục lỗi database này.
+
+Kiểm tra chỉ đọc bằng runtime connection:
+
+```sql
+SELECT to_regprocedure('ledger.trace_lot(uuid,uuid,text,text)') IS NOT NULL AS routine_exists,
+       has_function_privilege(current_user, 'ledger.trace_lot(uuid,uuid,text,text)', 'EXECUTE') AS can_execute;
+```
+
+Nếu routine tồn tại và migration trace đã áp dụng nhưng `can_execute=false`, owner có thể cấp riêng EXECUTE trên đúng signature cho runtime role đang cấu hình, sau phê duyệt của database owner. Không cần seed hoặc sửa stock. Workflow `--migrate` hiện có cũng cấu hình lại toàn bộ runtime grants và có thể áp dụng migration còn thiếu; không dùng nó như lệnh chẩn đoán chỉ đọc.
+
+`ValidateRuntimeAsync` nay kiểm tra routine trace tồn tại và runtime có EXECUTE khi khởi động. Không tự cấp quyền hay dùng migration credential để chạy ứng dụng. Kiểm tra tại database cấu hình trong phiên này xác nhận routine/migration tồn tại, runtime login khớp `Ledger:RuntimeRole`, nhưng EXECUTE trace bị thiếu trong khi EXECUTE `ledger.command` vẫn có; chưa xác định tác nhân đã đổi ACL.

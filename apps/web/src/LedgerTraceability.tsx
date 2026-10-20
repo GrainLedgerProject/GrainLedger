@@ -8,7 +8,7 @@ import { traceLotOrder } from './trace-flow';
 type Contribution = { sourceLotId: string; quantityKg: string; denominatorKg: string; percentage: string };
 type TraceLot = { id: string; code: string; stage: string; producedKg: string; restrictions: string[]; contributions: Contribution[] | null;
   positions: { locationId: string; quantityKg: string; availableKg: string }[] };
-type Provenance = { sourceRecordId: string; procurementCode: string; farmerId: string; plotId: string; seasonId: string; plotSeasonId: string; riceVariety: string; expectedKg: string; originalValue: string; originalUnit: string };
+type Provenance = { sourceRecordId: string; procurementId: string; procurementItemId: string; procurementCode: string; farmerId: string; plotId: string; seasonId: string; plotSeasonId: string; riceVariety: string; expectedKg: string; originalValue: string; originalUnit: string; currentReferenceLabels?: { farmerCode: string | null; farmerName: string | null; plotCode: string | null; seasonName: string | null } };
 export type LotTrace = { traceId: string; targetLotId: string; direction: 'forward' | 'backward'; view: 'current' | 'history'; asOf: string; complete: boolean; lotCount: number; edgeCount: number;
   sourceContributionsVisible: boolean; lots: TraceLot[];
   edges: { operationId: string; inputLotId: string; outputLotId: string; inputConsumedKg: string; outputProducedKg: string }[];
@@ -88,8 +88,21 @@ export function LedgerTraceability({ user, active = true }: { user: User; active
         <p>Allocated output kg / original output kg; percentages are rounded for display. A zero allocation after rounding does not erase a recorded source relationship.</p>
         <div className="table-scroll"><table aria-label="Traced source contributions"><thead><tr><th>Source Ledger lot</th><th>Allocated kg / output kg</th><th>Share</th><th>Recorded origin</th></tr></thead><tbody>{selected.contributions?.map(contribution => {
           const source = sources.get(contribution.sourceLotId), origin = source?.provenance;
-          return <tr key={contribution.sourceLotId}><td>{contribution.sourceLotId}</td><td>{contribution.quantityKg} / {contribution.denominatorKg}</td><td>{contribution.percentage}%</td><td>{origin ? <>
-            <p>Procurement: {origin.procurementCode}</p><p>Farmer: {origin.farmerId}</p><p>Plot: {origin.plotId}</p><p>Season: {origin.seasonId}</p><p>Plot-season: {origin.plotSeasonId} · {origin.riceVariety}</p><p>Source expectation: {origin.originalValue} {origin.originalUnit} ({origin.expectedKg} kg)</p>
+          const labels = origin?.currentReferenceLabels;
+          return <tr key={contribution.sourceLotId}><td>{lots.get(contribution.sourceLotId)?.code || contribution.sourceLotId}<small>{lots.has(contribution.sourceLotId) ? contribution.sourceLotId : ''}</small></td><td>{contribution.quantityKg} / {contribution.denominatorKg}</td><td>{contribution.percentage}%</td><td>{origin ? <>
+            <p>Procurement: {origin.procurementCode}</p>
+            <p>Plot: {labels?.plotCode || origin.plotId} · Season: {labels?.seasonName || origin.seasonId}</p>
+            <details className="trace-origin"><summary>View field / season origin — {origin.procurementCode}</summary>
+              <p>Origin of the selected lot: allocated {contribution.quantityKg} / {contribution.denominatorKg} kg ({contribution.percentage}%).</p>
+              <ol className="trace-origin-chain" aria-label={`Recorded origin for ${contribution.sourceLotId}`}>
+                <li><strong>Farmer</strong><p>{labels?.farmerName || 'Name unavailable'}{labels?.farmerCode ? ` · ${labels.farmerCode}` : ''}</p><small>{origin.farmerId}</small></li>
+                <li><strong>Plot / crop season</strong><p>Plot: {labels?.plotCode || 'Code unavailable'} · Season: {labels?.seasonName || 'Name unavailable'}</p><p>Recorded variety: {origin.riceVariety}</p><small>Plot: {origin.plotId}<br />Season: {origin.seasonId}<br />Plot-season: {origin.plotSeasonId}</small></li>
+                <li><strong>Procurement</strong><p>{origin.procurementCode}</p><p>Registered source expectation: {origin.originalValue} {origin.originalUnit} ({origin.expectedKg} kg). This is not the arrival measurement or this lot's allocated mass.</p><small>Procurement: {origin.procurementId}<br />Item: {origin.procurementItemId}<br />Source record: {origin.sourceRecordId}</small></li>
+                <li><strong>Source Ledger lot</strong><p>{lots.get(contribution.sourceLotId)?.code || contribution.sourceLotId}</p><small>{contribution.sourceLotId}</small></li>
+              </ol>
+              <p>Origin IDs, variety and source expectation come from the committed procurement record. Names and codes from reference records are current labels, including retained archived records; they are not historical registration snapshots.</p>
+              <p>This chain identifies the recorded source. Registration audit and changes to field records are not included.</p>
+            </details>
           </> : 'Legacy source details unavailable; no origin inferred.'}</td></tr>;
         })}</tbody></table></div>
       </Panel>}

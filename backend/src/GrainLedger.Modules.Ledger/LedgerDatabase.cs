@@ -230,6 +230,12 @@ public static class LedgerDatabase
             """, connection);
         if (!Equals(await required.ExecuteScalarAsync(ct), true))
             throw new InvalidOperationException("Official Capture/Catalog runtime grants missing. Run explicit owner migrations and runtime-role configuration.");
+        await using var trace = new NpgsqlCommand("""
+            SELECT CASE WHEN to_regprocedure('ledger.trace_lot(uuid,uuid,text,text)') IS NULL THEN false
+                ELSE has_function_privilege(current_user,'ledger.trace_lot(uuid,uuid,text,text)','EXECUTE') END
+            """, connection);
+        if (!Equals(await trace.ExecuteScalarAsync(ct), true))
+            throw new InvalidOperationException("Traceability runtime function or EXECUTE grant missing. Run approved owner migrations and runtime-role configuration; normal startup does not apply grants.");
     }
 }
 

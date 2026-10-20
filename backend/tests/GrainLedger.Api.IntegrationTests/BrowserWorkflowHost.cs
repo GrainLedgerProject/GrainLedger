@@ -16,6 +16,11 @@ public sealed class BrowserWorkflowHost
     {
         var sessionFile = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_SESSION_FILE");
         if (string.IsNullOrWhiteSpace(sessionFile)) return;
+        var apiPort = int.Parse(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_PORT") ?? "5080");
+        var webPort = int.Parse(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_WEB_PORT") ?? "5173");
+        if (apiPort is < 1 or > 65535 || webPort is < 1 or > 65535) throw new ArgumentOutOfRangeException("Browser test ports");
+        var apiUrl = $"http://localhost:{apiPort}";
+        var webUrl = $"http://localhost:{webPort}";
         var factory = new ApiFactory { BrowserCookies = true };
         await factory.InitializeAsync();
         // Synthetic password account only in the disposable browser-test database.
@@ -41,12 +46,12 @@ public sealed class BrowserWorkflowHost
             accounts[label] = new
             {
                 userId = account.User.Id, organizationId = account.User.OrganizationId, role = account.User.Role,
-                loginUrl = $"http://localhost:5080/__browser/session/{label}",
+                loginUrl = $"{apiUrl}/__browser/session/{label}",
                 cookie = new { name = cookie.Name, value = cookie.Value, domain = "localhost", path = "/", httpOnly = true, secure = false, sameSite = "Lax" }
             };
         }
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
-        builder.WebHost.UseUrls("http://localhost:5080");
+        builder.WebHost.UseUrls(apiUrl);
         await using var bridge = builder.Build();
         using var upstream = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
@@ -72,7 +77,7 @@ public sealed class BrowserWorkflowHost
                         Expires = session.ExpiresAt
                     });
                 }
-                context.Response.Redirect("http://localhost:5173");
+                context.Response.Redirect(webUrl);
                 return;
             }
             using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), context.Request.Path + context.Request.QueryString);
@@ -95,7 +100,7 @@ public sealed class BrowserWorkflowHost
         await using (var file = new FileStream(sessionFile, options))
             await JsonSerializer.SerializeAsync(file, new
             {
-                api = "http://localhost:5080", ui = "http://localhost:5173", isolatedTestData = true,
+                api = apiUrl, ui = webUrl, isolatedTestData = true,
                 customerOrganizationId = scenario.OwnerId, foreignCustomerOrganizationId = scenario.ForeignOwnerId,
                 facilityId = scenario.FacilityId, foreignFacilityId = scenario.ForeignFacilityId,
                 locationId = scenario.LocationId, secondLocationId = scenario.SecondLocationId,

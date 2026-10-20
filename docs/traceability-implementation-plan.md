@@ -110,3 +110,31 @@ Kiểm chứng bổ sung đã chạy:
 - `git diff --check` và link tài liệu: PASS. Không chạy lại toàn bộ backend suite vì phần mở rộng chỉ thay frontend/docs; browser dùng API thật của host test cô lập.
 
 Không chạy trace, seed hoặc migration trên Supabase dùng chung trong đợt mở rộng UI này. Môi trường browser/test bridge tạm được dừng sau smoke. Phần mở rộng Flowchart được tách thành commit riêng trước khi bổ sung chi tiết nguồn ruộng/vụ; chưa push từ phiên làm việc này.
+
+
+### 6.6. Chi tiết nguồn ruộng/vụ
+
+Đã bổ sung **View field / season origin** trong Source composition cho từng nguồn của lô đang chọn, dùng được từ Table và Flowchart. Chuỗi trình bày nông dân → thửa/vụ, giống → phiếu/dòng thu mua → lô nguồn; giữ allocated kg/tỷ lệ riêng với source expectation. Không dựng thao tác đăng ký thửa thành công đoạn vật liệu.
+
+Capture bổ sung `currentReferenceLabels` theo tập (mã/tên nông dân, mã thửa, tên vụ), join theo ID từ immutable snapshot và cùng owner, giữ reference đã lưu trữ. ID/giống/khối lượng nguồn không bị thay bằng giá trị danh mục; UI ghi rõ nhãn hiện tại và báo unavailable khi thiếu. Quyền nguồn vẫn là Customer Manager đúng owner hoặc Administrator; Export Staff không nhận nguồn. Không thêm endpoint, dependency, schema, migration hoặc grant.
+
+Kiểm chứng đã chạy:
+
+- `npm test`: PASS 67/67; thêm trường hợp mở nguồn từ Table/Flowchart không fetch lại, giữ exact zero allocation riêng với kỳ vọng và fallback ID khi thiếu nhãn.
+- `npm run build`: PASS TypeScript/Vite.
+- `dotnet test backend/tests/GrainLedger.Api.IntegrationTests --filter FullyQualifiedName~LotTraceabilityTests`: PASS 9/9 trên Testcontainers; xác minh nhãn hiện tại khi đổi tên/lưu trữ vẫn giữ nguyên nguồn snapshot, quyền/scope, không lộ contact/geometry và legacy rõ ràng. Lần đầu fixture cập nhật nhiều lệnh dùng positional parameters bị PostgreSQL từ chối; đã sửa thành một statement CTE và chạy lại toàn bộ nhóm pass. Backend build kèm test pass; các warning Pkcs NU1902/NU1903 và CS9113 có sẵn vẫn xuất hiện.
+- Browser với API thật qua BrowserWorkflowHost/Testcontainers: Customer Manager backward từ lô khô 8 kg, mở nguồn thấy nông dân/mã thửa/vụ/giống/phiếu/source lot; source expectation 10 kg tách biệt allocation 8.000000 / 8.000000 kg. Chuyển Flowchart giữ chi tiết mở, 3 node vật liệu/công đoạn, vẫn một trace request.
+- Browser test host hỗ trợ `GRAINLEDGER_BROWSER_API_PORT` / `GRAINLEDGER_BROWSER_WEB_PORT` tùy chọn (mặc định 5080/5173), chỉ bind localhost. Smoke dùng 5081/5174 vì cổng mặc định đang được sử dụng; không dừng server của người dùng. Config Vite tạm không đưa vào repository.
+
+Không migrate/seed hoặc chạy data-changing smoke trên Supabase dùng chung. Phần ruộng/vụ và kiểm tra runtime grant được đưa vào commit tiếp theo; commit Flowchart trước đó là `7023cf4` (`feat(web): add traceability flowchart view`). Chưa push từ phiên này.
+
+Phụ thuộc để làm sau: lịch sử đăng ký/sửa hồ sơ và historical label snapshot chưa có hợp đồng đọc audit dành cho trace; không suy diễn thời điểm/người đăng ký. Lab, compliance, plan/reservation/loading/container vẫn theo phần phụ thuộc trước đó.
+
+
+### 6.7. Phát hiện runtime grant trace bị thiếu
+
+Sau báo lỗi `permission denied for function trace_lot`, kiểm tra read-only trên database cấu hình xác nhận hàm và migration trace tồn tại, runtime login đúng role cấu hình, nhưng không có EXECUTE trace; command EXECUTE vẫn có. Chưa xác định tác nhân/thời điểm thay ACL. Đây không phải thay đổi quyền nghiệp vụ Customer Manager.
+
+Đã bổ sung startup validation cho hàm/grant trace, không tự sửa database. Regression trong `CaptureCutoverMigrationTests` thu hồi riêng EXECUTE trace trên runtime test cô lập, xác minh startup từ chối với lỗi rõ ràng, cấu hình lại runtime grants rồi xác minh validation pass. Chạy nhóm này: PASS 1/1 (backend build kèm test pass; warning có sẵn vẫn còn). `git diff --check`: PASS.
+
+Sửa database dùng chung cần phê duyệt riêng: chỉ GRANT EXECUTE trên `ledger.trace_lot(uuid,uuid,text,text)` cho runtime role cấu hình, không migration/seed hoặc business data smoke. Sau phê duyệt rõ ràng của người dùng, đã áp dụng đúng một GRANT EXECUTE trên signature này cho runtime role cấu hình. Preflight xác nhận cùng host/port/database, migration login riêng và effective PostgreSQL runtime role khớp cấu hình (pooler login có thể kèm suffix). Postflight qua runtime connection: `has_function_privilege(..., EXECUTE)=true`, `ValidateRuntimeAsync` PASS. Không chạy migration, seed hoặc trace POST ghi audit trên shared database.

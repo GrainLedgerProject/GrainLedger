@@ -38,6 +38,8 @@ public sealed class LotTraceabilityTests(ApiFactory factory) : IClassFixture<Api
         var provenance = backward.GetProperty("sources")[0].GetProperty("provenance");
         Assert.Equal(s.PlotSeasonId, provenance.GetProperty("plotSeasonId").GetGuid());
         Assert.Equal(s.FarmerId, provenance.GetProperty("farmerId").GetGuid());
+        Assert.False(string.IsNullOrWhiteSpace(provenance.GetProperty("currentReferenceLabels").GetProperty("plotCode").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(provenance.GetProperty("currentReferenceLabels").GetProperty("seasonName").GetString()));
         Assert.DoesNotContain("+840", backward.GetRawText());
         Assert.DoesNotContain("coordinates", backward.GetRawText());
         Assert.True(backward.GetProperty("complete").GetBoolean());
@@ -132,12 +134,30 @@ public sealed class LotTraceabilityTests(ApiFactory factory) : IClassFixture<Api
     public async Task Immutable_source_snapshot_survives_archived_reference_and_legacy_is_explicit()
     {
         using var s = await CreateAsync(factory); var source = Lots(await s.ReceiptAsync("2"))[0];
+        var before = (await Trace(s.Customer, source, "backward")).GetProperty("sources")[0].GetProperty("provenance");
         await using var connection = new NpgsqlConnection(factory.OwnerConnectionString); await connection.OpenAsync();
+        // Simulate changed/archived reference labels in this disposable database only.
+        await using (var labels = new NpgsqlCommand("""
+            WITH farmer AS (UPDATE capture.farmers SET name='Current farmer label' WHERE id=$1 RETURNING id),
+            plot AS (UPDATE capture.plots SET code='TRACE-CURRENT-PLOT',is_deleted=true WHERE id=$2 RETURNING id)
+            UPDATE capture.crop_seasons SET name='Current season label',is_deleted=true WHERE id=$3;
+            """, connection))
+        {
+            labels.Parameters.AddWithValue(s.FarmerId);
+            labels.Parameters.AddWithValue(before.GetProperty("plotId").GetGuid());
+            labels.Parameters.AddWithValue(s.SeasonId);
+            await labels.ExecuteNonQueryAsync();
+        }
         await using (var archive = new NpgsqlCommand("UPDATE capture.plot_seasons SET is_deleted=true WHERE id=$1", connection))
         { archive.Parameters.AddWithValue(s.PlotSeasonId); await archive.ExecuteNonQueryAsync(); }
         var result = await Trace(s.Customer, source, "backward");
         Assert.Equal("RECORDED", result.GetProperty("sources")[0].GetProperty("status").GetString());
-        Assert.Equal(s.PlotSeasonId, result.GetProperty("sources")[0].GetProperty("provenance").GetProperty("plotSeasonId").GetGuid());
+        var after = result.GetProperty("sources")[0].GetProperty("provenance");
+        foreach (var field in new[] { "farmerId", "plotId", "seasonId", "plotSeasonId", "riceVariety", "expectedKg", "originalValue", "originalUnit" })
+            Assert.Equal(before.GetProperty(field).GetRawText(), after.GetProperty(field).GetRawText());
+        Assert.Equal("Current farmer label", after.GetProperty("currentReferenceLabels").GetProperty("farmerName").GetString());
+        Assert.Equal("TRACE-CURRENT-PLOT", after.GetProperty("currentReferenceLabels").GetProperty("plotCode").GetString());
+        Assert.Equal("Current season label", after.GetProperty("currentReferenceLabels").GetProperty("seasonName").GetString());
         // Deliberately isolated legacy fixture: no official Capture record is fabricated.
         var legacy = Guid.NewGuid();
         await using (var create = new NpgsqlCommand("""

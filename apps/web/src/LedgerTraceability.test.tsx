@@ -137,3 +137,46 @@ it('keeps the complete table available when a result is too large to draw', asyn
   expect(screen.getByRole('button', { name: 'Last traced lots page' })).toBeEnabled();
   expect(fetchMock.mock.calls.filter(([url]) => url === '/api/ledger/trace')).toHaveLength(1);
 });
+
+
+it('opens recorded field/season origin from either view without another request, keeping exact allocation separate from expectation', async () => {
+  const recorded: LotTrace = { ...trace, sources: [{ lotId: 'source', status: 'RECORDED', provenance: {
+    sourceRecordId: 'record', procurementId: 'procurement', procurementItemId: 'item', procurementCode: 'PUR-01',
+    farmerId: 'farmer-id', plotId: 'plot-id', seasonId: 'season-id', plotSeasonId: 'plot-season-id', riceVariety: 'ST25',
+    expectedKg: '10.000000', originalValue: '10', originalUnit: 'kg',
+    currentReferenceLabels: { farmerCode: 'F-01', farmerName: 'Farmer One', plotCode: 'FIELD-01', seasonName: 'Winter 2026' }
+  } }] };
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : response(recorded));
+  const browser = userEvent.setup(); render(<LedgerTraceability user={actor} />);
+  await browser.type(screen.getByLabelText('Ledger lot ID'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  const link = await screen.findByText('View field / season origin — PUR-01');
+  await browser.click(link);
+  expect(link.closest('details')).toHaveAttribute('open');
+  const origin = screen.getByRole('list', { name: 'Recorded origin for source' });
+  expect(origin).toHaveTextContent('Farmer One · F-01');
+  expect(origin).toHaveTextContent('FIELD-01'); expect(origin).toHaveTextContent('Winter 2026');
+  expect(origin).toHaveTextContent('plot-id'); expect(origin).toHaveTextContent('ST25');
+  expect(origin).toHaveTextContent('10.000000 kg');
+  expect(screen.getByText(/allocated 0.000000 \/ 0.000001 kg/)).toBeInTheDocument();
+  expect(screen.getByText(/current labels, including retained archived/)).toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: 'Flowchart' }));
+  expect(screen.getByText('View field / season origin — PUR-01')).toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/api/ledger/trace')).toHaveLength(1);
+});
+
+it('keeps recorded origin IDs available when reference labels are missing', async () => {
+  const recorded = { ...trace, sources: [{ lotId: 'source', status: 'RECORDED', provenance: {
+    sourceRecordId: 'record', procurementId: 'procurement', procurementItemId: 'item', procurementCode: 'PUR-02',
+    farmerId: 'farmer-id', plotId: 'plot-id', seasonId: 'season-id', plotSeasonId: 'plot-season-id', riceVariety: 'ST25',
+    expectedKg: '1.000000', originalValue: '1', originalUnit: 'kg', currentReferenceLabels: { farmerCode: null, farmerName: null, plotCode: null, seasonName: null }
+  } }] };
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : response(recorded));
+  const browser = userEvent.setup(); render(<LedgerTraceability user={actor} />);
+  await browser.type(screen.getByLabelText('Ledger lot ID'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  await browser.click(await screen.findByText('View field / season origin — PUR-02'));
+  const origin = screen.getByRole('list', { name: 'Recorded origin for source' });
+  expect(origin).toHaveTextContent('Name unavailable'); expect(origin).toHaveTextContent('plot-id');
+  expect(screen.queryByText(/Legacy source details unavailable/)).not.toBeInTheDocument();
+});
