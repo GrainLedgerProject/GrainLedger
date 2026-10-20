@@ -80,6 +80,7 @@ This section is the HTTP contract referenced by [external laboratory workflow pl
 No report/result/file PUT, PATCH or DELETE endpoint exists. Original report metadata, bytes, proposed sample IDs, sections, rows, and confirmed associations cannot be overwritten. Correct with a new linked report.
 
 Lists return `{ "items": [LabReportResponse], "page": 1, "pageSize": 20, "hasMore": false }`. IDs are paged before bulk metadata/result projection; metadata responses never materialize original bytes. `sampleId` filtering includes proposed or confirmed associations so unresolved evidence is still findable. `sourceLotId` filtering includes **confirmed associations only**. Unconfirmed or wrong identity never appears as confirmed source-lot evidence.
+The web sample chooser searches loaded samples only. Searching never clears the selected sample: the selected option remains visible even when it does not match the search text, and report submission preserves that sample ID.
 
 ### Receive an original report
 

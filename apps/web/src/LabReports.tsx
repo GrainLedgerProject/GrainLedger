@@ -39,7 +39,7 @@ function SampleChooser({ value, onChange, disabled, label }: { value: string; on
     void api<SampleOption>(`/api/samples/${encodeURIComponent(value)}`).then(item => { if (active) setItems(current => current.some(existing => existing.id === item.id) ? current : [item, ...current]); }).catch(cause => { if (active) setError(errorMessage(cause)); });
     return () => { active = false; };
   }, [value, items]);
-  const visible = items.filter(item => `${item.code} ${item.sealCode} ${item.materialDescription ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const visible = items.filter(item => item.id === value || `${item.code} ${item.sealCode} ${item.materialDescription ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   return <div className="sample-chooser"><label>{label}<input type="search" value={query} onChange={event => setQuery(event.target.value)} disabled={disabled} placeholder="Search loaded samples" /></label><select aria-label={`${label} selection`} value={value} onChange={event => onChange(event.target.value)} disabled={disabled}><option value="">Unresolved — select only when identity is established</option>{visible.map(item => <option value={item.id} key={item.id}>{item.code} · seal {item.sealCode}</option>)}</select>{loading && <p role="status">Loading samples…</p>}{error && <p className="field-validation" role="alert">{error}</p>}{hasMore && <button className="secondary" type="button" disabled={loading || disabled} onClick={() => setPage(current => current + 1)}>Load more samples</button>}<p className="field-help">{items.length} samples loaded. Search loaded samples or load more.</p></div>;
 }
 
