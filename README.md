@@ -6,7 +6,7 @@ GrainLedger is a rice supply-chain traceability platform. It connects identity a
 
 - **Identity:** Google and email/password sign-in, verified onboarding, session management, and administrator-managed organizations and permissions.
 - **Catalog:** Shared commodities and measurement units used by procurement and ledger workflows.
-- **Capture:** Farmer, plot, crop-season, and procurement records. Procurement records source expectations; it does not create usable stock.
+- **Capture:** Farmer, plot, crop-season, procurement, physical samples, laboratory dispatch, and immutable external reports/results. Procurement records source expectations; it does not create usable stock. Laboratory confirmation checks transcription and identity, not market compliance.
 - **Ledger:** Permission- and scope-controlled receiving, stock, processing, transfers, HOLDs, evidence, corrections, and history. Accepted arrivals create stock from measured mass.
 
 The React web app supports desktop and mobile-sized screens. The mobile workspace is a placeholder, not a shipped mobile app. GrainLedger does not include customer settlement. Planned or documented future workflows are not implied to be available.
@@ -71,6 +71,7 @@ npm run build
 - [Development accounts and demo Ledger data](docs/development-accounts.md)
 - [Farmer API](docs/farmer-api.md) · [Procurement API](docs/procurement-api.md)
 - [Unified lot-code guide](docs/unified-lot-code-guide.md)
+- [Samples and external laboratory API](docs/sample-api.md#laboratory-report-routes) · [Laboratory workflow and policy boundaries](docs/lab-flow-plan.md)
 - [PostgreSQL diagrams and data dictionary](docs/dbdiagram/README.md)
 
 For deployment, separate restricted runtime credentials from migration-owner credentials, use HTTPS behind a trusted reverse proxy, and protect persistent DataProtection keys. See [production deployment guidance](docs/setup-and-deployment.md#production-deployment).

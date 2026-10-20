@@ -573,6 +573,11 @@ namespace GrainLedger.Modules.Capture.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("company_id");
 
+                    b.Property<string>("MaterialDescription")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("material_description");
+
                     b.Property<string>("SealCode")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -625,6 +630,29 @@ namespace GrainLedger.Modules.Capture.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("handed_over_at");
 
+                    b.Property<string>("HandoverKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("handover_kind")
+                        .HasDefaultValue("HANDOVER");
+
+                    b.Property<string>("LaboratoryName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("laboratory_name");
+
+                    b.Property<string>("LaboratoryReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("laboratory_reference");
+
+                    b.Property<string>("LaboratorySampleReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("laboratory_sample_reference");
+
                     b.Property<Guid>("RecordedBy")
                         .HasColumnType("uuid")
                         .HasColumnName("recorded_by");
@@ -653,7 +681,11 @@ namespace GrainLedger.Modules.Capture.Migrations
                         .IsUnique()
                         .HasDatabaseName("ux_sample_handovers_company_id");
 
-                    b.ToTable("sample_handovers", "capture");
+                    b.ToTable("sample_handovers", "capture", t =>
+                    {
+                        t.HasCheckConstraint("ck_sample_handovers_kind", "handover_kind IN ('HANDOVER','LAB_DISPATCH','LAB_ACKNOWLEDGEMENT')");
+                        t.HasCheckConstraint("ck_sample_handovers_lab", "handover_kind = 'HANDOVER' OR (laboratory_name IS NOT NULL AND length(btrim(laboratory_name)) > 0)");
+                    });
                 });
 
             modelBuilder.Entity("GrainLedger.Modules.Capture.SourceLot", b =>
@@ -785,6 +817,123 @@ namespace GrainLedger.Modules.Capture.Migrations
                             t.HasCheckConstraint("ck_spray_items_product_or_substance", "product_name IS NOT NULL OR substance_id IS NOT NULL");
                         });
                 });
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabReport", b =>
+            {
+                b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid").HasColumnName("id");
+                b.Property<Guid>("CompanyId").HasColumnType("uuid").HasColumnName("company_id");
+                b.Property<string>("LaboratoryName").IsRequired().HasMaxLength(200).HasColumnType("character varying(200)").HasColumnName("laboratory_name");
+                b.Property<string>("ReportNumber").IsRequired().HasMaxLength(200).HasColumnType("character varying(200)").HasColumnName("report_number");
+                b.Property<DateOnly>("IssuedOn").HasColumnType("date").HasColumnName("issued_on");
+                b.Property<DateTimeOffset>("ReceivedAt").HasColumnType("timestamp with time zone").HasColumnName("received_at");
+                b.Property<string>("ReportKind").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)").HasColumnName("report_kind");
+                b.Property<Guid?>("RelatedReportId").HasColumnType("uuid").HasColumnName("related_report_id");
+                b.Property<string>("RelationshipReason").HasColumnType("text").HasColumnName("relationship_reason");
+                b.Property<string>("LaboratoryConclusion").HasColumnType("text").HasColumnName("laboratory_conclusion");
+                b.Property<string>("StatedStandard").HasColumnType("text").HasColumnName("stated_standard");
+                b.Property<string>("FileName").IsRequired().HasMaxLength(255).HasColumnType("character varying(255)").HasColumnName("file_name");
+                b.Property<string>("ContentType").IsRequired().HasMaxLength(200).HasColumnType("character varying(200)").HasColumnName("content_type");
+                b.Property<int>("FileSize").HasColumnType("integer").HasColumnName("file_size");
+                b.Property<string>("Sha256").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)").HasColumnName("sha256");
+                b.Property<byte[]>("Content").IsRequired().HasColumnType("bytea").HasColumnName("content");
+                b.Property<bool>("CompanyOnlyConfirmed").HasColumnType("boolean").HasColumnName("company_only_confirmed");
+                b.Property<Guid>("RecordedBy").HasColumnType("uuid").HasColumnName("recorded_by");
+                b.Property<DateTimeOffset>("CapturedAt").HasColumnType("timestamp with time zone").HasColumnName("captured_at");
+                b.Property<DateTimeOffset>("RecordedAt").HasColumnType("timestamp with time zone").HasColumnName("recorded_at");
+                b.Property<ulong>("CreationTransactionId").ValueGeneratedOnAdd().HasColumnType("xid8").HasColumnName("creation_transaction_id").HasDefaultValueSql("pg_current_xact_id()");
+                b.HasKey("Id");
+                b.HasIndex("CompanyId", "Id").IsUnique().HasDatabaseName("ux_lab_reports_company_id");
+                b.HasIndex("CompanyId", "RecordedAt", "Id");
+                b.HasIndex("RelatedReportId");
+                b.ToTable("lab_reports", "capture", t =>
+                {
+                    t.HasCheckConstraint("ck_lab_reports_kind", "report_kind IN ('PARTIAL','FINAL','SUPPLEMENTARY','AMENDMENT','RETEST')");
+                    t.HasCheckConstraint("ck_lab_reports_company_only", "company_only_confirmed");
+                    t.HasCheckConstraint("ck_lab_reports_file", "file_size > 0 AND file_size <= 10485760 AND octet_length(content) = file_size");
+                    t.HasCheckConstraint("ck_lab_reports_related", "(related_report_id IS NULL AND report_kind NOT IN ('SUPPLEMENTARY','AMENDMENT','RETEST')) OR (related_report_id IS NOT NULL AND related_report_id <> id AND relationship_reason IS NOT NULL AND length(btrim(relationship_reason)) > 0)");
+                });
+            });
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabResultSet", b =>
+            {
+                b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid").HasColumnName("id");
+                b.Property<Guid>("CompanyId").HasColumnType("uuid").HasColumnName("company_id");
+                b.Property<Guid>("ReportId").HasColumnType("uuid").HasColumnName("report_id");
+                b.Property<int>("Position").HasColumnType("integer").HasColumnName("position");
+                b.Property<Guid?>("SampleId").HasColumnType("uuid").HasColumnName("sample_id");
+                b.Property<string>("LaboratorySampleReference").HasColumnType("text").HasColumnName("laboratory_sample_reference");
+                b.Property<string>("StatedSampleCode").HasColumnType("text").HasColumnName("stated_sample_code");
+                b.Property<string>("StatedSealCode").HasColumnType("text").HasColumnName("stated_seal_code");
+                b.Property<string>("SectionReference").HasColumnType("text").HasColumnName("section_reference");
+                b.HasKey("Id");
+                b.HasIndex("CompanyId", "Id").IsUnique().HasDatabaseName("ux_lab_result_sets_company_id");
+                b.HasIndex("ReportId", "Position").IsUnique();
+                b.HasIndex("SampleId");
+                b.ToTable("lab_result_sets", "capture");
+            });
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabResult", b =>
+            {
+                b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid").HasColumnName("id");
+                b.Property<Guid>("CompanyId").HasColumnType("uuid").HasColumnName("company_id");
+                b.Property<Guid>("ResultSetId").HasColumnType("uuid").HasColumnName("result_set_id");
+                b.Property<int>("Position").HasColumnType("integer").HasColumnName("position");
+                b.Property<string>("TestLabel").IsRequired().HasColumnType("text").HasColumnName("test_label");
+                b.Property<Guid?>("SubstanceId").HasColumnType("uuid").HasColumnName("substance_id");
+                b.Property<string>("OriginalResultText").IsRequired().HasColumnType("text").HasColumnName("original_result_text");
+                b.Property<string>("ResultKind").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)").HasColumnName("result_kind");
+                b.Property<string>("NumericValue").HasMaxLength(25).HasColumnType("character varying(25)").HasColumnName("numeric_value");
+                b.Property<string>("Unit").HasColumnType("text").HasColumnName("unit");
+                b.Property<string>("Lod").HasMaxLength(25).HasColumnType("character varying(25)").HasColumnName("lod");
+                b.Property<string>("Loq").HasMaxLength(25).HasColumnType("character varying(25)").HasColumnName("loq");
+                b.Property<string>("Method").HasColumnType("text").HasColumnName("method");
+                b.Property<string>("Uncertainty").HasColumnType("text").HasColumnName("uncertainty");
+                b.Property<string>("Reference").HasColumnType("text").HasColumnName("reference");
+                b.HasKey("Id");
+                b.HasIndex("ResultSetId", "Position").IsUnique();
+                b.HasIndex("SubstanceId");
+                b.ToTable("lab_results", "capture", t =>
+                {
+                    t.HasCheckConstraint("ck_lab_results_kind", "result_kind IN ('NUMERIC','BELOW_LIMIT','NOT_DETECTED','QUALITATIVE','OTHER')");
+                    t.HasCheckConstraint("ck_lab_results_numeric_required", "result_kind NOT IN ('NUMERIC','BELOW_LIMIT') OR numeric_value IS NOT NULL");
+                    t.HasCheckConstraint("ck_lab_results_numeric_value", "numeric_value IS NULL OR numeric_value ~ '^[0-9]{1,12}(\\.[0-9]{1,12})?$'");
+                    t.HasCheckConstraint("ck_lab_results_lod", "lod IS NULL OR lod ~ '^[0-9]{1,12}(\\.[0-9]{1,12})?$'");
+                    t.HasCheckConstraint("ck_lab_results_loq", "loq IS NULL OR loq ~ '^[0-9]{1,12}(\\.[0-9]{1,12})?$'");
+                });
+            });
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabReportConfirmation", b =>
+            {
+                b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid").HasColumnName("id");
+                b.Property<Guid>("CompanyId").HasColumnType("uuid").HasColumnName("company_id");
+                b.Property<Guid>("ReportId").HasColumnType("uuid").HasColumnName("report_id");
+                b.Property<Guid>("ConfirmedBy").HasColumnType("uuid").HasColumnName("confirmed_by");
+                b.Property<DateTimeOffset>("ConfirmedAt").HasColumnType("timestamp with time zone").HasColumnName("confirmed_at");
+                b.Property<bool>("IdentityChecked").HasColumnType("boolean").HasColumnName("identity_checked");
+                b.Property<bool>("TranscriptionChecked").HasColumnType("boolean").HasColumnName("transcription_checked");
+                b.Property<ulong>("CreationTransactionId").ValueGeneratedOnAdd().HasColumnType("xid8").HasColumnName("creation_transaction_id").HasDefaultValueSql("pg_current_xact_id()");
+                b.HasKey("Id");
+                b.HasIndex("ReportId").IsUnique();
+                b.HasIndex("CompanyId", "Id").IsUnique().HasDatabaseName("ux_lab_confirmations_company_id");
+                b.ToTable("lab_report_confirmations", "capture", t => t.HasCheckConstraint("ck_lab_confirmation_checked", "identity_checked AND transcription_checked"));
+            });
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabConfirmedAssociation", b =>
+            {
+                b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid").HasColumnName("id");
+                b.Property<Guid>("CompanyId").HasColumnType("uuid").HasColumnName("company_id");
+                b.Property<Guid>("ConfirmationId").HasColumnType("uuid").HasColumnName("confirmation_id");
+                b.Property<Guid>("ResultSetId").HasColumnType("uuid").HasColumnName("result_set_id");
+                b.Property<Guid>("SampleId").HasColumnType("uuid").HasColumnName("sample_id");
+                b.Property<string>("IdentityBasis").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)").HasColumnName("identity_basis");
+                b.Property<string>("EvidenceRef").HasColumnType("text").HasColumnName("evidence_ref");
+                b.HasKey("Id");
+                b.HasIndex("ConfirmationId");
+                b.HasIndex("ResultSetId").IsUnique();
+                b.HasIndex("SampleId");
+                b.ToTable("lab_confirmed_associations", "capture", t => t.HasCheckConstraint("ck_lab_association_basis", "identity_basis IN ('SAMPLE_CODE','SEAL_CODE','LAB_REFERENCE')"));
+            });
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabResultSet", b =>
+                b.HasOne("GrainLedger.Modules.Capture.LabReport", null).WithMany().HasForeignKey("ReportId").OnDelete(DeleteBehavior.Restrict).IsRequired());
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabResult", b =>
+                b.HasOne("GrainLedger.Modules.Capture.LabResultSet", null).WithMany().HasForeignKey("ResultSetId").OnDelete(DeleteBehavior.Restrict).IsRequired());
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabConfirmedAssociation", b =>
+                b.HasOne("GrainLedger.Modules.Capture.LabReportConfirmation", null).WithMany().HasForeignKey("ConfirmationId").OnDelete(DeleteBehavior.Restrict).IsRequired());
 #pragma warning restore 612, 618
         }
     }

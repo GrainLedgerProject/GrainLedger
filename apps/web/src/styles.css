@@ -197,6 +197,7 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
 .capture-item-row label { margin: 10px 0; }
 .capture-detail dl { display: grid; grid-template-columns: 150px 1fr; gap: 8px 16px; }
 .capture-detail dt, .capture-detail dd { margin: 0; }
+.capture-detail dd { min-width: 0; overflow-wrap: anywhere; }
 .capture-form-page { max-width: 900px; margin-top: 20px; }
 .capture-form-page h2 { margin-top: 25px; padding-bottom: 10px; border-bottom: 1px solid #edf0e8; }
 .capture-form-page h2:first-child { margin-top: 0; }
@@ -370,3 +371,12 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
 .receiving-detail table caption { padding: 12px; text-align: left; font-weight: 650; color: #526557; }
 .receiving-detail table { min-width: 840px; table-layout: auto; }
 .receiving-detail th, .receiving-detail td { overflow-wrap: normal; word-break: normal; }
+.lab-dialog { width: min(1100px, 96vw); max-height: 92vh; overflow-y: auto; }
+.lab-result-set { min-width: 0; margin: 24px 0; padding: 16px; border: 1px solid #dfe6da; border-radius: 10px; }
+.lab-result-set legend { padding: 0 8px; font-weight: 650; }
+.lab-result-set .table-scroll { margin: 12px 0; }
+.lab-result-set table { min-width: 1000px; }
+.lab-result-set input, .lab-result-set select { min-width: 110px; }
+.lab-import { margin-top: 20px; padding: 18px; border: 1px solid #dfe6da; border-radius: 10px; background: #f8faf6; }
+.lab-import textarea { width: 100%; min-height: 130px; padding: 12px; border: 1px solid #dce2d7; border-radius: 7px; font: 12px/1.5 ui-monospace, monospace; }
+@media (max-width: 620px) { .lab-dialog { width: 100%; max-height: 96vh; padding: 18px; } .lab-result-set { padding: 10px; } .lab-dialog .form-columns { grid-template-columns: 1fr; } }

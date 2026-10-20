@@ -40,6 +40,7 @@ public static class CaptureModule
     public static IEndpointRouteBuilder MapCaptureModule(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapSampleEndpoints();
+        endpoints.MapLabReportEndpoints();
         var group = endpoints.MapGroup("/api/farmers").RequireAuthorization()
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>();
         group.MapPost("", RegisterAsync).RequireAuthorization("farms.write");

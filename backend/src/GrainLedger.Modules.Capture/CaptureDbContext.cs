@@ -60,6 +60,11 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
     public DbSet<SourceLot> SourceLots => Set<SourceLot>();
     public DbSet<Sample> Samples => Set<Sample>();
     public DbSet<SampleHandover> SampleHandovers => Set<SampleHandover>();
+    public DbSet<LabReport> LabReports => Set<LabReport>();
+    public DbSet<LabResultSet> LabResultSets => Set<LabResultSet>();
+    public DbSet<LabResult> LabResults => Set<LabResult>();
+    public DbSet<LabReportConfirmation> LabReportConfirmations => Set<LabReportConfirmation>();
+    public DbSet<LabConfirmedAssociation> LabConfirmedAssociations => Set<LabConfirmedAssociation>();
     public DbSet<CaptureOperation> OfflineOperations => Set<CaptureOperation>();
     public DbSet<CaptureBusinessEvent> BusinessEvents => Set<CaptureBusinessEvent>();
 
@@ -68,6 +73,7 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
         // InitialCapture adds foreign keys to identity tables in its migration.
         // Those tables belong to the Identity DbContext and are not remapped here.
         modelBuilder.HasDefaultSchema("capture");
+        LabReportMappings.Configure(modelBuilder);
         modelBuilder.Entity<CaptureCodeCounter>(b =>
         {
             b.ToTable("code_counters");
@@ -244,6 +250,7 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.SealCode).HasColumnName("seal_code").HasMaxLength(100).IsRequired();
             b.Property(x => x.CollectedBy).HasColumnName("collected_by");
             b.Property(x => x.CollectedAt).HasColumnName("collected_at");
+            b.Property(x => x.MaterialDescription).HasColumnName("material_description").HasMaxLength(200);
             b.HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasDatabaseName("ux_samples_company_code");
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_samples_company_id");
             b.HasIndex(x => x.SourceLotId);
@@ -251,7 +258,11 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
         });
         modelBuilder.Entity<SampleHandover>(b =>
         {
-            b.ToTable("sample_handovers");
+            b.ToTable("sample_handovers", t =>
+            {
+                t.HasCheckConstraint("ck_sample_handovers_kind", "handover_kind IN ('HANDOVER','LAB_DISPATCH','LAB_ACKNOWLEDGEMENT')");
+                t.HasCheckConstraint("ck_sample_handovers_lab", "handover_kind = 'HANDOVER' OR (laboratory_name IS NOT NULL AND length(btrim(laboratory_name)) > 0)");
+            });
             b.HasKey(x => x.Id);
             b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             b.Property(x => x.CompanyId).HasColumnName("company_id");
@@ -262,6 +273,10 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.HandedOverAt).HasColumnName("handed_over_at");
             b.Property(x => x.SealCondition).HasColumnName("seal_condition").IsRequired();
             b.Property(x => x.EvidenceRef).HasColumnName("evidence_ref");
+            b.Property(x => x.HandoverKind).HasColumnName("handover_kind").HasMaxLength(32).HasDefaultValue("HANDOVER");
+            b.Property(x => x.LaboratoryName).HasColumnName("laboratory_name").HasMaxLength(200);
+            b.Property(x => x.LaboratoryReference).HasColumnName("laboratory_reference").HasMaxLength(200);
+            b.Property(x => x.LaboratorySampleReference).HasColumnName("laboratory_sample_reference").HasMaxLength(200);
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_sample_handovers_company_id");
             b.HasIndex(x => x.SampleId);
             b.HasIndex(x => x.RecordedBy);

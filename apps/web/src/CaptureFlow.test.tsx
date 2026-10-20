@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -173,12 +173,14 @@ describe('Capture journey', () => {
     expect(screen.getByText('0 kg')).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /Take sample/ }));
     expect(screen.getByText(/sample code is assigned after saving/i)).toBeInTheDocument();
+    await browser.type(screen.getByLabelText('Material sampled'), 'Paddy grain');
     await browser.type(screen.getByLabelText('Seal code'), 'SEAL-001');
     await browser.click(screen.getByRole('button', { name: 'Save sample' }));
     expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
     expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
     const samplePost = fetchMock.mock.calls.find(([url]) => url === '/api/samples')!;
     expect(JSON.parse(String(samplePost[1]?.body)).payload).not.toHaveProperty('code');
+    expect(JSON.parse(String(samplePost[1]?.body)).payload.materialDescription).toBe('Paddy grain');
     expect(JSON.parse(String(samplePost[1]?.body)).payloadSchemaVersion).toBe(2);
     finishSample?.(json(sample, 201));
     expect(await screen.findByRole('heading', { name: 'SMP-261017-0008' })).toBeInTheDocument();
@@ -190,7 +192,8 @@ describe('Capture journey', () => {
     expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
     expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
     finishHandover?.(json(handovers[0], 201));
-    await waitFor(() => expect(screen.getByText('Laboratory')).toBeInTheDocument());
+    const fromPartyCell = await screen.findByRole('cell', { name: 'Collection agent' });
+    expect(within(fromPartyCell.closest('tr')!).getByRole('cell', { name: 'Laboratory' })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/samples')).toBe(true);
   });
