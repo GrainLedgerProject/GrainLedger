@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage } from './api';
 import { type Page, type Procurement, type ProcurementSummary, type SourceLot } from './procurementTypes';
 import { SourceSamples } from './Samples';
+import { LabReports } from './LabReports';
 
 export type IntakeListState = { page: number; receiptQuery: string; farmerId: string; from: string; to: string; sortBy: string; sortDirection: string };
 const defaultIntakeState: IntakeListState = { page: 1, receiptQuery: '', farmerId: '', from: '', to: '', sortBy: 'receivedAt', sortDirection: 'desc' };
@@ -82,7 +83,7 @@ export function ProcurementDetail({ id, onBack, onOpenSourceLot, onOpenFarmer, o
   </>;
 }
 
-export function SourceLotDetail({ id, canWriteSamples, userId, companyId, onBack, onOpenSample, onOpenFarmer, onOpenPlot, onOpenPlotSeason }: { id: string; canWriteSamples: boolean; userId: string; companyId: string; onBack: (procurementId: string | null) => void; onOpenSample: (id: string) => void; onOpenFarmer?: (id: string) => void; onOpenPlot?: (id: string) => void; onOpenPlotSeason?: (id: string) => void }) {
+export function SourceLotDetail({ id, canWriteSamples, canReadLab = false, userId, companyId, onBack, onOpenSample, onOpenFarmer, onOpenPlot, onOpenPlotSeason }: { id: string; canWriteSamples: boolean; canReadLab?: boolean; userId: string; companyId: string; onBack: (procurementId: string | null) => void; onOpenSample: (id: string) => void; onOpenFarmer?: (id: string) => void; onOpenPlot?: (id: string) => void; onOpenPlotSeason?: (id: string) => void }) {
   const [lot, setLot] = useState<SourceLot | null>(null); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
   useEffect(() => {
     let active = true; const controller = new AbortController(); setLot(null); setError('');
@@ -93,6 +94,6 @@ export function SourceLotDetail({ id, canWriteSamples, userId, companyId, onBack
   return <><div className="page-heading"><span className="eyebrow">SOURCE LOT</span><h1>Paddy source lot</h1><p className="muted">Origin, expected quantity and current Ledger stock are separate records.</p></div><button className="text-button" onClick={() => onBack(lot?.procurementId ?? null)}>← Back to receipt</button>
     {!lot && !error && <p role="status">Loading source lot…</p>}{error && <div className="notice error" role="alert">{error} <button className="text-button" onClick={() => setRetry(n => n + 1)}>Try again</button></div>}
     {lot && <><section className="panel capture-detail"><span className="eyebrow">{arrivalStatusLabel(lot.receivingStatus)}</span><h2>{lot.lotCode}</h2><div className="capture-stat-grid"><div><span>Expected net mass</span><strong>{lot.initialNetMassKg} kg</strong></div><div><span>Usable stock</span><strong>{lot.usableStockKg} kg</strong></div><div><span>Rice variety</span><strong>{lot.riceVariety}</strong></div></div><p>Receipt: <button className="text-button" onClick={() => onBack(lot.procurementId)}>{lot.procurementCode} ↗</button></p><p>Farmer: {onOpenFarmer ? <button className="text-button" onClick={() => onOpenFarmer(lot.farmerId)}>{lot.farmerName ?? lot.farmerCode ?? lot.farmerId} ↗</button> : lot.farmerName ?? lot.farmerCode ?? lot.farmerId}</p><p>Plot: {onOpenPlot ? <button className="text-button" onClick={() => onOpenPlot(lot.plotId)}>{lot.plotCode ?? lot.plotId} ↗</button> : lot.plotCode ?? lot.plotId}</p><p>Season: {onOpenPlotSeason ? <button className="text-button" onClick={() => onOpenPlotSeason(lot.plotSeasonId)}>{lot.seasonName ?? lot.plotSeasonId} ↗</button> : lot.seasonName ?? lot.plotSeasonId}</p><p className="muted small">Stock checked at {new Date(lot.stockAsOf).toLocaleString()}. Moisture: {lot.moisturePercent}%.</p>{lot.currentStock.length === 0 ? <p className="notice pending">No stock has been accepted for this source lot.</p> : <div className="table-scroll"><table><thead><tr><th>Location ID</th><th>On-hand</th><th>Available</th></tr></thead><tbody>{lot.currentStock.map(position => <tr key={position.locationId}><td>{position.locationId}</td><td>{position.onHandKg} kg</td><td>{position.availableKg} kg</td></tr>)}</tbody></table></div>}</section>
-      <SourceSamples sourceLotId={lot.id} canCreate={canWriteSamples} userId={userId} companyId={companyId} onOpen={onOpenSample} /></>}
+      <SourceSamples sourceLotId={lot.id} canCreate={canWriteSamples} userId={userId} companyId={companyId} onOpen={onOpenSample} />{canReadLab && <LabReports canWrite={false} sourceLotId={lot.id} onOpenSample={onOpenSample} />}</>}
   </>;
 }

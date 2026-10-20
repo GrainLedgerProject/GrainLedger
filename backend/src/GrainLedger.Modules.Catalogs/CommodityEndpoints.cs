@@ -13,7 +13,7 @@ namespace GrainLedger.Modules.Catalogs;
 
 public sealed record CreateCommodityRequest(string? Code, string? Name);
 public sealed record UpdateCommodityRequest(string? Name);
-public sealed record CommodityResponse(Guid Id, string Code, string Name, Guid? CreatedBy, uint Version, bool CanEdit, bool CanDelete);
+public sealed record CommodityResponse(Guid Id, string Code, string Name, Guid? CreatedBy, uint Version, bool CanEdit, bool CanDelete, bool IsArchived);
 public sealed record CatalogPage<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount, bool HasMore);
 
 public static class CommodityEndpoints
@@ -263,7 +263,7 @@ public static class CommodityEndpoints
     private static string Etag(uint version) => $"\"{version}\"";
     private static void SetEtag(HttpContext http, uint version) => http.Response.Headers.ETag = Etag(version);
     private static CommodityResponse ToResponse(Commodity x, Guid actorId, bool canConfigure) =>
-        new(x.Id, x.Code, x.Name, x.CreatedBy, x.Version, canConfigure && x.CreatedBy == actorId, canConfigure && x.CreatedBy == actorId);
+        new(x.Id, x.Code, x.Name, x.CreatedBy, x.Version, canConfigure && x.CreatedBy == actorId, canConfigure && x.CreatedBy == actorId, x.IsArchived);
     private static IResult Problem(int status, string code, string title) => Results.Problem(statusCode: status, title: title,
         extensions: new Dictionary<string, object?> { ["code"] = code });
 }

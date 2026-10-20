@@ -9,6 +9,7 @@ public sealed class Sample
     public required string SealCode { get; set; }
     public Guid CollectedBy { get; set; }
     public DateTimeOffset CollectedAt { get; set; }
+    public string? MaterialDescription { get; set; }
 }
 
 public sealed class SampleHandover
@@ -22,4 +23,8 @@ public sealed class SampleHandover
     public DateTimeOffset HandedOverAt { get; set; }
     public required string SealCondition { get; set; }
     public string? EvidenceRef { get; set; }
+    public string HandoverKind { get; set; } = "HANDOVER";
+    public string? LaboratoryName { get; set; }
+    public string? LaboratoryReference { get; set; }
+    public string? LaboratorySampleReference { get; set; }
 }

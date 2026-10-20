@@ -793,6 +793,31 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
     }
 
     [Fact]
+    public async Task Initial_version_with_statutory_past_effective_start_publishes_and_resolves_from_publication_time()
+    {
+        var (admin, marketId, commodityId) = await CreateAdminAndCatalogsAsync();
+        using (admin)
+        {
+            var statutoryStart = new DateTimeOffset(2017, 7, 1, 0, 0, 0, TimeSpan.Zero);
+            var (draft, etag) = await CreateDraftAsync(admin, marketId, commodityId, statutoryStart);
+            await SeedValidLimitAsync(draft.Id);
+
+            var published = await PublishAsync(admin, draft.Id, etag);
+            Assert.Equal(HttpStatusCode.OK, published.StatusCode);
+            var result = (await published.Content.ReadFromJsonAsync<MrlVersionResponse>())!;
+            Assert.Equal("PUBLISHED", result.Status);
+            Assert.Equal(statutoryStart, result.EffectiveFrom);
+            Assert.NotNull(result.PublishedAt);
+
+            var resolvedNow = await admin.GetFromJsonAsync<MrlVersionResponse>(
+                ResolveUrl(marketId, commodityId, result.PublishedAt!.Value));
+            Assert.Equal(draft.Id, resolvedNow!.Id);
+            Assert.Equal(HttpStatusCode.NotFound,
+                (await admin.GetAsync(ResolveUrl(marketId, commodityId, result.PublishedAt.Value.AddTicks(-10)))).StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Concurrent_publications_for_same_market_do_not_overlap()
     {
         var (admin, marketId, commodityId) = await CreateAdminAndCatalogsAsync();
