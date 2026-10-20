@@ -135,5 +135,55 @@ class ImportReferenceTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             importer.Api("http://127.0.0.1:5080", token)
         self.assertNotIn(token, str(caught.exception))
+    def test_other_destinations_group_active_limits_and_share_substances(self):
+        eu_names, eu_active, eu_excluded, eu_groups = importer.prepare(self.substances, self.mrl, rice_code="RICE", source_market="EU")
+        self.assertEqual(len(eu_names), 14)
+        self.assertEqual((len(eu_active), len(eu_excluded)), (14, 0))
+        self.assertEqual([(g["mapping"], len(g["rows"])) for g in eu_groups], [("rice", 14)])
+
+        jp_names, jp_active, jp_excluded, jp_groups = importer.prepare(self.substances, self.mrl, husked_code="HUSKED", source_market="JAPAN")
+        self.assertEqual(jp_names, eu_names)
+        self.assertEqual((len(jp_active), len(jp_excluded)), (11, 3))
+        self.assertEqual([(g["mapping"], len(g["rows"])) for g in jp_groups], [("husked-rice", 11)])
+
+        kr_names, kr_active, kr_excluded, kr_groups = importer.prepare(self.substances, self.mrl, rice_code="RICE", source_market="KOREA")
+        self.assertEqual((len(kr_active), len(kr_excluded)), (12, 2))
+        self.assertEqual([(g["mapping"], len(g["rows"])) for g in kr_groups], [("rice", 12)])
+
+        _, us_active, us_excluded, us_groups = importer.prepare(
+            self.substances, self.mrl, rice_code="RICE", husked_code="HUSKED", polished_code="POLISHED", bran_code="BRAN", source_market="USA"
+        )
+        self.assertEqual((len(us_active), len(us_excluded)), (8, 8))
+        self.assertEqual([(g["mapping"], len(g["rows"])) for g in us_groups], [("rice", 5), ("husked-rice", 1), ("polished-rice", 1), ("bran", 1)])
+
+        _, cx_active, cx_excluded, cx_groups = importer.prepare(
+            self.substances, self.mrl, husked_code="HUSKED", polished_code="POLISHED", bran_code="BRAN", source_market="CODEX"
+        )
+        self.assertEqual((len(cx_active), len(cx_excluded)), (10, 14))
+        self.assertEqual([(g["mapping"], len(g["rows"])) for g in cx_groups], [("husked-rice", 5), ("polished-rice", 4), ("bran", 1)])
+
+    def test_non_vietnam_preflight_requires_effective_date_and_reuses_draft(self):
+        names, _, _, groups = importer.prepare(self.substances, self.mrl, rice_code="RICE", source_market="EU")
+        with self.assertRaisesRegex(ValueError, "--effective-from"):
+            importer.preflight(None, names, groups, "EU", source_market="EU")
+        substance_ids = {code: f"substance-{code}" for code in names}
+
+        class FakeEuApi:
+            def listing(self, path):
+                if path == "/api/active-substances":
+                    return [{"id": substance_ids[code], "code": code, "name": name} for code, name in names.items()]
+                if path == "/api/commodities":
+                    return [{"id": "commodity-rice", "code": "RICE", "isArchived": False}]
+                if path == "/api/markets":
+                    return [{"id": "market-eu", "code": "EU", "name": "European Union"}]
+                if path == "/api/measurement-units":
+                    return [{"code": "MG/KG", "quantityKind": "RESIDUE_CONCENTRATION"}]
+                if path == "/api/mrl-versions":
+                    return [{"id": "draft-eu-rice", "marketId": "market-eu", "commodityId": "commodity-rice", "effectiveFrom": "2026-09-13T00:00:00Z", "effectiveTo": None, "sourceRef": importer.source_ref("EU", "2026-09-13"), "status": "DRAFT"}]
+                return [{"substanceId": substance_ids[row["substance_id"]], "limitValue": float(Decimal(row["mrl_value_mg_kg"])), "unit": "mg/kg"} for row in groups[0]["rows"]]
+
+        _, checked = importer.preflight(FakeEuApi(), names, groups, "EU", source_market="EU", effective_date="2026-09-13")
+        self.assertEqual(checked[0]["existing"]["id"], "draft-eu-rice")
+
 if __name__ == "__main__":
     unittest.main()

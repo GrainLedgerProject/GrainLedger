@@ -6,34 +6,37 @@ shows a preview and sends one selected, normalized group to
 `POST /api/mrl-versions/import`. The endpoint creates one DRAFT MRL version and
 all of its numeric limits in one database transaction. It never publishes.
 
-## Bundled Vietnam reference import
+## Bundled reference import (`GL-A-3` & `GL-A-4`)
 
-`tools/import_catalog_reference.py` imports only the bundled snapshots in
+`tools/import_catalog_reference.py` imports the bundled snapshots in
 `tools/catalog-reference-data/`. They are attachments to YouTrack GL-A-4
 (substances) and GL-A-3 (MRL table), both version 1.1, revised 2026-09-13:
 
 - [GL-A-4](https://huubng.youtrack.cloud/articles/GL-A-4):
-  `pesticide_substances-v1.1.csv`, 14 substances.
+  `pesticide_substances-v1.1.csv`, 14 canonical substances (`TCZ001`–`TBZ014`) with CAS numbers.
 - [GL-A-3](https://huubng.youtrack.cloud/articles/GL-A-3):
-  `mrl_table-v1.1.csv`, containing 96 rows; Vietnam subset has 5 ACTIVE
-  numeric limits and 9 NO_MRL rows.
+  `mrl_table-v1.1.csv`, containing 96 rows across 6 markets (`VIETNAM`, `EU`, `USA`, `JAPAN`, `KOREA`, `CODEX`).
+
+All 6 markets in `mrl_table-v1.1.csv` already use the same 14 `substance_id` codes (`TCZ001`–`TBZ014`) as the join key, while jurisdiction-specific regulatory names and residue definitions (for example Japan/Korea `Cyhalothrin` for `LCH010`, ISO `Chlorpyrifos` for `CPF006`, or group residue definitions for `CBD005`/`PCZ013`) are kept in `notes` and `regulation_reference`.
 
 The script reads snapshot paths relative to itself. Its generated `SourceRef`
-contains both article links/version, `Thông tư 50/2016/TT-BYT`,
-`VN_TT50_2016`, effective date `2017-07-01`, and SHA-256 hashes of raw CSV
-bytes. Snapshot hashes: substances
+contains both article links/version, market legal reference/version,
+effective date, and SHA-256 hashes of raw CSV bytes. Snapshot hashes: substances
 `8c1a18aa7bec6e751a04b0b38264d61947c45ff45d51bf1ed8cedce79785ce1a`;
 MRL table `d43364841232fae50b67697709d0b794f33a87fdb95240f839fbfa6f22735e08`.
-Snapshots stay unchanged and retain all markets; apply selects only Vietnam.
 This is historical source provenance, not current legal verification or a
 compliance conclusion.
 
-Preview needs only Python standard library and is offline:
+Preview needs only Python standard library and is offline (defaults to `--source-market VIETNAM`):
 
 ```sh
 python3 tools/import_catalog_reference.py
+python3 tools/import_catalog_reference.py --source-market EU
+python3 tools/import_catalog_reference.py --source-market JAPAN
+python3 tools/import_catalog_reference.py --source-market KOREA
+python3 tools/import_catalog_reference.py --source-market USA
+python3 tools/import_catalog_reference.py --source-market CODEX
 ```
-
 Run local importer regression checks with:
 
 ```sh
@@ -54,6 +57,8 @@ python3 tools/import_catalog_reference.py --apply \
   --rice-commodity-code RICE \
   --husked-rice-commodity-code HUSKED-RICE
 ```
+
+For other destinations (`EU`, `JAPAN`, `KOREA`, `USA`, `CODEX`), pass `--source-market`, `--effective-from YYYY-MM-DD`, and the commodity flags matching that market's `ACTIVE` groups (`--rice-commodity-code`, `--husked-rice-commodity-code`, `--polished-rice-commodity-code`, `--bran-commodity-code`).
 
 Use actual configured commodity codes. Importer resolves exact market,
 commodity, unit and substance records; it does not create or remap commodities.
@@ -84,10 +89,9 @@ requests. The endpoint transaction applies to each individual MRL draft only.
 
 The API accepts only substance code, not CAS number. Numeric limits use
 `mg/kg`; API stores decimal numeric values. Publication is a separate action.
-The API rejects historical effective start earlier than publication time, so
-these drafts dated 2017-07-01 remain unpublished unless publication policy
-changes through an authorized decision. Do not alter legal dates to bypass
-that gate.
+Initial baseline versions for a `(market, commodity)` pair may be published
+with their statutory historical `EffectiveFrom`; successor versions replacing
+an already-published version must have `EffectiveFrom >= PublishedAt`.
 
 ## Browser CSV / Excel import
 
@@ -110,9 +114,9 @@ Administrator maps file group to existing market and commodity, verifies
 regulatory source, and selects effective interval. File dates have no
 timezone, so **Effective from** must always be entered and verified manually.
 **Effective to** may be blank, stored as `null` (open-ended). Historical
-effective start may be saved as DRAFT, but publication rule rejects it when
-start precedes publication time. Do not change historical legal date without
-policy decision.
+effective start may be saved and published as the initial baseline version for
+a market and commodity; successor versions replacing an already-published
+version cannot be backdated before publication time.
 
 Current MRL schema does not represent per-limit LOD flag, NO_MRL, default
 applicability, time-limited status, notes, regulation URL, CAS, or processing
