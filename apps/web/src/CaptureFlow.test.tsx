@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -184,11 +184,23 @@ describe('Capture journey', () => {
     expect(JSON.parse(String(samplePost[1]?.body)).payloadSchemaVersion).toBe(2);
     finishSample?.(json(sample, 201));
     expect(await screen.findByRole('heading', { name: 'SMP-261017-0008' })).toBeInTheDocument();
-    await browser.click(screen.getByRole('button', { name: /Record handover/ }));
+    expect(screen.queryByRole('button', { name: '+ Receive report' })).not.toBeInTheDocument();
+    await browser.click(screen.getByRole('button', { name: 'Send to laboratory' }));
+    expect(screen.getByLabelText('Handover type')).toHaveValue('LAB_DISPATCH');
+    await browser.click(screen.getByRole('button', { name: 'Cancel' }));
+    await browser.click(screen.getByRole('button', { name: 'Record laboratory receipt' }));
+    expect(screen.getByLabelText('Handover type')).toHaveValue('LAB_ACKNOWLEDGEMENT');
+    await browser.click(screen.getByRole('button', { name: 'Cancel' }));
+    await browser.click(screen.getByRole('button', { name: '+ Record handover' }));
+    expect(screen.getByLabelText('Handover type')).toHaveValue('HANDOVER');
+    await browser.click(screen.getByRole('button', { name: 'Cancel' }));
+    await browser.click(screen.getByRole('button', { name: '+ Record handover' }));
     await browser.type(screen.getByLabelText('From party'), 'Collection agent');
     await browser.type(screen.getByLabelText('To party'), 'Laboratory');
     await browser.type(screen.getByLabelText('Seal condition'), 'Intact');
     await browser.click(screen.getByRole('button', { name: 'Save handover' }));
+    const handoverPost = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith('/handovers') && init?.method === 'POST')!;
+    expect(JSON.parse(String(handoverPost[1]?.body)).payload.handoverKind).toBe('HANDOVER');
     expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
     expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
     finishHandover?.(json(handovers[0], 201));
@@ -196,5 +208,58 @@ describe('Capture journey', () => {
     expect(within(fromPartyCell.closest('tr')!).getByRole('cell', { name: 'Laboratory' })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/procurements')).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/samples')).toBe(true);
+  });
+  it('lets laboratory writers receive report against selected sample without custody controls', async () => {
+    const sampleId = '5a000000-0000-4000-8000-000000000001';
+    const customerManager = { ...staff, role: 'CustomerManager', permissions: ['lab.write'] };
+    const reportPayloads: Array<{ resultSets: Array<{ sampleId?: string }> }> = [];
+    fetchMock.mockImplementation(async (url, init) => {
+      const path = String(url);
+      if (path === '/api/auth/session') return json(customerManager);
+      if (path === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (path === `/api/samples/${sampleId}`) return json({ id: sampleId, sourceLotId: 'source-lot-1', code: 'SMP-1', sealCode: 'SEAL-1', collectedBy: 'staff', collectedAt: '2026-10-01T10:00:00Z', capturedAt: '2026-10-01T10:00:00Z', recordedAt: '2026-10-01T10:00:00Z', handoverCount: 0, materialDescription: 'Paddy' });
+      if (path.startsWith('/api/samples?')) return json({ items: [{ id: sampleId, sourceLotId: 'source-lot-1', code: 'SMP-1', sealCode: 'SEAL-1', materialDescription: 'Paddy' }], page: 1, pageSize: 20, hasMore: false });
+      if (path === `/api/samples/${sampleId}/handovers?page=1&pageSize=20`) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
+      if (path.startsWith('/api/lab-reports?')) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
+      if (path === '/api/lab-reports' && init?.method === 'POST') {
+        reportPayloads.push(JSON.parse(String(init.body)).payload);
+        return json({ id: 'report-1' }, 201);
+      }
+      return json({}, 404);
+    });
+    window.history.replaceState({}, '', `/capture/samples/${sampleId}`);
+    render(<App />); const browser = userEvent.setup();
+    expect(await screen.findByRole('heading', { name: 'SMP-1' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '+ Record handover' })).not.toBeInTheDocument();
+    await browser.click(screen.getByRole('button', { name: '+ Receive report' }));
+    await browser.type(screen.getByLabelText('Laboratory'), 'Lab One');
+    await browser.type(screen.getByLabelText('Report number'), 'R-1');
+    await browser.type(screen.getByLabelText('Issue date'), '2026-10-20');
+    await browser.upload(screen.getByLabelText('Original report file'), new File(['report'], 'report.pdf', { type: 'application/pdf' }));
+    await browser.click(screen.getByLabelText(/this original file contains this company/i));
+    await browser.type(screen.getByLabelText('testLabel section 1 row 1'), 'Moisture');
+    await browser.type(screen.getByLabelText('originalResultText section 1 row 1'), '12.5%');
+    fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
+    await waitFor(() => expect(reportPayloads).toHaveLength(1));
+    expect(reportPayloads[0].resultSets[0].sampleId).toBe(sampleId);
+  });
+  it('keeps export access read-only on sample custody and reports', async () => {
+    const sampleId = '5a000000-0000-4000-8000-000000000002';
+    const exporter = { ...staff, role: 'Export', permissions: ['lab.read'] };
+    fetchMock.mockImplementation(async url => {
+      const path = String(url);
+      if (path === '/api/auth/session') return json(exporter);
+      if (path === `/api/samples/${sampleId}`) return json({ id: sampleId, sourceLotId: 'source-lot-1', code: 'SMP-2', sealCode: 'SEAL-2', collectedBy: 'staff', collectedAt: '2026-10-01T10:00:00Z', capturedAt: '2026-10-01T10:00:00Z', recordedAt: '2026-10-01T10:00:00Z', handoverCount: 0, materialDescription: 'Paddy' });
+      if (path.includes('/handovers?')) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
+      if (path.startsWith('/api/lab-reports?')) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
+      return json({}, 404);
+    });
+    window.history.replaceState({}, '', `/capture/samples/${sampleId}`);
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'SMP-2' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send to laboratory' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Record laboratory receipt' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '+ Record handover' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '+ Receive report' })).not.toBeInTheDocument();
   });
 });

@@ -232,6 +232,25 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
     }
 
     [Fact]
+    public async Task Malformed_related_report_id_returns_safe_bad_request_without_persisting_report()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var request = ReportRequest([ResultSet(sample)]);
+        request["payload"]!["relatedReportId"] = "invalid-guid-secret";
+        using var content = new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json");
+        using var response = await s.Customer.PostAsync("/api/lab-reports", content);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Invalid request body", problem.RootElement.GetProperty("title").GetString());
+        Assert.Equal("Check request field types and formats, then try again.",
+            problem.RootElement.GetProperty("detail").GetString());
+        Assert.DoesNotContain("invalid-guid-secret", problem.RootElement.GetRawText());
+        var reports = await GetAsync(s.Customer, "/api/lab-reports");
+        Assert.Empty(reports.GetProperty("items").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Corrections_supplements_and_retests_append_with_reason_and_preserve_original()
     {
         using var s = await CreateAsync(factory, policies: false);

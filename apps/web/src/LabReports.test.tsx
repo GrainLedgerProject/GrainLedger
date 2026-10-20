@@ -33,6 +33,56 @@ it.each(['testLabel', 'originalResultText'] as const)('validates a cleared requi
   expect(await screen.findByRole('alert')).toHaveTextContent(/test labels and original text/);
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
+it('requires related report choice before file encoding for linked report kind', async () => {
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '+ Receive report' }));
+  await user.selectOptions(screen.getByLabelText('Report kind'), 'SUPPLEMENTARY');
+  fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Choose a related report');
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it('selects readable report label and submits selected report ID', async () => {
+  const report = { id: 'report-a', reportNumber: 'R-001', laboratoryName: 'North Lab', issuedOn: '2026-10-19', receivedAt: '2026-10-20T10:00:00Z', reportKind: 'FINAL', status: 'UNRESOLVED' };
+  let submitted: { payload: { relatedReportId?: string; relationshipReason?: string } } | undefined;
+  fetchMock.mockImplementation(async (input, init) => {
+    if (String(input) === '/api/auth/csrf') return new Response(JSON.stringify({ token: 'csrf' }), { headers: { 'Content-Type': 'application/json' } });
+    if (String(input) === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (String(input) === '/api/lab-reports' && init?.method === 'POST') { submitted = JSON.parse(String(init.body)); return new Response(JSON.stringify({ id: 'new-report' }), { headers: { 'Content-Type': 'application/json' } }); }
+    return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '+ Receive report' }));
+  await user.click(screen.getByRole('checkbox', { name: 'Link to an earlier report' }));
+  await user.selectOptions(await screen.findByLabelText('Related report'), 'report-a');
+  await user.type(screen.getByLabelText('Search loaded reports'), 'not matching');
+  expect(screen.getByRole('option', { name: /R-001 · North Lab · 2026-10-19 · FINAL/ })).toBeInTheDocument();
+  await user.clear(screen.getByLabelText('Search loaded reports'));
+  await user.type(screen.getByLabelText('Relationship reason'), 'Corrected transcription');
+  await user.type(screen.getByRole('textbox', { name: /^Laboratory$/ }), 'External laboratory');
+  await user.type(screen.getByLabelText('Report number'), 'R-002');
+  await user.type(screen.getByLabelText('Issue date'), '2026-10-20');
+  await user.upload(screen.getByLabelText('Original report file'), new File(['Original evidence'], 'report.txt', { type: 'text/plain' }));
+  await user.click(screen.getByRole('checkbox', { name: /this original file contains this company/ }));
+  await user.type(screen.getByLabelText('testLabel section 1 row 1'), 'Reported test');
+  await user.type(screen.getByLabelText('originalResultText section 1 row 1'), 'ND');
+  fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
+  await waitFor(() => expect(submitted?.payload.relatedReportId).toBe('report-a'));
+  expect(submitted?.payload.relationshipReason).toBe('Corrected transcription');
+});
+
+it('clears optional relation and reason when link checkbox turns off', async () => {
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '+ Receive report' }));
+  await user.click(screen.getByRole('checkbox', { name: 'Link to an earlier report' }));
+  await user.type(screen.getByLabelText('Relationship reason'), 'Not linked');
+  await user.click(screen.getByRole('checkbox', { name: 'Link to an earlier report' }));
+  expect(screen.queryByLabelText('Relationship reason')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Related report')).not.toBeInTheDocument();
+});
 it('keeps selected sample visible and submits it when search excludes it', async () => {
   const sampleA = { id: 'sample-a', code: 'SMP-001', sealCode: 'SEAL-001', sourceLotId: 'lot-a' };
   let submittedBody: { payload: { resultSets: Array<{ sampleId?: string }> } } | undefined;
@@ -72,4 +122,27 @@ it('keeps selected sample visible and submits it when search excludes it', async
   fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
 
   await waitFor(() => expect(submittedBody?.payload.resultSets[0].sampleId).toBe(sampleA.id));
+});
+it.each([
+  { name: 'confirmed identity over proposal', resultSets: [{ id: 'set-1', sampleId: 'sample-a', confirmedSampleId: 'sample-b' }], expected: 'sample-b' },
+  { name: 'different section identities', resultSets: [{ id: 'set-1', sampleId: 'sample-a', confirmedSampleId: 'sample-a' }, { id: 'set-2', sampleId: 'sample-b', confirmedSampleId: 'sample-b' }], expected: '' },
+  { name: 'unresolved section identity', resultSets: [{ id: 'set-1', sampleId: 'sample-a', confirmedSampleId: 'sample-a' }, { id: 'set-2', sampleId: null, confirmedSampleId: null }], expected: '' },
+])('prefills only unambiguous effective sample identity: $name', async ({ resultSets, expected }) => {
+  const parent = { id: 'parent-report', laboratoryName: 'North Lab', reportNumber: 'R-PARENT', issuedOn: '2026-10-19', receivedAt: '2026-10-20T10:00:00Z', reportKind: 'FINAL', status: 'UNRESOLVED', fileName: 'report.pdf', contentType: 'application/pdf', fileSize: 1, sha256: 'hash', recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null, confirmedAt: null, resultSets: resultSets.map(set => ({ ...set, sourceLotId: null, laboratorySampleReference: null, statedSampleCode: null, statedSealCode: null, sectionReference: null, results: [] })), suggestedMarketCode: 'UNKNOWN', assessmentReasons: [] };
+  const samples = ['sample-a', 'sample-b'].map((id, index) => ({ id, code: `SMP-00${index + 1}`, sealCode: `SEAL-00${index + 1}`, sourceLotId: 'lot-a' }));
+  fetchMock.mockImplementation(async input => {
+    const path = String(input);
+    if (path === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [parent], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/parent-report') return new Response(JSON.stringify(parent), { headers: { 'Content-Type': 'application/json' } });
+    if (path.startsWith('/api/samples/')) return new Response(JSON.stringify(samples.find(sample => sample.id === decodeURIComponent(path.split('/').pop()!))), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/samples?page=1&pageSize=20') return new Response(JSON.stringify({ items: samples, page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'R-PARENT ↗' }));
+  await user.click(await screen.findByRole('button', { name: 'Create linked supplementary' }));
+  const selection = await screen.findByRole('combobox', { name: 'Registered sample for section 1 selection' });
+  if (expected) await screen.findByRole('option', { name: 'SMP-002 · seal SEAL-002' });
+  expect(selection).toHaveValue(expected);
 });

@@ -222,6 +222,7 @@ This plan does not authorize automatic HOLD placement, unrestricted release, or 
 5. Exercise the complete sample-to-lot path with isolated PostgreSQL and the actual API/browser surface. Do not migrate, seed, or mutate the shared Supabase database for verification without explicit approval.
 
 Steps 1–3 and isolated verification in step 5 are implemented. Step 4 is deliberately gated: the API reports suggested market `VN`, `NOT_ASSESSED`, and the missing legal/interpretation/coverage prerequisites, without creating assessment decisions or claiming compliance.
+The role-by-role [laboratory workflow guide](lab-flow-guide.md) describes the implemented user path; this plan remains the policy/scope record.
 
 Prefer extending existing module features and in-process contracts. Do not add a laboratory integration service or new abstraction layer solely for this workflow. Do not pass EF entities across module boundaries.
 

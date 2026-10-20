@@ -80,7 +80,7 @@ This section is the HTTP contract referenced by [external laboratory workflow pl
 No report/result/file PUT, PATCH or DELETE endpoint exists. Original report metadata, bytes, proposed sample IDs, sections, rows, and confirmed associations cannot be overwritten. Correct with a new linked report.
 
 Lists return `{ "items": [LabReportResponse], "page": 1, "pageSize": 20, "hasMore": false }`. IDs are paged before bulk metadata/result projection; metadata responses never materialize original bytes. `sampleId` filtering includes proposed or confirmed associations so unresolved evidence is still findable. `sourceLotId` filtering includes **confirmed associations only**. Unconfirmed or wrong identity never appears as confirmed source-lot evidence.
-The web sample chooser searches loaded samples only. Searching never clears the selected sample: the selected option remains visible even when it does not match the search text, and report submission preserves that sample ID.
+The web sample chooser searches loaded samples only. Searching never clears the selected sample: the selected option remains visible even when it does not match the search text, and report submission preserves that sample ID. For the role-by-role application workflow, see the [laboratory workflow guide](lab-flow-guide.md).
 
 ### Receive an original report
 
@@ -133,6 +133,9 @@ The web sample chooser searches loaded samples only. Searching never clears the 
 Use real company sample IDs and fresh entity/operation IDs. Original file must be nonempty and at most 10 MiB; request cap is 20 MiB including base64 and structured results. File names allow no paths/control characters; media type must be valid. Server derives actor, recording time, file size and SHA-256. Whole original is stored independently of any mill facility.
 
 `companyOnlyConfirmed` must explicitly be `true` and attests that **every part of the original** belongs to this company, not only transcribed rows. Split/redact mixed-company originals before intake. Every supplied sample/related-report ID must belong to current company; one multi-sample file has separate result sets, never a shared global result panel applied to each lot.
+`relatedReportId` is optional and must be `null` or a UUID in canonical hyphenated form (hex digits are case-insensitive); report numbers remain arbitrary labels and are not accepted as IDs. A malformed UUID in the JSON request body returns 400 with a safe validation problem. Oversized request bodies return 413.
+
+In the web form, choose a related report from the scoped readable, paginated **Related report** selector; the UI submits its ID as `relatedReportId`. HTTP clients must still send a valid UUID as specified above. A server 400 is a definite rejection: the form remains editable and does not retain an uncertain-retry envelope. Genuine uncertain failures retain the exact original request for replay.
 
 `reportKind` permits `PARTIAL`, `FINAL`, `SUPPLEMENTARY`, `AMENDMENT`, or `RETEST`. Supplements/amendments/retests require existing same-company `relatedReportId` and nonblank `relationshipReason`. A linked new report does not replace any earlier row, silently resolve conflicting measurements, select the lowest/latest result, change earlier interpretations, or release a HOLD.
 
@@ -157,6 +160,28 @@ testLabel,substanceId,originalResultText,resultKind,numericValue,unit,lod,loq,me
 ```
 
 Optional empty fields become absent values; decimals remain strings. CSV supports quoted fields, embedded delimiters and escaped double quotes. TSV uses same column names separated by tabs. Import previews/validates before adding rows to the currently selected sample section; this internal template does not prescribe external laboratory report formats.
+
+### Synthetic report generator
+
+For the complete generate → print PDF → upload → import → confirm walkthrough, see the [synthetic laboratory report guide](synthetic-lab-report-guide.md).
+
+Use the standalone Python 3 standard-library CLI to make importable test evidence. Replace `SAMPLE-REPLACE-WITH-ACTUAL-CODE` with a registered sample code; optional seal and lab reference should match the sample's recorded identity/handover when testing confirmation.
+
+```sh
+python3 tools/generate_synthetic_lab_report.py \
+  --sample-code SAMPLE-REPLACE-WITH-ACTUAL-CODE \
+  --seal-code SEAL-001 \
+  --lab-sample-reference LAB-S-001 \
+  --out-dir tools/mock_lab_reports/report-001
+```
+
+`--out-dir` is optional; omitting it writes to `tools/mock_lab_reports` beside the script. The output directory must not already exist, and the generator refuses repeat runs there to prevent overwriting. Use a fresh subdirectory such as `tools/mock_lab_reports/report-001` for each explicit run.
+
+It creates a new output directory only, with `report.html` and matching `results.csv`; default is 5 rows, `--rows` accepts 1–10000. Import `results.csv` in the normal result-row CSV importer. Open `report.html` in a browser and use Print → Save as PDF if a PDF is useful.
+
+Every generated value is synthetic, visibly marked as test data, and is not official laboratory evidence. Never use it as a real report or for compliance decisions. Report kind is `FINAL`; rows exercise all five supported result kinds and preserve exact decimal strings. No legal limit or pass/fail comparison is applied.
+
+This standalone generator creates no report relationship: `relatedReportId` and `relationshipReason` do not apply to its unlinked `FINAL` output. For actual intake, amendments, supplements, or retests, relationship reason explains why new report links to its original; it does not replace earlier evidence or resolve conflicts.
 
 ### Review and confirm
 
