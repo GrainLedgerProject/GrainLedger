@@ -101,19 +101,25 @@ function focusFirstFieldError() {
 
 function CatalogSelect({ kind, label, value, onChange, required = true }: { kind: string; label: string; value: string; onChange: (id: string, selected?: Catalog) => void; required?: boolean }) {
   const [rows, setRows] = useState<Catalog[]>([]);
-  const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
-    const params = new URLSearchParams({ page: '1', pageSize: '100', q: query });
-    void api<Page<Catalog>>(`/api/${kind}?${params}`, { signal: controller.signal })
-      .then(result => setRows(previous => {
+    async function load() {
+      const found: Catalog[] = [];
+      for (let page = 1; ; page++) {
+        const params = new URLSearchParams({ page: String(page), pageSize: '100' });
+        const result = await api<Page<Catalog>>(`/api/${kind}?${params}`, { signal: controller.signal });
+        found.push(...result.items);
+        if (!result.hasMore) break;
+      }
+      if (!controller.signal.aborted) setRows(previous => {
         const selected = previous.find(row => row.id === value);
-        return selected && !result.items.some(row => row.id === value) ? [selected, ...result.items] : result.items;
-      }))
-      .catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause)); });
+        return selected && !found.some(row => row.id === value) ? [selected, ...found] : found;
+      });
+    }
+    void load().catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause)); });
     return () => controller.abort();
-  }, [kind, query, value]);
+  }, [kind, value]);
   useEffect(() => {
     if (!value || rows.some(row => row.id === value)) return;
     const controller = new AbortController();
@@ -122,7 +128,7 @@ function CatalogSelect({ kind, label, value, onChange, required = true }: { kind
       .catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause)); });
     return () => controller.abort();
   }, [kind, value, rows]);
-  return <div className="export-catalog"><label>{label} search<input aria-label={`Search ${label.toLowerCase()}`} value={query} onChange={event => setQuery(event.target.value)} placeholder="Search code or name" /></label>
+  return <div className="export-catalog">
     <label>{label}<select value={value} onChange={event => onChange(event.target.value, rows.find(row => row.id === event.target.value))} required={required}><option value="">Select {label.toLowerCase()}</option>{rows.map(row => <option value={row.id} key={row.id}>{row.code} · {row.name}</option>)}</select></label>
     {error && <span className="field-error" role="alert">{error}</span>}
   </div>;

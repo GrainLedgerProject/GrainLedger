@@ -122,7 +122,7 @@ td { padding: 17px 12px; border-bottom: 1px solid #edf0e7; }
 .export-section h2 { margin: 0; }
 .export-item { border-top: 1px solid #e6ebe3; padding-top: 18px; display: grid; gap: 12px; }
 .export-item:first-of-type { border-top: 0; }
-.export-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.export-catalog { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .admin-form-grid.export-order-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 20px; align-items: start; }
 .export-order-fields > * { min-width: 0; }
 .export-order-fields .export-catalog { grid-template-columns: minmax(0, 1fr); gap: 12px; }
