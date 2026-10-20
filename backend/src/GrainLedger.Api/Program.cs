@@ -5,6 +5,7 @@ using GrainLedger.Modules.Catalogs;
 using GrainLedger.Api.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Routing;
 using System.Net;
 using GrainLedger.Api.OpenApi;
 using Scalar.AspNetCore;
@@ -53,6 +54,7 @@ builder.Services.AddOpenApi(options =>
     options.AddOperationTransformer<BearerOperationTransformer>();
 });
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
+builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.AddIdentityModule(builder.Configuration, builder.Environment);
 builder.Services.AddCaptureModule();
 builder.Services.AddCatalogModule();

@@ -34,6 +34,10 @@ public sealed class BrowserWorkflowHost
             verification.EnsureSuccessStatusCode();
         }
         using var scenario = await LedgerScenario.CreateAsync(factory);
+        var (exportUser, exportSession) = await factory.SeedUserAsync(Roles.ExportStaff, scenario.OwnerId);
+        var exportClient = factory.CreateRealCookieClient(exportUser, exportSession);
+        await LedgerScenario.CsrfAsync(exportClient);
+        scenario.Accounts.Add("export", (exportUser, exportSession, exportClient));
         var received = await scenario.ReceiptAsync("10");
         var traceSourceLotId = LedgerScenario.Lots(received)[0];
         var processed = await scenario.CommitAsync(await scenario.DraftAsync("DRYING", [(traceSourceLotId, "10")], [("DRIED_PADDY", "8")], "2"));

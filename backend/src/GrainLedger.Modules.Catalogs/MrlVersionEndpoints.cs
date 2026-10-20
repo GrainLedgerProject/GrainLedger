@@ -73,10 +73,10 @@ public static class MrlVersionEndpoints
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({pairLock}, 0))", ct);
         var now = NormalizeTimestamp(clock.GetUtcNow());
-        if (version.EffectiveFrom < now)
-            return Problem(409, "MRL_BACKDATED_PUBLICATION", "Effective start cannot be before publication time.");
         if (version.EffectiveTo is not null && version.EffectiveTo <= version.EffectiveFrom)
             return Problem(409, "MRL_INVALID_INTERVAL", "Effective end must be after effective start.");
+        if (version.EffectiveTo is not null && version.EffectiveTo <= now)
+            return Problem(409, "MRL_BACKDATED_PUBLICATION", "Effective end cannot be before publication time.");
         if (string.IsNullOrWhiteSpace(version.SourceRef))
             return Problem(409, "MRL_SOURCE_REQUIRED", "A source reference is required before publication.");
         var limits = await db.MrlLimits.AsNoTracking()
@@ -92,6 +92,8 @@ public static class MrlVersionEndpoints
             .Where(x => x.MarketId == version.MarketId && x.CommodityId == version.CommodityId &&
                 x.Status == "PUBLISHED")
             .OrderBy(x => x.EffectiveFrom).ToListAsync(ct);
+        if (published.Count > 0 && version.EffectiveFrom < now)
+            return Problem(409, "MRL_BACKDATED_PUBLICATION", "A successor effective start cannot be before publication time.");
         if (published.Any(x => x.VersionNo >= version.VersionNo || x.EffectiveFrom >= version.EffectiveFrom))
             return Problem(409, "MRL_PUBLICATION_ORDER", "A successor must have a later version and effective start.");
         for (var i = 0; i < published.Count; i++)
