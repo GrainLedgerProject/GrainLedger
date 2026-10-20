@@ -57,6 +57,81 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
     }
 
     [Fact]
+    public async Task Confirmation_matches_legacy_padded_identity_without_changing_original_values()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var request = ReportRequest([ResultSet(sample), ResultSet(sample), ResultSet(sample)]);
+        request["payload"]!["resultSets"]![2]!["laboratorySampleReference"] = "LAB-SPECIMEN-42";
+        var id = EntityId(request);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", request, HttpStatusCode.Created);
+        var draft = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        var setIds = draft.GetProperty("resultSets").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToArray();
+
+        await using (var owner = new NpgsqlConnection(factory.OwnerConnectionString))
+        {
+            await owner.OpenAsync();
+            await using var transaction = await owner.BeginTransactionAsync();
+            await using var command = new NpgsqlCommand("ALTER TABLE capture.lab_result_sets DISABLE TRIGGER lab_result_sets_immutable", owner, transaction);
+            await command.ExecuteNonQueryAsync();
+            command.CommandText = """
+                UPDATE capture.lab_result_sets
+                SET stated_sample_code = chr(160) || chr(8195) || stated_sample_code || chr(12288),
+                    stated_seal_code = chr(9) || stated_seal_code || chr(10)
+                WHERE report_id = $1
+                """;
+            command.Parameters.AddWithValue(id);
+            await command.ExecuteNonQueryAsync();
+            command.Parameters.Clear();
+            command.CommandText = """
+                UPDATE capture.lab_result_sets
+                SET laboratory_sample_reference = chr(9) || laboratory_sample_reference || chr(10)
+                WHERE report_id = $1 AND position = 2
+                """;
+            command.Parameters.AddWithValue(id);
+            await command.ExecuteNonQueryAsync();
+            command.Parameters.Clear();
+            command.CommandText = "ALTER TABLE capture.lab_result_sets ENABLE TRIGGER lab_result_sets_immutable";
+            await command.ExecuteNonQueryAsync();
+            await transaction.CommitAsync();
+        }
+
+        var padded = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        var originalSets = padded.GetProperty("resultSets").EnumerateArray().ToArray();
+        Assert.Equal($"\u00A0\u2003{sample.Code}\u3000", originalSets[0].GetProperty("statedSampleCode").GetString());
+        Assert.Equal($"\t{sample.Seal}\n", originalSets[0].GetProperty("statedSealCode").GetString());
+        Assert.Equal($"\tLAB-SPECIMEN-42\n", originalSets[2].GetProperty("laboratorySampleReference").GetString());
+
+        await SendAsync(s.Purchaser, HttpMethod.Post, $"/api/samples/{sample.Id}/handovers", Envelope(new
+        {
+            entityId = Guid.NewGuid(), fromParty = "Purchasing staff", toParty = "External Test Laboratory", handedOverAt = CapturedAt,
+            handoverKind = "LAB_DISPATCH", laboratoryName = "External Test Laboratory", laboratorySampleReference = "LAB-SPECIMEN-42",
+            evidenceRef = "dispatch-receipt-42", sealCondition = "Intact"
+        }));
+        var confirmation = ConfirmRequest(padded, sample, sample, sample);
+        confirmation["payload"]!["matches"]![1]!["identityBasis"] = "SEAL_CODE";
+        confirmation["payload"]!["matches"]![2]!["identityBasis"] = "LAB_REFERENCE";
+        confirmation["payload"]!["matches"]![2]!["evidenceRef"] = "\u0085\t dispatch-receipt-42 \n\u202F";
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", confirmation, HttpStatusCode.OK);
+
+        var confirmed = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        var confirmedSets = confirmed.GetProperty("resultSets").EnumerateArray().ToArray();
+        Assert.Equal(sample.Id, confirmedSets[0].GetProperty("confirmedSampleId").GetGuid());
+        Assert.Equal(sample.Id, confirmedSets[1].GetProperty("confirmedSampleId").GetGuid());
+        Assert.Equal(sample.Id, confirmedSets[2].GetProperty("confirmedSampleId").GetGuid());
+        foreach (var (original, current) in originalSets.Zip(confirmedSets))
+        {
+            Assert.Equal(original.GetProperty("statedSampleCode").GetString(), current.GetProperty("statedSampleCode").GetString());
+            Assert.Equal(original.GetProperty("statedSealCode").GetString(), current.GetProperty("statedSealCode").GetString());
+            Assert.Equal(original.GetProperty("laboratorySampleReference").GetString(), current.GetProperty("laboratorySampleReference").GetString());
+        }
+        await AssertImmutableAsync(async db =>
+        {
+            (await db.Set<LabResultSet>().SingleAsync(x => x.Id == setIds[0])).StatedSampleCode = sample.Code;
+        });
+    }
+
+    [Fact]
     public async Task Persistence_guards_reject_original_row_and_confirmation_changes()
     {
         using var s = await CreateAsync(factory, policies: false);

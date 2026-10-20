@@ -146,3 +146,61 @@ it.each([
   if (expected) await screen.findByRole('option', { name: 'SMP-002 · seal SEAL-002' });
   expect(selection).toHaveValue(expected);
 });
+it('shows rejected confirmation inside dialog, allows correction and retry, and preserves backend NOT_ASSESSED status', async () => {
+  const sample = { id: 'sample-a', code: 'SMP-001', sealCode: 'SEAL-001', sourceLotId: 'lot-a' };
+  const report = {
+    id: 'report-a', laboratoryName: 'North Lab', reportNumber: 'R-001', issuedOn: '2026-10-19', receivedAt: '2026-10-20T10:00:00Z',
+    reportKind: 'FINAL', status: 'UNRESOLVED', fileName: 'report.pdf', contentType: 'application/pdf', fileSize: 1, sha256: 'hash',
+    recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null as string | null, confirmedAt: null as string | null,
+    assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [], suggestedMarketCode: 'UNKNOWN',
+    resultSets: [{ id: 'set-a', sampleId: sample.id, confirmedSampleId: null, sourceLotId: null, laboratorySampleReference: null,
+      statedSampleCode: sample.code, statedSealCode: sample.sealCode, sectionReference: null, results: [
+        { testLabel: 'Analyte', substanceId: '11111111-1111-4111-8111-111111111111', originalResultText: '0.1 mg/kg', resultKind: 'NUMERIC', numericValue: '0.1', unit: 'mg/kg' },
+      ] }],
+  };
+  let confirmedReport = report;
+  let confirmationAttempts = 0;
+  let firstConfirmation: { payload: { matches: Array<{ identityBasis: string }> } } | undefined;
+  let correctedConfirmation: { payload: { matches: Array<{ identityBasis: string }> } } | undefined;
+  fetchMock.mockImplementation(async (input, init) => {
+    const path = String(input);
+    if (path === '/api/auth/csrf') return new Response(JSON.stringify({ token: 'csrf' }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/report-a') return new Response(JSON.stringify(confirmedReport), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/samples?page=1&pageSize=20') return new Response(JSON.stringify({ items: [sample], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/samples/sample-a') return new Response(JSON.stringify(sample), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/report-a/confirm' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body));
+      confirmationAttempts++;
+      if (confirmationAttempts === 1) {
+        firstConfirmation = body;
+        return new Response(JSON.stringify({ detail: 'Identity basis does not match printed sample.' }), { status: 400, headers: { 'Content-Type': 'application/problem+json' } });
+      }
+      correctedConfirmation = body;
+      confirmedReport = { ...report, status: 'CONFIRMED', confirmedBy: 'reviewer', confirmedAt: '2026-10-20T11:00:00Z' };
+      return new Response(null, { status: 204 });
+    }
+    return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+  });
+
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'R-001 ↗' }));
+  expect(await screen.findByText('NOT_ASSESSED')).toBeVisible();
+  await user.click(await screen.findByRole('button', { name: 'Review and confirm' }));
+  const dialog = screen.getByRole('dialog', { name: 'Review report transcription' });
+  await screen.findByRole('option', { name: 'SMP-001 · seal SEAL-001' });
+  await user.click(screen.getByRole('checkbox', { name: /I checked sample\/seal identity/ }));
+  await user.click(screen.getByRole('checkbox', { name: /I checked all result text/ }));
+  await user.click(screen.getByRole('button', { name: 'Confirm checked record' }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Identity basis does not match printed sample.');
+  expect(screen.getByRole('dialog', { name: 'Review report transcription' })).toBe(dialog);
+  expect(firstConfirmation?.payload.matches[0].identityBasis).toBe('SAMPLE_CODE');
+  await user.selectOptions(screen.getByLabelText('Identity basis'), 'SEAL_CODE');
+  await user.click(screen.getByRole('button', { name: 'Confirm checked record' }));
+
+  await waitFor(() => expect(correctedConfirmation?.payload.matches[0].identityBasis).toBe('SEAL_CODE'));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Review report transcription' })).not.toBeInTheDocument());
+  expect(screen.getByText('NOT_ASSESSED')).toBeVisible();
+});

@@ -187,8 +187,8 @@ public static class LabReportEndpoints
         {
             var set = resultSets[i];
             db.LabResultSets.Add(new LabResultSet { Id = set.EntityId, CompanyId = company.Value, ReportId = p.EntityId, Position = i,
-                SampleId = set.SampleId, LaboratorySampleReference = set.LaboratorySampleReference, StatedSampleCode = set.StatedSampleCode,
-                StatedSealCode = set.StatedSealCode, SectionReference = set.SectionReference });
+                SampleId = set.SampleId, LaboratorySampleReference = set.LaboratorySampleReference?.Trim(), StatedSampleCode = set.StatedSampleCode?.Trim(),
+                StatedSealCode = set.StatedSealCode?.Trim(), SectionReference = set.SectionReference?.Trim() });
             for (var j = 0; j < set.Results!.Count; j++)
             {
                 var row = set.Results[j];
@@ -254,11 +254,11 @@ public static class LabReportEndpoints
             if (Contradicts(set, sample)) return Problem(409, "REPORT_IDENTITY_UNRESOLVED", "Printed sample or seal contradicts selected sample. Preserve this evidence and append a corrected report.");
             var valid = match.IdentityBasis switch
             {
-                "SAMPLE_CODE" => !string.IsNullOrWhiteSpace(set.StatedSampleCode) && set.StatedSampleCode == sample.Code,
-                "SEAL_CODE" => !string.IsNullOrWhiteSpace(set.StatedSealCode) && set.StatedSealCode == sample.SealCode,
+                "SAMPLE_CODE" => !string.IsNullOrWhiteSpace(set.StatedSampleCode) && set.StatedSampleCode.Trim() == sample.Code.Trim(),
+                "SEAL_CODE" => !string.IsNullOrWhiteSpace(set.StatedSealCode) && set.StatedSealCode.Trim() == sample.SealCode.Trim(),
                 "LAB_REFERENCE" => !string.IsNullOrWhiteSpace(set.LaboratorySampleReference) && !string.IsNullOrWhiteSpace(match.EvidenceRef) &&
-                    handovers.Any(h => h.SampleId == sample.Id && h.LaboratoryName == report.LaboratoryName && h.LaboratorySampleReference == set.LaboratorySampleReference &&
-                        !string.IsNullOrWhiteSpace(h.EvidenceRef) && h.EvidenceRef == match.EvidenceRef),
+                    handovers.Any(h => h.SampleId == sample.Id && h.LaboratoryName == report.LaboratoryName && h.LaboratorySampleReference?.Trim() == set.LaboratorySampleReference.Trim() &&
+                        !string.IsNullOrWhiteSpace(h.EvidenceRef) && h.EvidenceRef.Trim() == match.EvidenceRef.Trim()),
                 _ => false
             };
             if (!valid) return Problem(409, "REPORT_IDENTITY_UNRESOLVED", "Printed identity or independently evidenced laboratory reference must establish sample identity.");
@@ -488,10 +488,10 @@ public static class LabReportEndpoints
     }
 
     private static bool Contradicts(LabResultSet set, Sample sample) =>
-        !string.IsNullOrWhiteSpace(set.StatedSampleCode) && set.StatedSampleCode != sample.Code ||
-        !string.IsNullOrWhiteSpace(set.StatedSealCode) && set.StatedSealCode != sample.SealCode;
+        !string.IsNullOrWhiteSpace(set.StatedSampleCode) && set.StatedSampleCode.Trim() != sample.Code.Trim() ||
+        !string.IsNullOrWhiteSpace(set.StatedSealCode) && set.StatedSealCode.Trim() != sample.SealCode.Trim();
     private static bool PrintedMatch(LabResultSet set, Sample sample) => !Contradicts(set, sample) &&
-        (!string.IsNullOrWhiteSpace(set.StatedSampleCode) && set.StatedSampleCode == sample.Code || !string.IsNullOrWhiteSpace(set.StatedSealCode) && set.StatedSealCode == sample.SealCode);
+        (!string.IsNullOrWhiteSpace(set.StatedSampleCode) && set.StatedSampleCode.Trim() == sample.Code.Trim() || !string.IsNullOrWhiteSpace(set.StatedSealCode) && set.StatedSealCode.Trim() == sample.SealCode.Trim());
     private static Dictionary<string, string[]> Envelope(string? device, Guid operation, DateTimeOffset at, int version)
     {
         var errors = new Dictionary<string, string[]>();

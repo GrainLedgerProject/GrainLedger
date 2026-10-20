@@ -32,7 +32,7 @@ python3 tools/generate_synthetic_lab_report.py \
   --out-dir tools/mock_lab_reports/report-001
 ```
 
-`--out-dir` is optional; omitting it writes directly to `tools/mock_lab_reports` beside the script. The output directory must not already exist. The tool refuses to overwrite existing files; use a fresh subdirectory for each run.
+`--out-dir` is optional; omitting it writes directly to `tools/mock_lab_reports` beside the script. Repeat runs overwrite `report.html` and `results.csv`. Use `--no-overwrite` to reject an existing output directory, or choose a fresh subdirectory to retain previous files.
 
 Outputs:
 
@@ -46,13 +46,16 @@ Outputs:
 | `--sample-code` | Required; nonblank | Sample code printed in report. Use registered sample code for a matching-identity test. |
 | `--seal-code` | Optional | Printed physical seal identifier. Omit if testing a report with no seal identifier. |
 | `--lab-sample-reference` | Optional | Printed laboratory-assigned sample reference; not a GrainLedger UUID. |
-| `--report-number` | Optional; `SYN-YYYYMMDD` | Printed report identifier. Supply distinct identifiers when testing several reports on the same day. |
-| `--rows` | Optional; `5` | Number of findings, from `1` to `10000`. |
-| `--out-dir` | Optional; `tools/mock_lab_reports` beside script | New directory for generated files. Existing directory causes an error; use a fresh directory for every run. |
+| `--report-number` | Optional; `COA-YYYYMMDD-001` | Printed report identifier. Supply distinct identifiers when testing several reports on the same day. |
+| `--rows` | Optional; `14` | Number of findings, from `1` to `10000`. |
+| `--out-dir` | Optional; `tools/mock_lab_reports` beside script | Output directory; generated HTML/CSV are overwritten on repeat runs. |
+| `--no-overwrite` | Optional | Reject an existing output directory. |
+| `--laboratory-name` | Optional; `QUATEST 3 — Food & Agricultural Testing Lab (Synthetic)` | Synthetic laboratory label printed in report. Not proof of laboratory issuance or accreditation. |
+| `--scenario` | Optional; `compliant` | Fictional measurements: `compliant`, `vn-pass-export-fail`, `vn-exceed`, or `synthetic`. Scenario names are not legal verdicts. |
 
-Laboratory name is **Synthetic Laboratory**. Report kind is **FINAL**. Issue date is the generator machine's current date. These values appear in HTML; copy them when registering the report.
+Report kind is **FINAL**; issue date is the generator machine's current date. Copy actual metadata printed in the generated report.
 
-Default five-row panel covers `NUMERIC`, `BELOW_LIMIT`, `NOT_DETECTED`, `QUALITATIVE`, and `OTHER`. Larger panels repeat these kinds with distinct synthetic test labels. Catalog substance IDs remain blank: no mapping is invented. Decimal strings, qualifiers, and quoted text are preserved.
+Default panel uses 14 reference-substance codes, CAS labels, realistic-looking methods, LOD/LOQ, and uncertainty. CSV `substanceId` contains catalog codes resolved to database IDs at intake. `--scenario synthetic` exercises `NUMERIC`, `BELOW_LIMIT`, `NOT_DETECTED`, `QUALITATIVE`, and `OTHER` with unmapped synthetic labels. Decimal strings, qualifiers, and quoted text are preserved.
 
 For a large panel:
 
@@ -79,7 +82,7 @@ The CLI creates HTML and CSV only; PDF is produced by the browser. The HTML repo
 1. Sign in as **Customer Manager** for sample's company.
 2. Open **Samples**, choose sample, then **+ Receive report**. Sample is preselected; verify it against report and custody history.
 3. Copy report metadata from HTML/PDF:
-   - **Laboratory:** `Synthetic Laboratory`.
+   - **Laboratory:** laboratory name printed in generated report.
    - **Report number:** generated identifier, such as `SYN-MANUAL-001`.
    - **Issue date:** date printed in report.
    - **Received at:** actual receipt time, distinct from collection and issue dates.
@@ -87,7 +90,7 @@ The CLI creates HTML and CSV only; PDF is produced by the browser. The HTML repo
 4. Leave **Related report** unlinked for this independent original. For linked reports, select earlier report by its readable report number/lab/date/kind choice; do not enter a UUID or printed report number as an ID. Linked report requires a relationship reason.
 5. Upload PDF as original report file. Review entire file before checking company-only declaration. Do not include another company's information.
 6. In sample-specific sections, verify preselected registered sample. Copy printed sample code, seal code, and laboratory sample reference exactly; do not invent missing identifiers.
-7. Enter a section reference such as `Results table`. Generated rows also carry individual `Synthetic row N` references.
+7. Enter a section reference such as `Results table`. Generated rows carry their own section/table/item references.
 8. Choose CSV import before the results table and select `results.csv`.
 9. Preview rows. Check row count, exact numeric strings, original result text and qualifiers. Resolve validation errors before continuing.
 10. Add previewed rows, then save report evidence.
@@ -99,13 +102,13 @@ One CSV import belongs to the selected report section only. This generator repre
 1. Open saved report and download original if needed.
 2. Click **Review and confirm**.
 3. Check sample identity against the registered sample and custody history; check every transcribed result against original file.
-4. Select verified sample and identity basis. **SAMPLE_CODE** works when printed sample code matches and any printed seal code also agrees.
+4. Select verified sample. Compare printed and registered identifiers; review suggested identity basis. **SAMPLE_CODE** works when printed sample code matches and any printed seal code also agrees. Leading/trailing whitespace is ignored; real contradictions require corrected evidence, not a different basis.
 5. Check identity and transcription attestations, then click **Confirm checked record**.
 6. Reopen the sample or original procurement source lot to review linked confirmed results.
 
 `LAB_REFERENCE` is not an arbitrary alternative: it requires matching persisted dispatch/acknowledgement laboratory name, sample reference and supporting evidence reference. Merely passing `--lab-sample-reference` does not create that evidence.
 
-Confirmation means identity/transcription were checked. It does not mean PASS or legal compliance. Assessment remains **NOT_ASSESSED / insufficient evidence**; stock and HOLD state remain unchanged.
+Confirmation means identity/transcription were checked, not PASS or legal compliance. Server may provide a VN numeric baseline comparison where published limits and mapped results exist; otherwise assessment remains **NOT_ASSESSED**. Browser never substitutes hardcoded limits. Stock and HOLD state remain unchanged. Rejected confirmations show errors beside the submit action inside the dialog; correct rejected inputs before retrying. An uncertain outcome retains the exact original request for replay.
 
 ## Relationship reason: when to use it
 
@@ -125,7 +128,7 @@ This generator always prints `FINAL` and does not generate amendment/supplement/
 
 ## Troubleshooting
 
-- **Output directory already exists:** use a fresh `--out-dir`; existing files are not overwritten.
+- **Output directory already exists:** repeat runs overwrite generated files by default; remove `--no-overwrite` only if replacing those files is intended, or choose a fresh directory.
 - **Sample code rejected by CLI:** provide a nonblank value.
 - **Row count rejected:** use an integer from `1` to `10000`.
 - **Report stays unresolved:** compare printed sample/seal identifiers with the selected sample. Wrong or missing identity must not be guessed. Preserve the original; use verified evidence or a linked correction as applicable.

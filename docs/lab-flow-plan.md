@@ -1,10 +1,14 @@
 # External laboratory workflow plan
 
-Status: sample collection/dispatch, immutable laboratory report intake/results, confirmation, linked corrections/supplements/retests, and the working web UI are implemented. Market assessment remains `NOT_ASSESSED` pending the policy prerequisites in section 9; no automatic HOLD or stock changes are authorized.
+Status: sample collection/dispatch, immutable laboratory report intake/results, confirmation, linked corrections/supplements/retests, and the working web UI are implemented. Confirmed reports can show a server-computed VN numeric baseline comparison against published Catalog limits. This is not the full decision-time legal assessment described in section 5; approved applicability, interpretation, and coverage rules remain necessary. No automatic HOLD or stock changes are authorized.
 
 Implementation contract: [Samples and laboratory API](sample-api.md#laboratory-report-routes). Capture migration `20261020000000_ExternalLaboratoryWorkflow` installs company-scoped report evidence and append-only confirmation guards. This is not evidence that the migration is installed on a shared database.
 
 Verification used isolated PostgreSQL and the actual cookie-authenticated API/browser surface: pre-arrival collection with zero stock, separate dispatch/acknowledgement, original-file upload/download, exact CSV/TSV preview and row validation, confirmation, source-lot results, supplementary history, Export Staff reads, and cross-company/Purchasing Staff report denial. Desktop and mobile report review were inspected. Clearing either required result text field was also exercised: submission shows validation without uploading a report. Focused sample/lab regressions passed 16 tests; the web suite passed 98 tests. Full backend run passed 295 of 297; unrelated existing administrator-demotion race and stale processing-output-code test expectations failed.
+
+Confirmation UI now shows printed-versus-registered identity checks and submission errors inside the dialog. Leading/trailing whitespace is ignored during identity comparison without rewriting legacy evidence. Browser smoke verification used live read-only report/sample data and an intercepted confirmation rejection; no report was submitted to shared Supabase. Mobile inspection at 390 px confirmed dialog scrolling, visible rejection feedback, and no whole-page horizontal overflow. Backend success/immutability regressions use isolated PostgreSQL.
+
+Capture migration `20261020120000_TrimLegacyLabIdentityComparisons` updates the database confirmation guard to use the same whitespace comparison as the API. Without this upgrade, padded legacy evidence can still fail when its confirmed association is inserted, even after restarting the updated API. Shared-database application requires explicit approval.
 
 ## 1. Purpose and scope
 

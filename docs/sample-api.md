@@ -175,11 +175,11 @@ python3 tools/generate_synthetic_lab_report.py \
   --out-dir tools/mock_lab_reports/report-001
 ```
 
-`--out-dir` is optional; omitting it writes to `tools/mock_lab_reports` beside the script. The output directory must not already exist, and the generator refuses repeat runs there to prevent overwriting. Use a fresh subdirectory such as `tools/mock_lab_reports/report-001` for each explicit run.
+`--out-dir` is optional; omitting it writes to `tools/mock_lab_reports` beside the script. Repeat runs overwrite `report.html` and `results.csv`; pass `--no-overwrite` to reject an existing output directory.
 
-It creates a new output directory only, with `report.html` and matching `results.csv`; default is 5 rows, `--rows` accepts 1–10000. Import `results.csv` in the normal result-row CSV importer. Open `report.html` in a browser and use Print → Save as PDF if a PDF is useful.
+Default output is a realistic-looking 14-substance synthetic panel with catalog codes, CAS labels, methods, and reporting limits. `--rows` accepts 1–10000; `--scenario synthetic` exercises all five supported result kinds. Other scenarios are `compliant` (default), `vn-pass-export-fail`, and `vn-exceed`. These names select fictional measurements, not legal verdicts. Import matching `results.csv`; open `report.html` in a browser and Print → Save as PDF if needed.
 
-Every generated value is synthetic, visibly marked as test data, and is not official laboratory evidence. Never use it as a real report or for compliance decisions. Report kind is `FINAL`; rows exercise all five supported result kinds and preserve exact decimal strings. No legal limit or pass/fail comparison is applied.
+Every generated value is synthetic, visibly marked as test data, and is not official laboratory evidence. Never use it as a real report or for compliance decisions. Report kind is `FINAL`; no legal limit or pass/fail comparison is applied by the generator.
 
 This standalone generator creates no report relationship: `relatedReportId` and `relationshipReason` do not apply to its unlinked `FINAL` output. For actual intake, amendments, supplements, or retests, relationship reason explains why new report links to its original; it does not replace earlier evidence or resolve conflicts.
 
@@ -204,13 +204,17 @@ This standalone generator creates no report relationship: `relatedReportId` and 
 }
 ```
 
-Each result set must occur exactly once. All nonblank printed sample and seal identifiers must agree with selected registered sample: one matching identifier does not override another mismatching identifier.
+Each result set must occur exactly once. All nonblank printed sample and seal identifiers must agree with selected registered sample: one matching identifier does not override another mismatching identifier. Comparisons ignore leading/trailing whitespace but remain case-sensitive; legacy evidence is not rewritten. New intake trims sample/seal and laboratory-reference fields before storing them.
 
-- `SAMPLE_CODE`: exact printed sample-code match.
-- `SEAL_CODE`: exact printed seal-code match.
+- `SAMPLE_CODE`: printed sample-code match after trimming.
+- `SEAL_CODE`: printed seal-code match after trimming.
 - `LAB_REFERENCE`: report laboratory sample reference matches a persisted `LAB_DISPATCH` or `LAB_ACKNOWLEDGEMENT` for selected sample and same laboratory; submitted nonblank `evidenceRef` must match that handover's supporting evidence. An arbitrary free-text reference is not enough.
 
 Missing/contradictory identity returns 409 `REPORT_IDENTITY_UNRESOLVED`; it cannot auto-confirm by farmer/plot/lot similarity. If original printed identity is wrong, preserve unresolved original and append linked corrected evidence. Confirmation records authenticated actor/time, check attestations and immutable associations; it never edits original proposed IDs/results. New operation against an already confirmed report returns 409 `REPORT_ALREADY_CONFIRMED`; identical replay returns original response with 200.
+
+The web confirmation dialog compares printed and registered identifiers and proposes a basis from matching sample code, then matching seal code, then an available laboratory reference. Staff still verify evidence and explicitly attest identity/transcription. Rejections appear beside the submit action inside the open dialog. Definite rejections permit correction; uncertain failures retain the exact request for replay.
+
+Legacy padded identities also require Capture migration `20261020120000_TrimLegacyLabIdentityComparisons`. It aligns the database association guard with .NET whitespace trimming for sample/seal, laboratory-reference, and supporting-evidence comparisons. Original report/sample evidence and immutability triggers remain unchanged. A backend restart alone does not update this guard; apply the migration through the approved migration-owner workflow, never routine runtime startup.
 
 ### Detail shape and meaning
 
@@ -223,9 +227,11 @@ Missing/contradictory identity returns 409 `REPORT_IDENTITY_UNRESOLVED`; it cann
 - `status`: `UNRESOLVED`, `PENDING_REVIEW`, or `CONFIRMED`. Initial pending review requires all proposed samples to match printed identity without contradictory identifiers. Only explicit successful confirmation yields confirmed.
 - `resultSets`: `id`, original proposed `sampleId`, separate `confirmedSampleId`, **confirmed-only** `sourceLotId`, printed `laboratorySampleReference`, `statedSampleCode`, `statedSealCode`, `sectionReference`, `identityStatus` (`UNRESOLVED`, `MATCHED`, `CONFIRMED`), and `results`. Each result adds server `id` to its intake row fields.
 - `relatedReports`: child `{id, reportKind, relationshipReason}` links; parent remains `relatedReportId`.
-- `assessmentStatus: "NOT_ASSESSED"`, `suggestedMarketCode: "VN"`, and reasons `LEGAL_DATA_NOT_APPROVED`, `INTERPRETATION_POLICY_NOT_APPROVED`, `COVERAGE_POLICY_NOT_APPROVED`.
+- `assessmentStatus`: `NOT_ASSESSED`, `WITHIN_ASSESSED_LIMITS`, `EXCEEDS_LIMIT`, `INSUFFICIENT_EVIDENCE`, or `NO_MRL_IN_VN`; `suggestedMarketCode: "VN"` and per-substance `assessmentReasons`.
 
-No assessment calculation/write route exists until applicable legal data, interpretation and coverage policy are approved. Confirmation is a transcription/identity check, not PASS, legal compliance or finished-product certification. Late reports follow stable procurement sample/source identity, even after receiving/processing/exhaustion. Stock and existing HOLD decisions remain unchanged.
+Confirmed reports with mapped substances and published VN limits receive a server-computed numeric baseline comparison. Unconfirmed reports, missing published limits, or wholly unmapped panels remain `NOT_ASSESSED`. Numeric and below-limit results use exact decimal comparisons; ND requires a usable LOQ/LOD. Missing numeric limits are reported as `NO_MRL_IN_VN`, never zero or unrestricted. Exceedance takes precedence over insufficient evidence, then within-assessed findings. This read-time comparison currently uses the latest published VN version per substance/commodity; it is not a persisted, decision-time legal assessment or finished-product certification. The web displays server status/reasons without embedded statutory values or browser-side compliance calculations.
+
+Confirmation is a transcription/identity check, not PASS or legal compliance. Late reports follow stable procurement sample/source identity, even after receiving/processing/exhaustion. Stock and existing HOLD decisions remain unchanged.
 
 Both lab writes reuse Capture's transaction/event/offline operation convention. Successful intake returns 201 plus `Location`; confirmation returns 200. Identical device/operation/content replay returns 200; changed content returns 409 `OPERATION_CONFLICT`. Invalid syntax/decimal strings/attestations return 400; unavailable sample/related report/catalog references return 409 (`SAMPLE_NOT_FOUND`, `RELATED_REPORT_NOT_FOUND`, `SUBSTANCE_NOT_FOUND`); scoped GET/file/confirmation for absent/foreign report returns 404 `LAB_REPORT_NOT_FOUND`. Unauthorized roles receive 403. No report evidence can be obtained through an unscoped URL.
 
