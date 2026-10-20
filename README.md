@@ -73,6 +73,7 @@ npm run build
 - [Development accounts and demo Ledger data](docs/development-accounts.md)
 - [Farmer API](docs/farmer-api.md) · [Procurement API](docs/procurement-api.md)
 - [MRL CSV/Excel and YouTrack reference import](docs/mrl-file-import.md): substance setup, Vietnam draft limits, source provenance, and import safeguards
+- [Container preparation API and integration boundary](docs/container-api.md) · [Loading/CLOSE implementation plan](docs/container-loading-implementation-plan.md)
 - [Unified lot-code guide](docs/unified-lot-code-guide.md)
 - [Laboratory workflow guide](docs/lab-flow-guide.md) · [Samples and external laboratory API](docs/sample-api.md#laboratory-report-routes) · [Laboratory workflow policy boundaries](docs/lab-flow-plan.md)
 - [PostgreSQL diagrams and data dictionary](docs/dbdiagram/README.md)

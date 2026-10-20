@@ -85,6 +85,18 @@ public sealed class LedgerService(IConfiguration configuration, IHttpContextAcce
         var value = await ExecuteAsync(connection, null, $"SELECT {routine}($1,$2,$3)::text", ct, actor, action, payload);
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
+    public async Task<JsonElement> ContainerAsync(string action, JsonObject payload, CancellationToken ct = default)
+    {
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        try
+        {
+            var value = await ExecuteAsync(connection, null, "SELECT ledger.container_action($1,$2,$3)::text", ct, actor, action, payload);
+            return JsonSerializer.Deserialize<JsonElement>((string)value!);
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42883")
+        { throw new LedgerException(503, "Container preparation is not available on this deployment."); }
+    }
     public async Task<bool> CanAccessEvidenceAsync(Guid evidenceId, Guid ownerId, Guid facilityId, CancellationToken ct = default)
     {
         await using var connection = await OpenAsync(ct);

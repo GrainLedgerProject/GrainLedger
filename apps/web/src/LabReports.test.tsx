@@ -50,6 +50,7 @@ it('selects readable report label and submits selected report ID', async () => {
     if (String(input) === '/api/auth/csrf') return new Response(JSON.stringify({ token: 'csrf' }), { headers: { 'Content-Type': 'application/json' } });
     if (String(input) === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
     if (String(input) === '/api/lab-reports' && init?.method === 'POST') { submitted = JSON.parse(String(init.body)); return new Response(JSON.stringify({ id: 'new-report' }), { headers: { 'Content-Type': 'application/json' } }); }
+    if (String(input) === '/api/lab-reports/new-report') return new Response(JSON.stringify({ ...report, id: 'new-report', reportNumber: 'R-002', resultSets: [], assessmentStatus: 'NOT_ASSESSED' }), { headers: { 'Content-Type': 'application/json' } });
     return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
   });
   render(<LabReports canWrite />);
@@ -71,6 +72,7 @@ it('selects readable report label and submits selected report ID', async () => {
   fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
   await waitFor(() => expect(submitted?.payload.relatedReportId).toBe('report-a'));
   expect(submitted?.payload.relationshipReason).toBe('Corrected transcription');
+  expect(await screen.findByRole('heading', { name: 'R-002' })).toBeVisible();
 });
 
 it('clears optional relation and reason when link checkbox turns off', async () => {
