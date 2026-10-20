@@ -44,13 +44,14 @@ public sealed record LabReportResponse(Guid Id, Guid CompanyId, string Laborator
     IReadOnlyList<LabRelatedReportResponse> RelatedReports, string AssessmentStatus, string SuggestedMarketCode,
     IReadOnlyList<string> AssessmentReasons);
 public sealed record LabReportListResponse(IReadOnlyList<LabReportResponse> Items, int Page, int PageSize, bool HasMore);
+internal sealed record VnMrlLimitRow(Guid SubstanceId, string SubstanceCode, string CommodityCode, decimal LimitValue, string Unit);
+internal sealed record SubstanceCodeRow(Guid Id, string Code);
 
 public static class LabReportEndpoints
 {
     private const int MaxFileBytes = 10 * 1024 * 1024;
     private static readonly Regex DecimalPattern = new(@"\A[0-9]{1,12}(\.[0-9]{1,12})?\z", RegexOptions.CultureInvariant);
     private static readonly string[] AssessmentReasons = ["LEGAL_DATA_NOT_APPROVED", "INTERPRETATION_POLICY_NOT_APPROVED", "COVERAGE_POLICY_NOT_APPROVED"];
-
     public static IEndpointRouteBuilder MapLabReportEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/lab-reports").RequireAuthorization()
@@ -311,6 +312,29 @@ public static class LabReportEndpoints
         var samples = await db.Samples.AsNoTracking().Where(x => x.CompanyId == company && sampleIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
         var related = await db.LabReports.AsNoTracking().Where(x => x.CompanyId == company && x.RelatedReportId != null && ids.Contains(x.RelatedReportId.Value))
             .Select(x => new { ParentId = x.RelatedReportId!.Value, x.Id, x.ReportKind, x.RelationshipReason }).ToListAsync(ct);
+        var mappedIds = rows.Where(x => x.SubstanceId.HasValue).Select(x => x.SubstanceId!.Value).Distinct().ToArray();
+        var substanceCodes = mappedIds.Length == 0
+            ? new Dictionary<Guid, string>()
+            : (await db.Database.SqlQuery<SubstanceCodeRow>($"SELECT id AS \"Id\", code AS \"Code\" FROM catalog.active_substances WHERE id = ANY({mappedIds})").ToListAsync(ct))
+                .ToDictionary(x => x.Id, x => x.Code);
+        var vnLimits = await db.Database.SqlQueryRaw<VnMrlLimitRow>(
+            """
+            SELECT DISTINCT ON (l.substance_id, c.code)
+                l.substance_id AS "SubstanceId",
+                s.code AS "SubstanceCode",
+                c.code AS "CommodityCode",
+                l.limit_value AS "LimitValue",
+                l.unit AS "Unit"
+            FROM catalog.mrl_limits l
+            JOIN catalog.mrl_versions v ON v.id = l.mrl_version_id
+            JOIN catalog.markets m ON m.id = v.market_id
+            JOIN catalog.commodities c ON c.id = v.commodity_id
+            JOIN catalog.active_substances s ON s.id = l.substance_id
+            WHERE UPPER(m.code) = 'VN' AND v.status = 'PUBLISHED' AND NOT c.is_archived
+            ORDER BY l.substance_id, c.code, v.version_no DESC
+            """).ToListAsync(ct);
+        var hasPublishedVnTable = vnLimits.Count > 0;
+        var vnLimitsBySubstance = vnLimits.ToLookup(x => x.SubstanceId);
         var rowLookup = rows.ToLookup(x => x.ResultSetId);
         var setLookup = sets.ToLookup(x => x.ReportId);
         var relatedLookup = related.ToLookup(x => x.ParentId);
@@ -318,6 +342,8 @@ public static class LabReportEndpoints
         {
             var r = reports[id];
             confirmations.TryGetValue(id, out var confirmation);
+            var reportRows = setLookup[id].SelectMany(s => rowLookup[s.Id]).ToArray();
+            var (assessmentStatus, assessmentReasons) = AssessVn(confirmation is not null, reportRows, substanceCodes, vnLimitsBySubstance, hasPublishedVnTable);
             var resultSets = setLookup[id].Select(s =>
             {
                 associations.TryGetValue(s.Id, out var association);
@@ -333,8 +359,110 @@ public static class LabReportEndpoints
                 r.RelatedReportId, r.RelationshipReason, r.LaboratoryConclusion, r.StatedStandard, r.FileName, r.ContentType, r.FileSize,
                 r.Sha256, r.RecordedBy, r.CapturedAt, r.RecordedAt, confirmation is not null ? "CONFIRMED" : resultSets.All(x => x.IdentityStatus == "MATCHED") ? "PENDING_REVIEW" : "UNRESOLVED",
                 confirmation?.ConfirmedBy, confirmation?.ConfirmedAt, resultSets, relatedLookup[id].Select(x => new LabRelatedReportResponse(x.Id, x.ReportKind, x.RelationshipReason)).ToArray(),
-                "NOT_ASSESSED", "VN", AssessmentReasons);
+                assessmentStatus, "VN", assessmentReasons);
         }).ToArray();
+    }
+
+    private static (string Status, IReadOnlyList<string> Reasons) AssessVn(
+        bool confirmed,
+        IReadOnlyList<LabResult> rows,
+        IReadOnlyDictionary<Guid, string> substanceCodes,
+        ILookup<Guid, VnMrlLimitRow> vnLimitsBySubstance,
+        bool hasPublishedVnTable)
+    {
+        if (!confirmed || !hasPublishedVnTable || rows.All(x => x.SubstanceId is null))
+            return ("NOT_ASSESSED", AssessmentReasons);
+        var anyExceeds = false;
+        var anyInsufficient = false;
+        var anyWithin = false;
+        var reasons = new List<string>();
+        foreach (var row in rows)
+        {
+            if (row.SubstanceId is null)
+            {
+                anyInsufficient = true;
+                reasons.Add($"{row.TestLabel}: UNMAPPED_SUBSTANCE");
+                continue;
+            }
+            var subId = row.SubstanceId.Value;
+            var code = substanceCodes.GetValueOrDefault(subId, subId.ToString());
+            var limits = vnLimitsBySubstance[subId].ToList();
+            if (limits.Count == 0)
+            {
+                reasons.Add($"{code}: NO_MRL_IN_VN (no numeric limit in VN table)");
+                continue;
+            }
+            foreach (var lim in limits)
+            {
+                if (row.ResultKind == "NUMERIC" &&
+                    string.Equals(row.Unit, "mg/kg", StringComparison.OrdinalIgnoreCase) &&
+                    decimal.TryParse(row.NumericValue, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var val))
+                {
+                    if (val > lim.LimitValue)
+                    {
+                        anyExceeds = true;
+                        reasons.Add($"{code}: EXCEEDS_LIMIT ({row.NumericValue} mg/kg > VN {lim.CommodityCode} {lim.LimitValue} mg/kg)");
+                    }
+                    else
+                    {
+                        anyWithin = true;
+                        reasons.Add($"{code}: WITHIN_LIMIT ({row.NumericValue} mg/kg <= VN {lim.CommodityCode} {lim.LimitValue} mg/kg)");
+                    }
+                }
+                else if (row.ResultKind == "BELOW_LIMIT" &&
+                    string.Equals(row.Unit, "mg/kg", StringComparison.OrdinalIgnoreCase) &&
+                    decimal.TryParse(row.NumericValue, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var threshold))
+                {
+                    if (threshold <= lim.LimitValue)
+                    {
+                        anyWithin = true;
+                        reasons.Add($"{code}: WITHIN_LIMIT (<{row.NumericValue} mg/kg <= VN {lim.CommodityCode} {lim.LimitValue} mg/kg)");
+                    }
+                    else
+                    {
+                        anyInsufficient = true;
+                        reasons.Add($"{code}: INSUFFICIENT_EVIDENCE (reporting limit <{row.NumericValue} mg/kg > VN {lim.CommodityCode} {lim.LimitValue} mg/kg)");
+                    }
+                }
+                else if (row.ResultKind == "NOT_DETECTED")
+                {
+                    var boundText = !string.IsNullOrWhiteSpace(row.Loq) ? row.Loq : row.Lod;
+                    if ((string.IsNullOrWhiteSpace(row.Unit) || string.Equals(row.Unit, "mg/kg", StringComparison.OrdinalIgnoreCase)) &&
+                        !string.IsNullOrWhiteSpace(boundText) &&
+                        decimal.TryParse(boundText, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var bound))
+                    {
+                        if (bound <= lim.LimitValue)
+                        {
+                            anyWithin = true;
+                            reasons.Add($"{code}: WITHIN_LIMIT (ND with LOQ/LOD {boundText} mg/kg <= VN {lim.CommodityCode} {lim.LimitValue} mg/kg)");
+                        }
+                        else
+                        {
+                            anyInsufficient = true;
+                            reasons.Add($"{code}: INSUFFICIENT_EVIDENCE (ND with LOQ/LOD {boundText} mg/kg > VN {lim.CommodityCode} {lim.LimitValue} mg/kg)");
+                        }
+                    }
+                    else
+                    {
+                        anyInsufficient = true;
+                        reasons.Add($"{code}: INSUFFICIENT_EVIDENCE (ND requires LOQ/LOD in mg/kg <= VN {lim.CommodityCode} {lim.LimitValue} mg/kg)");
+                    }
+                }
+                else
+                {
+                    anyInsufficient = true;
+                    reasons.Add($"{code}: INSUFFICIENT_EVIDENCE (unsupported qualifier {row.ResultKind} or unit {row.Unit ?? "none"})");
+                }
+            }
+        }
+        var status = anyExceeds
+            ? "EXCEEDS_LIMIT"
+            : anyInsufficient
+                ? "INSUFFICIENT_EVIDENCE"
+                : anyWithin
+                    ? "WITHIN_ASSESSED_LIMITS"
+                    : "NO_MRL_IN_VN";
+        return (status, reasons);
     }
 
     private static bool Contradicts(LabResultSet set, Sample sample) =>

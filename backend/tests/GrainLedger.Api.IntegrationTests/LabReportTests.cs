@@ -446,6 +446,76 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
             ConfirmRequest(ownerDetail, foreignSample), HttpStatusCode.Conflict);
     }
 
+    [Fact]
+    public async Task Confirmed_report_assesses_against_published_VN_MRL_limits_and_flags_unregulated_or_insufficient_rows()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var unit = await s.Admin.PostAsJsonAsync("/api/measurement-units", new
+        { code = "MG/KG", name = "Milligram per kilogram", quantityKind = "RESIDUE_CONCENTRATION" });
+        Assert.True(unit.StatusCode is HttpStatusCode.Created or HttpStatusCode.Conflict);
+        var marketResp = await s.Admin.PostAsJsonAsync("/api/markets", new { code = "VN", name = "Vietnam" });
+        var vnMarketId = (await marketResp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var commResp = await s.Admin.PostAsJsonAsync("/api/commodities", new { code = "RICE", name = "Rice" });
+        var riceCommodityId = (await commResp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var cpfResp = await s.Admin.PostAsJsonAsync("/api/active-substances", new { code = "CPF006", name = "Chlorpyrifos-ethyl" });
+        var cpfId = (await cpfResp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var tczResp = await s.Admin.PostAsJsonAsync("/api/active-substances", new { code = "TCZ001", name = "Tricyclazole" });
+        var tczId = (await tczResp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var importResp = await s.Admin.PostAsJsonAsync("/api/mrl-versions/import", new
+        {
+            marketId = vnMarketId, commodityId = riceCommodityId,
+            effectiveFrom = "2017-07-01T00:00:00Z", effectiveTo = (string?)null,
+            sourceRef = "Thông tư 50/2016/TT-BYT",
+            limits = new[] { new { substanceCode = "CPF006", limitValue = "0.5", unit = "mg/kg" } }
+        });
+        Assert.Equal(HttpStatusCode.Created, importResp.StatusCode);
+        var versionId = (await importResp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var publishReq = new HttpRequestMessage(HttpMethod.Post, $"/api/mrl-versions/{versionId}/publish");
+        publishReq.Headers.IfMatch.Add(importResp.Headers.ETag!);
+        Assert.Equal(HttpStatusCode.OK, (await s.Admin.SendAsync(publishReq)).StatusCode);
+
+        object MappedRow(Guid subId, string label, string text, string kind, string? num, string? loq = "0.01") => new
+        {
+            testLabel = label, substanceId = (Guid?)subId, originalResultText = text, resultKind = kind,
+            numericValue = num, unit = "mg/kg", lod = "0.005", loq, method = "LC-MS/MS", uncertainty = (string?)null, reference = "p.1"
+        };
+
+        // 1. Within VN limit + unregulated TCZ001 -> WITHIN_ASSESSED_LIMITS
+        var withinReq = ReportRequest([ResultSet(sample, [
+            MappedRow(cpfId, "Chlorpyrifos", "0.20", "NUMERIC", "0.20"),
+            MappedRow(tczId, "Tricyclazole", "0.05", "NUMERIC", "0.05")
+        ])]);
+        var withinId = EntityId(withinReq);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", withinReq, HttpStatusCode.Created);
+        var withinDraft = await GetAsync(s.Customer, $"/api/lab-reports/{withinId}");
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{withinId}/confirm", ConfirmRequest(withinDraft, sample), HttpStatusCode.OK);
+        var withinConfirmed = await GetAsync(s.Customer, $"/api/lab-reports/{withinId}");
+        Assert.Equal("WITHIN_ASSESSED_LIMITS", withinConfirmed.GetProperty("assessmentStatus").GetString());
+        var withinReasons = withinConfirmed.GetProperty("assessmentReasons").EnumerateArray().Select(x => x.GetString()!).ToArray();
+        Assert.Contains(withinReasons, r => r.Contains("CPF006: WITHIN_LIMIT"));
+        Assert.Contains(withinReasons, r => r.Contains("TCZ001: NO_MRL_IN_VN"));
+
+        // 2. Exceeds VN limit -> EXCEEDS_LIMIT
+        var exceedsReq = ReportRequest([ResultSet(sample, [MappedRow(cpfId, "Chlorpyrifos", "0.80", "NUMERIC", "0.80")])]);
+        var exceedsId = EntityId(exceedsReq);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", exceedsReq, HttpStatusCode.Created);
+        var exceedsDraft = await GetAsync(s.Customer, $"/api/lab-reports/{exceedsId}");
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{exceedsId}/confirm", ConfirmRequest(exceedsDraft, sample), HttpStatusCode.OK);
+        var exceedsConfirmed = await GetAsync(s.Customer, $"/api/lab-reports/{exceedsId}");
+        Assert.Equal("EXCEEDS_LIMIT", exceedsConfirmed.GetProperty("assessmentStatus").GetString());
+
+        // 3. Reporting limit <0.60 > 0.50 -> INSUFFICIENT_EVIDENCE
+        var insuffReq = ReportRequest([ResultSet(sample, [MappedRow(cpfId, "Chlorpyrifos", "<0.60", "BELOW_LIMIT", "0.60")])]);
+        var insuffId = EntityId(insuffReq);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", insuffReq, HttpStatusCode.Created);
+        var insuffDraft = await GetAsync(s.Customer, $"/api/lab-reports/{insuffId}");
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{insuffId}/confirm", ConfirmRequest(insuffDraft, sample), HttpStatusCode.OK);
+        var insuffConfirmed = await GetAsync(s.Customer, $"/api/lab-reports/{insuffId}");
+        Assert.Equal("INSUFFICIENT_EVIDENCE", insuffConfirmed.GetProperty("assessmentStatus").GetString());
+    }
+
     private static async Task<SampleIdentity> SampleAsync(LedgerScenario s, JsonElement? receipt = null, HttpClient? purchaser = null)
     {
         var procurement = receipt ?? await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), ["100"]));
