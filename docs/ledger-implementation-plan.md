@@ -1,6 +1,6 @@
 # Ledger implementation and verification
 
-Status: Procurement registers source expectation without creating usable Ledger stock; arrival becomes stock only after assigned MillOperator exact-match confirmation or assigned MillManager evidence-backed shortage approval. Capture route contract is in [procurement-api.md](procurement-api.md). Existing historical source evidence and stock are grandfathered and unchanged; receiving migration applies to new workflow records and does not retroactively freeze or reinterpret legacy stock. Shared-database migrations, seeds and schema/role/grant changes require explicit database-owner approval.
+Status: Receiving-loss threshold implemented. Procurement registers source expectation without creating usable Ledger stock; exact-match or within-threshold operator acceptance posts measured arrival mass, and above-threshold/surplus cases require assigned MillManager evidence-backed resolution. Capture route contract is in [procurement-api.md](procurement-api.md). Historical source evidence and stock are grandfathered unchanged; receiving migrations do not retroactively freeze, reinterpret or assign thresholds to legacy records. Shared-database migrations, seeds and schema/role/grant changes require explicit database-owner approval.
 
 ## 1. Scope and sources
 
@@ -9,8 +9,8 @@ Implemented baseline follows source documents listed below. Source diagrams info
 Confirmed decisions:
 - Deliver usable ledger with real prerequisites and basic working UI.
 - Adopt qualified stage matrix as implementation baseline, not factory approval.
-- Keep operational tolerance unconfigured until confirmed; synthetic values only for clearly labeled tests/demo.
-- One procurement represents one complete arrival; use separate procurement per load. No truck model, partial arrivals, customer settlement, tolerance, or surplus acceptance.
+- Receiving loss uses a default 2% threshold with optional company overrides; configuration changes require authorized Administrator and append-only history.
+- One procurement represents one complete arrival; use separate procurement per load. No truck model, partial arrivals, customer settlement or surplus acceptance.
 - Give Mill Operators task-scoped reads in assigned facilities, never customer-wide access.
 - Fail closed where approved business rules or API contracts are absent.
 - Preserve accepted deferred reservation-correction contract: correction `RELEASE` requires correction correlation but no movement linkage; only `CONSUME` and `REVERSE_CONSUME` require movement linkage. Reservation implementation remains excluded from this milestone.
@@ -62,10 +62,11 @@ Catalog and Capture lists and large Ledger queues use bounded server-side search
 
 Procurement contract uses `POST /api/procurements` for source registration, `GET /api/ledger/receiving-tasks?facilityId={id}&page=1&pageSize=25` and `GET /api/ledger/receiving/{id}` for assigned-facility task/detail, and `POST /api/ledger/receiving/{id}/measurements` and `/reviews` for operator arrival and manager decisions. Exact DTO fields, status names, and migration marker are in [procurement API](procurement-api.md).
 
-- One procurement is one complete arrival, with separate procurement per load and no truck model. Operator submits a complete actual-mass set for every line. Exact normalized match confirms arrival and posts actual mass; any mismatch remains pending review with no stock.
-- Manager review requires reason and evidence scoped to procurement owner and assigned facility. `APPROVE_SHORTAGE` is valid only if every line is at or below expected and at least one is short; it posts actual mass only. `REQUEST_REMEASUREMENT` appends request/observations; `KEEP_BLOCKED` leaves unexplained shortage/surplus without stock. No tolerance or surplus acceptance.
+- One procurement is one complete arrival, with separate procurement per load and no truck model. Operator submits a complete actual-mass set for every line. Exact normalized match confirms arrival and posts actual mass. A complete positive set with at least one shortage and every line within the snapshotted company threshold posts actual mass as `RECEIVED_WITHIN_TOLERANCE`; any surplus or over-threshold shortage remains pending review with no stock.
+- Manager review requires reason and evidence scoped to procurement owner and assigned facility. `APPROVE_SHORTAGE` is valid only if every line is at or below expected and at least one is short; it posts actual mass only. `REQUEST_REMEASUREMENT` appends request/observations; `KEEP_BLOCKED` leaves unexplained shortage/surplus without stock. Surplus acceptance remains unsupported.
 - Persist exact decimal strings and normalize supported catalog mass units to positive `numeric(20,6)` kg without rounding. Preserve immutable source expectation separately from actual measurements and append-only measurement/review history.
 - Registration, complete measurements, manager decision and accepted stock posting use one shared transaction and Ledger advisory lock `714928352` at `READ COMMITTED`; accepted actual mass and receiving transition are atomic. `receivingVersion` begins at 0 and increments on mutation; stale version/set conflicts. Same operation ID, canonical payload and actor replays saved result; changed payload conflicts.
+- Receiving thresholds: system default starts at 2%; authorized Administrators can set company overrides. Exact decimal-string, versioning, own-company privacy, immutable config-history and per-measurement applied-snapshot contracts are documented in [procurement API](procurement-api.md). Threshold changes affect new measurement submissions only; do not recompute pending decisions or old snapshots.
 
 ### Operations, variance, units and lineage
 
@@ -107,15 +108,22 @@ Milling records positive fractions actually produced, not fabricated four output
 
 Required current-suite coverage: concurrency/overspend and atomic rollback; authorization and facility scope; idempotency/conflict; policy/compatibility fail closed; variance confirmation invalidation; exact lineage rounding; transfer identity; HOLD and processing-correction races; immutable evidence/history and one-time reversal; unit precision and procurement registration without stock; exact arrival, mismatch block, shortage approval, append-only remeasurement, unresolved discrepancy, stale version/set, scoped evidence, and runtime direct-mutation denial. Integration tests use PostgreSQL/Testcontainers, not in-memory DB.
 
-Historical synthetic workflow descriptions and earlier arrival/correction browser reports are historical only; they do not establish current receiving behavior or migration acceptance. Historical Capture rows with `receiving_workflow IS NULL` and existing Ledger stock remain grandfathered unchanged; migration does not retrofit workflow freezes.
+Historical synthetic workflow descriptions and earlier arrival/correction browser reports are historical only; they do not establish current receiving behavior or migration acceptance. Historical Capture rows with `receiving_workflow IS NULL` and existing Ledger stock remain grandfathered unchanged; threshold snapshots remain absent for pre-feature measurement sets.
 
-Earlier implementation owner reported completed checks; documentation owner did not rerun them. Historical results:
+Earlier implementation owner reported completed checks; those results remain historical:
 
 - Initial `dotnet build GrainLedger.slnx` succeeded; earlier `dotnet test GrainLedger.slnx --no-build`: 87 passed, 0 failed.
 - Earlier `npm test`: 14 passed; `npm run build` passed.
 - Earlier synthetic browser and cutover reports are historical only; they do not verify current physical receiving behavior or its migration.
 
-No current checks were run by documentation owner. Live Google consent, factory approval and real-stock pilot approval are not established by historical checks.
+Receiving-threshold implementation verification (isolated PostgreSQL, real HTTP/cookie sessions):
+
+- Backend build passed with existing NU1902/NU1903 Pkcs 10.0.0 and unread-access CS9113 warnings. Full `dotnet test GrainLedger.slnx --no-build`: 273 passed, 4 failed of 277. All 34 `Receiving*` cases passed, including migration, threshold concurrency/strict input, and inherited-column runtime denial. Three unrelated SampleTests fail because SeedSourceAsync commits event payload `{}` before procurement and provenance trigger rejects it. Identity reciprocal admin-demotion race returned 401 + 200 where existing test expects 409.
+- Web `npm test`: 87 passed across 17 files; `npm run build` passed.
+- Isolated browser: company A default 2%, 100 kg → 98 kg accepted with 98 kg stock; 100 kg → 97.5 kg awaited manager with zero stock. Administrator changed default 2% → 3% with append-only server actor/time/reason history and created company B 3% override. B accepted 100 kg → 97.5 kg with 97.5 kg stock and `COMPANY_OVERRIDE` revision; own-company read exposed 3% without broad Setup access. Restoring default 2% left earlier pending/accepted snapshots unchanged. Manager approved A's 97.5 kg shortage with reason and scoped evidence; actual mass posted, stored 2% snapshot and config remained unchanged.
+- Setup/manager browser layout at 375 px had no body overflow; tables used local horizontal overflow; browser errors empty. No shared database migration, seed or data-changing check was performed.
+
+Backend suite was not fully green. Shared database deployment not verified. Live Google consent, factory approval and real-stock pilot approval are not established by these checks.
 
 Useful commands:
 
@@ -132,9 +140,9 @@ Backend integration tests require Docker/Testcontainers. Browser test host is te
 
 | Area | Implemented behavior | Requirement to broaden |
 | --- | --- | --- |
-| Tolerance | No confirmed effective policy → no processing commit, even exact balance. Synthetic values only in test/demo. | Confirmed operation percentage/effective date/evidence. |
+| Tolerance | No confirmed effective processing policy → no processing commit, even exact balance. Synthetic values only in test/demo. | Confirmed operation percentage/effective date/evidence. |
 | Compatibility | No explicit compatible input-product rule → no blend. | Approved combinations/output identity. |
-| Receiving discrepancy | Exact match posts measured actual; manager shortage approval posts actual only; remeasurement appends; unexplained mismatch/surplus stays blocked without stock. | No tolerance, customer settlement, partial arrival, or surplus approval. |
+| Receiving discrepancy | Exact operator match or complete within-threshold set posts measured actual; over-threshold shortage/surplus stays pending for manager; manager shortage approval posts actual only; remeasurement appends. | No customer settlement, partial arrival or surplus approval. |
 | Byproduct dispatch/disposal | Outputs remain stock, no fabricated outbound posting or hiding in loss. | Approved dispatch/disposal workflow. |
 | HOLD release | No release action; response/isolation/read/correction do not clear it. | Explicit authority/evidence/audit/multi-HOLD rule. |
 | Receipt correction | No current correction endpoint; existing stock/source history remains unchanged. | Approved endpoint and reviewed provenance workflow. |

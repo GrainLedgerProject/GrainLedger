@@ -18,6 +18,7 @@ public sealed class SprayItem
     public Guid DeclarationId { get; set; }
     public string? ProductName { get; set; }
     public Guid? SubstanceId { get; set; }
-    public decimal Rate { get; set; }
-    public required string RateUnit { get; set; }
+    // Legacy values remain readable. New declarations do not collect application rate.
+    public decimal? Rate { get; set; }
+    public string? RateUnit { get; set; }
 }

@@ -4,7 +4,11 @@ import { LedgerOperations } from './LedgerOperations';
 import { LedgerReceiving } from './LedgerReceiving';
 import { LedgerSetup } from './LedgerSetup';
 import { LedgerStock } from './LedgerStock';
+<<<<<<< HEAD
 import { LedgerTraceability } from './LedgerTraceability';
+=======
+import { OwnReceivingThreshold } from './ReceivingThresholds';
+>>>>>>> dev
 
 export const ledgerSections = [
   { id: 'receiving', label: 'Receive stock', description: 'Procurement & mill arrivals', permissions: ['farms.read', 'farms.write', 'purchases.write', 'platform.configure', 'lots.receive', 'receiving.reconcile'] },
@@ -27,6 +31,7 @@ export function LedgerWorkspace({ user }: { user: User }) {
   }
   return <div className="ledger-workspace">
     <header className="page-heading"><span className="eyebrow">OPERATIONS</span><h1>Ledger</h1><p className="muted">Receive, find and move stock. Choose a task to get started.</p></header>
+    {['CustomerManager', 'PurchasingStaff', 'ExportStaff'].includes(user.role || '') && <OwnReceivingThreshold active />}
     <nav className="ledger-nav" aria-label="Ledger sections">{allowed.map(section => <button key={section.id} aria-label={section.label} aria-current={tab === section.id ? 'page' : undefined} aria-controls={`ledger-${section.id}`} onClick={() => selectSection(section.id)}><strong>{section.label}</strong><small>{section.description}</small></button>)}</nav>
     {allowed.map(section => <div key={section.id} id={`ledger-${section.id}`} hidden={tab !== section.id}>
       {(visited.includes(section.id) || tab === section.id) && (section.id === 'traceability' ? <LedgerTraceability user={user} active={tab === section.id} /> : section.id === 'inventory' ? <LedgerStock user={user} active={tab === section.id} /> : section.id === 'receiving' ? <LedgerReceiving user={user} active={tab === section.id} /> : section.id === 'operations' ? <LedgerOperations user={user} active={tab === section.id} /> : <LedgerSetup user={user} active={tab === section.id} />)}

@@ -1,35 +1,123 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from './api';
-import { Feedback, ListControls, Pagination, Panel, Table, useAction, type Page, type Row } from './ledger-ui';
+import { Feedback, ListControls, Pagination, Table, useAction, type Page, type Row } from './ledger-ui';
 
 const kinds = ['MASS', 'AREA', 'RESIDUE_CONCENTRATION', 'APPLICATION_RATE', 'FRACTION'];
+type CatalogKind = 'commodities' | 'measurement-units';
 type CatalogPage = Page<Row>;
-export function CatalogScreen({ active = true }: { active?: boolean }) {
+const emptyPage: CatalogPage = { items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false };
+
+export function CatalogScreen({ active = true, selectedKind }: { active?: boolean; selectedKind?: CatalogKind }) {
   const action = useAction();
   const requestId = useRef(0);
-  const [commodities, setCommodities] = useState<CatalogPage>({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
-  const [units, setUnits] = useState<CatalogPage>({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+  const [internalKind, setInternalKind] = useState<CatalogKind>('commodities');
+  const kind = selectedKind ?? internalKind;
+  const [commodities, setCommodities] = useState<CatalogPage>(emptyPage);
+  const [units, setUnits] = useState<CatalogPage>(emptyPage);
+  const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [cq, setCq] = useState(''), [uq, setUq] = useState(''), [cp, setCp] = useState(1), [up, setUp] = useState(1);
-  const [cs, setCs] = useState('code'), [us, setUs] = useState('code'), [cd, setCd] = useState<'asc'|'desc'>('asc'), [ud, setUd] = useState<'asc'|'desc'>('asc');
-  const [code, setCode] = useState(''), [name, setName] = useState(''), [unitCode, setUnitCode] = useState(''), [unitName, setUnitName] = useState(''), [quantityKind, setQuantityKind] = useState('MASS');
+  const [cs, setCs] = useState('code'), [us, setUs] = useState('code');
+  const [cd, setCd] = useState<'asc' | 'desc'>('asc'), [ud, setUd] = useState<'asc' | 'desc'>('asc');
+  const [code, setCode] = useState(''), [name, setName] = useState('');
+  const [unitCode, setUnitCode] = useState(''), [unitName, setUnitName] = useState(''), [quantityKind, setQuantityKind] = useState('MASS');
+
+  const commodity = kind === 'commodities';
+  const data = commodity ? commodities : units;
+  const label = commodity ? 'commodities' : 'measurement units';
+  const page = commodity ? cp : up;
+  const setPage = commodity ? setCp : setUp;
+  const search = commodity ? cq : uq;
+  const setSearch = commodity ? setCq : setUq;
+  const sort = commodity ? cs : us;
+  const setSort = commodity ? setCs : setUs;
+  const direction = commodity ? cd : ud;
+  const setDirection = commodity ? setCd : setUd;
+
   async function load() {
     const request = ++requestId.current;
-    const query = (q: string, page: number, sortBy: string, sortDirection: string) => `q=${encodeURIComponent(q)}&page=${page}&pageSize=25&sortBy=${sortBy}&sortDirection=${sortDirection}`;
-    const [c, u] = await Promise.all([api<CatalogPage>(`/api/commodities?${query(cq, cp, cs, cd)}`), api<CatalogPage>(`/api/measurement-units?${query(uq, up, us, ud)}`)]);
-    if (request === requestId.current) { setCommodities(c); setUnits(u); }
+    setLoading(true);
+    const params = new URLSearchParams({ q: search, page: String(page), pageSize: '25', sortBy: sort, sortDirection: direction });
+    try {
+      const result = await api<CatalogPage>(`/api/${kind}?${params}`);
+      if (request === requestId.current) (commodity ? setCommodities : setUnits)(result);
+    } finally {
+      if (request === requestId.current) setLoading(false);
+    }
   }
-  useEffect(() => { if (active) void action.run(load); return () => { requestId.current++; }; }, [active, cq, cp, cs, cd, uq, up, us, ud]);
-  async function create(event: FormEvent, path: string, body: Row) { event.preventDefault(); await action.run(async () => { await api(path, { method: 'POST', body: JSON.stringify(body) }); await load(); }, 'Catalog record saved.'); }
-  async function update(path: string, row: Row, label: string) {
-    const value = window.prompt(`New ${label} name`, row.name); if (value === null || value === row.name) return;
-    await action.run(async () => { await api(`/api/${path}/${row.id}`, { method: 'PATCH', headers: { 'If-Match': `\"${row.version}\"` }, body: JSON.stringify({ name: value }) }); await load(); }, 'Catalog record updated.');
+
+  useEffect(() => {
+    if (active) void action.run(load);
+    return () => { requestId.current++; };
+  }, [active, kind, cq, cp, cs, cd, uq, up, us, ud]);
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    await action.run(async () => {
+      await api(`/api/${kind}`, { method: 'POST', body: JSON.stringify(commodity
+        ? { code: code.trim(), name: name.trim() }
+        : { code: unitCode.trim(), name: unitName.trim(), quantityKind }) });
+      setCode(''); setName(''); setUnitCode(''); setUnitName(''); setQuantityKind('MASS');
+      setCreateOpen(false);
+      await load();
+    }, 'Catalog record saved.');
   }
-  async function remove(path: string, row: Row, label: string, page: number, pageSize: number, totalCount: number, setPage: (value: number) => void) {
+
+  async function update(row: Row) {
+    const value = window.prompt(`New ${label} name`, row.name);
+    if (value === null || value === row.name) return;
+    await action.run(async () => {
+      await api(`/api/${kind}/${row.id}`, { method: 'PATCH', headers: { 'If-Match': `"${row.version}"` }, body: JSON.stringify({ name: value }) });
+      await load();
+    }, 'Catalog record updated.');
+  }
+
+  async function remove(row: Row) {
     if (!window.confirm(`Remove ${row.code} from active ${label}? Stored record/history will be retained.`)) return;
-    await action.run(async () => { await api(`/api/${path}/${row.id}`, { method: 'DELETE', headers: { 'If-Match': `\"${row.version}\"` } }); if (totalCount <= (page - 1) * pageSize + 1 && page > 1) setPage(page - 1); await load(); }, 'Catalog record removed.');
+    await action.run(async () => {
+      await api(`/api/${kind}/${row.id}`, { method: 'DELETE', headers: { 'If-Match': `"${row.version}"` } });
+      if (data.totalCount <= (page - 1) * data.pageSize + 1 && page > 1) setPage(page - 1);
+      else await load();
+    }, 'Catalog record removed.');
   }
-  function catalogTable(label: string, data: CatalogPage, query: string, setQuery: (v: string) => void, page: number, setPage: (v: number) => void, sort: string, setSort: (v: string) => void, direction: 'asc'|'desc', setDirection: (v: 'asc'|'desc') => void, path: string, columns: string[]) {
-    return <><ListControls label={label} search={query} onSearch={v => { setQuery(v); setPage(1); }} sortBy={sort} onSortBy={v => { setSort(v); setPage(1); }} sortDirection={direction} onSortDirection={setDirection} sortOptions={[{value:'code',label:'Code'},{value:'name',label:'Name'}]} /><Table rows={data.items} label={label} controls={false} columns={columns} actions={row => row.canEdit || row.canDelete ? <>{row.canEdit && <button type="button" onClick={() => void update(path, row, label)}>Edit {row.name}</button>}{row.canDelete && <button type="button" onClick={() => void remove(path, row, label, page, data.pageSize, data.totalCount, setPage)}>{label === 'commodities' ? 'Remove' : 'Delete'} {row.name}</button>}</> : undefined} /><Pagination label={label} page={page} pageSize={data.pageSize} totalCount={data.totalCount} onChange={setPage} busy={action.busy} />{data.items.some(row => row.createdBy === null) && <p>Legacy catalog records are read-only.</p>}</>;
-  }
-  return <><Feedback {...action} /><div className="ledger-grid"><Panel title="Commodity catalog"><p>Canonical commodity master. Ledger stock and processing use these Catalog names.</p>{catalogTable('commodities', commodities, cq, setCq, cp, setCp, cs, setCs, cd, setCd, 'commodities', ['code','name'])}<form onSubmit={e => void create(e, '/api/commodities', { code, name })}><label>Code<input required maxLength={40} value={code} onChange={e => setCode(e.target.value)} /></label><label>Name<input required value={name} onChange={e => setName(e.target.value)} /></label><button disabled={action.busy}>Create commodity</button></form></Panel><Panel title="Measurement units">{catalogTable('measurement units', units, uq, setUq, up, setUp, us, setUs, ud, setUd, 'measurement-units', ['code','name','quantityKind'])}<form onSubmit={e => void create(e, '/api/measurement-units', { code: unitCode, name: unitName, quantityKind })}><label>Code<input required maxLength={20} value={unitCode} onChange={e => setUnitCode(e.target.value)} /></label><label>Name<input required value={unitName} onChange={e => setUnitName(e.target.value)} /></label><label>Quantity kind<select value={quantityKind} onChange={e => setQuantityKind(e.target.value)}>{kinds.map(value => <option key={value}>{value}</option>)}</select></label><button disabled={action.busy}>Create measurement unit</button></form></Panel></div></>;
+
+  return <div className="catalog-workspace">
+    {!selectedKind && <nav className="catalog-type-nav" aria-label="Commodity and unit catalogs">
+      <button type="button" aria-current={commodity ? 'page' : undefined} onClick={() => { setInternalKind('commodities'); setCreateOpen(false); }}>Commodities</button>
+      <button type="button" aria-current={!commodity ? 'page' : undefined} onClick={() => { setInternalKind('measurement-units'); setCreateOpen(false); }}>Measurement units</button>
+    </nav>}
+    <section className={`panel catalog-workspace-panel${selectedKind ? ' admin-catalog-panel' : ''}`} aria-label={commodity ? 'Commodity catalog' : 'Measurement units'}>
+      <div className="section-toolbar catalog-workspace-heading">
+        <div><h2>{commodity ? 'Commodity catalog' : 'Measurement units'}</h2><p className="muted">{commodity
+          ? 'Canonical commodity names for stock, processing and MRL tables.'
+          : 'Units and quantity kinds used across stock, field records and residue limits.'}</p></div>
+        <button type="button" onClick={() => { action.setStatus(''); action.setError(''); setCreateOpen(true); }}>+ Add {commodity ? 'commodity' : 'unit'}</button>
+      </div>
+      {!createOpen && <Feedback {...action} />}
+      <ListControls label={label} search={search} onSearch={value => { setSearch(value); setPage(1); }} sortBy={sort} onSortBy={value => { setSort(value); setPage(1); }} sortDirection={direction} onSortDirection={setDirection} sortOptions={[{ value: 'code', label: 'Code' }, { value: 'name', label: 'Name' }]} />
+      <div className="catalog-list-viewport" aria-busy={loading}>
+        {loading ? <div className="catalog-list-loading" role="status">Loading {label}…</div> : <>
+          <Table rows={data.items} label={label} controls={false} columns={commodity ? ['code', 'name'] : ['code', 'name', 'quantityKind']} actions={row => row.canEdit || row.canDelete ? <div className="catalog-row-actions">
+            {row.canEdit && <button type="button" className="secondary" disabled={action.busy} onClick={() => void update(row)}>Edit {row.name}</button>}
+            {row.canDelete && <button type="button" className="secondary" disabled={action.busy} onClick={() => void remove(row)}>{commodity ? 'Remove' : 'Delete'} {row.name}</button>}
+          </div> : null} />
+          {data.items.some(row => row.createdBy === null) && <p className="muted small">Legacy catalog records are read-only.</p>}
+        </>}
+      </div>
+      <Pagination label={label} page={page} pageSize={data.pageSize} totalCount={data.totalCount} onChange={setPage} busy={loading || action.busy} />
+    </section>
+    {createOpen && <div className="farmer-modal-backdrop" onKeyDown={event => { if (event.key === 'Escape' && !action.busy) setCreateOpen(false); }}>
+      <section className="farmer-modal catalog-create-modal" role="dialog" aria-modal="true" aria-labelledby="catalog-create-title">
+        <div className="farmer-modal-heading"><div><span className="eyebrow">REFERENCE DATA</span><h2 id="catalog-create-title">Add {commodity ? 'commodity' : 'measurement unit'}</h2></div><button className="farmer-modal-close" type="button" aria-label="Close" disabled={action.busy} onClick={() => setCreateOpen(false)}>×</button></div>
+        <p className="muted">Code and {commodity ? 'commodity identity' : 'quantity kind'} cannot be changed after creation.</p>
+        <Feedback {...action} />
+        <form onSubmit={event => void create(event)}>
+          <label>Code<input autoFocus required maxLength={commodity ? 40 : 30} value={commodity ? code : unitCode} onChange={event => (commodity ? setCode : setUnitCode)(event.target.value)} /></label>
+          <label>Name<input required value={commodity ? name : unitName} onChange={event => (commodity ? setName : setUnitName)(event.target.value)} /></label>
+          {!commodity && <label>Quantity kind<select value={quantityKind} onChange={event => setQuantityKind(event.target.value)}>{kinds.map(value => <option key={value}>{value}</option>)}</select></label>}
+          <div className="form-footer"><button className="secondary" type="button" disabled={action.busy} onClick={() => setCreateOpen(false)}>Cancel</button><button disabled={action.busy}>{action.busy ? 'Saving…' : `Create ${commodity ? 'commodity' : 'measurement unit'}`}</button></div>
+        </form>
+      </section>
+    </div>}
+  </div>;
 }

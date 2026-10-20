@@ -34,6 +34,13 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
         await AddCsrfAsync(otherAdminClient);
         var ids = await SeedPagedReferencesAsync(company.Id, owner.Id, admin.Id);
 
+        var usedFarmer = await ownerClient.GetFromJsonAsync<FarmerReferenceItem>($"/api/farmers/{ids.SupportFarmer}");
+        var usedPlot = await ownerClient.GetFromJsonAsync<PlotReferenceResponse>($"/api/plots/{ids.SupportPlotA}");
+        var usedSeason = await adminClient.GetFromJsonAsync<CropSeasonReferenceItem>($"/api/crop-seasons/{ids.SupportSeason}");
+        Assert.False(usedFarmer!.CanEdit || usedFarmer.CanDelete);
+        Assert.False(usedPlot!.CanEdit || usedPlot.CanDelete);
+        Assert.False(usedSeason!.CanEdit || usedSeason.CanDelete);
+
         var farmers = await ownerClient.GetFromJsonAsync<FarmerListResponse>(
             "/api/farmers?search=Owned&page=1&pageSize=1&sortBy=name&sortDirection=desc");
         Assert.Equal(2, farmers!.TotalCount);
@@ -96,8 +103,11 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
         using (var stale = await ownerClient.PutAsJsonAsync($"/api/farmers/{ids.FarmerA}",
                    new UpdateFarmerRequest("OWNED-A2", "Changed A", null, 2)))
             Assert.Equal(HttpStatusCode.PreconditionFailed, stale.StatusCode);
-        using (var updated = await ownerClient.PutAsJsonAsync($"/api/farmers/{ids.FarmerA}",
+        using (var changedCode = await ownerClient.PutAsJsonAsync($"/api/farmers/{ids.FarmerA}",
                    new UpdateFarmerRequest("OWNED-A2", "Changed A", null, 1)))
+            Assert.Equal(HttpStatusCode.Conflict, changedCode.StatusCode);
+        using (var updated = await ownerClient.PutAsJsonAsync($"/api/farmers/{ids.FarmerA}",
+                   new UpdateFarmerRequest("OWNED-A", "Changed A", null, 1)))
         {
             Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
             Assert.Equal(2, (await updated.Content.ReadFromJsonAsync<FarmerReferenceItem>())!.Version);
@@ -108,8 +118,14 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
             Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
 
         var geometry = Point();
-        using (var updated = await ownerClient.PutAsJsonAsync($"/api/plots/{ids.PlotA}",
+        using (var reparented = await ownerClient.PutAsJsonAsync($"/api/plots/{ids.PlotA}",
+                   new UpdatePlotRequest(ids.FarmerZ, "PLOT-A", geometry, 2m, 1)))
+            Assert.Equal(HttpStatusCode.Conflict, reparented.StatusCode);
+        using (var changedCode = await ownerClient.PutAsJsonAsync($"/api/plots/{ids.PlotA}",
                    new UpdatePlotRequest(ids.SupportFarmer, "PLOT-A2", geometry, 2m, 1)))
+            Assert.Equal(HttpStatusCode.Conflict, changedCode.StatusCode);
+        using (var updated = await ownerClient.PutAsJsonAsync($"/api/plots/{ids.PlotA}",
+                   new UpdatePlotRequest(ids.SupportFarmer, "PLOT-A", geometry, 2m, 1)))
         {
             Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
             Assert.Equal(2, (await updated.Content.ReadFromJsonAsync<PlotReferenceResponse>())!.Version);

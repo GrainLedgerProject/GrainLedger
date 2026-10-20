@@ -1,6 +1,9 @@
 erDiagram
-    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
-    business_events {
+    %% Live catalog snapshot 2026-10-19. Exact type aliases: varchar(n)=character varying(n); timestamptz=timestamp with time zone.
+    %% NN = NOT NULL; NULL = nullable. PK/FK mark catalog constraints; FK labels are exact constraint names.
+
+    %% capture.business_events — full table
+    capture_business_events {
         uuid id PK "NN"
         uuid company_id FK "NULL"
         uuid actor_id FK "NULL"
@@ -10,39 +13,45 @@ erDiagram
         uuid correlation_id "NN"
         jsonb payload "NN"
     }
-    state_changes {
+    %% identity.audit_events — reference only; full fields in owning diagram
+    identity_audit_events {
+        bigint Id PK "NN"
+        uuid ActorUserId "NULL"
+        uuid SubjectUserId "NULL"
+        varchar(100) Action "NN"
+        jsonb DetailsJson "NN"
+        timestamptz OccurredAt "NN"
+        text IpAddress "NULL"
+    }
+    %% identity.organizations — reference only; full fields in owning diagram
+    identity_organizations {
+        uuid Id PK "NN"
+    }
+    %% identity.users — reference only; full fields in owning diagram
+    identity_users {
+        uuid Id PK "NN"
+    }
+    %% ledger.events — full table
+    ledger_events {
         uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid event_id FK "NN"
-        uuid plan_id FK "NULL"
-        uuid conversion_id FK "NULL"
-        uuid container_id FK "NULL"
-        varchar(32) from_state "NULL"
-        varchar(32) to_state "NN"
-        text reason "NULL"
+        text kind "NN"
+        uuid actor_id FK "NN"
+        uuid operation_id FK "NULL"
+        uuid lot_id FK "NULL"
+        jsonb details "NN"
+        timestamptz occurred_at "NN"
     }
-    organizations {
-        uuid Id PK "Reference table; identity.organizations"
+    %% ledger.lots — reference only; full fields in owning diagram
+    ledger_lots {
+        uuid id PK "NN"
     }
-    users {
-        uuid Id PK "Reference table; identity.users"
+    %% ledger.operations — reference only; full fields in owning diagram
+    ledger_operations {
+        uuid id PK "NN"
     }
-    blend_plans {
-        uuid id PK "Reference table; defined in another module"
-        uuid company_id FK "Reference table"
-    }
-    conversions {
-        uuid id PK "Reference table; defined in another module"
-        uuid company_id FK "Reference table"
-    }
-    containers {
-        uuid id PK "Reference table; defined in another module"
-        uuid company_id FK "Reference table"
-    }
-    organizations o|..o{ business_events : company
-    users o|..o{ business_events : actor
-    organizations ||..o{ state_changes : company
-    business_events ||..o{ state_changes : event
-    blend_plans o|..o{ state_changes : plan
-    conversions o|..o{ state_changes : conversion
-    containers o|..o{ state_changes : container
+
+    identity_organizations o|..o{ capture_business_events : "fk_events_company"
+    identity_users o|..o{ capture_business_events : "fk_events_actor"
+    identity_users ||..o{ ledger_events : "events_actor_id_fkey"
+    ledger_lots o|..o{ ledger_events : "events_lot_id_fkey"
+    ledger_operations o|..o{ ledger_events : "events_operation_id_fkey"

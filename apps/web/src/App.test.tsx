@@ -12,10 +12,190 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
   clearLocalSession();
+  window.sessionStorage.clear();
+  window.localStorage.clear();
   window.history.replaceState({}, '', '/');
 });
 
 describe('Account experience', () => {
+  it('opens company farmers, searches, and reads a farmer without exposing the menu to unassigned users', async () => {
+    const staff = { ...user, role: 'PurchasingStaff', organizationId: 'company-1', organizationName: 'Customer A', permissions: ['farms.write'] };
+    const farmer = { id: '11111111-1111-4111-8111-111111111111', code: 'ND-111111111111', name: 'Nguyen Van A', contact: '0900000000', createdAt: '2026-10-10T00:00:00Z' };
+    fetchMock.mockImplementation(async url => {
+      if (url === '/api/auth/session') return json(staff);
+      if (url === `/api/farmers/${farmer.id}`) return json(farmer);
+      if (url === '/api/plots/plot-1') return json({ id: 'plot-1', farmerId: farmer.id, code: 'TR-001', areaHa: 1.25, geometry: { type: 'Point', coordinates: [106.35, 10.4] } });
+      if (url === '/api/plot-seasons/plot-season-1') return json({ id: 'plot-season-1', plotId: 'plot-1', seasonId: 'season-1', riceVariety: 'ST25' });
+      if (String(url).startsWith('/api/plot-seasons?')) return json({ items: [{ id: 'plot-season-1', plotId: 'plot-1', seasonId: 'season-1', riceVariety: 'ST25' }], page: 1, pageSize: 10, hasMore: false });
+      if (String(url).startsWith('/api/crop-seasons?')) return json({ items: [{ id: 'season-1', companyId: 'company-1', name: 'Đông Xuân 2026–2027', startsOn: '2026-11-01', endsOn: '2027-03-31' }], page: 1, pageSize: 100, hasMore: false });
+      if (String(url).startsWith('/api/plots?')) return json({ items: [{ id: 'plot-1', farmerId: farmer.id, code: 'TR-001', areaHa: 1.25 }], page: 1, pageSize: 10, hasMore: false });
+      if (String(url).startsWith('/api/farmers?')) return json({ items: [farmer], page: 1, pageSize: 20, hasMore: false });
+      return json({}, 404);
+    });
+    render(<App />);
+    const browser = userEvent.setup();
+    await browser.click(await screen.findByRole('button', { name: 'Farmers' }));
+    expect(await screen.findByRole('button', { name: farmer.name })).toBeInTheDocument();
+    await browser.type(screen.getByLabelText('Search by name or code'), 'Nguyen');
+    await browser.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('q=Nguyen'))).toBe(true));
+    await browser.click(screen.getByRole('button', { name: farmer.name }));
+    expect(await screen.findByText(farmer.contact)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /TR-001/ })).toBeInTheDocument();
+    expect(screen.getByText('1.25 ha')).toBeInTheDocument();
+    await browser.click(screen.getByRole('button', { name: /TR-001/ }));
+    expect(await screen.findByRole('heading', { name: 'TR-001' })).toBeInTheDocument();
+    expect(screen.getByText('106.35')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/capture/plots/plot-1');
+    await browser.click(await screen.findByRole('button', { name: /Đông Xuân 2026–2027/ }));
+    expect(await screen.findByRole('heading', { name: 'Đông Xuân 2026–2027' })).toBeInTheDocument();
+    expect(screen.getByText('ST25')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/capture/plot-seasons/plot-season-1');
+    await browser.click(screen.getByRole('button', { name: /Back to plot/ }));
+    expect(await screen.findByRole('heading', { name: 'TR-001' })).toBeInTheDocument();
+    await browser.click(screen.getByRole('button', { name: /Back to farmer/ }));
+    expect(await screen.findByRole('button', { name: /TR-001/ })).toBeInTheDocument();
+    expect(window.location.pathname).toBe(`/capture/farmers/${farmer.id}`);
+    await browser.click(screen.getByRole('button', { name: /Back to farmers/ }));
+    expect(window.location.pathname).toBe('/capture/farmers');
+  });
+
+  it('registers a farmer and retries the exact same request after a lost response', async () => {
+    const staff = { ...user, role: 'PurchasingStaff', organizationId: 'company-1', organizationName: 'Customer A', permissions: ['farms.write'] };
+    let attempts = 0;
+    fetchMock.mockImplementation(async url => {
+      if (url === '/api/auth/session') return json(staff);
+      if (url === '/api/auth/csrf') return json({ token: 'csrf-value' });
+      if (url === '/api/farmers') {
+        attempts++;
+        if (attempts === 1) throw new Error('Connection interrupted');
+        const body = JSON.parse(String(fetchMock.mock.calls.filter(([path]) => path === '/api/farmers')[0][1]?.body));
+        return json({ id: body.payload.entityId, code: 'ND-TEST', name: body.payload.name, contact: body.payload.contact, createdAt: '2026-10-14T00:00:00Z' }, 201);
+      }
+      if (String(url).startsWith('/api/farmers/')) return json({ id: String(url).split('/').at(-1), code: 'ND-TEST', name: 'Nguyễn Văn C', contact: '0900000000', createdAt: '2026-10-14T00:00:00Z' });
+      if (String(url).startsWith('/api/plots?')) return json({ items: [], page: 1, pageSize: 10, hasMore: false });
+      if (String(url).startsWith('/api/farmers?')) return json({ items: [], page: 1, pageSize: 20, hasMore: false });
+      return json({}, 404);
+    });
+    render(<App />);
+    const browser = userEvent.setup();
+    await browser.click(await screen.findByRole('button', { name: 'Farmers' }));
+    await browser.click(await screen.findByRole('button', { name: /Add farmer/ }));
+    expect(screen.getByRole('dialog', { name: 'Add farmer' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/capture/farmers');
+    await browser.type(screen.getByLabelText(/Full name/), 'Nguyễn Văn C');
+    await browser.type(screen.getByLabelText(/Contact/), '0900000000');
+    await browser.click(screen.getByRole('button', { name: 'Save farmer' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Connection interrupted');
+    await browser.click(screen.getByRole('button', { name: 'Retry save' }));
+    expect(await screen.findByRole('heading', { name: 'Nguyễn Văn C' })).toBeInTheDocument();
+    const posts = fetchMock.mock.calls.filter(([url]) => url === '/api/farmers');
+    expect(posts).toHaveLength(2);
+    expect(posts[0][1]?.body).toBe(posts[1][1]?.body);
+    const submitted = JSON.parse(String(posts[0][1]?.body));
+    expect(submitted.payload).toMatchObject({ name: 'Nguyễn Văn C', contact: '0900000000' });
+    expect(submitted.payload.code).toBeUndefined();
+    expect(submitted.clientOperationId).toBeTruthy();
+    expect(submitted.payload.entityId).toBeTruthy();
+  });
+
+  it('registers a point plot for the selected farmer and retries one operation after a lost response', async () => {
+    const staff = { ...user, role: 'PurchasingStaff', organizationId: 'company-1', organizationName: 'Customer A', permissions: ['farms.write'] };
+    const farmer = { id: '11111111-1111-4111-8111-111111111111', code: 'ND-001', name: 'Nguyen Van A', contact: null, createdAt: '2026-10-10T00:00:00Z' };
+    let attempts = 0;
+    let rejectFirst: ((reason?: unknown) => void) | undefined;
+    fetchMock.mockImplementation(async (url, init) => {
+      if (url === '/api/auth/session') return json(staff);
+      if (url === '/api/auth/csrf') return json({ token: 'csrf-value' });
+      if (url === '/api/plots') {
+        attempts++;
+        if (attempts === 1) return new Promise<Response>((_resolve, reject) => { rejectFirst = reject; });
+        const request = JSON.parse(String(init?.body));
+        return json({ id: request.payload.entityId, farmerId: farmer.id, code: 'TR-TEST', areaHa: 1.25, geometry: request.payload.geometry }, 201);
+      }
+      if (String(url).startsWith('/api/plots/')) return json({ id: String(url).split('/').at(-1), farmerId: farmer.id, code: 'TR-TEST', areaHa: 1.25, geometry: { type: 'Point', coordinates: [106.35, 10.4] } });
+      if (String(url).startsWith('/api/plot-seasons?')) return json({ items: [], page: 1, pageSize: 10, hasMore: false });
+      if (String(url).startsWith('/api/crop-seasons?')) return json({ items: [], page: 1, pageSize: 100, hasMore: false });
+      if (String(url).startsWith('/api/plots?')) return json({ items: [], page: 1, pageSize: 10, hasMore: false });
+      if (url === `/api/farmers/${farmer.id}`) return json(farmer);
+      if (String(url).startsWith('/api/farmers?')) return json({ items: [farmer], page: 1, pageSize: 20, hasMore: false });
+      return json({}, 404);
+    });
+    render(<App />);
+    const browser = userEvent.setup();
+    await browser.click(await screen.findByRole('button', { name: 'Farmers' }));
+    await browser.click(await screen.findByRole('button', { name: farmer.name }));
+    await browser.click(await screen.findByRole('button', { name: /Add plot/ }));
+    expect(screen.getByRole('dialog', { name: 'Add plot' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe(`/capture/farmers/${farmer.id}`);
+    await browser.type(screen.getByLabelText(/Longitude/), '106.35');
+    await browser.type(screen.getByLabelText(/Latitude/), '10.4');
+    await browser.type(screen.getByLabelText(/Area \(hectares\)/), '1.25');
+    await browser.click(screen.getByRole('button', { name: 'Save plot' }));
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+    await waitFor(() => expect(rejectFirst).toBeDefined());
+    expect(screen.queryByText(/The previous save did not return a result/)).not.toBeInTheDocument();
+    rejectFirst?.(new Error('Connection interrupted'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Connection interrupted');
+    expect(screen.getByText(/The previous save did not return a result/)).toBeInTheDocument();
+    await browser.click(screen.getByRole('button', { name: 'Retry save' }));
+    expect(await screen.findByRole('heading', { name: 'TR-TEST' })).toBeInTheDocument();
+    const posts = fetchMock.mock.calls.filter(([url]) => url === '/api/plots');
+    expect(posts).toHaveLength(2);
+    expect(posts[0][1]?.body).toBe(posts[1][1]?.body);
+    const submitted = JSON.parse(String(posts[0][1]?.body));
+    expect(submitted.payload).toMatchObject({ farmerId: farmer.id, geometry: { type: 'Point', coordinates: [106.35, 10.4] }, areaHa: 1.25 });
+    expect(submitted.payload).not.toHaveProperty('code');
+    expect(submitted.payloadSchemaVersion).toBe(2);
+    expect(submitted.payload.entityId).toBeTruthy();
+    expect(submitted.clientOperationId).toBeTruthy();
+  });
+
+  it('registers an existing company crop season for a plot and retries the same request', async () => {
+    const plotId = '11408862-f173-49d8-9f02-fe57483bd6e6';
+    const farmerId = '6114dc9c-f08c-4b25-a90f-91c7c88a05b0';
+    const seasonId = '81504cfe-cf51-4bce-9eb2-44159e97fb03';
+    const recordId = '06d238e3-d388-4a91-b142-24b90b5dba25';
+    const staff = { ...user, role: 'PurchasingStaff', organizationId: 'company-1', organizationName: 'Customer A', permissions: ['farms.write'] };
+    let attempts = 0;
+    fetchMock.mockImplementation(async (url, init) => {
+      if (url === '/api/auth/session') return json(staff);
+      if (url === '/api/auth/csrf') return json({ token: 'csrf-value' });
+      if (url === `/api/plots/${plotId}`) return json({ id: plotId, farmerId, code: 'TR-001', areaHa: 1.25, geometry: { type: 'Point', coordinates: [106.35, 10.4] } });
+      if (url === `/api/farmers/${farmerId}`) return json({ id: farmerId, code: 'ND-001', name: 'Nguyen Van A' });
+      if (url === `/api/plot-seasons/${recordId}`) return json({ id: recordId, plotId, seasonId, riceVariety: 'ST25' });
+      if (url === '/api/plot-seasons') {
+        attempts++;
+        if (attempts === 1) throw new Error('Connection interrupted');
+        return json({ id: recordId, plotId, seasonId, riceVariety: 'ST25' }, 201);
+      }
+      if (String(url).startsWith('/api/plot-seasons?')) return json({ items: [], page: 1, pageSize: 10, hasMore: false });
+      if (String(url).startsWith('/api/crop-seasons?page=1')) return json({ items: [{ id: 'other-season', companyId: 'company-1', name: 'Hè Thu', startsOn: '2026-04-01', endsOn: '2026-08-31' }], page: 1, pageSize: 100, hasMore: true });
+      if (String(url).startsWith('/api/crop-seasons?page=2')) return json({ items: [{ id: seasonId, companyId: 'company-1', name: 'Đông Xuân', startsOn: '2026-11-01', endsOn: '2027-03-31' }], page: 2, pageSize: 100, hasMore: false });
+      return json({}, 404);
+    });
+    window.history.replaceState({}, '', `/capture/plots/${plotId}`);
+    render(<App />);
+    const browser = userEvent.setup();
+    await browser.click(await screen.findByRole('button', { name: /Register season/ }));
+    expect(screen.getByRole('dialog', { name: 'Register crop season' })).toBeInTheDocument();
+    await browser.selectOptions(await screen.findByLabelText(/Crop season/), seasonId);
+    await browser.type(screen.getByLabelText(/Rice variety/), 'ST25');
+    await browser.click(screen.getByRole('button', { name: 'Register season' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Connection interrupted');
+    await browser.click(screen.getByRole('button', { name: 'Retry save' }));
+    expect(await screen.findByRole('heading', { name: 'Đông Xuân' })).toBeInTheDocument();
+    expect(screen.getByText('ST25')).toBeInTheDocument();
+    expect(window.location.pathname).toBe(`/capture/plot-seasons/${recordId}`);
+    const posts = fetchMock.mock.calls.filter(([url]) => url === '/api/plot-seasons');
+    expect(posts).toHaveLength(2);
+    expect(posts[0][1]?.body).toBe(posts[1][1]?.body);
+    const submitted = JSON.parse(String(posts[0][1]?.body));
+    expect(submitted.payload).toMatchObject({ plotId, seasonId, riceVariety: 'ST25' });
+    expect(submitted.payload.entityId).toBeTruthy();
+    expect(submitted.clientOperationId).toBeTruthy();
+  });
+
   it('offers email/password and Google sign-in to anonymous users', async () => {
     fetchMock.mockResolvedValue(json({}, 401));
     render(<App />);
@@ -32,6 +212,7 @@ describe('Account experience', () => {
     render(<App />);
     expect(await screen.findByText('Your account is ready. Workspace access is next.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Administration/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Farmers' })).not.toBeInTheDocument();
     const browser = userEvent.setup();
     await browser.clear(screen.getByLabelText('Full name'));
     await browser.type(screen.getByLabelText('Full name'), 'Nguyen Binh');

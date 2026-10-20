@@ -140,7 +140,7 @@ export const SignInPage: React.FC = () => {
             </div>
 
             <div className="space-y-1">
-              
+
               <p className="text-xs text-ink-secondary leading-relaxed">
                 Hệ thống sổ cái cân bằng khối lượng lúa gạo theo tiêu chuẩn ISO 22095:2020.
               </p>

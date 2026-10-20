@@ -160,6 +160,19 @@ public sealed class ProcurementLedgerPort(IConfiguration configuration) : IProcu
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task<string> ReserveSourceLotCodeAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid actorId, Guid companyId, Guid procurementId, Guid lotId, CancellationToken ct)
+    {
+        if (transaction.Connection != connection) throw new InvalidOperationException("Caller-owned transaction required.");
+        await using var command = new NpgsqlCommand("SELECT ledger.reserve_source_lot_code($1,$2,$3,$4)", connection, transaction);
+        command.Parameters.AddWithValue(actorId);
+        command.Parameters.AddWithValue(companyId);
+        command.Parameters.AddWithValue(procurementId);
+        command.Parameters.AddWithValue(lotId);
+        return (string)(await command.ExecuteScalarAsync(ct)
+            ?? throw new ProcurementLedgerUnavailableException());
+    }
+
     public async Task<ProcurementReceivingState?> GetReceivingStateAsync(Guid procurementId, CancellationToken ct)
     {
         await using var connection = await OpenAsync(ct);

@@ -149,16 +149,18 @@ public static class LedgerDatabase
             REVOKE ALL ON ALL TABLES IN SCHEMA ledger FROM {role};
             REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ledger FROM {role};
             GRANT SELECT ON ALL TABLES IN SCHEMA ledger TO {role};
+            REVOKE ALL ON TABLE ledger.receiving_threshold_default,ledger.receiving_threshold_overrides,ledger.receiving_threshold_history FROM {role};
             GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
             {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
                 ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.trace_lot(uuid,uuid,text,text),ledger.lock_writes(),
                 ledger.provision_catalog_commodities(uuid),
-                ledger.register_pending_procurement(uuid,uuid),
+                ledger.register_pending_procurement(uuid,uuid),ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid),
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
                 ledger.procurement_stock(uuid,uuid),
                 ledger.arrival_command(uuid,uuid,text,jsonb),
+                ledger.receiving_threshold_read(uuid,text,jsonb),ledger.receiving_threshold_command(uuid,text,jsonb),
                 ledger.can_read_lot(uuid,uuid),ledger.assigned(uuid,uuid),
                 ledger.own(uuid,uuid),ledger.role(uuid)
             TO {role};
@@ -168,11 +170,21 @@ public static class LedgerDatabase
             SELECT EXISTS (
                 SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p')
                   AND (n.nspname IN ('ledger','capture_mock') AND has_table_privilege($1,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                    OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER'))
-            ) OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
-                AND has_schema_privilege($1,n.oid,'CREATE'))
-              OR has_function_privilege($1,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
-              OR has_function_privilege($1,'ledger.provision_catalog_commodity(uuid)','EXECUTE')
+                    OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER')
+                    OR c.oid IN ('ledger.receiving_threshold_default'::regclass,'ledger.receiving_threshold_overrides'::regclass,'ledger.receiving_threshold_history'::regclass)
+                       AND has_table_privilege($1,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+            ) OR has_any_column_privilege($1,'ledger.receiving_threshold_default','SELECT')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_default','INSERT')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_default','UPDATE')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_default','REFERENCES')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_overrides','SELECT')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_overrides','INSERT')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_overrides','UPDATE')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_overrides','REFERENCES')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_history','SELECT')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_history','INSERT')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_history','UPDATE')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_history','REFERENCES')
             """, connection);
         inherited.Parameters.AddWithValue(runtimeRole);
         if (Equals(await inherited.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("Runtime role inherits unsafe module mutation authority; remove inherited grants before deployment.");
@@ -208,8 +220,22 @@ public static class LedgerDatabase
                         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                         WHERE c.relkind IN ('r','p')
                           AND (n.nspname IN ('ledger','capture_mock') AND has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                            OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER'))
+                            OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER')
+                            OR c.oid IN ('ledger.receiving_threshold_default'::regclass,'ledger.receiving_threshold_overrides'::regclass,'ledger.receiving_threshold_history'::regclass)
+                               AND has_table_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
                     )
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_default','SELECT')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_default','INSERT')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_default','UPDATE')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_default','REFERENCES')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_overrides','SELECT')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_overrides','INSERT')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_overrides','UPDATE')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_overrides','REFERENCES')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_history','SELECT')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_history','INSERT')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_history','UPDATE')
+                    OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_history','REFERENCES')
                     OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
                         AND has_schema_privilege(r.oid,n.oid,'CREATE'))
                     OR has_function_privilege(r.oid,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
@@ -220,9 +246,27 @@ public static class LedgerDatabase
         if (Equals(await command.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("API database role must not be superuser, schema/table owner or owner-role member. Configure separate migration and runtime credentials.");
         await using var required = new NpgsqlCommand("""
             SELECT has_function_privilege(current_user,'ledger.register_pending_procurement(uuid,uuid)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.arrival_command(uuid,uuid,text,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.receiving_threshold_read(uuid,text,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.receiving_threshold_command(uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.lock_writes()','EXECUTE')
                AND has_function_privilege(current_user,'ledger.provision_catalog_commodities(uuid)','EXECUTE')
+               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_default','SELECT')
+               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_overrides','SELECT')
+               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_history','SELECT')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','SELECT')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','INSERT')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','UPDATE')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','REFERENCES')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_overrides','SELECT')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_overrides','INSERT')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_overrides','UPDATE')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_overrides','REFERENCES')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_history','SELECT')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_history','INSERT')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_history','UPDATE')
+               AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_history','REFERENCES')
                AND has_schema_privilege(current_user,'capture','USAGE')
                AND has_schema_privilege(current_user,'catalog','USAGE')
                AND has_table_privilege(current_user,'capture.procurements','SELECT,INSERT')

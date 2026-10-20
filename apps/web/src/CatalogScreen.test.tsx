@@ -37,3 +37,21 @@ it('filters and sorts catalog list, edits/deletes with If-Match and renders serv
   await browser.selectOptions(screen.getByLabelText('Sort commodities by'), 'name');
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('sortBy=name'))).toBe(true));
 });
+
+it('shows one catalog at a time and opens creation outside the list', async () => {
+  const browser = userEvent.setup();
+  render(<CatalogScreen />);
+  expect(await screen.findByText('PADDY')).toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/measurement-units?'))).toBe(false);
+  await browser.click(screen.getByRole('button', { name: '+ Add commodity' }));
+  expect(screen.getByRole('dialog', { name: 'Add commodity' })).toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: 'Cancel' }));
+  await browser.click(screen.getByRole('button', { name: 'Measurement units' }));
+  expect(await screen.findByLabelText('Search measurement units')).toBeInTheDocument();
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/measurement-units?'))).toBe(true));
+  expect(screen.queryByText('PADDY')).not.toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: '+ Add unit' }));
+  expect(screen.getByRole('dialog', { name: 'Add measurement unit' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Quantity kind')).toBeInTheDocument();
+});

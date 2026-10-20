@@ -36,6 +36,8 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(receipt.EventId, (await replay.Content.ReadFromJsonAsync<ProcurementResponse>())!.EventId);
         Assert.Equal("PENDING_ARRIVAL", receipt.Status);
         Assert.All(receipt.Items, x => Assert.Equal("0", x.InitialStock.ReceivedKg));
+        Assert.Equal(2, receipt.Items.Select(x => x.LotCode).Distinct().Count());
+        Assert.All(receipt.Items, x => Assert.Matches(@"^RAW-\d{8}-\d{6,}$", x.LotCode));
         var procurementPage = await GetAsync(s.Purchaser,
             $"/api/procurements?farmerId={s.FarmerId}&search=PENDING_ARRIVAL&page=1&pageSize=1&sortBy=status&sortDirection=desc");
         Assert.Equal(1, procurementPage.GetProperty("totalCount").GetInt32());
@@ -44,10 +46,12 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
         var pendingSource = await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.Items[0].SourceLotId}");
         Assert.Empty(pendingSource!.CurrentStock);
+        Assert.Equal(receipt.Items[0].LotCode, pendingSource.LotCode);
         Assert.Equal("0", pendingSource.UsableStockKg);
         await s.ConfirmArrivalAsync(JsonSerializer.SerializeToElement(receipt, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         var lotId = receipt.Items[0].LotId;
         var protectedLot = await s.LotAsync(lotId, s.Customer);
+        Assert.Equal(receipt.Items[0].LotCode, protectedLot.GetProperty("code").GetString());
         Assert.Equal(600m, Quantity(protectedLot));
         var mappedCommodity = protectedLot.GetProperty("commodityId").GetGuid();
         Assert.NotEqual(s.CatalogCommodityId, mappedCommodity);
@@ -211,10 +215,17 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var requests = new[] { s.ReceiptBody(Guid.NewGuid(), ["1"]), s.ReceiptBody(Guid.NewGuid(), ["2"]) };
             var replies = await Task.WhenAll(requests.Select(body => s.Purchaser.PostAsJsonAsync("/api/procurements", body, deadline.Token)));
+            var codes = new List<string>();
             foreach (var reply in replies)
             {
-                using (reply) Assert.Equal(HttpStatusCode.Created, reply.StatusCode);
+                using (reply)
+                {
+                    Assert.Equal(HttpStatusCode.Created, reply.StatusCode);
+                    var body = await reply.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: deadline.Token);
+                    codes.Add(body.GetProperty("items")[0].GetProperty("lotCode").GetString()!);
+                }
             }
+            Assert.Equal(2, codes.Distinct().Count());
         }
         finally { config["ConnectionStrings:GrainLedger"] = previous; }
     }

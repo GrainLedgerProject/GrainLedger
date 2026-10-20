@@ -1,6 +1,31 @@
 erDiagram
-    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
-    farmers {
+    %% Live catalog snapshot 2026-10-19. Exact type aliases: varchar(n)=character varying(n); timestamptz=timestamp with time zone.
+    %% NN = NOT NULL; NULL = nullable. PK/FK mark catalog constraints; FK labels are exact constraint names.
+
+    %% capture.business_events — reference only; full fields in owning diagram
+    capture_business_events {
+        uuid id PK "NN"
+    }
+    %% capture.code_counters — full table
+    capture_code_counters {
+        uuid company_id PK "NN"
+        varchar(3) kind PK "NN"
+        varchar(32) scope PK "NN"
+        bigint next_value "NN"
+    }
+    %% capture.crop_seasons — full table
+    capture_crop_seasons {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        text name "NN"
+        date starts_on "NN"
+        date ends_on "NN"
+        uuid created_by FK "NULL"
+        integer version "NN"
+        boolean is_deleted "NN"
+    }
+    %% capture.farmers — full table
+    capture_farmers {
         uuid id PK "NN"
         uuid company_id FK "NN"
         varchar(40) code "NN"
@@ -9,86 +34,11 @@ erDiagram
         timestamptz created_at "NN"
         uuid created_by FK "NULL"
         integer version "NN"
-        boolean is_deleted "NN default false"
+        boolean is_deleted "NN"
+        bigint code_number "NULL"
     }
-    plots {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid farmer_id FK "NN"
-        varchar(40) code "NN"
-        jsonb boundary_geojson "NN"
-        numeric(24,12) area_ha "NN"
-        uuid created_by FK "NULL"
-        integer version "NN"
-        boolean is_deleted "NN default false"
-    }
-    crop_seasons {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        text name "NN"
-        date starts_on "NN"
-        date ends_on "NN"
-        uuid created_by FK "NULL"
-        integer version "NN"
-        boolean is_deleted "NN default false"
-    }
-    plot_seasons {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid plot_id FK "NN"
-        uuid season_id FK "NN"
-        text rice_variety "NN"
-        uuid created_by FK "NULL"
-        integer version "NN"
-        boolean is_deleted "NN default false"
-    }
-    spray_declarations {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid plot_season_id FK "NN"
-        date applied_on "NN"
-        uuid recorded_by FK "NN"
-        timestamptz recorded_at "NN"
-        text evidence_ref "NULL"
-    }
-    spray_items {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid declaration_id FK "NN"
-        text product_name "NULL"
-        uuid substance_id FK "NULL"
-        numeric(24,12) rate "NN"
-        varchar(40) rate_unit "NN"
-    }
-    procurements {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        varchar(40) code "NN"
-        uuid farmer_id FK "NN"
-        uuid collection_site_id FK "NN"
-        uuid received_by FK "NN"
-        timestamptz received_at "NN"
-        varchar(32) status "NN; DRAFT COMMITTED"
-        uuid event_id FK,UK "NULL"
-    }
-    procurement_items {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid procurement_id FK "NN"
-        integer line_no "NN"
-        uuid plot_season_id FK "NN"
-        numeric(20,6) net_mass_kg "NN"
-        numeric(24,12) measured_value "NN"
-        varchar(20) measured_unit "NN"
-        numeric(24,12) moisture_percent "NN"
-    }
-    source_lots {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid lot_id FK,UK "NN"
-        uuid procurement_item_id FK,UK "NN"
-    }
-    offline_operations {
+    %% capture.offline_operations — full table
+    capture_offline_operations {
         uuid id PK "NN"
         uuid company_id FK "NN"
         uuid submitted_by FK "NN"
@@ -99,54 +49,123 @@ erDiagram
         timestamptz captured_at "NN"
         jsonb capture_geojson "NULL"
         timestamptz received_at "NN"
-        varchar(32) status "NN; PENDING APPLIED CONFLICT REJECTED"
-        uuid applied_event_id FK,UK "NULL"
+        varchar(32) status "NN"
+        uuid applied_event_id FK "NULL"
         jsonb result_payload "NULL"
         text conflict_reason "NULL"
     }
-    organizations {
-        uuid Id PK "Reference table; identity.organizations"
+    %% capture.plot_seasons — full table
+    capture_plot_seasons {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid plot_id FK "NN"
+        uuid season_id FK "NN"
+        text rice_variety "NN"
+        uuid created_by FK "NULL"
+        integer version "NN"
+        boolean is_deleted "NN"
     }
-    users {
-        uuid Id PK "Reference table; identity.users"
+    %% capture.plots — full table
+    capture_plots {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid farmer_id FK "NN"
+        varchar(40) code "NN"
+        jsonb boundary_geojson "NN"
+        numeric(24,12) area_ha "NN"
+        uuid created_by FK "NULL"
+        integer version "NN"
+        boolean is_deleted "NN"
     }
-    active_substances {
-        uuid id PK "Reference table; defined in another module"
+    %% capture.procurement_items — full table
+    capture_procurement_items {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid procurement_id FK "NN"
+        integer line_no "NN"
+        uuid plot_season_id FK "NN"
+        numeric(20,6) net_mass_kg "NN"
+        numeric(24,12) measured_value "NN"
+        varchar(20) measured_unit "NN"
+        numeric(24,12) moisture_percent "NN"
     }
-    facilities {
-        uuid id PK "Reference table; defined in another module"
+    %% capture.procurements — full table
+    capture_procurements {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        varchar(40) code "NN"
+        uuid farmer_id FK "NN"
+        uuid collection_site_id "NN"
+        uuid received_by FK "NN"
+        timestamptz received_at "NN"
+        varchar(32) status "NN"
+        uuid event_id FK "NULL"
+        text receiving_workflow "NULL"
     }
-    business_events {
-        uuid id PK "Reference table; defined in another module"
+    %% capture.source_lots — full table
+    capture_source_lots {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid lot_id "NN"
+        uuid procurement_item_id FK "NN"
     }
-    lots {
-        uuid id PK "Reference table; defined in another module"
-        uuid company_id FK "Reference table"
+    %% capture.spray_declarations — full table
+    capture_spray_declarations {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid plot_season_id FK "NN"
+        date applied_on "NN"
+        uuid recorded_by FK "NN"
+        timestamptz recorded_at "NN"
+        text evidence_ref "NULL"
     }
-    organizations ||..o{ farmers : company
-    organizations ||..o{ plots : company
-    farmers ||..o{ plots : farmer
-    organizations ||..o{ crop_seasons : company
-    organizations ||..o{ plot_seasons : company
-    plots ||..o{ plot_seasons : plot
-    crop_seasons ||..o{ plot_seasons : season
-    organizations ||..o{ spray_declarations : company
-    plot_seasons ||..o{ spray_declarations : plot_season
-    users ||..o{ spray_declarations : recorded_by
-    organizations ||..o{ spray_items : company
-    spray_declarations ||..o{ spray_items : declaration
-    active_substances o|..o{ spray_items : substance
-    organizations ||..o{ procurements : company
-    farmers ||..o{ procurements : farmer
-    facilities ||..o{ procurements : collection_site
-    users ||..o{ procurements : received_by
-    business_events o|..o| procurements : event
-    organizations ||..o{ procurement_items : company
-    procurements ||..o{ procurement_items : procurement
-    plot_seasons ||..o{ procurement_items : plot_season
-    organizations ||..o{ source_lots : company
-    lots ||..o| source_lots : lot
-    procurement_items ||..o| source_lots : procurement_item
-    organizations ||..o{ offline_operations : company
-    users ||..o{ offline_operations : submitted_by
-    business_events o|..o| offline_operations : applied_event
+    %% capture.spray_items — full table
+    capture_spray_items {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid declaration_id FK "NN"
+        text product_name "NULL"
+        uuid substance_id FK "NULL"
+        numeric(24,12) rate "NULL"
+        varchar(40) rate_unit "NULL"
+    }
+    %% catalog.active_substances — reference only; full fields in owning diagram
+    catalog_active_substances {
+        uuid id PK "NN"
+    }
+    %% identity.organizations — reference only; full fields in owning diagram
+    identity_organizations {
+        uuid Id PK "NN"
+    }
+    %% identity.users — reference only; full fields in owning diagram
+    identity_users {
+        uuid Id PK "NN"
+    }
+
+    capture_business_events o|..o| capture_offline_operations : "fk_operations_event"
+    capture_business_events o|..o| capture_procurements : "fk_procurements_event"
+    capture_crop_seasons ||..o{ capture_plot_seasons : "fk_plot_seasons_company_season"
+    capture_farmers ||..o{ capture_plots : "fk_plots_company_farmer"
+    capture_farmers ||..o{ capture_procurements : "fk_procurements_company_farmer"
+    capture_plot_seasons ||..o{ capture_procurement_items : "fk_procurement_items_company_plot_season"
+    capture_plot_seasons ||..o{ capture_spray_declarations : "fk_spray_declarations_company_plot_season"
+    capture_plots ||..o{ capture_plot_seasons : "fk_plot_seasons_company_plot"
+    capture_procurement_items ||..o| capture_source_lots : "fk_source_lots_company_item"
+    capture_procurements ||..o{ capture_procurement_items : "fk_procurement_items_company_procurement"
+    capture_spray_declarations ||..o{ capture_spray_items : "fk_spray_items_company_declaration"
+    catalog_active_substances o|..o{ capture_spray_items : "fk_spray_items_substance"
+    identity_organizations ||..o{ capture_crop_seasons : "fk_crop_seasons_company"
+    identity_organizations ||..o{ capture_farmers : "fk_farmers_company"
+    identity_organizations ||..o{ capture_offline_operations : "fk_operations_company"
+    identity_organizations ||..o{ capture_plot_seasons : "fk_plot_seasons_company"
+    identity_organizations ||..o{ capture_plots : "fk_plots_company"
+    identity_organizations ||..o{ capture_procurements : "fk_procurements_company"
+    identity_organizations ||..o{ capture_spray_declarations : "fk_spray_declarations_company"
+    identity_organizations ||..o{ capture_spray_items : "fk_spray_items_company"
+    identity_users o|..o{ capture_crop_seasons : "fk_crop_seasons_created_by"
+    identity_users o|..o{ capture_farmers : "fk_farmers_created_by"
+    identity_users o|..o{ capture_plot_seasons : "fk_plot_seasons_created_by"
+    identity_users o|..o{ capture_plots : "fk_plots_created_by"
+    identity_users ||..o{ capture_offline_operations : "fk_operations_user"
+    identity_users ||..o{ capture_procurements : "fk_procurements_received_by"
+    identity_users ||..o{ capture_spray_declarations : "fk_spray_declarations_recorded_by"

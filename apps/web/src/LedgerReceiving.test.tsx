@@ -1,9 +1,9 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { LedgerWorkspace } from './LedgerWorkspace';
 import { LedgerReceiving } from './LedgerReceiving';
 import { type User } from './api';
-
 const user: User = { id: 'farmer-user', email: 'farmer@example.com', displayName: 'Farmer', phoneNumber: null, role: 'CustomerStaff', organizationId: 'company-1', organizationName: 'Company', isActive: true, permissions: ['farms.read', 'farms.write'] };
 const fetchMock = vi.fn<typeof fetch>();
 const response = (body: unknown, status = 200) => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -20,6 +20,18 @@ beforeEach(() => {
     if (url.pathname === '/api/farmers/farmer-1') return response(farmer);
     return response({ title: `Unexpected route ${url.pathname}` }, 404);
   });
+});
+it('reads own-company threshold through scoped endpoint only', async () => {
+  fetchMock.mockImplementation(async input => {
+    const path = new URL(String(input), 'http://localhost').pathname;
+    if (path === '/api/ledger/receiving-thresholds/own-company') return response({ companyId: 'company-1', percentage: '3', source: 'COMPANY_OVERRIDE', revision: 'company-revision' });
+    return response({ title: `Unexpected route ${path}` }, 404);
+  });
+  render(<LedgerWorkspace user={{ ...user, role: 'CustomerManager', permissions: [] }} />);
+  expect(await screen.findByText('3%')).toBeInTheDocument();
+  expect(screen.getByText(/Company override/)).toBeInTheDocument();
+  expect(screen.getByText(/Revision company-revision/)).toBeInTheDocument();
+  expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(['/api/ledger/receiving-thresholds/own-company']);
 });
 
 it('keeps server dependency conflicts visible when deleting own source record', async () => {

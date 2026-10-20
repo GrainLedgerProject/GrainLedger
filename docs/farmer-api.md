@@ -71,3 +71,13 @@ dotnet run --project backend/src/GrainLedger.Api -- --migrate
 ```
 
 Do not point this command at a production database without the normal database backup and deployment procedure.
+
+## F04 reference editing and duplicate warnings
+
+The responsive web app reads `GET /api/farmers/{id}` and `GET /api/plots/{id}` before editing. It sends their current `version` as `expectedVersion` to the existing PUT endpoints. The farmer code and the plot's code/farmer link remain unchanged. Only the creator with `farms.write` can edit; records already used by a plot, procurement, or crop season may return `409 REFERENCE_IN_USE`. A stale version returns `412 REFERENCE_STALE`. The UI does not silently retry an uncertain PUT.
+
+`POST /api/farmers/duplicate-check` accepts `{ "name": "Nguyễn Văn A", "contact": "0900 123 456", "excludeId": null }`. It returns up to five active records in the caller's customer company, with `SAME_NAME` and/or `SAME_CONTACT` reasons and `hasMore`. The matching is advisory: it normalizes Unicode names and whitespace, and removes simple phone separators. It does not merge or reject records.
+
+`POST /api/plots/duplicate-check` accepts `{ "geometry": { "type": "Point", "coordinates": [106.35, 10.4] }, "excludeId": null }`. It returns up to five same-company active points within 20 m, with distance, `hasMore`, `radiusMeters: 20`, and `coverage: "POINT_ONLY"`. It does not compare polygon boundaries. Both endpoints require `farms.write`; cookie requests use the existing CSRF mechanism, while Bearer requests do not. No database migration is needed for these checks.
+
+The plot map uses OpenStreetMap tiles only in Development. A production deployment can set `VITE_MAP_TILE_URL` to a same-origin tile path and `VITE_MAP_ATTRIBUTION` to the provider's required attribution in the web app's build environment. Without a configured tile path, the map shows a coordinate grid and the text coordinates remain available.

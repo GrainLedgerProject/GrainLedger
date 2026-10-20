@@ -40,8 +40,6 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
             var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
             catalog.ActiveSubstances.Add(new ActiveSubstance { Id = substanceId,
                 Code = $"T{substanceId:N}", Name = "Test substance" });
-            catalog.MeasurementUnits.Add(new MeasurementUnit { Id = Guid.NewGuid(),
-                Code = $"R{substanceId:N}"[..25].ToUpperInvariant(), Name = "Test rate", QuantityKind = "APPLICATION_RATE" });
             await catalog.SaveChangesAsync();
         }
         return (company.Id, plotSeasonId, substanceId);
@@ -61,12 +59,11 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
         DateOnly? appliedOn = null) => new
     {
         deviceId = "spray-test", clientOperationId = operationId ?? Guid.NewGuid(),
-        capturedAt = new DateTimeOffset(2026, 10, 13, 8, 0, 0, TimeSpan.Zero), payloadSchemaVersion = 1,
+        capturedAt = new DateTimeOffset(2026, 10, 13, 8, 0, 0, TimeSpan.Zero), payloadSchemaVersion = 2,
         payload = new { entityId = entityId ?? Guid.NewGuid(), plotSeasonId,
             appliedOn = appliedOn ?? new DateOnly(2026, 10, 12),
             informationSource, evidenceRef = (string?)null,
-            items = items ?? [new { productName = (string?)null, substanceId = (Guid?)substanceId,
-                rate = 0.5m, rateUnit = $"R{substanceId:N}"[..25] }] }
+            items = items ?? [new { productName = (string?)null, substanceId = (Guid?)substanceId }] }
     };
 
     [Fact]
@@ -76,10 +73,8 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
         using var client = await CustomerClientAsync(source.CompanyId);
         var operationId = Guid.NewGuid();
         var entityId = Guid.NewGuid();
-        object[] items = [new { productName = "Test product", substanceId = (Guid?)null,
-                rate = 1.25m, rateUnit = $"R{source.SubstanceId:N}"[..25] },
-            new { productName = (string?)null, substanceId = (Guid?)source.SubstanceId,
-                rate = 0.5m, rateUnit = $"R{source.SubstanceId:N}"[..25] }];
+        object[] items = [new { productName = "Test product", substanceId = (Guid?)null },
+            new { productName = (string?)null, substanceId = (Guid?)source.SubstanceId }];
         var request = Request(source.PlotSeasonId, source.SubstanceId, entityId, operationId, items);
         var created = await client.PostAsJsonAsync("/api/spray-declarations", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
@@ -89,6 +84,7 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
         var body = await created.Content.ReadAsStringAsync();
         Assert.Contains("\"appliedOn\":\"2026-10-12\"", body);
         Assert.DoesNotContain("appliedAt", body);
+        Assert.DoesNotContain("rate", body, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("Farmer notebook", result.InformationSource);
         Assert.Equal(HttpStatusCode.OK,
             (await client.PostAsJsonAsync("/api/spray-declarations", request)).StatusCode);
@@ -108,13 +104,13 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
         Assert.Equal(1, await db.SprayDeclarations.CountAsync(x => x.Id == entityId));
-        Assert.Equal(2, await db.SprayItems.CountAsync(x => x.DeclarationId == entityId));
+        Assert.Equal(2, await db.SprayItems.CountAsync(x => x.DeclarationId == entityId && x.Rate == null && x.RateUnit == null));
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CorrelationId == operationId));
         Assert.Equal(1, await db.OfflineOperations.CountAsync(x => x.ClientOperationId == operationId));
     }
 
     [Fact]
-    public async Task Rejects_foreign_source_invalid_line_and_wrong_unit_without_writing()
+    public async Task Rejects_foreign_source_invalid_line_and_legacy_rate_without_writing()
     {
         var source = await SeedSourceAsync();
         var foreign = await SeedSourceAsync();
@@ -122,16 +118,15 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(HttpStatusCode.Conflict,
             (await client.PostAsJsonAsync("/api/spray-declarations",
                 Request(foreign.PlotSeasonId, source.SubstanceId))).StatusCode);
-        object[] invalidItems = [new { productName = (string?)null, substanceId = (Guid?)null,
-            rate = 0m, rateUnit = "NOT-A-UNIT" }];
+        object[] invalidItems = [new { productName = (string?)null, substanceId = (Guid?)null }];
         Assert.Equal(HttpStatusCode.BadRequest,
             (await client.PostAsJsonAsync("/api/spray-declarations",
                 Request(source.PlotSeasonId, source.SubstanceId, items: invalidItems))).StatusCode);
-        object[] invalidUnit = [new { productName = "Product", substanceId = (Guid?)null,
-            rate = 1m, rateUnit = "NOT-A-UNIT" }];
+        object[] legacyRate = [new { productName = "Product", substanceId = (Guid?)null,
+            rate = 1m, rateUnit = "L/HA" }];
         Assert.Equal(HttpStatusCode.BadRequest,
             (await client.PostAsJsonAsync("/api/spray-declarations",
-                Request(source.PlotSeasonId, source.SubstanceId, items: invalidUnit))).StatusCode);
+                Request(source.PlotSeasonId, source.SubstanceId, items: legacyRate))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest,
             (await client.PostAsJsonAsync("/api/spray-declarations",
                 Request(source.PlotSeasonId, source.SubstanceId,

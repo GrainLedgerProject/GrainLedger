@@ -7,6 +7,7 @@ public sealed class Farmer
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
     public required string Code { get; set; }
+    public long? CodeNumber { get; set; }
     public required string Name { get; set; }
     public string? Contact { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -48,6 +49,7 @@ public sealed class CaptureBusinessEvent
 public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options) : DbContext(options)
 {
     public DbSet<Farmer> Farmers => Set<Farmer>();
+    public DbSet<CaptureCodeCounter> CodeCounters => Set<CaptureCodeCounter>();
     public DbSet<Plot> Plots => Set<Plot>();
     public DbSet<CropSeason> CropSeasons => Set<CropSeason>();
     public DbSet<PlotSeason> PlotSeasons => Set<PlotSeason>();
@@ -56,6 +58,8 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
     public DbSet<Procurement> Procurements => Set<Procurement>();
     public DbSet<ProcurementItem> ProcurementItems => Set<ProcurementItem>();
     public DbSet<SourceLot> SourceLots => Set<SourceLot>();
+    public DbSet<Sample> Samples => Set<Sample>();
+    public DbSet<SampleHandover> SampleHandovers => Set<SampleHandover>();
     public DbSet<CaptureOperation> OfflineOperations => Set<CaptureOperation>();
     public DbSet<CaptureBusinessEvent> BusinessEvents => Set<CaptureBusinessEvent>();
 
@@ -64,6 +68,15 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
         // InitialCapture adds foreign keys to identity tables in its migration.
         // Those tables belong to the Identity DbContext and are not remapped here.
         modelBuilder.HasDefaultSchema("capture");
+        modelBuilder.Entity<CaptureCodeCounter>(b =>
+        {
+            b.ToTable("code_counters");
+            b.HasKey(x => new { x.CompanyId, x.Kind, x.Scope });
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.Kind).HasColumnName("kind").HasMaxLength(3);
+            b.Property(x => x.Scope).HasColumnName("scope").HasMaxLength(32);
+            b.Property(x => x.NextValue).HasColumnName("next_value");
+        });
         modelBuilder.Entity<Farmer>(b =>
         {
             b.ToTable("farmers");
@@ -71,6 +84,9 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             b.Property(x => x.CompanyId).HasColumnName("company_id");
             b.Property(x => x.Code).HasColumnName("code").HasMaxLength(40).IsRequired();
+            b.Property(x => x.CodeNumber).HasColumnName("code_number");
+            b.HasIndex(x => new { x.CompanyId, x.CodeNumber }).IsUnique()
+                .HasDatabaseName("ux_farmers_company_code_number");
             b.Property(x => x.Name).HasColumnName("name").IsRequired();
             b.Property(x => x.Contact).HasColumnName("contact");
             b.Property(x => x.CreatedAt).HasColumnName("created_at");
@@ -150,7 +166,6 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
         {
             b.ToTable("spray_items", table =>
             {
-                table.HasCheckConstraint("ck_spray_items_rate_positive", "rate > 0");
                 table.HasCheckConstraint("ck_spray_items_product_or_substance", "product_name IS NOT NULL OR substance_id IS NOT NULL");
             });
             b.HasKey(x => x.Id);
@@ -160,7 +175,7 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.Property(x => x.ProductName).HasColumnName("product_name");
             b.Property(x => x.SubstanceId).HasColumnName("substance_id");
             b.Property(x => x.Rate).HasColumnName("rate").HasPrecision(24, 12);
-            b.Property(x => x.RateUnit).HasColumnName("rate_unit").HasMaxLength(40).IsRequired();
+            b.Property(x => x.RateUnit).HasColumnName("rate_unit").HasMaxLength(40);
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_spray_items_company_id");
             b.HasIndex(x => x.DeclarationId);
             b.HasIndex(x => x.SubstanceId);
@@ -217,6 +232,39 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
             b.HasIndex(x => x.LotId).IsUnique();
             b.HasIndex(x => x.ProcurementItemId).IsUnique();
             b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_source_lots_company_id");
+        });
+        modelBuilder.Entity<Sample>(b =>
+        {
+            b.ToTable("samples");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.Code).HasColumnName("code").HasMaxLength(60).IsRequired();
+            b.Property(x => x.SourceLotId).HasColumnName("source_lot_id");
+            b.Property(x => x.SealCode).HasColumnName("seal_code").HasMaxLength(100).IsRequired();
+            b.Property(x => x.CollectedBy).HasColumnName("collected_by");
+            b.Property(x => x.CollectedAt).HasColumnName("collected_at");
+            b.HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasDatabaseName("ux_samples_company_code");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_samples_company_id");
+            b.HasIndex(x => x.SourceLotId);
+            b.HasIndex(x => x.CollectedBy);
+        });
+        modelBuilder.Entity<SampleHandover>(b =>
+        {
+            b.ToTable("sample_handovers");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.SampleId).HasColumnName("sample_id");
+            b.Property(x => x.RecordedBy).HasColumnName("recorded_by");
+            b.Property(x => x.FromParty).HasColumnName("from_party").IsRequired();
+            b.Property(x => x.ToParty).HasColumnName("to_party").IsRequired();
+            b.Property(x => x.HandedOverAt).HasColumnName("handed_over_at");
+            b.Property(x => x.SealCondition).HasColumnName("seal_condition").IsRequired();
+            b.Property(x => x.EvidenceRef).HasColumnName("evidence_ref");
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique().HasDatabaseName("ux_sample_handovers_company_id");
+            b.HasIndex(x => x.SampleId);
+            b.HasIndex(x => x.RecordedBy);
         });
         modelBuilder.Entity<CaptureOperation>(b =>
         {

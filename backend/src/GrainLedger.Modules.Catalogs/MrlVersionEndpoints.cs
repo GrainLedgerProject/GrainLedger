@@ -34,6 +34,7 @@ public static class MrlVersionEndpoints
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>()
             .WithTags("MRL versions");
         group.MapPost("", CreateAsync).RequireAuthorization("platform.configure");
+        group.MapPost("/import", MrlImportEndpoints.ImportAsync).RequireAuthorization("platform.configure");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         group.MapPatch("/{id:guid}", UpdateAsync).RequireAuthorization("platform.configure");
