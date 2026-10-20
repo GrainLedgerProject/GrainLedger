@@ -12,7 +12,7 @@ Triển khai phần độc lập có thể làm ngay: **Ledger lot ↔ công đo
 - [x] A2 — Giao diện chọn lô/truy hai chiều, khối lượng nguồn và restriction.
 - [x] A3 — Regression tests PostgreSQL cô lập, frontend tests, build và actual API/browser smoke.
 - [x] A4 — Tài liệu API, kết quả kiểm chứng và hướng dẫn deployment.
-- [ ] B — Lab/evidence dependencies; chờ nghiệp vụ lab/compliance.
+- [ ] B — Lab/evidence dependencies; đã có sample/handover sau merge dev, chưa có lab result/compliance; xem mục 7.
 - [ ] C — Plan/reservation/loading/container/dossier; chờ nghiệp vụ export.
 
 ## 2. Phạm vi bước A thực hiện trong đợt này
@@ -138,3 +138,50 @@ Sau báo lỗi `permission denied for function trace_lot`, kiểm tra read-only 
 Đã bổ sung startup validation cho hàm/grant trace, không tự sửa database. Regression trong `CaptureCutoverMigrationTests` thu hồi riêng EXECUTE trace trên runtime test cô lập, xác minh startup từ chối với lỗi rõ ràng, cấu hình lại runtime grants rồi xác minh validation pass. Chạy nhóm này: PASS 1/1 (backend build kèm test pass; warning có sẵn vẫn còn). `git diff --check`: PASS.
 
 Sửa database dùng chung cần phê duyệt riêng: chỉ GRANT EXECUTE trên `ledger.trace_lot(uuid,uuid,text,text)` cho runtime role cấu hình, không migration/seed hoặc business data smoke. Sau phê duyệt rõ ràng của người dùng, đã áp dụng đúng một GRANT EXECUTE trên signature này cho runtime role cấu hình. Preflight xác nhận cùng host/port/database, migration login riêng và effective PostgreSQL runtime role khớp cấu hình (pooler login có thể kèm suffix). Postflight qua runtime connection: `has_function_privilege(..., EXECUTE)=true`, `ValidateRuntimeAsync` PASS. Không chạy migration, seed hoặc trace POST ghi audit trên shared database.
+
+
+## 7. Đánh giá điều kiện tiếp tục sau merge dev — 20/10/2026
+
+Đối chiếu tại merge `dc2b31b` (cha trace `3e8039c`, dev gồm field capture/sample custody, MRL import, unified lot codes và receiving thresholds). Kết luận: có thể thiết kế/triển khai một phần mở rộng nhỏ nối nguồn với sample/handover sau khi ổn định merge; chưa đủ dependency cho toàn bộ B1–B3/C1–C3. Đây là đánh giá source và test cô lập, chưa xác nhận migration/data tại shared Supabase.
+
+### Phần có thể bắt đầu tiếp
+
+- **B0 — Nguồn → mẫu và bàn giao:** đã có `capture.samples`, `capture.sample_handovers`, API sample theo company, sample/source FK, business events và captured/recorded time. Trace đã trả `SourceRecordId`, chính là Capture SourceLot.Id; sample dùng ID này, không dùng Ledger lot ID. Có thể thêm thông tin mẫu, seal, thời điểm lấy và lịch sử bàn giao vào chi tiết nguồn, qua Capture-owned bulk read contract cùng scope/transaction. Không thêm cạnh vật liệu giả hoặc tự kết luận xét nghiệm/compliance. Chỉ hiển thị theo quyền trace nguồn hiện có; không mở dữ liệu nguồn cho ExportStaff. Admin global trace cần contract có kiểm tra authority riêng, không bỏ company filter của sample API hiện có.
+- **Source/plot search:** đã có Capture search/reference và mã lot thống nhất; có thể triển khai điểm bắt đầu theo nguồn/thửa-vụ sau khi chốt mapping và scope. Source pending có thể có sample nhưng chưa có Ledger stock graph; phải trình bày rõ trạng thái.
+- Sample API kiểm tra source đã commit trong Capture và procurement event; không kiểm tra Ledger arrival accepted. Không được hiểu chữ “accepted source” là đã có usable stock.
+
+### Phần vẫn chờ
+
+- **B1 đầy đủ:** chưa có lab report/result model/API và immutable official report/supersession contract. Sample handover có `toParty` không chứng minh phòng lab đã trả kết quả.
+- **B2/B3:** MRL versions/limits, publish, resolve và import đã có nhưng chỉ là ngưỡng tham chiếu. Chưa có cohort membership snapshot, evidence dependency, compliance assessment, propagation hoặc atomic STALE/risk invalidation. Không suy dư lượng từ khối lượng đóng góp, tự HOLD hay kết luận đạt MRL.
+- **C1–C3:** chưa có execution/versioned export plan, reservation, loading/allocation/container, closing assessment/dossier/supplement và container HOLD contract. Permission constants không chứng minh workflow đã triển khai.
+- Arbitrary knowledge-time trace và benchmark toàn mùa vụ vẫn chưa đủ contract/dataset.
+
+### Các việc phải xử lý trước khi mở rộng
+
+1. Sót conflict marker đã được commit ở `README.md:5`, `apps/web/src/LedgerWorkspace.tsx:7` và `apps/web/src/styles.css:401`. Import LedgerWorkspace phải giữ cả Traceability lẫn OwnReceivingThreshold; CSS phải giữ cả trace-origin lẫn receiving-detail. Web hiện chưa build được. Đợt đánh giá này chỉ ghi nhận, chưa sửa code merge.
+2. Ba `SampleTests` đều lỗi trong `SeedSourceAsync` ở `SaveChangesAsync` dòng 37: SQLSTATE 23514, `Committed procurement requires complete immutable provenance and Ledger stock`. Fixture dựng event/source rời rạc không còn thỏa boundary hiện tại. Cần dùng procurement/receiving workflow thật trong Testcontainers thay vì làm lỏng constraint; lỗi xảy ra trước khi test gọi sample API nên chưa kết luận API sample hỏng.
+3. Sau khi sửa, cần kiểm tra integration source → sample → handover → backward/forward trace và browser thực tế, cả scope/legacy/pending source. Các test riêng đang pass chưa chứng minh phần tích hợp mới.
+4. Kiểm tra pending migrations/runtime grants bằng read-only preflight trước deployment. Các migration unified code/receiving threshold mới trong source không có nghĩa đã được áp dụng trên shared database; mọi migration/grant vẫn cần phê duyệt riêng.
+
+### Kiểm chứng thực sự đã chạy trong lần đánh giá
+
+- `npm run build`: FAIL với TS1185 ở LedgerWorkspace, dòng 7/9/11 (conflict markers).
+- `dotnet test backend/tests/GrainLedger.Api.IntegrationTests --filter 'FullyQualifiedName~LotTraceabilityTests|FullyQualifiedName~SampleTests|FullyQualifiedName~CaptureCutoverMigrationTests'`: build backend PASS (còn warning CS9113); 13 test: 10 PASS (9 trace + 1 migration/runtime), 3 FAIL (sample fixture như trên), 0 skipped. Database PostgreSQL Testcontainers cô lập.
+- Không chạy toàn bộ test suite, không chạy browser với web build lỗi, không migrate/seed/trace POST hoặc sửa grants trên shared Supabase. Không thay đổi code tính năng và không commit trong lần đánh giá này.
+
+Thứ tự đề xuất: sửa merge → sửa fixture và kiểm chứng sample → B0 sample/custody trong trace → chờ lab/compliance để mở B1/B2/B3 → chờ export/loading để mở C. Những điều kiện ở mục 4 vẫn giữ, chỉ phần sample/handover đã có nền tảng trong source.
+
+
+### 7.1. Khôi phục runtime EXECUTE sau merge
+
+Kiểm tra chỉ đọc ngày 20/10/2026 xác nhận trace function/migration vẫn tồn tại, effective runtime role đúng cấu hình, schema USAGE và command EXECUTE vẫn có nhưng trace ACL chỉ còn owner EXECUTE. Các migration UnifiedLotCodes/ReceivingLossThreshold/RepairReceivingLotCodeBoundary đã có trong history tại lần kiểm tra này. Bản dev trước merge thu hồi toàn bộ function grants rồi cấp lại danh sách chưa có trace; đây là cơ chế có thể gây mất quyền, chưa có audit chứng minh tác nhân đã chạy nó. Code sau merge đã có trace trong danh sách grant.
+
+Theo yêu cầu khôi phục của người dùng và phê duyệt EXECUTE trước đó, đã cấp lại riêng `GRANT EXECUTE ON FUNCTION ledger.trace_lot(uuid,uuid,text,text)` cho runtime role đang cấu hình bằng migration-owner connection. Không migrate/seed, không gọi trace POST hoặc thay stock/history. Postflight runtime EXECUTE=true, `ValidateRuntimeAsync` PASS. Đã chạy backend bằng runtime connection, kiểm tra `GET http://localhost:5080/openapi/v1.json` trả 200 và route `/api/ledger/trace` có trong tài liệu. Backend được giữ chạy cho người dùng. Lỗi merge web ở mục 7 vẫn cần xử lý riêng.
+
+
+### 7.2. Sửa conflict marker sau merge
+
+Theo yêu cầu người dùng, đã gỡ ba khối marker ở README, LedgerWorkspace và styles.css. Giữ cả import/component Traceability và OwnReceivingThreshold, cả CSS trace-origin và receiving-detail; README giữ phần mô tả tracing cùng bố cục dev mới. Các lỗi marker/build web tại mục 7 đã được xử lý; lỗi fixture SampleTests vẫn là việc riêng chưa sửa.
+
+Kiểm chứng: quét toàn bộ file tracked bằng `git grep` không còn conflict marker; `git diff --check` PASS; `npm run build` PASS (còn cảnh báo chunk trên 500 kB); `npm test` PASS 107/107 trên 20 file. Browser thật tại cổng test 5175 tải được màn hình đăng nhập và các module, không còn lỗi parse/import; session API trả 401 do chưa đăng nhập, chưa kiểm chứng màn Ledger sau đăng nhập trong smoke này. Không chạy trace POST hoặc thay dữ liệu shared database. Không chỉnh sửa package-lock đang có thay đổi của người dùng; chưa commit.

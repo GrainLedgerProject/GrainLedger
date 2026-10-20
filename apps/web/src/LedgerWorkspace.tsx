@@ -4,11 +4,8 @@ import { LedgerOperations } from './LedgerOperations';
 import { LedgerReceiving } from './LedgerReceiving';
 import { LedgerSetup } from './LedgerSetup';
 import { LedgerStock } from './LedgerStock';
-<<<<<<< HEAD
 import { LedgerTraceability } from './LedgerTraceability';
-=======
 import { OwnReceivingThreshold } from './ReceivingThresholds';
->>>>>>> dev
 
 export const ledgerSections = [
   { id: 'receiving', label: 'Receive stock', description: 'Procurement & mill arrivals', permissions: ['farms.read', 'farms.write', 'purchases.write', 'platform.configure', 'lots.receive', 'receiving.reconcile'] },

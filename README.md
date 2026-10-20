@@ -2,11 +2,8 @@
 
 GrainLedger is a rice supply-chain traceability platform. It connects identity and access control, shared product catalogs, procurement source records, and a protected ledger for receiving, stock, processing, and history.
 
-<<<<<<< HEAD
 Lot-to-lot tracing is available through Ledger → Traceability and the [audited trace API](docs/traceability-api.md). The [implementation plan](docs/traceability-implementation-plan.md) records current scope and deferred lab/export/container dependencies. New trace migration/runtime grants require explicit deployment; normal startup does not apply them.
 
-## Structure
-=======
 ## What it does
 
 - **Identity:** Google and email/password sign-in, verified onboarding, session management, and administrator-managed organizations and permissions.
@@ -23,7 +20,6 @@ The React web app supports desktop and mobile-sized screens. The mobile workspac
 - Docker image and Compose PostgreSQL service for local development
 
 ## Repository map
->>>>>>> dev
 
 ```text
 backend/src/GrainLedger.Api/                  ASP.NET Core host
