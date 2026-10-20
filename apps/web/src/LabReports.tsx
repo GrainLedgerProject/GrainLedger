@@ -63,7 +63,7 @@ function assessmentPillClass(status: AssessmentStatus) {
   return 'lab-pill neutral';
 }
 
-export function LabReports({ canWrite, sampleId, sourceLotId, onOpenSample }: { canWrite: boolean; sampleId?: string; sourceLotId?: string; onOpenSample?: (id: string) => void }) {
+export function LabReports({ canWrite, sampleId, sourceLotId, onOpenSample, onOpenSourceLot }: { canWrite: boolean; sampleId?: string; sourceLotId?: string; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
   const [page, setPage] = useState(1), [retry, setRetry] = useState(0), [list, setList] = useState<Page<Report> | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState(''), [selected, setSelected] = useState<string | null>(null), [creating, setCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | Report['status']>('ALL'), [searchQuery, setSearchQuery] = useState('');
   useEffect(() => {
@@ -80,7 +80,7 @@ export function LabReports({ canWrite, sampleId, sourceLotId, onOpenSample }: { 
     return () => { active = false; controller.abort(); };
   }, [page, retry, sampleId, sourceLotId]);
 
-  if (selected) return <ReportDetail key={selected} id={selected} canWrite={canWrite} onBack={() => { setSelected(null); setRetry(value => value + 1); }} onOpenReport={setSelected} onOpenSample={onOpenSample} />;
+  if (selected) return <ReportDetail key={selected} id={selected} canWrite={canWrite} onBack={() => { setSelected(null); setRetry(value => value + 1); }} onOpenReport={setSelected} onOpenSample={onOpenSample} onOpenSourceLot={onOpenSourceLot} />;
 
   const items = list?.items ?? [];
   const confirmedCount = items.filter(r => r.status === 'CONFIRMED').length;
@@ -279,7 +279,7 @@ function ReportIntake({ canWrite, initialSampleId, initialLaboratory, relatedRep
     </form></section></div>;
 }
 
-function ReportDetail({ id, canWrite, onBack, onOpenReport, onOpenSample }: { id: string; canWrite: boolean; onBack: () => void; onOpenReport: (id: string) => void; onOpenSample?: (id: string) => void }) {
+function ReportDetail({ id, canWrite, onBack, onOpenReport, onOpenSample, onOpenSourceLot }: { id: string; canWrite: boolean; onBack: () => void; onOpenReport: (id: string) => void; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
   const [report, setReport] = useState<Report | null>(null), [error, setError] = useState(''), [retry, setRetry] = useState(0), [confirmOpen, setConfirmOpen] = useState(false), [identityChecked, setIdentity] = useState(false), [transcriptionChecked, setTranscription] = useState(false), [matches, setMatches] = useState<Record<string, { sampleId: string; identityBasis: string; evidenceRef: string }>>({}), [selectedSamples, setSelectedSamples] = useState<Record<string, SampleOption>>({}), [substances, setSubstances] = useState<Record<string, { code: string; name: string }>>({}), [confirmPending, setConfirmPending] = useState<Envelope<ConfirmPayload> | null>(null), [busy, setBusy] = useState(false), [mutationError, setMutationError] = useState(''), [relationship, setRelationship] = useState<ReportKind | null>(null);
   useEffect(() => {
     let active = true;
@@ -469,6 +469,7 @@ function ReportDetail({ id, canWrite, onBack, onOpenReport, onOpenSample }: { id
                   Unresolved · proposed {set.statedSampleCode?.trim() || set.sampleId || 'not recorded'}
                 </span>
               )}
+              {set.sourceLotId && onOpenSourceLot && <button className="secondary" type="button" onClick={() => onOpenSourceLot(set.sourceLotId!)}>Recorded source lot ↗</button>}
             </div>
           </div>
           <div className="table-scroll">

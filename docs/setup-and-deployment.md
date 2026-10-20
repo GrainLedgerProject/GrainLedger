@@ -94,9 +94,16 @@ ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.
 
 Normal application startup is separate and neither migrates nor seeds:
 
+
 ```bash
 dotnet run --project backend/src/GrainLedger.Api
 ```
+
+## Mixed-bulk forward migration and activation
+
+Ledger migration `20261020000000_MixedBulkStorage` installs mixed-bulk location/pool state, protected command/safety/read routines, and restricted grants through four embedded SQL resources. It is forward-only; rollback is unsupported because custody history is immutable. Implementation is local and is not deployed to shared Supabase or production. Do not run `--migrate`, seeds, grant changes or schema changes against any shared database without explicit database-owner approval.
+
+No reset, stock backfill, conversion, or default mixed-bulk policy is part of deployment. Existing locations remain `mixedBulk: false`; explicit location opt-in alone does not authorize ingress. An Administrator must record append-only evidence-backed policy for exact location kind, owner, commodity, stage, product identity and effective time, with `identityScopeConfirmed: true`. No factory default/seed policy. Supported kinds are `STORE`, `SILO`, `COMPARTMENT`; `ISOLATION` is only for held-stock isolation, not pooling. Runtime credentials must remain restricted; migration owner must apply generated grants and private helper/table privileges via the reviewed migration path.
 
 ## Local web and API
 

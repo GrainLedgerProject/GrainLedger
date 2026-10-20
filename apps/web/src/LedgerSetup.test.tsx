@@ -209,3 +209,34 @@ it('keeps newest history filter results when older response arrives last', async
  expect(screen.getByText('Newest company filter')).toBeInTheDocument();
  expect(screen.queryByText('Stale system filter')).not.toBeInTheDocument();
 });
+it('requires exact-scope confirmation before recording evidence-backed mixed-bulk policy', async () => {
+ const browser = userEvent.setup();
+ fetchMock.mockImplementation(async (input, init) => {
+  const path = String(input).split('?')[0];
+  if (path === '/api/auth/csrf') return response({ token: 'csrf' });
+  if (path === '/api/ledger/setup') return response({ owners: organizations, facilities, locations: [{ id: 'silo-a', name: 'Silo A', facilityId: 'facility-a', kind: 'SILO', mixedBulk: true }], commodities: [{ id: 'paddy', name: 'Paddy' }], equipment: [], assignments: [], policies: [], compatibilities: [], mixedBulkPolicies: [] });
+  if (path === '/api/admin/users') return response([]);
+  if (path === '/api/admin/organizations') return response(organizations);
+  if (path === '/api/commodities' || path === '/api/measurement-units') return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+  if (path === '/api/ledger/receiving-thresholds') return response({ systemDefault: { percentage: '2', version: 'threshold-v1' }, companyOverrides: [] });
+  if (path === '/api/ledger/receiving-thresholds/companies' || path === '/api/ledger/receiving-thresholds/history') return response({ items: [], page: 1, pageSize: 20, totalCount: 0, hasMore: false });
+  if (path === '/api/ledger/evidence' && init?.method === 'POST') return response({ id: 'evidence-a' });
+  return response({});
+ });
+ render(<LedgerSetup user={user} />);
+ await browser.click(await screen.findByText(/Advanced policy/, { selector: 'summary' }));
+ const mixedPanel = screen.getByRole('heading', { name: 'Mixed-bulk location policies' }).closest('section')!;
+ await browser.selectOptions(within(mixedPanel).getByLabelText('Enabled mixed-bulk location'), 'silo-a');
+ await browser.selectOptions(within(mixedPanel).getByLabelText('Policy owner'), 'owner-a');
+ await browser.selectOptions(within(mixedPanel).getByLabelText('Commodity'), 'paddy');
+ await browser.upload(within(mixedPanel).getByLabelText('Evidence file'), new File(['approval evidence'], 'policy.pdf', { type: 'application/pdf' }));
+ await browser.click(within(mixedPanel).getByRole('button', { name: 'Upload evidence' }));
+ const record = within(mixedPanel).getByRole('button', { name: 'Record mixed-bulk policy' });
+ expect(record).toBeDisabled();
+ await browser.click(within(mixedPanel).getByLabelText(/I confirm this evidence explicitly approves/));
+ expect(record).toBeEnabled();
+ await browser.click(record);
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/ledger/mixed-bulk-policies')).toBe(true));
+ const write = fetchMock.mock.calls.find(([url]) => String(url) === '/api/ledger/mixed-bulk-policies')!;
+ expect(JSON.parse(String(write[1]?.body))).toMatchObject({ locationId: 'silo-a', ownerId: 'owner-a', commodityId: 'paddy', stage: 'RAW_PADDY', productIdentity: 'RAW_PADDY', evidenceId: 'evidence-a', identityScopeConfirmed: true });
+});

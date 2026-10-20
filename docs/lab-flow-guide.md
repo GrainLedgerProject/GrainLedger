@@ -72,6 +72,10 @@ Preserve laboratory wording and units. `ND` means not detected under reported me
 
 Report confirmation checks transcription and sample identity. Assessment remains `NOT_ASSESSED`, not `PASS`. No automatic HOLD or release follows report intake, confirmation, amendment, or retest. Existing stock and HOLD decisions remain unchanged.
 
+## Mixed-bulk source evidence boundary
+
+Pooling does not change sample or report subject: samples remain associated with original procurement source lot. Procurement and Ledger views may link that source to current pool/descendant stock through source-attributed lineage; this is evidence navigation, not a pool-specific laboratory test. A late confirmed report remains source identity `NOT_ASSESSED` and does not adjust pool shares, stock availability or HOLD. Positive custody/processing ancestry propagates explicit HOLDs only to descendants containing that source; a later top-up does not taint an earlier aliquot. Isolation movement preserves HOLD and does not release it. No automatic lab-triggered HOLD or assessment exists.
+
 ## Fictional example
 
 All values below are fictional workflow examples, not legal limits or compliance guidance.

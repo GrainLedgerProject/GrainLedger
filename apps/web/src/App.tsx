@@ -136,6 +136,7 @@ export function App() {
   const canReadFarmers = user.permissions.includes('farms.read') || user.permissions.includes('farms.write');
   const canWritePurchases = user.permissions.includes('purchases.write');
   const canReadPurchases = canWritePurchases || user.permissions.includes('lots.read.tenant');
+  const canReadLedgerStock = ['lots.read.all', 'lots.read.facility', 'lots.read.tenant', 'purchases.write'].some(permission => user.permissions.includes(permission));
   const canReadSamples = canWritePurchases || user.permissions.includes('farms.read') || user.permissions.includes('lab.read') || user.permissions.includes('lab.write');
   const farmerPathId = path.match(/^\/capture\/farmers\/([^/]+)\/?$/)?.[1] ?? null;
   const selectedFarmerId = farmerPathId === 'new' ? null : farmerPathId;
@@ -171,10 +172,10 @@ export function App() {
         {error && <div className="notice error" role="alert">{error}</div>}
         {tab === 'mrl' && user.permissions.includes('mrl.read') ? <MrlLookup />
           : tab === 'administration' && user.role === 'Administrator' ? <AdminWorkspace user={user} section={adminSection} onSelect={openAdminSection} />
-          : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} />
-          : tab === 'lab' && (user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) ? <LabReports canWrite={user.permissions.includes('lab.write')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} />
+          : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} initialLotId={path.match(/^\/ledger\/lots\/([^/]+)$/)?.[1]} />
+          : tab === 'lab' && (user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) ? <LabReports canWrite={user.permissions.includes('lab.write')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={canReadPurchases ? id => openCapturePath(`/capture/source-lots/${id}`, 'procurements') : undefined} />
           : tab === 'procurements' && selectedSourceLotId ? (canReadPurchases
-            ? <SourceLotDetail id={selectedSourceLotId} canWriteSamples={canWritePurchases} canReadLab={user.permissions.includes('lab.read') || user.permissions.includes('lab.write')} userId={user.id} companyId={user.organizationId || ''} onBack={id => id ? openCapturePath(`/capture/procurements/${id}`, 'procurements') : openTab('procurements')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenFarmer={canReadFarmers ? id => selectFarmer(id) : undefined} onOpenPlot={canReadFarmers ? selectPlot : undefined} onOpenPlotSeason={canReadFarmers ? selectPlotSeason : undefined} />
+            ? <SourceLotDetail id={selectedSourceLotId} canWriteSamples={canWritePurchases} canReadLab={user.permissions.includes('lab.read') || user.permissions.includes('lab.write')} userId={user.id} companyId={user.organizationId || ''} onBack={id => id ? openCapturePath(`/capture/procurements/${id}`, 'procurements') : openTab('procurements')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={id => openCapturePath(`/capture/source-lots/${id}`, 'procurements')} onOpenLedgerLot={canReadLedgerStock ? id => openCapturePath(`/ledger/lots/${encodeURIComponent(id)}`, 'ledger') : undefined} onOpenFarmer={canReadFarmers ? id => selectFarmer(id) : undefined} onOpenPlot={canReadFarmers ? selectPlot : undefined} onOpenPlotSeason={canReadFarmers ? selectPlotSeason : undefined} />
             : <div className="notice error" role="alert">Your account cannot view source lots.</div>)
           : tab === 'procurements' && procurementPathId === 'new' ? (canWritePurchases
             ? <ProcurementForm userId={user.id} companyId={user.organizationId || ''} onBack={() => openTab('procurements')} onCreated={id => openCapturePath(`/capture/procurements/${id}`, 'procurements')} />
