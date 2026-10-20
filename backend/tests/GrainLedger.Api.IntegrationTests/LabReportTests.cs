@@ -476,16 +476,16 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         publishReq.Headers.IfMatch.Add(importResp.Headers.ETag!);
         Assert.Equal(HttpStatusCode.OK, (await s.Admin.SendAsync(publishReq)).StatusCode);
 
-        object MappedRow(Guid subId, string label, string text, string kind, string? num, string? loq = "0.01") => new
+        object MappedRow(string subIdOrCode, string label, string text, string kind, string? num, string? loq = "0.01") => new
         {
-            testLabel = label, substanceId = (Guid?)subId, originalResultText = text, resultKind = kind,
+            testLabel = label, substanceId = subIdOrCode, originalResultText = text, resultKind = kind,
             numericValue = num, unit = "mg/kg", lod = "0.005", loq, method = "LC-MS/MS", uncertainty = (string?)null, reference = "p.1"
         };
 
-        // 1. Within VN limit + unregulated TCZ001 -> WITHIN_ASSESSED_LIMITS
+        // 1. Within VN limit (using substance code CPF006 + UUID tczId) -> WITHIN_ASSESSED_LIMITS
         var withinReq = ReportRequest([ResultSet(sample, [
-            MappedRow(cpfId, "Chlorpyrifos", "0.20", "NUMERIC", "0.20"),
-            MappedRow(tczId, "Tricyclazole", "0.05", "NUMERIC", "0.05")
+            MappedRow("CPF006", "Chlorpyrifos", "0.20", "NUMERIC", "0.20"),
+            MappedRow(tczId.ToString(), "Tricyclazole", "0.05", "NUMERIC", "0.05")
         ])]);
         var withinId = EntityId(withinReq);
         await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", withinReq, HttpStatusCode.Created);
@@ -498,7 +498,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Contains(withinReasons, r => r.Contains("TCZ001: NO_MRL_IN_VN"));
 
         // 2. Exceeds VN limit -> EXCEEDS_LIMIT
-        var exceedsReq = ReportRequest([ResultSet(sample, [MappedRow(cpfId, "Chlorpyrifos", "0.80", "NUMERIC", "0.80")])]);
+        var exceedsReq = ReportRequest([ResultSet(sample, [MappedRow("CPF006", "Chlorpyrifos", "0.80", "NUMERIC", "0.80")])]);
         var exceedsId = EntityId(exceedsReq);
         await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", exceedsReq, HttpStatusCode.Created);
         var exceedsDraft = await GetAsync(s.Customer, $"/api/lab-reports/{exceedsId}");
@@ -507,7 +507,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal("EXCEEDS_LIMIT", exceedsConfirmed.GetProperty("assessmentStatus").GetString());
 
         // 3. Reporting limit <0.60 > 0.50 -> INSUFFICIENT_EVIDENCE
-        var insuffReq = ReportRequest([ResultSet(sample, [MappedRow(cpfId, "Chlorpyrifos", "<0.60", "BELOW_LIMIT", "0.60")])]);
+        var insuffReq = ReportRequest([ResultSet(sample, [MappedRow("CPF006", "Chlorpyrifos", "<0.60", "BELOW_LIMIT", "0.60")])]);
         var insuffId = EntityId(insuffReq);
         await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", insuffReq, HttpStatusCode.Created);
         var insuffDraft = await GetAsync(s.Customer, $"/api/lab-reports/{insuffId}");

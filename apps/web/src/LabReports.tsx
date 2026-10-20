@@ -79,8 +79,18 @@ function ReportIntake({ canWrite, initialSampleId, initialLaboratory, relatedRep
     if (sets.some(set => !set.results.length || set.results.some(row => !row.testLabel.trim() || !row.originalResultText.trim() || ['NUMERIC', 'BELOW_LIMIT'].includes(row.resultKind) && !row.numericValue || [row.numericValue, row.lod, row.loq].some(value => value !== undefined && value !== '' && !/^[0-9]{1,12}(?:\.[0-9]{1,12})?$/.test(value))))) { setError('Every section needs result rows with test labels and original text; numeric values, LOD, and LOQ must use exact nonnegative decimal strings.'); return; }
     setBusy(true); setError('');
     try {
+      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let codeToId: Map<string, string> | null = null;
+      if (!pending && sets.some(s => s.results.some(r => r.substanceId && !uuidRe.test(r.substanceId.trim())))) {
+        const catalog = await api<Page<{ id: string; code: string; name: string }>>('/api/active-substances?page=1&pageSize=100');
+        codeToId = new Map();
+        for (const item of catalog.items) {
+          codeToId.set(item.code.toUpperCase(), item.id);
+          codeToId.set(item.name.toUpperCase(), item.id);
+        }
+      }
       const contentBase64 = pending?.payload.contentBase64 ?? await encodeBase64(file);
-      const payload: IntakePayload = pending?.payload ?? { entityId: crypto.randomUUID(), laboratoryName: laboratoryName.trim(), reportNumber: reportNumber.trim(), issuedOn, receivedAt: new Date(receivedAt).toISOString(), reportKind, ...(relatedReportIdValue ? { relatedReportId: relatedReportIdValue } : {}), ...(relationshipReason.trim() ? { relationshipReason: relationshipReason.trim() } : {}), fileName: file.name, contentType: file.type || 'application/octet-stream', contentBase64, companyOnlyConfirmed: true, resultSets: sets.map(set => ({ entityId: set.entityId, ...(set.sampleId ? { sampleId: set.sampleId } : {}), ...(set.laboratorySampleReference ? { laboratorySampleReference: set.laboratorySampleReference } : {}), ...(set.statedSampleCode ? { statedSampleCode: set.statedSampleCode } : {}), ...(set.statedSealCode ? { statedSealCode: set.statedSealCode } : {}), ...(set.sectionReference ? { sectionReference: set.sectionReference } : {}), results: set.results })) };
+      const payload: IntakePayload = pending?.payload ?? { entityId: crypto.randomUUID(), laboratoryName: laboratoryName.trim(), reportNumber: reportNumber.trim(), issuedOn, receivedAt: new Date(receivedAt).toISOString(), reportKind, ...(relatedReportIdValue ? { relatedReportId: relatedReportIdValue } : {}), ...(relationshipReason.trim() ? { relationshipReason: relationshipReason.trim() } : {}), fileName: file.name, contentType: file.type || 'application/octet-stream', contentBase64, companyOnlyConfirmed: true, resultSets: sets.map(set => ({ entityId: set.entityId, ...(set.sampleId ? { sampleId: set.sampleId } : {}), ...(set.laboratorySampleReference ? { laboratorySampleReference: set.laboratorySampleReference } : {}), ...(set.statedSampleCode ? { statedSampleCode: set.statedSampleCode } : {}), ...(set.statedSealCode ? { statedSealCode: set.statedSealCode } : {}), ...(set.sectionReference ? { sectionReference: set.sectionReference } : {}), results: set.results.map(r => { const raw = r.substanceId?.trim(); if (!raw) return r; const resolved = uuidRe.test(raw) ? raw : codeToId?.get(raw.toUpperCase()); if (!resolved) throw new Error(`Unknown substance code or ID: ${raw}`); return { ...r, substanceId: resolved }; }) })) };
       if (!pending && laboratoryConclusion.trim()) payload.laboratoryConclusion = laboratoryConclusion.trim();
       if (!pending && statedStandard.trim()) payload.statedStandard = statedStandard.trim();
       const request = pending ?? newRequest(payload);

@@ -14,7 +14,7 @@ using Npgsql;
 
 namespace GrainLedger.Modules.Capture;
 
-public sealed record LabResultInput(string? TestLabel, Guid? SubstanceId, string? OriginalResultText,
+public sealed record LabResultInput(string? TestLabel, string? SubstanceId, string? OriginalResultText,
     string? ResultKind, string? NumericValue = null, string? Unit = null, string? Lod = null,
     string? Loq = null, string? Method = null, string? Uncertainty = null, string? Reference = null);
 public sealed record LabResultSetInput(Guid EntityId, Guid? SampleId, string? LaboratorySampleReference,
@@ -152,11 +152,30 @@ public static class LabReportEndpoints
         var sampleIds = resultSets.Where(x => x.SampleId.HasValue).Select(x => x.SampleId!.Value).Distinct().ToArray();
         if (await db.Samples.CountAsync(x => x.CompanyId == company && sampleIds.Contains(x.Id), ct) != sampleIds.Length)
             return Problem(409, "SAMPLE_NOT_FOUND", "Every proposed sample must belong to this company.");
-        var substances = resultSets.SelectMany(x => x.Results!).Where(x => x.SubstanceId.HasValue).Select(x => x.SubstanceId!.Value).Distinct().ToArray();
-        if (substances.Length > 0)
+        var rawSubstances = resultSets.SelectMany(x => x.Results!)
+            .Where(x => !string.IsNullOrWhiteSpace(x.SubstanceId))
+            .Select(x => x.SubstanceId!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var resolvedSubstances = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        if (rawSubstances.Length > 0)
         {
-            var known = await db.Database.SqlQuery<Guid>($"SELECT id AS \"Value\" FROM catalog.active_substances WHERE id = ANY({substances})").ToArrayAsync(ct);
-            if (known.Length != substances.Length) return Problem(409, "SUBSTANCE_NOT_FOUND", "A supplied catalog substance does not exist.");
+            var guids = rawSubstances.Where(x => Guid.TryParse(x, out _)).Select(Guid.Parse).Distinct().ToArray();
+            var codes = rawSubstances.Where(x => !Guid.TryParse(x, out _)).Select(x => x.ToUpperInvariant()).Distinct().ToArray();
+            if (guids.Length > 0)
+            {
+                var byId = await db.Database.SqlQuery<SubstanceCodeRow>(
+                    $"SELECT id AS \"Id\", code AS \"Code\" FROM catalog.active_substances WHERE id = ANY({guids})").ToListAsync(ct);
+                foreach (var item in byId) resolvedSubstances[item.Id.ToString()] = item.Id;
+            }
+            if (codes.Length > 0)
+            {
+                var byCode = await db.Database.SqlQuery<SubstanceCodeRow>(
+                    $"SELECT id AS \"Id\", code AS \"Code\" FROM catalog.active_substances WHERE UPPER(code) = ANY({codes})").ToListAsync(ct);
+                foreach (var item in byCode) resolvedSubstances[item.Code] = item.Id;
+            }
+            if (rawSubstances.Any(raw => !resolvedSubstances.ContainsKey(raw)))
+                return Problem(409, "SUBSTANCE_NOT_FOUND", "A supplied catalog substance does not exist.");
         }
         var now = clock.GetUtcNow();
         db.LabReports.Add(new LabReport { Id = p.EntityId, CompanyId = company.Value, LaboratoryName = p.LaboratoryName!, ReportNumber = p.ReportNumber!,
@@ -173,8 +192,11 @@ public static class LabReportEndpoints
             for (var j = 0; j < set.Results!.Count; j++)
             {
                 var row = set.Results[j];
+                Guid? resolvedSubstanceId = !string.IsNullOrWhiteSpace(row.SubstanceId)
+                    ? resolvedSubstances[row.SubstanceId.Trim()]
+                    : null;
                 db.LabResults.Add(new LabResult { Id = Guid.NewGuid(), CompanyId = company.Value, ResultSetId = set.EntityId, Position = j,
-                    TestLabel = row.TestLabel!, SubstanceId = row.SubstanceId, OriginalResultText = row.OriginalResultText!, ResultKind = row.ResultKind!,
+                    TestLabel = row.TestLabel!, SubstanceId = resolvedSubstanceId, OriginalResultText = row.OriginalResultText!, ResultKind = row.ResultKind!,
                     NumericValue = row.NumericValue, Unit = row.Unit, Lod = row.Lod, Loq = row.Loq, Method = row.Method, Uncertainty = row.Uncertainty, Reference = row.Reference });
             }
         }

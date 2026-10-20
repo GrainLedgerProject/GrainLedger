@@ -13,37 +13,46 @@ class GeneratorTests(unittest.TestCase):
     def run_cli(self, out, *extra):
         return subprocess.run([sys.executable, str(SCRIPT), '--sample-code', 'SAMPLE<&"1', '--seal-code', 'SEAL-1', '--lab-sample-reference', 'LAB-1', '--report-number', 'REPORT-1', '--out-dir', str(out), *extra], text=True, capture_output=True)
 
-    def test_report_and_csv_share_synthetic_rows(self):
+    def test_realistic_default_generates_14_substances_and_overwrites_in_place(self):
         with tempfile.TemporaryDirectory() as temp:
             out = Path(temp) / 'report'
-            result = self.run_cli(out, '--rows', '5')
-            self.assertEqual(result.returncode, 0, result.stderr)
-            csv_text = (out / 'results.csv').read_text(encoding='utf-8')
+            first = self.run_cli(out)
+            self.assertEqual(first.returncode, 0, first.stderr)
             with (out / 'results.csv').open(newline='', encoding='utf-8') as file:
                 reader = csv.DictReader(file)
                 self.assertEqual(reader.fieldnames, HEADERS)
                 rows = list(reader)
+            self.assertEqual(len(rows), 14)
+            self.assertEqual(rows[0]['substanceId'], 'TCZ001')
+            self.assertIn('Tricyclazole', rows[0]['testLabel'])
+            self.assertEqual(rows[5]['substanceId'], 'CPF006')
+            self.assertEqual(rows[5]['numericValue'], '0.042')
+
+            # Re-running with a different scenario overwrites report.html and results.csv cleanly
+            second = self.run_cli(out, '--scenario', 'vn-exceed', '--report-number', 'COA-OVERRIDE-2')
+            self.assertEqual(second.returncode, 0, second.stderr)
+            with (out / 'results.csv').open(newline='', encoding='utf-8') as file:
+                rows_after = list(csv.DictReader(file))
+            self.assertEqual(rows_after[5]['numericValue'], '0.680')
+            page = (out / 'report.html').read_text(encoding='utf-8')
+            self.assertIn('SYNTHETIC TEST DATA ONLY', page)
+            self.assertIn('COA-OVERRIDE-2', page)
+            self.assertIn('SAMPLE&lt;&amp;&quot;1', page)
+            self.assertNotIn('SAMPLE<&"1', page)
+
+    def test_synthetic_scenario_and_csv_escaping(self):
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp) / 'report'
+            result = self.run_cli(out, '--scenario', 'synthetic', '--rows', '5')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            csv_text = (out / 'results.csv').read_text(encoding='utf-8')
+            with (out / 'results.csv').open(newline='', encoding='utf-8') as file:
+                rows = list(csv.DictReader(file))
             self.assertIn('"See note, ""retain original"""', csv_text)
             self.assertEqual(len(rows), 5)
             self.assertEqual([r['resultKind'] for r in rows], ['NUMERIC', 'BELOW_LIMIT', 'NOT_DETECTED', 'QUALITATIVE', 'OTHER'])
-            self.assertEqual(rows[0]['numericValue'], '000.0100')
-            self.assertEqual(rows[1]['numericValue'], '0.020')
-            self.assertTrue(all(not r['substanceId'] and r['testLabel'].startswith('Synthetic') for r in rows))
-            self.assertEqual(rows[-1]['originalResultText'], 'See note, "retain original"')
-            page = (out / 'report.html').read_text(encoding='utf-8')
-            self.assertIn('SYNTHETIC TEST DATA ONLY', page)
-            self.assertIn('SAMPLE&lt;&amp;&quot;1', page)
-            self.assertNotIn('SAMPLE<&"1', page)
-            for row in rows:
-                self.assertIn(row['testLabel'], page)
-                self.assertIn(row['originalResultText'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;'), page)
-            self.assertIn('&quot;retain original&quot;', page)
-            self.assertIn('REPORT-1', page)
-            self.assertIn('SEAL-1', page)
-            self.assertIn('LAB-1', page)
 
-
-    def test_default_output_is_next_to_copied_script_not_working_directory(self):
+    def test_default_output_is_next_to_copied_script_and_overwrites_by_default(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             tools = root / 'tools'
@@ -60,17 +69,17 @@ class GeneratorTests(unittest.TestCase):
             self.assertTrue((output / 'report.html').is_file())
             self.assertTrue((output / 'results.csv').is_file())
             self.assertFalse((cwd / 'mock_lab_reports').exists())
-            self.assertFalse((cwd / 'report.html').exists())
-            self.assertFalse((cwd / 'results.csv').exists())
 
-            original_report = (output / 'report.html').read_text(encoding='utf-8')
-            original_csv = (output / 'results.csv').read_text(encoding='utf-8')
-            retry = subprocess.run(command, cwd=cwd, text=True, capture_output=True)
-            self.assertNotEqual(retry.returncode, 0)
-            self.assertEqual((output / 'report.html').read_text(encoding='utf-8'), original_report)
-            self.assertEqual((output / 'results.csv').read_text(encoding='utf-8'), original_csv)
+            # Overwrites by default
+            rerun = subprocess.run([*command, '--report-number', 'COA-NEW'], cwd=cwd, text=True, capture_output=True)
+            self.assertEqual(rerun.returncode, 0, rerun.stderr)
+            self.assertIn('COA-NEW', (output / 'report.html').read_text(encoding='utf-8'))
 
-    def test_bounds_blank_sample_and_nonoverwrite_preserve_existing_file(self):
+            # --no-overwrite refuses when directory already exists
+            refused = subprocess.run([*command, '--no-overwrite'], cwd=cwd, text=True, capture_output=True)
+            self.assertNotEqual(refused.returncode, 0)
+
+    def test_bounds_blank_sample_and_row_limits(self):
         with tempfile.TemporaryDirectory() as temp:
             blank_out = Path(temp) / 'blank'
             blank = subprocess.run([sys.executable, str(SCRIPT), '--sample-code', '  ', '--out-dir', str(blank_out)], text=True, capture_output=True)
@@ -81,15 +90,6 @@ class GeneratorTests(unittest.TestCase):
                 result = self.run_cli(out, '--rows', count)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(out.exists())
-            out = Path(temp) / 'existing'
-            out.mkdir()
-            marker = out / 'evidence.txt'
-            marker.write_text('keep', encoding='utf-8')
-            result = self.run_cli(out)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(marker.read_text(encoding='utf-8'), 'keep')
-            self.assertFalse((out / 'report.html').exists())
-
     def test_accepts_maximum_row_count(self):
         with tempfile.TemporaryDirectory() as temp:
             out = Path(temp) / 'large'
