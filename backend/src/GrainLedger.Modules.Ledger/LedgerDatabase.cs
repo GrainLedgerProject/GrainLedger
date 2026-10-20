@@ -120,11 +120,11 @@ public static class LedgerDatabase
                   )
                   AND NOT EXISTS (
                       SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                      WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
+                      WHERE n.nspname IN ('ledger','identity','capture','catalog','exports','capture_mock')
                         AND pg_has_role(r.oid,c.relowner,'MEMBER')
                   )
                   AND NOT EXISTS (
-                      SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
+                      SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','exports','capture_mock')
                         AND pg_has_role(r.oid,n.nspowner,'MEMBER')
                   )
                   AND NOT EXISTS (
@@ -143,6 +143,12 @@ public static class LedgerDatabase
             REVOKE ALL ON ALL FUNCTIONS IN SCHEMA capture_mock FROM {role};
             REVOKE ALL ON ALL SEQUENCES IN SCHEMA capture_mock FROM {role};
             """ : "";
+        await using var exportsSchema = new NpgsqlCommand("SELECT to_regnamespace('exports') IS NOT NULL", connection);
+        var exportsGrant = Equals(await exportsSchema.ExecuteScalarAsync(ct), true) ? $"""
+            GRANT USAGE ON SCHEMA exports TO {role};
+            GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA exports TO {role};
+            GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA exports TO {role};
+            """ : "";
         await using var grant = new NpgsqlCommand($"""
             REVOKE ALL ON SCHEMA ledger FROM {role};
             GRANT USAGE ON SCHEMA ledger,identity,capture,catalog TO {role};
@@ -151,6 +157,7 @@ public static class LedgerDatabase
             GRANT SELECT ON ALL TABLES IN SCHEMA ledger TO {role};
             GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
+            {exportsGrant}
             {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
                 ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.lock_writes(),
@@ -168,8 +175,8 @@ public static class LedgerDatabase
             SELECT EXISTS (
                 SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p')
                   AND (n.nspname IN ('ledger','capture_mock') AND has_table_privilege($1,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                    OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER'))
-            ) OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
+                    OR n.nspname IN ('capture','catalog','identity','exports') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER'))
+            ) OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','exports','capture_mock')
                 AND has_schema_privilege($1,n.oid,'CREATE'))
               OR has_function_privilege($1,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
               OR has_function_privilege($1,'ledger.provision_catalog_commodity(uuid)','EXECUTE')
@@ -193,11 +200,11 @@ public static class LedgerDatabase
                     )
                     OR EXISTS (
                         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                        WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
+                        WHERE n.nspname IN ('ledger','identity','capture','catalog','exports','capture_mock')
                           AND pg_has_role(r.oid,c.relowner,'MEMBER')
                     )
                     OR EXISTS (
-                        SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
+                        SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','exports','capture_mock')
                           AND pg_has_role(r.oid,n.nspowner,'MEMBER')
                     )
                     OR EXISTS (
@@ -208,9 +215,9 @@ public static class LedgerDatabase
                         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                         WHERE c.relkind IN ('r','p')
                           AND (n.nspname IN ('ledger','capture_mock') AND has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                            OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER'))
+                            OR n.nspname IN ('capture','catalog','identity','exports') AND has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER'))
                     )
-                    OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
+                    OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','exports','capture_mock')
                         AND has_schema_privilege(r.oid,n.oid,'CREATE'))
                     OR has_function_privilege(r.oid,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
                     OR has_function_privilege(r.oid,'ledger.provision_catalog_commodity(uuid)','EXECUTE')

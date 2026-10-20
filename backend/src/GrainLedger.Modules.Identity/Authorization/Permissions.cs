@@ -30,6 +30,8 @@ public static class Permissions
     public const string ContainersWrite = "containers.write";
     public const string FarmsWrite = "farms.write";
     public const string PurchasesWrite = "purchases.write";
+    public const string ExportOrdersRead = "export-orders.read";
+    public const string ExportOrdersWrite = "export-orders.write";
 
     public static IReadOnlyList<string> All { get; } = Array.AsReadOnly<string>(
     [
@@ -38,7 +40,7 @@ public static class Permissions
         HoldsProcess, ReconciliationRead, HistoryRead, LotsReadFacility, LotsReceive,
         ConversionsWrite, ContainersOperate, FarmsRead, LotsReadTenant, LabWrite,
         BlendApprove, HoldsManage, TraceReadTenant, MrlRead, LabRead, BlendPropose,
-        ContainersWrite, FarmsWrite, PurchasesWrite
+        ContainersWrite, FarmsWrite, PurchasesWrite, ExportOrdersRead, ExportOrdersWrite
     ]);
 
     public static string[] ForRole(string role) => role switch
@@ -46,8 +48,8 @@ public static class Permissions
         Roles.Administrator => [IdentityManage, PlatformConfigure, TraceReadAll],
         Roles.MillManager => [PlatformRead, LotsReadAll, ConversionsRead, ConversionsConfirm, CorrectionsReconcile, ReceivingReconcile, HoldsProcess, ReconciliationRead, HistoryRead],
         Roles.MillOperator => [PlatformRead, LotsReadFacility, LotsReceive, ConversionsWrite, ContainersOperate, HistoryRead],
-        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead],
-        Roles.ExportStaff => [MrlRead, LotsReadTenant, LabRead, BlendPropose, ContainersWrite, TraceReadTenant, HistoryRead],
+        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead, ExportOrdersRead],
+        Roles.ExportStaff => [MrlRead, LotsReadTenant, LabRead, BlendPropose, ContainersWrite, TraceReadTenant, HistoryRead, ExportOrdersRead, ExportOrdersWrite],
         Roles.PurchasingStaff => [FarmsWrite, PurchasesWrite, HistoryRead],
         _ => []
     };

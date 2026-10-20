@@ -2,6 +2,7 @@ using GrainLedger.Modules.Identity;
 using GrainLedger.Modules.Ledger;
 using GrainLedger.Modules.Capture;
 using GrainLedger.Modules.Catalogs;
+using GrainLedger.Modules.Exports;
 using GrainLedger.Api.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -15,10 +16,11 @@ using System.Security.Cryptography;
 
 var builder = WebApplication.CreateBuilder(args);
 var migrating = args.Contains("--migrate", StringComparer.Ordinal);
+var configuringRuntimeRole = args.Contains("--configure-runtime-role", StringComparer.Ordinal);
 var seedDevelopment = args.Contains("--seed-dev", StringComparer.Ordinal);
 var seedLedger = args.Contains("--seed-ledger", StringComparer.Ordinal);
-if (migrating && (seedDevelopment || seedLedger) || seedDevelopment && seedLedger)
-    throw new InvalidOperationException("Run --migrate, --seed-dev and --seed-ledger separately.");
+if (new[] { migrating, configuringRuntimeRole, seedDevelopment, seedLedger }.Count(value => value) > 1)
+    throw new InvalidOperationException("Run --migrate, --configure-runtime-role, --seed-dev and --seed-ledger separately.");
 if (seedLedger && !builder.Environment.IsDevelopment())
     throw new InvalidOperationException("--seed-ledger is only available in Development.");
 if (!builder.Environment.IsEnvironment("Testing"))
@@ -29,10 +31,10 @@ if (!builder.Environment.IsEnvironment("Testing"))
     builder.Configuration.AddCommandLine(args);
 }
 var migrationConnection = builder.Configuration.GetConnectionString("GrainLedgerMigration");
-if (migrating)
+if (migrating || configuringRuntimeRole)
 {
-    if (string.IsNullOrWhiteSpace(migrationConnection)) throw new InvalidOperationException("ConnectionStrings:GrainLedgerMigration is required for explicit owner migrations.");
-    builder.Configuration["ConnectionStrings:GrainLedger"] = migrationConnection;
+    if (string.IsNullOrWhiteSpace(migrationConnection)) throw new InvalidOperationException("ConnectionStrings:GrainLedgerMigration is required for explicit owner commands.");
+    if (migrating) builder.Configuration["ConnectionStrings:GrainLedger"] = migrationConnection;
 }
 if (seedLedger)
 {
@@ -57,8 +59,14 @@ builder.Services.AddIdentityModule(builder.Configuration, builder.Environment);
 builder.Services.AddCaptureModule();
 builder.Services.AddCatalogModule();
 builder.Services.AddLedgerModule(builder.Configuration);
+builder.Services.AddExportsModule();
 
 var app = builder.Build();
+if (configuringRuntimeRole)
+{
+    await LedgerDatabase.ConfigureRuntimeRoleAsync(migrationConnection!, builder.Configuration["Ledger:RuntimeRole"] ?? throw new InvalidOperationException("Ledger:RuntimeRole is required."));
+    return;
+}
 if (seedDevelopment)
 {
     await using var scope = app.Services.CreateAsyncScope();
@@ -117,6 +125,7 @@ app.MapIdentityModule();
 app.MapLedgerModule();
 app.MapCaptureModule();
 app.MapCatalogModule();
+app.MapExportsModule();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 if (!app.Environment.IsDevelopment()) app.MapFallbackToFile("index.html");
 

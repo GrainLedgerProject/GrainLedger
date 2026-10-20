@@ -14,8 +14,8 @@ public sealed class PermissionContractTests(ApiFactory factory) : IClassFixture<
     [InlineData(Roles.Administrator, "identity.manage,platform.configure,trace.read.all")]
     [InlineData(Roles.MillManager, "platform.read,lots.read.all,conversions.read,conversions.confirm,corrections.reconcile,receiving.reconcile,holds.process,reconciliation.read,history.read")]
     [InlineData(Roles.MillOperator, "platform.read,lots.read.facility,lots.receive,conversions.write,containers.operate,history.read")]
-    [InlineData(Roles.CustomerManager, "farms.read,lots.read.tenant,lab.write,blend.approve,holds.manage,trace.read.tenant,history.read")]
-    [InlineData(Roles.ExportStaff, "mrl.read,lots.read.tenant,lab.read,blend.propose,containers.write,trace.read.tenant,history.read")]
+    [InlineData(Roles.CustomerManager, "farms.read,lots.read.tenant,lab.write,blend.approve,holds.manage,trace.read.tenant,history.read,export-orders.read")]
+    [InlineData(Roles.ExportStaff, "mrl.read,lots.read.tenant,lab.read,blend.propose,containers.write,trace.read.tenant,history.read,export-orders.read,export-orders.write")]
     [InlineData(Roles.PurchasingStaff, "farms.write,purchases.write,history.read")]
     public async Task Session_and_policy_enforcement_preserve_existing_role_contract(string role, string expected)
     {

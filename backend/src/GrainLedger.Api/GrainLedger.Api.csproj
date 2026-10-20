@@ -12,6 +12,7 @@
     <ProjectReference Include="../GrainLedger.Modules.Ledger/GrainLedger.Modules.Ledger.csproj" />
     <ProjectReference Include="../GrainLedger.Modules.Capture/GrainLedger.Modules.Capture.csproj" />
     <ProjectReference Include="../GrainLedger.Modules.Catalogs/GrainLedger.Modules.Catalogs.csproj" />
+    <ProjectReference Include="../GrainLedger.Modules.Exports/GrainLedger.Modules.Exports.csproj" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

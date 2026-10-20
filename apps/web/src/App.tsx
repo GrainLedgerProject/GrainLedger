@@ -12,9 +12,11 @@ import { LedgerWorkspace, ledgerSections } from './LedgerWorkspace';
 import { googleLoginError } from './auth-errors';
 import { LocalAuth } from './LocalAuth';
 import { MrlLookup } from './MrlLookup';
+import { ExportOrders, initialExportListState, type ExportListState } from './ExportOrders';
 
-type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'mrl' | 'sprays';
+type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'mrl' | 'sprays' | 'export';
 function tabForPath(path: string): Tab {
+  if (path.startsWith('/export/')) return 'export';
   if (path.startsWith('/mrl')) return 'mrl';
   if (path === '/capture/spray-declarations' || path === '/capture/spray-declarations/') return 'sprays';
   if (path.startsWith('/capture/spray-declarations/') && window.history.state?.fromSprayList) return 'sprays';
@@ -33,6 +35,8 @@ export function App() {
   const [tab, setTab] = useState<Tab>(tabForPath(window.location.pathname));
   const [path, setPath] = useState(window.location.pathname);
   const [signingOut, setSigningOut] = useState(false);
+  const [exportReady, setExportReady] = useState(false);
+  const [exportListState, setExportListState] = useState<ExportListState>(initialExportListState);
   const [intakeListState, setIntakeListState] = useState<IntakeListState>({ page: 1, receiptQuery: '', farmerId: '', from: '', to: '', sortBy: 'receivedAt', sortDirection: 'desc' });
   const [sprayListPage, setSprayListPage] = useState(1);
 
@@ -46,7 +50,7 @@ export function App() {
 
   useEffect(() => {
     void loadSession();
-    const expired = () => { setUser(null); setTab('profile'); setPath('/'); window.history.replaceState({}, '', '/'); };
+    const expired = () => { setUser(null); setExportListState(initialExportListState); setTab('profile'); setPath('/'); window.history.replaceState({}, '', '/'); };
     window.addEventListener('session-ended', expired);
     const popped = () => {
       setPath(window.location.pathname);
@@ -56,8 +60,17 @@ export function App() {
     return () => { window.removeEventListener('session-ended', expired); window.removeEventListener('popstate', popped); };
   }, []);
 
+  useEffect(() => {
+    if (!user?.permissions.includes('export-orders.read')) { setExportReady(false); return; }
+    let active = true;
+    void api<{ ready: boolean }>('/api/export-availability')
+      .then(result => { if (active) setExportReady(result.ready); })
+      .catch(() => { if (active) setExportReady(false); });
+    return () => { active = false; };
+  }, [user]);
+
   function openTab(next: Tab) {
-    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : '/';
+    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : next === 'export' ? '/export/orders' : '/';
     window.history.pushState({}, '', nextPath);
     setPath(nextPath);
     setTab(next);
@@ -96,6 +109,7 @@ export function App() {
   function openCapturePath(nextPath: string, nextTab: Tab) {
     window.history.pushState({}, '', nextPath); setPath(nextPath); setTab(nextTab);
   }
+  function openExportPath(nextPath: string) { openCapturePath(nextPath, 'export'); }
   function openAdminSection(section: AdminSection) {
     openCapturePath(section === 'people' ? '/admin' : `/admin/${section}`, 'administration');
   }
@@ -107,6 +121,7 @@ export function App() {
       await api<void>(all ? '/api/auth/logout-all' : '/api/auth/logout', { method: 'POST' });
       clearLocalSession();
       setUser(null);
+      setExportListState(initialExportListState);
       setTab('profile');
       setPath('/');
       window.history.replaceState({}, '', '/');
@@ -158,15 +173,19 @@ export function App() {
         {canReadFarmers && <button aria-current={tab === 'sprays' ? 'page' : undefined} onClick={() => openTab('sprays')}><span aria-hidden="true">◈</span> Spray declarations</button>}
         {canReadPurchases && <button aria-current={tab === 'procurements' ? 'page' : undefined} onClick={() => openTab('procurements')}><span aria-hidden="true">▣</span> Paddy intake</button>}
         {canReadSamples && <button aria-current={tab === 'samples' ? 'page' : undefined} onClick={() => openTab('samples')}><span aria-hidden="true">◇</span> Samples</button>}
+        {exportReady && <button aria-current={tab === 'export' ? 'page' : undefined} onClick={() => openTab('export')}><span aria-hidden="true">▧</span> Export orders</button>}
         {user.permissions.includes('mrl.read') && user.role !== 'Administrator' && <button aria-current={tab === 'mrl' ? 'page' : undefined} onClick={() => openTab('mrl')}><span aria-hidden="true">▤</span> Applicable MRL</button>}
       </nav>
       <div className="sidebar-bottom"><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span>{roleLabel(user.role)}</span></div></div>
     </aside>
     <div className="workspace-body">
-      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
+      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : tab === 'export' ? 'Export orders' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
       <main className="content">
         {error && <div className="notice error" role="alert">{error}</div>}
-        {tab === 'mrl' && user.permissions.includes('mrl.read') ? <MrlLookup />
+        {tab === 'export' && user.permissions.includes('export-orders.read') ? (exportReady
+            ? <ExportOrders userId={user.id} canWrite={user.permissions.includes('export-orders.write')} path={path} onNavigate={openExportPath} listState={exportListState} onListStateChange={setExportListState} />
+            : <div className="notice">Export orders are not available until the database update is deployed.</div>)
+          : tab === 'mrl' && user.permissions.includes('mrl.read') ? <MrlLookup />
           : tab === 'administration' && user.role === 'Administrator' ? <AdminWorkspace user={user} section={adminSection} onSelect={openAdminSection} />
           : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} />
           : tab === 'procurements' && selectedSourceLotId ? (canReadPurchases

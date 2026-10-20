@@ -1,10 +1,15 @@
 using System.Text.Json;
 using System.Net.Http.Json;
 using GrainLedger.Modules.Identity;
+using GrainLedger.Modules.Catalogs;
+using GrainLedger.Modules.Exports;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Xunit;
 
 namespace GrainLedger.Api.IntegrationTests;
@@ -16,6 +21,10 @@ public sealed class BrowserWorkflowHost
     {
         var sessionFile = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_SESSION_FILE");
         if (string.IsNullOrWhiteSpace(sessionFile)) return;
+        var port = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_PORT") ?? "5080";
+        var apiUrl = $"http://localhost:{port}";
+        var webRoot = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_UI_DIST");
+        var uiUrl = string.IsNullOrWhiteSpace(webRoot) ? "http://localhost:5173" : apiUrl;
         var factory = new ApiFactory { BrowserCookies = true };
         await factory.InitializeAsync();
         // Synthetic password account only in the disposable browser-test database.
@@ -31,6 +40,29 @@ public sealed class BrowserWorkflowHost
         using var scenario = await LedgerScenario.CreateAsync(factory);
         await scenario.ReceiptAsync("10");
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
+        var (exportUser, exportSession) = await factory.SeedUserAsync(Roles.ExportStaff, scenario.OwnerId);
+        scenario.Accounts.Add("export", (exportUser, exportSession, factory.CreateRealCookieClient(exportUser, exportSession)));
+        using (var scope = factory.Services.CreateScope())
+        {
+            var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            catalog.AddRange(new Market { Id = Guid.NewGuid(), Code = "DEMO-EU", Name = "Browser test market" },
+                new Commodity { Id = Guid.NewGuid(), Code = "RICE", Name = "Rice" },
+                new QualityAttribute { Id = Guid.NewGuid(), Code = "MOISTURE", Name = "Moisture", Unit = "%" });
+            await catalog.SaveChangesAsync();
+        }
+        async Task<string> StockSnapshotAsync()
+        {
+            await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand("""
+                SELECT jsonb_build_object('positions', (SELECT count(*) FROM ledger.positions),
+                    'massKg', (SELECT coalesce(sum(quantity_kg),0) FROM ledger.positions),
+                    'postings', (SELECT count(*) FROM ledger.postings))::text
+                """, connection);
+            return (string)(await command.ExecuteScalarAsync())!;
+        }
+        var stockBefore = await StockSnapshotAsync();
+        var corruptNextExportResponse = 0;
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -38,13 +70,14 @@ public sealed class BrowserWorkflowHost
             accounts[label] = new
             {
                 userId = account.User.Id, organizationId = account.User.OrganizationId, role = account.User.Role,
-                loginUrl = $"http://localhost:5080/__browser/session/{label}",
+                loginUrl = $"{apiUrl}/__browser/session/{label}",
                 cookie = new { name = cookie.Name, value = cookie.Value, domain = "localhost", path = "/", httpOnly = true, secure = false, sameSite = "Lax" }
             };
         }
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
-        builder.WebHost.UseUrls("http://localhost:5080");
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing", WebRootPath = webRoot });
+        builder.WebHost.UseUrls(apiUrl);
         await using var bridge = builder.Build();
+        if (!string.IsNullOrWhiteSpace(webRoot)) { bridge.UseDefaultFiles(); bridge.UseStaticFiles(); }
         using var upstream = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false, HandleCookies = false
@@ -52,6 +85,27 @@ public sealed class BrowserWorkflowHost
         bridge.Run(async context =>
         {
             // Provisioning belongs only to this loopback test bridge, never production API.
+            if (context.Request.Path == "/__browser/corrupt-next-export-response" && HttpMethods.IsPost(context.Request.Method))
+            {
+                Interlocked.Exchange(ref corruptNextExportResponse, 1);
+                context.Response.StatusCode = 204;
+                return;
+            }
+            if (context.Request.Path == "/__browser/export-check" && HttpMethods.IsGet(context.Request.Method))
+            {
+                using var scope = factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ExportDbContext>();
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    stockUnchanged = stockBefore == await StockSnapshotAsync(),
+                    stock = JsonSerializer.Deserialize<JsonElement>(stockBefore),
+                    orders = await db.Orders.AsNoTracking().Where(x => x.CompanyId == scenario.OwnerId)
+                        .Select(x => new { x.Code, x.Version, x.RequiredMassKg, x.CurrentSpecificationVersion }).ToArrayAsync(),
+                    containerCount = await db.Containers.CountAsync(x => x.CompanyId == scenario.OwnerId),
+                    eventCount = await db.Events.CountAsync(x => x.CompanyId == scenario.OwnerId)
+                });
+                return;
+            }
             if (context.Request.Path.StartsWithSegments("/__browser/session", out var remaining))
             {
                 if (!HttpMethods.IsGet(context.Request.Method)) { context.Response.StatusCode = 405; return; }
@@ -69,7 +123,14 @@ public sealed class BrowserWorkflowHost
                         Expires = session.ExpiresAt
                     });
                 }
-                context.Response.Redirect("http://localhost:5173");
+                context.Response.Redirect(uiUrl);
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(webRoot) && HttpMethods.IsGet(context.Request.Method) &&
+                !context.Request.Path.StartsWithSegments("/api") && !context.Request.Path.StartsWithSegments("/signin-google"))
+            {
+                context.Response.ContentType = "text/html";
+                await context.Response.SendFileAsync(Path.Combine(webRoot, "index.html"));
                 return;
             }
             using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), context.Request.Path + context.Request.QueryString);
@@ -83,6 +144,14 @@ public sealed class BrowserWorkflowHost
             }
             using var response = await upstream.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
             context.Response.StatusCode = (int)response.StatusCode;
+            if (response.IsSuccessStatusCode && context.Request.Path.StartsWithSegments("/api/export-orders") &&
+                !HttpMethods.IsGet(context.Request.Method) && Interlocked.Exchange(ref corruptNextExportResponse, 0) == 1)
+            {
+                context.Response.ContentType = "application/json";
+                context.Response.Headers.CacheControl = "no-store";
+                await context.Response.WriteAsync("{\"id\":");
+                return;
+            }
             foreach (var header in response.Headers.Concat(response.Content.Headers))
                 if (!header.Key.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase)) context.Response.Headers[header.Key] = header.Value.ToArray();
             await response.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
@@ -92,7 +161,7 @@ public sealed class BrowserWorkflowHost
         await using (var file = new FileStream(sessionFile, options))
             await JsonSerializer.SerializeAsync(file, new
             {
-                api = "http://localhost:5080", ui = "http://localhost:5173", isolatedTestData = true,
+                api = apiUrl, ui = uiUrl, isolatedTestData = true,
                 customerOrganizationId = scenario.OwnerId, foreignCustomerOrganizationId = scenario.ForeignOwnerId,
                 facilityId = scenario.FacilityId, foreignFacilityId = scenario.ForeignFacilityId,
                 locationId = scenario.LocationId, secondLocationId = scenario.SecondLocationId,

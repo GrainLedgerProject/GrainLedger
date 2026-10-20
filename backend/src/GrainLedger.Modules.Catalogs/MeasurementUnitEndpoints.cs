@@ -12,7 +12,7 @@ namespace GrainLedger.Modules.Catalogs;
 
 public sealed record CreateMeasurementUnitRequest(string? Code, string? Name, string? QuantityKind);
 public sealed record UpdateMeasurementUnitRequest(string? Name, string? Code, string? QuantityKind);
-public sealed record MeasurementUnitResponse(Guid Id, string Code, string Name, string QuantityKind, Guid? CreatedBy, uint Version, bool CanEdit, bool CanDelete);
+public sealed record MeasurementUnitResponse(Guid Id, string Code, string Name, string QuantityKind, Guid? CreatedBy, uint Version, bool CanEdit, bool CanDelete, bool IsDeleted);
 public sealed record MeasurementUnitListResponse(IReadOnlyList<MeasurementUnitResponse> Items, int Page, int PageSize, int TotalCount, bool HasMore);
 
 public static class MeasurementUnitEndpoints
@@ -221,7 +221,8 @@ public static class MeasurementUnitEndpoints
     private static void SetEtag(HttpContext http, uint version) => http.Response.Headers.ETag = Etag(version);
     private static MeasurementUnitResponse ToResponse(MeasurementUnit x, Guid actorId, bool canConfigure) =>
         new(x.Id, x.Code, x.Name, x.QuantityKind, x.CreatedBy, x.Version,
-            canConfigure && x.CreatedBy == actorId, canConfigure && x.CreatedBy == actorId);
+            canConfigure && x.CreatedBy == actorId && !x.IsDeleted,
+            canConfigure && x.CreatedBy == actorId && !x.IsDeleted, x.IsDeleted);
     private static IResult Problem(int status, string code, string title) => Results.Problem(statusCode: status, title: title,
         extensions: new Dictionary<string, object?> { ["code"] = code });
 }
