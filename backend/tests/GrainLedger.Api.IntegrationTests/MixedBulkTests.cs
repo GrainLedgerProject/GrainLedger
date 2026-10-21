@@ -108,6 +108,100 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         return response.GetProperty("actualLotId").GetGuid();
     }
 
+    private static Task<JsonElement> TraceAsync(HttpClient client, Guid lotId, string direction = "forward", string view = "current") =>
+        SendAsync(client, HttpMethod.Post, "/api/ledger/trace", new { lotId, direction, view });
+    private static Guid[] TraceIds(JsonElement trace) => trace.GetProperty("lots").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToArray();
+
+    [Fact]
+    public async Task Trace_structural_zero_branches_do_not_claim_positive_source_paths_through_custody()
+    {
+        var site = await CreateMixedSiteAsync(); using var s = site.Scenario;
+        var first = Lots(await ArriveAsync(site, "0.000001")).Single();
+        var second = Lots(await ArriveAsync(site, "0.000001")).Single();
+        var (pool, revision) = await PoolAsync(site.LocationId);
+        var aliquot = await TransferAsync(site, Guid.NewGuid(), pool, revision, "0.000001", s.LocationId);
+        var retained = (await SharesAsync(aliquot)).Keys.Single();
+        var absent = retained == first ? second : first;
+        var trace = await TraceAsync(s.Customer, absent);
+        // Structural relations stay visible, but source-specific evidence must not
+        // traverse a shared pool onto an aliquot with zero share of this root.
+        var lot = trace.GetProperty("lots").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == aliquot);
+        Assert.Empty(lot.GetProperty("positivePathSourceIds").EnumerateArray());
+        var edge = trace.GetProperty("edges").EnumerateArray().Single(e => e.GetProperty("outputLotId").GetGuid() == aliquot);
+        Assert.DoesNotContain(edge.GetProperty("sourceAllocations").EnumerateArray(), x => x.GetProperty("sourceLotId").GetGuid() == absent);
+        Assert.Equal("PERSISTED_ALLOCATIONS", trace.GetProperty("positivePathCoverage").GetString());
+        await s.HoldAsync(absent);
+        var heldTrace = await TraceAsync(s.Customer, aliquot);
+        Assert.False(heldTrace.GetProperty("lots").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == aliquot).GetProperty("effectiveHold").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Trace_custody_preserves_generations_actual_processing_chronology_and_effective_HOLD()
+    {
+        var site = await CreateMixedSiteAsync(); using var s = site.Scenario;
+        var root = Lots(await ArriveAsync(site, "10")).Single();
+        var (firstPool, revision) = await PoolAsync(site.LocationId);
+        var aliquot = await TransferAsync(site, Guid.NewGuid(), firstPool, revision, "4", s.LocationId);
+        var lateRoot = Lots(await ArriveAsync(site, "5")).Single();
+        var (currentPool, _) = await PoolAsync(site.LocationId);
+        var processed = await s.CommitAsync(await s.DraftAsync("DRYING", [(aliquot, "4")], [("DRIED_PADDY", "4")]));
+        var output = Output(processed);
+        var backward = await TraceAsync(s.Customer, output, "backward");
+        Assert.Contains(root, TraceIds(backward)); Assert.Contains(firstPool, TraceIds(backward));
+        Assert.Contains(aliquot, TraceIds(backward)); Assert.DoesNotContain(lateRoot, TraceIds(backward));
+        Assert.DoesNotContain(currentPool, TraceIds(backward));
+        Assert.Contains(output, TraceIds(await TraceAsync(s.Customer, root)));
+        Assert.DoesNotContain(aliquot, TraceIds(await TraceAsync(s.Customer, lateRoot)));
+        Assert.Equal(2, backward.GetProperty("schemaVersion").GetInt32());
+        Assert.Contains(backward.GetProperty("edges").EnumerateArray(), e =>
+            e.GetProperty("relationType").GetString() == "CUSTODY" && e.GetProperty("outputLotId").GetGuid() == aliquot);
+        var hold = await s.HoldAsync(lateRoot);
+        var held = await TraceAsync(s.Customer, currentPool, "backward");
+        var pool = held.GetProperty("lots").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == currentPool);
+        Assert.Contains("HOLD", pool.GetProperty("restrictions").EnumerateArray().Select(x => x.GetString()));
+        Assert.False(pool.GetProperty("directHold").GetBoolean()); Assert.True(pool.GetProperty("effectiveHold").GetBoolean());
+        Assert.All(pool.GetProperty("positions").EnumerateArray(), x => Assert.Equal("0.000000", x.GetProperty("availableKg").GetString()));
+        var old = (await TraceAsync(s.Customer, aliquot)).GetProperty("lots").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == aliquot);
+        Assert.False(old.GetProperty("effectiveHold").GetBoolean());
+        var history = await TraceAsync(s.Customer, output, "backward", "history");
+        Assert.Equal(TraceIds(backward).Order(), TraceIds(history).Order());
+        using var denied = await s.ForeignCustomer.PostAsJsonAsync("/api/ledger/trace", new { lotId = currentPool });
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff, s.OwnerId);
+        using var export = factory.CreateRealCookieClient(user, session); await CsrfAsync(export);
+        var redacted = await TraceAsync(export, lateRoot);
+        Assert.Contains(currentPool, TraceIds(redacted));
+        Assert.All(redacted.GetProperty("edges").EnumerateArray(), e => Assert.Equal(JsonValueKind.Null, e.GetProperty("sourceAllocations").ValueKind));
+        Assert.Empty(redacted.GetProperty("sources").EnumerateArray());
+        Assert.Contains(currentPool, TraceIds(await TraceAsync(s.Admin, currentPool, "backward")));
+    }
+
+    [Fact]
+    public async Task Trace_processing_uses_resolved_aliquot_not_logical_pool_and_keeps_output_ingress()
+    {
+        var site = await CreateMixedSiteAsync(); using var s = site.Scenario;
+        var outputSite = await AddMixedLocationAsync(s);
+        await PolicyAsync(s, outputSite.LocationId, site.CommodityId, "DRIED_PADDY", "DRIED_PADDY");
+        var root = Lots(await ArriveAsync(site, "10")).Single();
+        var (pool, revision) = await PoolAsync(site.LocationId);
+        var id = Guid.NewGuid();
+        var draft = JsonSerializer.SerializeToNode(s.OperationBody(id, "DRYING", [(pool, "4")], [("DRIED_PADDY", "4")],
+            inputLocationId: site.LocationId, outputLocationId: outputSite.LocationId))!.AsObject();
+        draft["inputs"]![0]!["poolRevision"] = revision;
+        await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", draft);
+        var committed = await SendAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{id}/commit", new { });
+        var (outputPool, _) = await PoolAsync(outputSite.LocationId);
+        var backward = await TraceAsync(s.Customer, outputPool, "backward");
+        Assert.Contains(root, TraceIds(backward)); Assert.Contains(pool, TraceIds(backward));
+        var processing = Assert.Single(backward.GetProperty("edges").EnumerateArray(), x => x.GetProperty("relationType").GetString() == "PROCESSING");
+        Assert.NotEqual(pool, processing.GetProperty("inputLotId").GetGuid());
+        Assert.Equal(Output(committed), processing.GetProperty("outputLotId").GetGuid());
+        Assert.Equal("RESOLVED_INPUTS", processing.GetProperty("basis").GetString());
+        Assert.Equal("4.000000", processing.GetProperty("sourceAllocations")[0].GetProperty("quantityKg").GetString());
+        Assert.Contains(backward.GetProperty("edges").EnumerateArray(), x => x.GetProperty("outputLotId").GetGuid() == outputPool);
+        Assert.Equal(TraceIds(backward).Length, TraceIds(backward).Distinct().Count());
+    }
+
     [Fact]
     public async Task Mixed_bulk_requires_explicit_scoped_policy_and_rejects_unauthorized_or_unconfirmed_policy()
     {

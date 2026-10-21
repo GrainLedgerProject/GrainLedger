@@ -47,6 +47,18 @@ public sealed class MixedBulkMigrationTests
         Assert.Equal("Pre-mixed legacy facility", await check.ExecuteScalarAsync());
         await using var columns = new NpgsqlCommand("SELECT count(*) FROM information_schema.columns WHERE table_schema='ledger' AND table_name='locations' AND column_name='mixed_bulk'", owner);
         Assert.Equal(1L, (long)(await columns.ExecuteScalarAsync())!);
+        // Upgrade the same existing database; custody trace must be a forward
+        // replacement preserving both earlier migration entries and business rows.
+        await ledger.Database.MigrateAsync();
+        var traceHistory = await HistoryAsync(owner);
+        Assert.Contains("20261021010000_CustodyTraceability", traceHistory);
+        Assert.Equal(migratedHistory, traceHistory.Where(id => id != "20261021010000_CustodyTraceability").ToArray());
+        await using var routine = new NpgsqlCommand("SELECT pg_get_functiondef('ledger.trace_lot(uuid,uuid,text,text)'::regprocedure)", owner);
+        var definition = (string)(await routine.ExecuteScalarAsync())!;
+        Assert.Contains("RECORDED_MATERIAL_RELATIONSHIPS", definition);
+        Assert.Contains("effective_hold_ids", definition);
+        Assert.Equal("Pre-mixed legacy facility", await check.ExecuteScalarAsync());
+
     }
 
     private static async Task<string[]> HistoryAsync(NpgsqlConnection owner)

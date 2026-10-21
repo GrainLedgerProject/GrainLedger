@@ -36,6 +36,9 @@ public static class LotTraceability
                 command.Parameters.AddWithValue(actor); command.Parameters.AddWithValue(request.LotId);
                 command.Parameters.AddWithValue(request.Direction); command.Parameters.AddWithValue(request.View);
                 var result = JsonNode.Parse((string)(await command.ExecuteScalarAsync(ct))!)!.AsObject();
+                if (result["schemaVersion"]?.GetValue<int>() != 2)
+                    return Results.Problem(statusCode: 503,
+                        title: "Custody trace upgrade is not installed. Run approved owner migrations and runtime-role configuration.");
                 if (result["sourceContributionsVisible"]!.GetValue<bool>())
                 {
                     var sourceIds = result["lots"]!.AsArray().SelectMany(l => l!["contributions"]!.AsArray())

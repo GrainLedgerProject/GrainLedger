@@ -651,3 +651,12 @@ it('does not let stale processing searches replace newer server results', async 
  expect(screen.getByText(/DRYING: New result.*DRAFT/)).toBeInTheDocument();
  expect(screen.queryByText(/DRYING: Old result.*DRAFT/)).not.toBeInTheDocument();
 });
+
+it('opens tracing from the selected stock lot without automatically executing an audited trace', async () => {
+  render(<LedgerWorkspace user={{ ...actor, role: 'CustomerManager', organizationId: 'company', permissions: ['lots.read.tenant', 'trace.read.tenant'] }} initialLotId="source" />);
+  const browser = userEvent.setup();
+  await browser.click(await screen.findByRole('button', { name: 'Trace this lot' }));
+  expect(await screen.findByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('source');
+  expect(screen.getByRole('button', { name: 'Traceability' })).toHaveAttribute('aria-current', 'page');
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ledger/trace'))).toBe(false);
+});

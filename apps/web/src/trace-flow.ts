@@ -1,10 +1,22 @@
-import type { LotTrace } from './LedgerTraceability';
+import type { LotTrace, TraceRelation } from './LedgerTraceability';
 
-export type FlowNode = { id: string; kind: 'lot' | 'operation'; recordId: string; x: number; y: number };
+export type FlowNode = { id: string; kind: 'lot' | 'operation' | 'custody'; recordId: string; x: number; y: number };
 export type FlowEdge = { id: string; from: string; to: string; quantityKg: string };
 export type TraceFlow = { nodes: FlowNode[]; edges: FlowEdge[]; width: number; height: number; error?: string };
 export const flowCard = { width: 236, height: 148, columnGap: 96, rowGap: 32, padding: 28 };
 export const flowLimit = { nodes: 250, relationships: 500 };
+
+export function traceRelationKey(edge: TraceRelation): string {
+  return edge.relationType === 'CUSTODY' ? `custody:${edge.relationId}` : `operation:${edge.operationId}`;
+}
+export function traceRelationLabel(trace: LotTrace, edge: TraceRelation): string {
+  if (edge.relationType === 'CUSTODY') {
+    const event = trace.custodyEvents?.find(event => event.id === edge.relationId);
+    return event ? `${event.action === 'INGRESS' ? 'Pool ingress' : edge.outputLotId === event.primaryOutputLotId ? 'Withdrawal' : 'Remainder'} · revision ${event.revision}` : 'Custody';
+  }
+  const operation = trace.operations.find(operation => operation.id === edge.operationId);
+  return operation ? `${operation.kind} · ${operation.status}` : 'Processing';
+}
 
 // Only graph geometry uses JS numbers. Mass strings are carried unchanged from the API.
 export function traceLotOrder(trace: LotTrace): string[] {
@@ -28,19 +40,19 @@ export function traceLotOrder(trace: LotTrace): string[] {
 
 export function buildTraceFlow(trace: LotTrace): TraceFlow {
   const unavailable = (error: string): TraceFlow => ({ nodes: [], edges: [], width: 0, height: 0, error });
-  const operationIds = new Set(trace.edges.map(edge => edge.operationId));
-  if (trace.lots.length + operationIds.size > flowLimit.nodes || trace.edges.length > flowLimit.relationships)
-    return unavailable(`Flowchart supports up to ${flowLimit.nodes} lot/operation nodes and ${flowLimit.relationships} relationships. The complete result remains available in Table view.`);
+  const relationIds = new Set(trace.edges.map(traceRelationKey));
+  if (trace.lots.length + relationIds.size > flowLimit.nodes || trace.edges.length > flowLimit.relationships)
+    return unavailable(`Flowchart supports up to ${flowLimit.nodes} lot/event nodes and ${flowLimit.relationships} relationships. The complete result remains available in Table view.`);
   const lotIds = new Set(trace.lots.map(lot => lot.id));
   const nodes: FlowNode[] = traceLotOrder(trace).map(id => ({ id: `lot:${id}`, kind: 'lot', recordId: id, x: 0, y: 0 }));
-  for (const id of [...operationIds].sort()) nodes.push({ id: `operation:${id}`, kind: 'operation', recordId: id, x: 0, y: 0 });
+  for (const id of [...relationIds].sort()) nodes.push({ id, kind: id.startsWith('custody:') ? 'custody' : 'operation', recordId: id.slice(id.indexOf(':') + 1), x: 0, y: 0 });
   const connections = new Map<string, FlowEdge>();
   for (const edge of trace.edges) {
     if (!lotIds.has(edge.inputLotId) || !lotIds.has(edge.outputLotId))
       return unavailable('Some relationship endpoints are missing. Use Table view to inspect the returned result.');
-    const input = `lot:${edge.inputLotId}`, operation = `operation:${edge.operationId}`, output = `lot:${edge.outputLotId}`;
+    const input = `lot:${edge.inputLotId}`, operation = traceRelationKey(edge), output = `lot:${edge.outputLotId}`;
     // An operation's input/output appears once even when the API contains every input/output pair.
-    connections.set(`${input}/${operation}`, { id: `${input}/${operation}`, from: input, to: operation, quantityKg: edge.inputConsumedKg });
+    connections.set(`${input}/${operation}`, { id: `${input}/${operation}`, from: input, to: operation, quantityKg: edge.inputEventKg || edge.inputConsumedKg });
     connections.set(`${operation}/${output}`, { id: `${operation}/${output}`, from: operation, to: output, quantityKg: edge.outputProducedKg });
   }
   const edges = [...connections.values()];

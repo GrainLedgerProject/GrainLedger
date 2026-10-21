@@ -4,7 +4,7 @@ import type { LotTrace } from './LedgerTraceability';
 
 const lot = (id: string) => ({ id, code: id.toUpperCase(), stage: 'DRIED_PADDY', producedKg: '0.000001', positions: [], restrictions: [], contributions: null });
 const edge = (operationId: string, inputLotId: string, outputLotId: string, inputConsumedKg: string, outputProducedKg: string) => ({ operationId, inputLotId, outputLotId, inputConsumedKg, outputProducedKg });
-const trace: LotTrace = { traceId: 'fixture', targetLotId: 'a', direction: 'forward', view: 'current', complete: true, asOf: '2026-10-17T00:00:00Z', lotCount: 4, edgeCount: 4, sourceContributionsVisible: false,
+const trace: LotTrace = { schemaVersion: 2, traceId: 'fixture', targetLotId: 'a', direction: 'forward', view: 'current', complete: true, asOf: '2026-10-17T00:00:00Z', lotCount: 4, edgeCount: 4, sourceContributionsVisible: false,
   lots: ['d', 'b', 'a', 'c'].map(lot), operations: [], corrections: [], sources: [],
   edges: [edge('split', 'a', 'b', '10.000001', '6.000001'), edge('split', 'a', 'c', '10.000001', '4.000000'), edge('join', 'b', 'd', '6.000001', '10.000001'), edge('join', 'c', 'd', '4.000000', '10.000001')] };
 
@@ -40,4 +40,24 @@ it('rejects oversized or malformed diagrams explicitly instead of returning a pa
   expect(buildTraceFlow({ ...trace, lots: Array.from({ length: flowLimit.nodes + 1 }, (_, i) => lot(String(i))), edges: [] }).error).toMatch(/complete result remains available in Table/);
   expect(buildTraceFlow({ ...trace, edges: [edge('op', 'missing', 'a', '1', '1')] }).error).toMatch(/endpoints are missing/);
   expect(buildTraceFlow({ ...trace, edges: [edge('cycle', 'a', 'a', '1', '1')] }).error).toMatch(/cyclic/);
+});
+
+it('draws custody ingress and withdrawal/remainder as separate storage events without double counting split input', () => {
+  const custody: LotTrace = { ...trace, lots: ['a', 'b', 'c', 'd'].map(lot), operations: [],
+    custodyEvents: [{ id: 'ingress', action: 'INGRESS', locationId: 'store', revision: 1, occurredAt: trace.asOf, primaryOutputLotId: 'b' },
+      { id: 'withdraw', action: 'WITHDRAW', locationId: 'store', revision: 2, occurredAt: trace.asOf, primaryOutputLotId: 'c' }],
+    edges: [
+      { ...edge('unused', 'a', 'b', '99999999999999.999999', '99999999999999.999999'), operationId: null, relationType: 'CUSTODY', relationId: 'ingress', inputEventKg: '99999999999999.999999' },
+      { ...edge('unused', 'b', 'c', '0.000001', '0.000001'), operationId: null, relationType: 'CUSTODY', relationId: 'withdraw', inputEventKg: '99999999999999.999999' },
+      { ...edge('unused', 'b', 'd', '99999999999999.999998', '99999999999999.999998'), operationId: null, relationType: 'CUSTODY', relationId: 'withdraw', inputEventKg: '99999999999999.999999' },
+    ] };
+  const flow = buildTraceFlow(custody);
+  expect(flow.error).toBeUndefined();
+  expect(flow.nodes.filter(node => node.kind === 'custody')).toHaveLength(2);
+  expect(flow.nodes.some(node => node.kind === 'operation')).toBe(false);
+  expect(flow.edges.filter(edge => edge.from === 'lot:b')).toHaveLength(1);
+  expect(flow.edges.find(edge => edge.from === 'lot:b')?.quantityKg).toBe('99999999999999.999999');
+  expect(flow.edges.filter(edge => edge.from === 'custody:withdraw')).toHaveLength(2);
+  const nearLimit = { ...custody, lots: [...custody.lots, ...Array.from({ length: flowLimit.nodes - 5 }, (_, i) => lot(`extra-${i}`))] };
+  expect(buildTraceFlow(nearLimit).error).toMatch(/complete result remains available in Table/);
 });

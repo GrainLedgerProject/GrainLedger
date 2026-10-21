@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { LotTrace } from './LedgerTraceability';
-import { buildTraceFlow, flowCard } from './trace-flow';
+import { buildTraceFlow, flowCard, traceRelationKey, traceRelationLabel } from './trace-flow';
 
 export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
   trace: LotTrace; selectedId: string; onSelect: (id: string) => void; onShowTable: () => void;
@@ -29,7 +29,7 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
   }
   const selected = lots.get(selectedId);
   return <div className="trace-flow">
-    <p id={helpId}>Material flows left to right: lot → processing operation → lot. {trace.direction === 'backward' ? 'Backward tracing shows earlier inputs to the left of your starting lot.' : 'Forward tracing shows later outputs to the right of your starting lot.'} Only lots in this trace are shown; an operation may also have other inputs or outputs. Select a lot to inspect it below.</p>
+    <p id={helpId}>Material flows left to right: lot → storage event or processing operation → lot. {trace.direction === 'backward' ? 'Backward tracing shows earlier inputs to the left of your starting lot.' : 'Forward tracing shows later outputs to the right of your starting lot.'} Only lots in this trace are shown; an operation may also have other inputs or outputs. Select a lot to inspect it below.</p>
     <div className="trace-flow-toolbar" role="group" aria-label="Flowchart controls">
       <button type="button" aria-label="Zoom out" disabled={zoom <= 0.4} onClick={() => setZoom(value => Math.max(0.4, value - 0.2))}>−</button>
       <output aria-label="Graph zoom">{Math.round(zoom * 100)}%</output>
@@ -42,7 +42,7 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
       <button type="button" onClick={() => { setZoom(1); }}>Reset zoom</button>
       <button type="button" onClick={focusStart}>Focus starting lot</button>
     </div>
-    <div className="trace-flow-legend"><span className="trace-flow-lot-key">Lot</span><span className="trace-flow-operation-key">Processing</span><span className="trace-flow-start-key">Starting lot</span><span>Badges show recorded restrictions, not a quality verdict.</span></div>
+    <div className="trace-flow-legend"><span className="trace-flow-lot-key">Lot</span><span className="trace-flow-operation-key">Processing / custody</span><span className="trace-flow-start-key">Starting lot</span><span>Badges show recorded restrictions, not a quality verdict.</span></div>
     <div className="trace-flow-viewport" ref={viewport} role="region" aria-label="Trace flowchart" aria-describedby={helpId} tabIndex={0}>
       <div style={{ width: flow.width * zoom, height: flow.height * zoom }}>
         <div className="trace-flow-canvas" style={{ width: flow.width, height: flow.height, transform: `scale(${zoom})` }}>
@@ -58,11 +58,19 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
               const path = to.x - from.x > flowCard.width + flowCard.columnGap + 1
                 ? `M${x1},${y1} C${x1 + 24},${y1} ${x1 + 24},${lane} ${x1 + 48},${lane} H${x2 - 48} C${x2 - 24},${lane} ${x2 - 24},${y2} ${x2},${y2}`
                 : `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`;
-              return <g key={edge.id}><path className="trace-flow-edge" d={path} markerEnd={`url(#${marker})`}><title>{edge.quantityKg} kg — operation quantity, not source attribution</title></path></g>;
+              return <g key={edge.id}><path className="trace-flow-edge" d={path} markerEnd={`url(#${marker})`}><title>{edge.quantityKg} kg — event quantity, not source attribution</title></path></g>;
             })}
           </svg>
           {flow.nodes.map(node => {
             const style = { left: node.x, top: node.y, width: flowCard.width, height: flowCard.height };
+            if (node.kind === 'custody') {
+              const event = trace.custodyEvents?.find(event => event.id === node.recordId);
+              return <div key={node.id} className="trace-flow-node trace-flow-operation trace-flow-custody" style={style} role="group" aria-label={`${event?.action || 'Custody'} storage event ${node.recordId}`}>
+                <span className="trace-flow-kicker">STORAGE</span><strong>{event?.action === 'INGRESS' ? 'Pool ingress' : 'Withdrawal / remainder'}</strong>
+                <span>Revision {event?.revision} · {event ? new Date(event.occurredAt).toLocaleString() : 'Recorded'}</span>
+                <small title={event?.locationId}>Location: {event?.locationId}</small>
+              </div>;
+            }
             if (node.kind === 'operation') {
               const operation = operations.get(node.recordId);
               return <div key={node.id} className="trace-flow-node trace-flow-operation" style={style} role="group" aria-label={`${operation?.kind || 'Processing'} operation ${node.recordId}`}>
@@ -74,7 +82,7 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
             return <button type="button" key={node.id} ref={start ? startingLot : undefined} style={style}
               className={`trace-flow-node trace-flow-lot${start ? ' trace-flow-start' : ''}`}
               aria-label={`Select lot ${lot.code}${start ? ' — starting lot' : ''}`} aria-pressed={lot.id === selectedId} onClick={() => onSelect(lot.id)} title={`${lot.code} · ${lot.id}`}>
-              <span className="trace-flow-kicker">{start ? 'STARTING LOT' : 'LOT'}</span><strong>{lot.code}</strong><span>{lot.stage} · {lot.producedKg} kg output</span>
+              <span className="trace-flow-kicker">{start ? 'STARTING LOT' : 'LOT'}</span><strong>{lot.code}</strong><span>{lot.stage} · {lot.producedKg} kg created{lot.poolRevision != null ? ` · ${lot.isCurrentPool ? 'Current pool' : 'Generation'} r${lot.poolRevision}` : ''}</span>
               <span className={lot.restrictions.length ? 'trace-flow-restriction' : 'trace-flow-clear'}>{lot.restrictions.join(' · ') || 'No recorded restrictions'}</span>
               <small>{lot.id}</small>
             </button>;
@@ -82,16 +90,16 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
         </div>
       </div>
     </div>
-    {!trace.edges.length && <p>No processing relationships in this direction and view. The starting lot is shown on its own.</p>}
+    {!trace.edges.length && <p>No material relationships in this direction and view. The starting lot is shown on its own.</p>}
     {selected && <section className="trace-flow-selection" aria-label="Selected graph lot" aria-live="polite">
       <strong>{selected.code}</strong>{selected.id === trace.targetLotId && <span className="trace-start-badge">Starting lot</span>}
-      <p>{selected.stage} · Original output: {selected.producedKg} kg · {selected.restrictions.join(', ') || 'No recorded restrictions'}</p>
+      <p>{selected.stage} · Quantity when created: {selected.producedKg} kg · {selected.restrictions.join(', ') || 'No recorded restrictions'}</p>
       <small>{selected.id}</small>
       {selected.positions.map(position => <p key={position.locationId}>Current stock: {position.quantityKg} kg · Available: {position.availableKg} kg · {position.locationId}</p>)}
     </section>}
-    <details className="trace-flow-quantities"><summary>Operation quantities and exact relationships</summary><p>Amounts belong to each input/output of the operation; do not sum repeated output amounts across input–output pairs.</p>
-      <ul>{trace.edges.map(edge => <li key={`${edge.operationId}/${edge.inputLotId}/${edge.outputLotId}`}>
-        {lots.get(edge.inputLotId)?.code} → {operations.get(edge.operationId)?.kind || 'Processing'} → {lots.get(edge.outputLotId)?.code}: input {edge.inputConsumedKg} kg; output {edge.outputProducedKg} kg. <small>{edge.operationId}</small>
+    <details className="trace-flow-quantities"><summary>Event quantities and exact relationships</summary><p>Processing amounts belong to each operation input/output; custody input is edge mass and output is whole created lot; do not sum repeated output amounts across input–output pairs.</p>
+      <ul>{trace.edges.map(edge => <li key={`${traceRelationKey(edge)}/${edge.inputLotId}/${edge.outputLotId}`}>
+        {lots.get(edge.inputLotId)?.code} → {traceRelationLabel(trace, edge)} → {lots.get(edge.outputLotId)?.code}: input {edge.inputConsumedKg} kg; output {edge.outputProducedKg} kg. <small>{edge.relationId || edge.operationId}</small>
       </li>)}</ul>
     </details>
   </div>;

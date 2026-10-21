@@ -43,6 +43,24 @@ public sealed class BrowserWorkflowHost
         var processed = await scenario.CommitAsync(await scenario.DraftAsync("DRYING", [(traceSourceLotId, "10")], [("DRIED_PADDY", "8")], "2"));
         var traceOutputLotId = LedgerScenario.Output(processed);
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
+        // Reproducible custody trace fixture; all writes stay in this disposable database.
+        var mixedLocation = Guid.NewGuid();
+        await LedgerScenario.SendAsync(scenario.Admin, HttpMethod.Post, "/api/ledger/locations", new
+        { id = mixedLocation, facilityId = scenario.FacilityId, name = "Trace mixed store", kind = "STORE", mixedBulk = true });
+        await LedgerScenario.SendAsync(scenario.Admin, HttpMethod.Post, "/api/ledger/mixed-bulk-policies", new
+        {
+            id = Guid.NewGuid(), locationId = mixedLocation, ownerId = scenario.OwnerId, commodityId = scenario.CommodityId,
+            stage = "RAW_PADDY", productIdentity = "RAW_PADDY", effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            evidenceId = scenario.EvidenceId, identityScopeConfirmed = true
+        });
+        var mixedReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements",
+            scenario.ReceiptBody(Guid.NewGuid(), ["10"], mixedLocation));
+        await scenario.ConfirmArrivalAsync(mixedReceipt);
+        var mixedRoot = LedgerScenario.Lots(mixedReceipt)[0];
+        var source = await scenario.Purchaser.GetFromJsonAsync<GrainLedger.Modules.Capture.SourceLotResponse>(
+            $"/api/source-lots/{mixedReceipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()}");
+        var mixedPool = source!.CurrentStock.Single().CurrentStockLotId;
+        await scenario.HoldAsync(mixedRoot);
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -112,7 +130,7 @@ public sealed class BrowserWorkflowHost
                 equipmentId = scenario.EquipmentId, commodityId = scenario.CommodityId, catalogCommodityId = scenario.CatalogCommodityId,
                 farmerId = scenario.FarmerId, seasonId = scenario.SeasonId, plotSeasonId = scenario.PlotSeasonId,
                 evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(),
-                traceSourceLotId, traceOutputLotId, accounts
+                traceSourceLotId, traceOutputLotId, mixedRoot, mixedPool, accounts
             }, new JsonSerializerOptions { WriteIndented = true });
         try { await bridge.StartAsync(); await bridge.WaitForShutdownAsync(); }
         finally { File.Delete(sessionFile); await factory.DisposeAsync(); }

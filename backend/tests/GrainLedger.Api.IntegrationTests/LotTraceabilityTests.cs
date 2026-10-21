@@ -18,6 +18,35 @@ public sealed class LotTraceabilityTests(ApiFactory factory) : IClassFixture<Api
     private static Guid[] Ids(JsonElement result) => result.GetProperty("lots").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToArray();
 
     [Fact]
+    public async Task Older_trace_routine_is_rejected_without_committing_a_misleading_success_audit()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("1"))[0];
+        await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
+        async Task InstallAsync(string resource)
+        {
+            using var stream = typeof(GrainLedger.Modules.Ledger.AddLotTraceability).Assembly.GetManifestResourceStream(
+                $"GrainLedger.Modules.Ledger.Sql.{resource}.sql")!;
+            using var reader = new StreamReader(stream);
+            await using var command = new NpgsqlCommand((await reader.ReadToEndAsync()).Replace(
+                "CREATE FUNCTION ledger.trace_lot", "CREATE OR REPLACE FUNCTION ledger.trace_lot"), owner);
+            await command.ExecuteNonQueryAsync();
+        }
+        try
+        {
+            await InstallAsync("Traceability");
+            using var response = await s.Customer.PostAsJsonAsync("/api/ledger/trace", new { lotId = source });
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Contains("upgrade is not installed", await response.Content.ReadAsStringAsync());
+            await using var audit = new NpgsqlCommand("SELECT count(*) FROM ledger.events WHERE lot_id=$1 AND kind='TRACEBACK'", owner);
+            audit.Parameters.AddWithValue(source);
+            Assert.Equal(0L, await audit.ExecuteScalarAsync());
+        }
+        finally { await InstallAsync("CustodyTraceability"); }
+        Assert.True((await Trace(s.Customer, source)).GetProperty("complete").GetBoolean());
+    }
+
+    [Fact]
     public async Task Traversal_uses_actual_edges_and_retained_exact_source_facts_not_shared_root_or_stock_balance()
     {
         using var s = await CreateAsync(factory);
