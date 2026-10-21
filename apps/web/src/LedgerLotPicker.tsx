@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
-import { Feedback, Pagination, name, useAction, type Lookup, type Lot, type Page } from './ledger-ui';
+import { Feedback, isUnavailableHistoricalMixedLot, Pagination, name, useAction, type Lookup, type Lot, type Page } from './ledger-ui';
 
-type Props = { label: string; value: string; onChange: (id: string) => void; onSelected?: (lot: Lot | undefined) => void; look: Lookup; ownerId?: string; facilityId?: string; disabled?: boolean; lockedLotId?: string; pinnedLots?: Lot[] };
-export function LedgerLotPicker({ label, value, onChange, onSelected, look, ownerId, facilityId, disabled = false, lockedLotId, pinnedLots = [] }: Props) {
-  const [search, setSearch] = useState(''), [page, setPage] = useState(1), [result, setResult] = useState<Page<Lot>>({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false }), [selected, setSelected] = useState<Lot | undefined>(), action = useAction(), requestId = useRef(0), pinnedRef = useRef(pinnedLots), selectedCallback = useRef(onSelected);
+type Props = { label: string; value: string; onChange: (id: string, selectedLot?: Lot) => void; onSelected?: (lot: Lot | undefined) => void; look: Lookup; ownerId?: string; facilityId?: string; disabled?: boolean; lockedLotId?: string; pinnedLots?: Lot[]; availableOnly?: boolean };
+export function LedgerLotPicker({ label, value, onChange, onSelected, look, ownerId, facilityId, disabled = false, lockedLotId, pinnedLots = [], availableOnly = true }: Props) {
+  const [search, setSearch] = useState(''), [page, setPage] = useState(1), [reload, setReload] = useState(0), [result, setResult] = useState<Page<Lot>>({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false }), [selected, setSelected] = useState<Lot | undefined>(), action = useAction(), requestId = useRef(0), pinnedRef = useRef(pinnedLots), selectedCallback = useRef(onSelected);
   pinnedRef.current = pinnedLots;
   selectedCallback.current = onSelected;
   useEffect(() => { setPage(1); }, [ownerId, facilityId]);
@@ -17,16 +17,17 @@ export function LedgerLotPicker({ label, value, onChange, onSelected, look, owne
       if (search) query.set('search', search);
       if (ownerId) query.set('ownerId', ownerId);
       if (facilityId) query.set('facilityId', facilityId);
+      if (availableOnly) query.set('availableOnly', 'true');
       const next = await api<Page<Lot>>(`/api/ledger/lots?${query}`);
       if (request === requestId.current) setResult(next);
     });
     return () => { requestId.current++; };
-  }, [page, search, ownerId, facilityId, disabled, lockedLotId]);
+  }, [page, search, ownerId, facilityId, disabled, lockedLotId, reload, availableOnly]);
   useEffect(() => {
     if (!value) { setSelected(undefined); selectedCallback.current?.(undefined); return; }
     const scopedSelection = selected && selected.id === value && (!ownerId || selected.ownerId === ownerId) && (!facilityId || selected.positions.some(position => position.facilityId === facilityId));
     if (scopedSelection) { selectedCallback.current?.(selected); return; }
-    const current = [...pinnedRef.current, ...result.items].find(lot => lot.id === value && (!ownerId || lot.ownerId === ownerId) && (!facilityId || lot.positions.some(position => position.facilityId === facilityId)));
+    const current = [...result.items, ...pinnedRef.current].find(lot => lot.id === value && (!ownerId || lot.ownerId === ownerId) && (!facilityId || lot.positions.some(position => position.facilityId === facilityId)));
     if (current) { setSelected(current); selectedCallback.current?.(current); return; }
     if (disabled || lockedLotId && !ownerId && !facilityId) { setSelected(undefined); selectedCallback.current?.(undefined); return; }
     let live = true;
@@ -46,5 +47,5 @@ export function LedgerLotPicker({ label, value, onChange, onSelected, look, owne
   }
   if (selected && selected.id === value && (!ownerId || selected.ownerId === ownerId) && (!facilityId || selected.positions.some(position => position.facilityId === facilityId))) options.set(selected.id, selected);
   const lots = [...options.values()];
-  return <><Feedback {...action} /><label>{label}<select required value={value} onChange={event => { onChange(lockedLotId || event.target.value); const lot = lots.find(row => row.id === event.target.value); setSelected(lot); selectedCallback.current?.(lot); }} disabled={disabled || !!lockedLotId}><option value="">Select…</option>{lots.map(lot => <option key={lot.id} value={lot.id}>{lot.code} — {lot.stage} — {lot.restrictions.join(', ') || 'Unrestricted'} — {lot.positions.map(position => `${name(look.locations, position.locationId)}: ${position.quantityKg} kg`).join('; ') || 'No positions'}</option>)}</select></label>{!disabled && !lockedLotId && <><label>Search {label}<input type="search" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} /></label><Pagination page={result.page} pageSize={result.pageSize} totalCount={result.totalCount} onChange={setPage} label={label} busy={action.busy} /></>}</>;
+  return <><Feedback {...action} /><label>{label}<select required value={value} onChange={event => { const lot = lots.find(row => row.id === event.target.value); onChange(lockedLotId || event.target.value, lot); setSelected(lot); selectedCallback.current?.(lot); }} disabled={disabled || !!lockedLotId}><option value="">Select…</option>{lots.map(lot => <option key={lot.id} value={lot.id} disabled={isUnavailableHistoricalMixedLot(lot)}>{lot.code} — {lot.stage} — {lot.restrictions.join(', ') || 'Unrestricted'} — {lot.positions.map(position => `${name(look.locations, position.locationId)}: ${position.quantityKg} kg`).join('; ')}{lot.isCurrentPool ? ` — current pool revision ${lot.poolRevision}` : isUnavailableHistoricalMixedLot(lot) ? ' — historical generation; unavailable' : lot.custodyDerived ? ' — custody-derived stock at current position' : ''}</option>)}</select></label>{selected?.id === value && selected.isCurrentPool && <p role="status">Observed current pool revision {selected.poolRevision}. If stale, reload, reselect lot and save draft again; saved draft is not silently rewritten.</p>}{selected?.id === value && isUnavailableHistoricalMixedLot(selected) && <p role="status">Saved historical mixed-bulk generation has no positive physical stock. Reload options and reselect before saving.</p>}{!disabled && !lockedLotId && <><button type="button" className="secondary" disabled={action.busy} onClick={() => { onChange('', undefined); setSelected(undefined); selectedCallback.current?.(undefined); setResult({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false }); setPage(1); setSearch(''); setReload(value => value + 1); }}>Reload stock options and reselect</button><label>Search {label}<input type="search" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} /></label><Pagination page={result.page} pageSize={result.pageSize} totalCount={result.totalCount} onChange={setPage} label={label} busy={action.busy} /></>}</>;
 }

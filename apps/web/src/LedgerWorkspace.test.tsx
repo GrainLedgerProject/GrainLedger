@@ -172,6 +172,37 @@ it('edits processing draft with decimal strings and supports multiple actual out
  await browser.click(screen.getByRole('button', { name: 'Add actual output' }));
  expect(screen.getAllByLabelText('Actual output (kg)')).toHaveLength(2);
 });
+it('requires explicit refresh and reselect for stale mixed-bulk draft inputs', async () => {
+ const historicalLot = { ...lot, positions: lot.positions.map(position => ({ ...position, quantityKg: '0', availableKg: '0' })), mixedBulk: true, isCurrentPool: false, poolLocationId: 'store', poolRevision: 1 };
+ const initialPool = { ...lot, id: 'pool-v2', code: 'Pool v2', mixedBulk: true, isCurrentPool: true, poolLocationId: 'store', poolRevision: 2 };
+ routes['/api/ledger/lots'] = page([initialPool, historicalLot]);
+ routes['/api/ledger/lots/source'] = historicalLot;
+ routes['/api/ledger/operations'] = page([{ ...draft, inputs: [{ ...draft.inputs[0], poolRevision: 1 }] }]);
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByText(/DRYING:.*DRAFT/));
+ await browser.click(screen.getByRole('button', { name: 'Edit processing draft' }));
+ const editor = screen.getByRole('heading', { name: 'Edit processing draft' }).closest('section')!;
+ expect(within(editor).getByRole('button', { name: 'Save draft changes' })).toBeDisabled();
+ const picker = within(editor).getByLabelText('Input lot');
+ await waitFor(() => {
+  const historicalOption = picker.querySelector('option[value="source"]');
+  expect(historicalOption).toBeInTheDocument();
+  expect(historicalOption).toBeDisabled();
+ });
+ const currentPool = { ...initialPool, id: 'pool-v3', code: 'Pool v3', poolRevision: 3 };
+ routes['/api/ledger/lots'] = page([currentPool]);
+ await browser.click(within(editor).getByRole('button', { name: 'Reload stock options and reselect' }));
+ await within(editor).findByRole('option', { name: /current pool revision 3/ });
+ await browser.selectOptions(picker, 'pool-v3');
+ await browser.selectOptions(within(editor).getByLabelText('Input stock position'), 'store');
+ expect(within(editor).getByText(/Draft revision: 3 · current revision: 3/)).toBeInTheDocument();
+ expect(within(editor).getByRole('button', { name: 'Save draft changes' })).toBeEnabled();
+ await browser.click(within(editor).getByRole('button', { name: 'Save draft changes' }));
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/ledger/operations/draft' && init?.method === 'PUT')).toBe(true));
+ const saved = JSON.parse(String(fetchMock.mock.calls.find(([url, init]) => url === '/api/ledger/operations/draft' && init?.method === 'PUT')![1]?.body));
+ expect(saved.inputs[0]).toMatchObject({ lotId: 'pool-v3', poolRevision: 3 });
+});
 it('derives processing output payloads by kind while preserving exact strings and correction locations', async () => {
  const { } = render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
  const browser = userEvent.setup();
