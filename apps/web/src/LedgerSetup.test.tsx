@@ -210,6 +210,7 @@ it('keeps newest history filter results when older response arrives last', async
  expect(screen.queryByText('Stale system filter')).not.toBeInTheDocument();
 });
 it('requires exact-scope confirmation before recording evidence-backed mixed-bulk policy', async () => {
+ const organizations = [{ id: 'owner-a', name: 'Owner A', kind: 'Customer' }, { id: 'mill-a', name: 'Mill A', kind: 'Mill' }];
  const browser = userEvent.setup();
  fetchMock.mockImplementation(async (input, init) => {
   const path = String(input).split('?')[0];
@@ -226,12 +227,16 @@ it('requires exact-scope confirmation before recording evidence-backed mixed-bul
  render(<LedgerSetup user={user} />);
  await browser.click(await screen.findByText(/Advanced policy/, { selector: 'summary' }));
  const mixedPanel = screen.getByRole('heading', { name: 'Mixed-bulk location policies' }).closest('section')!;
+ const policyOwner = within(mixedPanel).getByLabelText('Policy owner');
+ expect(within(mixedPanel).getByRole('option', { name: 'Owner A' })).toBeInTheDocument();
+ expect(within(mixedPanel).queryByRole('option', { name: 'Mill A' })).not.toBeInTheDocument();
  await browser.selectOptions(within(mixedPanel).getByLabelText('Enabled mixed-bulk location'), 'silo-a');
- await browser.selectOptions(within(mixedPanel).getByLabelText('Policy owner'), 'owner-a');
+ await browser.selectOptions(policyOwner, 'owner-a');
  await browser.selectOptions(within(mixedPanel).getByLabelText('Commodity'), 'paddy');
+ const record = within(mixedPanel).getByRole('button', { name: 'Record mixed-bulk policy' });
+ expect(record).toBeDisabled();
  await browser.upload(within(mixedPanel).getByLabelText('Evidence file'), new File(['approval evidence'], 'policy.pdf', { type: 'application/pdf' }));
  await browser.click(within(mixedPanel).getByRole('button', { name: 'Upload evidence' }));
- const record = within(mixedPanel).getByRole('button', { name: 'Record mixed-bulk policy' });
  expect(record).toBeDisabled();
  await browser.click(within(mixedPanel).getByLabelText(/I confirm this evidence explicitly approves/));
  expect(record).toBeEnabled();
