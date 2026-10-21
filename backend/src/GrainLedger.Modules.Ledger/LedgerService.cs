@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Data;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GrainLedger.Modules.Identity;
@@ -12,12 +14,17 @@ using NpgsqlTypes;
 namespace GrainLedger.Modules.Ledger;
 
 public sealed record LedgerEvidence(Guid Id, string FileName, string ContentType, byte[] Content, string Sha256);
+public sealed record LedgerInventoryPosition(Guid LocationId, Guid FacilityId, decimal OnHandKg, decimal AvailableKg);
+public sealed record LedgerInventoryLot(Guid LotId, string Code, Guid OwnerId, Guid CommodityId, string Stage,
+    string ProductIdentity, IReadOnlyList<string> Restrictions, IReadOnlyList<LedgerInventoryPosition> Positions);
+public sealed record LedgerInventoryScope(Guid OwnerId, Guid FacilityId, int TotalLots,
+    IReadOnlyList<LedgerInventoryLot> Lots);
 public sealed class LedgerException(int statusCode, string message) : Exception(message)
 {
     public int StatusCode { get; } = statusCode;
 }
 
-public sealed class LedgerService(IConfiguration configuration, IHttpContextAccessor accessor, IdentityDbContext identity, ICurrentAccess access)
+public sealed partial class LedgerService(IConfiguration configuration, IHttpContextAccessor accessor, IdentityDbContext identity, ICurrentAccess access)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     public async Task<Guid> ActorAsync(CancellationToken ct = default)
@@ -61,6 +68,61 @@ public sealed class LedgerService(IConfiguration configuration, IHttpContextAcce
         await using var connection = await OpenAsync(ct);
         var value = await ExecuteAsync(connection, null, "SELECT ledger.read($1,$2,$3)::text", ct, actor, action, payload);
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
+    }
+
+    // Planning must inspect the whole owner/facility scope from one MVCC view.
+    // This is stock inventory, not a compliance-qualified candidate set or reservation.
+    public async Task<LedgerInventoryScope> ReadInventoryScopeAsync(Guid ownerId, Guid facilityId,
+        CancellationToken ct = default)
+    {
+        if (ownerId == Guid.Empty || facilityId == Guid.Empty)
+            throw new LedgerException(400, "Owner and facility are required");
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await using (var readOnly = new NpgsqlCommand("SET TRANSACTION READ ONLY", connection, transaction))
+            await readOnly.ExecuteNonQueryAsync(ct);
+
+        const int pageSize = 100;
+        const int maxLots = 10000;
+        var lots = new List<LedgerInventoryLot>();
+        var page = 1;
+        var total = 0;
+        while (true)
+        {
+            var payload = new JsonObject
+            {
+                ["ownerId"] = ownerId.ToString(), ["facilityId"] = facilityId.ToString(),
+                ["page"] = page, ["pageSize"] = pageSize, ["sortBy"] = "code", ["sortDirection"] = "asc"
+            };
+            var value = await ExecuteAsync(connection, transaction, "SELECT ledger.read($1,$2,$3)::text", ct,
+                actor, "lots", payload);
+            var result = JsonSerializer.Deserialize<JsonElement>((string)value!);
+            total = result.GetProperty("totalCount").GetInt32();
+            if (total > maxLots)
+                throw new LedgerException(409, "Planning inventory exceeds the 10000-lot scan limit; narrow the facility scope");
+            foreach (var lot in result.GetProperty("items").EnumerateArray())
+            {
+                if (lot.GetProperty("ownerId").GetGuid() != ownerId)
+                    throw new InvalidOperationException("Ledger returned stock outside the requested owner.");
+                var positions = lot.GetProperty("positions").EnumerateArray()
+                    .Where(x => x.GetProperty("facilityId").GetGuid() == facilityId)
+                    .Select(x => new LedgerInventoryPosition(x.GetProperty("locationId").GetGuid(), facilityId,
+                        decimal.Parse(x.GetProperty("quantityKg").GetString()!, CultureInfo.InvariantCulture),
+                        decimal.Parse(x.GetProperty("availableKg").GetString()!, CultureInfo.InvariantCulture)))
+                    .ToArray();
+                lots.Add(new LedgerInventoryLot(lot.GetProperty("id").GetGuid(), lot.GetProperty("code").GetString()!,
+                    ownerId, lot.GetProperty("commodityId").GetGuid(), lot.GetProperty("stage").GetString()!,
+                    lot.GetProperty("productIdentity").GetString()!,
+                    lot.GetProperty("restrictions").EnumerateArray().Select(x => x.GetString()!).ToArray(), positions));
+            }
+            if (!result.GetProperty("hasMore").GetBoolean()) break;
+            page++;
+        }
+        if (lots.Count != total)
+            throw new InvalidOperationException("Planning inventory scan did not return the complete scope.");
+        await transaction.CommitAsync(ct);
+        return new LedgerInventoryScope(ownerId, facilityId, total, lots);
     }
     public async Task<JsonElement> ReceivingAsync(string action, JsonObject payload, CancellationToken ct = default)
     {

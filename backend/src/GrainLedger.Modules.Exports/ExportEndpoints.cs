@@ -14,7 +14,7 @@ using Npgsql;
 
 namespace GrainLedger.Modules.Exports;
 
-public static class ExportModule
+public static partial class ExportModule
 {
     private sealed class ReadyFilter(ExportDbContext db) : IEndpointFilter
     {
@@ -73,6 +73,7 @@ public static class ExportModule
         endpoints.MapPatch("/api/export-containers/{id:guid}", UpdateContainerAsync)
             .RequireAuthorization(Permissions.ExportOrdersWrite).AddEndpointFilter<NoStoreFilter>()
             .AddEndpointFilter<MutationAntiforgeryFilter>().AddEndpointFilter<ReadyFilter>();
+        MapBlendPlanning(endpoints);
         return endpoints;
     }
 
@@ -139,7 +140,8 @@ public static class ExportModule
             ExportRules.Text(order.RequiredMassKg), order.OriginalMass, order.OriginalUnit,
             order.ShippingFrom, order.ShippingTo, order.Version, order.CurrentSpecificationVersion,
             limits.Select(ToDto).ToArray(),
-            ExportRules.Text(allocated), ExportRules.Text(order.RequiredMassKg - allocated), canEdit);
+            ExportRules.Text(allocated), ExportRules.Text(order.RequiredMassKg - allocated),
+            canEdit);
     }
 
     private static async Task<IResult> ListAsync(HttpContext http, IdentityDbContext identity,

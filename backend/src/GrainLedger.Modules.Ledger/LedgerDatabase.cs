@@ -169,6 +169,7 @@ public static class LedgerDatabase
                 ledger.register_pending_procurement(uuid,uuid),ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid),
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
                 ledger.procurement_stock(uuid,uuid),ledger.procurement_stock_bulk(uuid,uuid[]),
+                ledger.planning_candidates(uuid,uuid,uuid),
                 ledger.procurement_source_lineage(uuid,uuid),
                 ledger.arrival_command(uuid,uuid,text,jsonb),
                 ledger.receiving_threshold_read(uuid,text,jsonb),ledger.receiving_threshold_command(uuid,text,jsonb),

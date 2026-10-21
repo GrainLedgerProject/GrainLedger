@@ -98,10 +98,13 @@ public sealed class ExportDbContext(DbContextOptions<ExportDbContext> options) :
     public DbSet<ExportEvent> Events => Set<ExportEvent>();
     public DbSet<ExportOperation> Operations => Set<ExportOperation>();
     public DbSet<ExportCodeCounter> Counters => Set<ExportCodeCounter>();
+    public DbSet<BlendPlanDraft> BlendPlanDrafts => Set<BlendPlanDraft>();
+    public DbSet<BlendPlanEvent> BlendPlanEvents => Set<BlendPlanEvent>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
         m.HasDefaultSchema("exports");
+        BlendPlanModel.Configure(m);
         m.Entity<ExportOrder>(b =>
         {
             b.ToTable("export_orders"); b.HasKey(x => x.Id);
