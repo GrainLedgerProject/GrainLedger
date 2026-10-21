@@ -396,7 +396,7 @@ public static class ProcurementEndpoints
         {
             var state = await ledger.GetReceivingStateAsync(header.Id, ct);
             if (state is null && snapshot.Status == "PENDING_ARRIVAL") return LedgerUnavailable();
-            var accepted = state is null || state.Status is "RECEIVED_MATCHED" or "RECEIVED_SHORTAGE_APPROVED";
+            var accepted = state is null || state.Status is "RECEIVED_MATCHED" or "RECEIVED_WITHIN_TOLERANCE" or "RECEIVED_SHORTAGE_APPROVED";
             IReadOnlyList<ProcurementStockPosition> stock = accepted ? await ledger.GetCurrentStockAsync(companyId.Value, source.LotId, ct) : [];
             var farmer = await db.Farmers.IgnoreQueryFilters().AsNoTracking()
                 .Where(x => x.CompanyId == companyId && x.Id == header.FarmerId)

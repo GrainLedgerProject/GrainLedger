@@ -13,28 +13,34 @@ using Npgsql;
 namespace GrainLedger.Modules.Capture;
 
 public sealed record SampleInput(Guid EntityId, Guid SourceLotId, string? Code, string? SealCode,
-    DateTimeOffset CollectedAt);
+    DateTimeOffset CollectedAt, string? MaterialDescription = null);
 public sealed record CaptureSampleRequest(string? DeviceId, Guid ClientOperationId,
     DateTimeOffset CapturedAt, int PayloadSchemaVersion, SampleInput? Payload);
 public sealed record SampleResponse(Guid Id, Guid SourceLotId, string Code, string SealCode,
     Guid CollectedBy, DateTimeOffset CollectedAt, DateTimeOffset CapturedAt,
-    DateTimeOffset RecordedAt, int HandoverCount);
+    DateTimeOffset RecordedAt, int HandoverCount, string? MaterialDescription);
 public sealed record SampleSummary(Guid Id, Guid SourceLotId, string Code, string SealCode,
-    Guid CollectedBy, DateTimeOffset CollectedAt, int HandoverCount);
+    Guid CollectedBy, DateTimeOffset CollectedAt, int HandoverCount, string? MaterialDescription);
 public sealed record SampleListResponse(IReadOnlyList<SampleSummary> Items, int Page, int PageSize, bool HasMore);
 
 public sealed record SampleHandoverInput(Guid EntityId, string? FromParty, string? ToParty,
-    DateTimeOffset HandedOverAt, string? SealCondition, string? EvidenceRef);
+    DateTimeOffset HandedOverAt, string? SealCondition, string? EvidenceRef,
+    string? HandoverKind = null, string? LaboratoryName = null,
+    string? LaboratoryReference = null, string? LaboratorySampleReference = null);
 public sealed record RecordSampleHandoverRequest(string? DeviceId, Guid ClientOperationId,
     DateTimeOffset CapturedAt, int PayloadSchemaVersion, SampleHandoverInput? Payload);
 public sealed record SampleHandoverResponse(Guid Id, Guid SampleId, Guid RecordedBy,
     string FromParty, string ToParty, DateTimeOffset HandedOverAt, string SealCondition,
-    string? EvidenceRef, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt);
+    string? EvidenceRef, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt,
+    string HandoverKind = "HANDOVER", string? LaboratoryName = null,
+    string? LaboratoryReference = null, string? LaboratorySampleReference = null);
 public sealed record SampleHandoverSummary(Guid Id, Guid SampleId, Guid RecordedBy,
     string FromParty, string ToParty, DateTimeOffset HandedOverAt, string SealCondition,
-    string? EvidenceRef);
+    string? EvidenceRef, string HandoverKind, string? LaboratoryName,
+    string? LaboratoryReference, string? LaboratorySampleReference);
 public sealed record SampleHandoverListResponse(IReadOnlyList<SampleHandoverSummary> Items,
     int Page, int PageSize, bool HasMore);
+
 
 public static class SampleEndpoints
 {
@@ -77,6 +83,8 @@ public static class SampleEndpoints
                 errors["payload.sealCode"] = ["Seal code is required and must not exceed 100 characters."];
             if (payload.CollectedAt == default || request.CapturedAt != default && payload.CollectedAt > request.CapturedAt)
                 errors["payload.collectedAt"] = ["Collection time must exist and must not follow capture time."];
+            if (payload.MaterialDescription?.Trim().Length > 200)
+                errors["payload.materialDescription"] = ["Material description must not exceed 200 characters."];
         }
         if (errors.Count != 0) return Results.ValidationProblem(errors);
 
@@ -86,10 +94,15 @@ public static class SampleEndpoints
         var deviceId = request.DeviceId!.Trim();
         var legacyCode = payload.Code?.Trim();
         var sealCode = payload.SealCode!.Trim();
-        var canonical = JsonSerializer.Serialize(new { operationType = SampleEvent,
-            request.PayloadSchemaVersion, capturedAt, payload.EntityId, payload.SourceLotId,
-            code = request.PayloadSchemaVersion == 1 ? legacyCode : null,
-            sealCode, collectedAt });
+        var materialDescription = Clean(payload.MaterialDescription);
+        var canonical = materialDescription is null
+            ? JsonSerializer.Serialize(new { operationType = SampleEvent,
+                request.PayloadSchemaVersion, capturedAt, payload.EntityId, payload.SourceLotId,
+                code = request.PayloadSchemaVersion == 1 ? legacyCode : null, sealCode, collectedAt })
+            : JsonSerializer.Serialize(new { operationType = SampleEvent,
+                request.PayloadSchemaVersion, capturedAt, payload.EntityId, payload.SourceLotId,
+                code = request.PayloadSchemaVersion == 1 ? legacyCode : null,
+                sealCode, collectedAt, materialDescription });
         var hash = Hash(canonical);
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -109,9 +122,10 @@ public static class SampleEndpoints
 
         var now = clock.GetUtcNow();
         var sample = new Sample { Id = payload.EntityId, CompanyId = companyId.Value, SourceLotId = payload.SourceLotId,
-            Code = code, SealCode = sealCode, CollectedBy = actorId, CollectedAt = collectedAt };
+            Code = code, SealCode = sealCode, CollectedBy = actorId, CollectedAt = collectedAt,
+            MaterialDescription = materialDescription };
         var response = new SampleResponse(sample.Id, sample.SourceLotId, code, sealCode,
-            actorId, collectedAt, capturedAt, now, 0);
+            actorId, collectedAt, capturedAt, now, 0, materialDescription);
         var ev = new CaptureBusinessEvent { CompanyId = companyId, ActorId = actorId, EventType = SampleEvent,
             OccurredAt = capturedAt, RecordedAt = now, CorrelationId = request.ClientOperationId,
             Payload = JsonSerializer.Serialize(new { schemaVersion = 1, sampleId = sample.Id, response }) };
@@ -135,7 +149,6 @@ public static class SampleEndpoints
         { return Problem(409, "SOURCE_RECORD_NOT_READY", "The source lot changed. Reload it and try again."); }
         return Results.Created($"/api/samples/{sample.Id}", response);
     }
-
     private static async Task<IResult> HandoverAsync(Guid id, RecordSampleHandoverRequest request,
         ClaimsPrincipal principal, ICurrentAccess access, IdentityDbContext identityDb,
         CaptureDbContext db, TimeProvider clock, CancellationToken ct)
@@ -154,6 +167,18 @@ public static class SampleEndpoints
             if (string.IsNullOrWhiteSpace(payload.SealCondition)) errors["payload.sealCondition"] = ["Seal condition is required."];
             if (payload.HandedOverAt == default || request.CapturedAt != default && payload.HandedOverAt > request.CapturedAt)
                 errors["payload.handedOverAt"] = ["Handover time must exist and must not follow capture time."];
+            var kind = NormalizeHandoverKind(payload.HandoverKind);
+            if (kind is not ("HANDOVER" or "LAB_DISPATCH" or "LAB_ACKNOWLEDGEMENT"))
+                errors["payload.handoverKind"] = ["Handover kind must be HANDOVER, LAB_DISPATCH, or LAB_ACKNOWLEDGEMENT."];
+            if ((kind is "LAB_DISPATCH" or "LAB_ACKNOWLEDGEMENT") &&
+                string.IsNullOrWhiteSpace(payload.LaboratoryName))
+                errors["payload.laboratoryName"] = ["Laboratory name is required for laboratory handovers."];
+            if (payload.LaboratoryName?.Trim().Length > 200)
+                errors["payload.laboratoryName"] = ["Laboratory name must not exceed 200 characters."];
+            if (payload.LaboratoryReference?.Trim().Length > 200)
+                errors["payload.laboratoryReference"] = ["Laboratory reference must not exceed 200 characters."];
+            if (payload.LaboratorySampleReference?.Trim().Length > 200)
+                errors["payload.laboratorySampleReference"] = ["Laboratory sample reference must not exceed 200 characters."];
         }
         if (errors.Count != 0) return Results.ValidationProblem(errors);
 
@@ -165,9 +190,19 @@ public static class SampleEndpoints
         var toParty = payload.ToParty!.Trim();
         var sealCondition = payload.SealCondition!.Trim();
         var evidenceRef = Clean(payload.EvidenceRef);
-        var canonical = JsonSerializer.Serialize(new { operationType = HandoverEvent,
-            request.PayloadSchemaVersion, capturedAt, sampleId = id, payload.EntityId,
-            fromParty, toParty, handedOverAt, sealCondition, evidenceRef });
+        var handoverKind = NormalizeHandoverKind(payload.HandoverKind);
+        var laboratoryName = Clean(payload.LaboratoryName);
+        var laboratoryReference = Clean(payload.LaboratoryReference);
+        var laboratorySampleReference = Clean(payload.LaboratorySampleReference);
+        var canonical = handoverKind == "HANDOVER" && laboratoryName is null &&
+                laboratoryReference is null && laboratorySampleReference is null
+            ? JsonSerializer.Serialize(new { operationType = HandoverEvent,
+                request.PayloadSchemaVersion, capturedAt, sampleId = id, payload.EntityId,
+                fromParty, toParty, handedOverAt, sealCondition, evidenceRef })
+            : JsonSerializer.Serialize(new { operationType = HandoverEvent,
+                request.PayloadSchemaVersion, capturedAt, sampleId = id, payload.EntityId,
+                fromParty, toParty, handedOverAt, sealCondition, evidenceRef,
+                handoverKind, laboratoryName, laboratoryReference, laboratorySampleReference });
         var hash = Hash(canonical);
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -186,9 +221,12 @@ public static class SampleEndpoints
         var now = clock.GetUtcNow();
         var handover = new SampleHandover { Id = payload.EntityId, CompanyId = companyId.Value,
             SampleId = id, RecordedBy = actorId, FromParty = fromParty, ToParty = toParty,
-            HandedOverAt = handedOverAt, SealCondition = sealCondition, EvidenceRef = evidenceRef };
+            HandedOverAt = handedOverAt, SealCondition = sealCondition, EvidenceRef = evidenceRef,
+            HandoverKind = handoverKind, LaboratoryName = laboratoryName,
+            LaboratoryReference = laboratoryReference, LaboratorySampleReference = laboratorySampleReference };
         var response = new SampleHandoverResponse(handover.Id, id, actorId, fromParty, toParty,
-            handedOverAt, sealCondition, evidenceRef, capturedAt, now);
+            handedOverAt, sealCondition, evidenceRef, capturedAt, now,
+            handoverKind, laboratoryName, laboratoryReference, laboratorySampleReference);
         var ev = new CaptureBusinessEvent { CompanyId = companyId, ActorId = actorId, EventType = HandoverEvent,
             OccurredAt = capturedAt, RecordedAt = now, CorrelationId = request.ClientOperationId,
             Payload = JsonSerializer.Serialize(new { schemaVersion = 1, sampleId = id,
@@ -210,6 +248,7 @@ public static class SampleEndpoints
         return Results.Created($"/api/samples/{id}/handovers", response);
     }
 
+
     private static async Task<IResult> ListAsync(HttpContext http, ClaimsPrincipal principal,
         ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, CancellationToken ct)
     {
@@ -230,7 +269,8 @@ public static class SampleEndpoints
             .Skip((page - 1) * size).Take(size + 1)
             .Select(x => new SampleSummary(x.Id, x.SourceLotId, x.Code, x.SealCode,
                 x.CollectedBy, x.CollectedAt,
-                db.SampleHandovers.Count(h => h.CompanyId == companyId && h.SampleId == x.Id)))
+                db.SampleHandovers.Count(h => h.CompanyId == companyId && h.SampleId == x.Id),
+                x.MaterialDescription))
             .ToListAsync(ct);
         return Results.Ok(new SampleListResponse(rows.Take(size).ToArray(), page, size, rows.Count > size));
     }
@@ -249,9 +289,10 @@ public static class SampleEndpoints
         if (ev is null) return Problem(500, "SAMPLE_EVENT_MISSING", "The sample history is incomplete.");
         var count = await db.SampleHandovers.CountAsync(x => x.CompanyId == companyId && x.SampleId == id, ct);
         return Results.Ok(new SampleResponse(sample.Id, sample.SourceLotId, sample.Code, sample.SealCode,
-            sample.CollectedBy, sample.CollectedAt, ev.OccurredAt, ev.RecordedAt, count));
-    }
+            sample.CollectedBy, sample.CollectedAt, ev.OccurredAt, ev.RecordedAt, count,
+            sample.MaterialDescription));
 
+    }
     private static async Task<IResult> ListHandoversAsync(Guid id, HttpContext http,
         ClaimsPrincipal principal, ICurrentAccess access, IdentityDbContext identityDb,
         CaptureDbContext db, CancellationToken ct)
@@ -267,7 +308,8 @@ public static class SampleEndpoints
             .OrderByDescending(x => x.HandedOverAt).ThenBy(x => x.Id)
             .Skip((page - 1) * size).Take(size + 1)
             .Select(x => new SampleHandoverSummary(x.Id, x.SampleId, x.RecordedBy,
-                x.FromParty, x.ToParty, x.HandedOverAt, x.SealCondition, x.EvidenceRef))
+                x.FromParty, x.ToParty, x.HandedOverAt, x.SealCondition, x.EvidenceRef,
+                x.HandoverKind, x.LaboratoryName, x.LaboratoryReference, x.LaboratorySampleReference))
             .ToListAsync(ct);
         return Results.Ok(new SampleHandoverListResponse(rows.Take(size).ToArray(),
             page, size, rows.Count > size));
@@ -305,7 +347,10 @@ public static class SampleEndpoints
     }
 
     private static async Task<bool> CanReadAsync(ICurrentAccess access, CancellationToken ct) =>
-        await access.HasPermissionAsync("purchases.write", ct) || await access.HasPermissionAsync("farms.read", ct);
+        await access.HasPermissionAsync("purchases.write", ct) ||
+        await access.HasPermissionAsync("farms.read", ct) ||
+        await access.HasPermissionAsync("lab.write", ct) ||
+        await access.HasPermissionAsync("lab.read", ct);
 
     private static async Task LockAsync(CaptureDbContext db, Guid companyId, string deviceId,
         Guid operationId, CancellationToken ct)
@@ -341,6 +386,8 @@ public static class SampleEndpoints
     private static string Hash(string payload) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
     private static string? Clean(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    private static string NormalizeHandoverKind(string? kind) =>
+        string.IsNullOrWhiteSpace(kind) ? "HANDOVER" : kind.Trim().ToUpperInvariant();
 
     private static bool TryPage(HttpContext http, out int page, out int size)
     {

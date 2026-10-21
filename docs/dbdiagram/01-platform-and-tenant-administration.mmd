@@ -1,38 +1,10 @@
 erDiagram
-    %% Identity tables reflect current EF migrations. Other tables remain planned V2 design.
-    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
-    organizations {
-        uuid Id PK "NN; identity schema"
-        varchar(160) Name UK "NN"
-        varchar(20) Kind "NN; Mill Customer"
-        timestamptz CreatedAt "NN"
-    }
-    users {
-        uuid Id PK "NN; identity schema"
-        varchar(30) Provider "NN"
-        varchar(255) ProviderSubject "NN"
-        varchar(320) Email "NN"
-        varchar(120) DisplayName "NN"
-        varchar(32) PhoneNumber "NULL"
-        varchar(40) Role "NULL; one role"
-        uuid OrganizationId FK "NULL"
-        boolean IsActive "NN"
-        uuid Version "NN"
-        timestamptz CreatedAt "NN"
-        timestamptz UpdatedAt "NN"
-    }
-    sessions {
-        uuid Id PK "NN; identity schema"
-        uuid UserId FK "NN"
-        timestamptz CreatedAt "NN"
-        timestamptz LastSeenAt "NN"
-        timestamptz ExpiresAt "NN"
-        timestamptz RevokedAt "NULL"
-        varchar(64) IpAddress "NULL"
-        varchar(512) UserAgent "NULL"
-    }
-    audit_events {
-        bigint Id PK "NN; identity schema"
+    %% Live catalog snapshot 2026-10-19. Exact type aliases: varchar(n)=character varying(n); timestamptz=timestamp with time zone.
+    %% NN = NOT NULL; NULL = nullable. PK/FK mark catalog constraints; FK labels are exact constraint names.
+
+    %% identity.audit_events — full table
+    identity_audit_events {
+        bigint Id PK "NN"
         uuid ActorUserId "NULL"
         uuid SubjectUserId "NULL"
         varchar(100) Action "NN"
@@ -40,67 +12,120 @@ erDiagram
         timestamptz OccurredAt "NN"
         text IpAddress "NULL"
     }
-    facilities {
+    %% identity.organizations — full table
+    identity_organizations {
+        uuid Id PK "NN"
+        varchar(160) Name "NN"
+        varchar(20) Kind "NN"
+        timestamptz CreatedAt "NN"
+    }
+    %% identity.password_reset_codes — full table
+    identity_password_reset_codes {
+        uuid Id PK "NN"
+        uuid UserId FK "NN"
+        varchar(64) CodeHash "NN"
+        integer FailedAttempts "NN"
+        timestamptz CreatedAt "NN"
+        timestamptz ExpiresAt "NN"
+        timestamptz LastSentAt "NN"
+        timestamptz ConsumedAt "NULL"
+    }
+    %% identity.registration_attempts — full table
+    identity_registration_attempts {
+        uuid Id PK "NN"
+        varchar(320) Email "NN"
+        varchar(320) NormalizedEmail "NN"
+        varchar(120) DisplayName "NN"
+        varchar(1000) PasswordHash "NN"
+        varchar(64) CodeHash "NN"
+        integer FailedAttempts "NN"
+        timestamptz CreatedAt "NN"
+        timestamptz ExpiresAt "NN"
+        timestamptz LastSentAt "NN"
+        timestamptz InvalidatedAt "NULL"
+        timestamptz ConsumedAt "NULL"
+    }
+    %% identity.sessions — full table
+    identity_sessions {
+        uuid Id PK "NN"
+        uuid UserId FK "NN"
+        timestamptz CreatedAt "NN"
+        timestamptz LastSeenAt "NN"
+        timestamptz ExpiresAt "NN"
+        timestamptz RevokedAt "NULL"
+        varchar(64) IpAddress "NULL"
+        varchar(512) UserAgent "NULL"
+        uuid FamilyId "NN"
+        varchar(64) RefreshTokenHash "NULL"
+        uuid ReplacedBySessionId "NULL"
+        timestamptz RefreshTokenUsedAt "NULL"
+    }
+    %% identity.users — full table
+    identity_users {
+        uuid Id PK "NN"
+        varchar(30) Provider "NN"
+        varchar(255) ProviderSubject "NN"
+        varchar(320) Email "NN"
+        varchar(120) DisplayName "NN"
+        varchar(32) PhoneNumber "NULL"
+        varchar(40) Role "NULL"
+        uuid OrganizationId FK "NULL"
+        boolean IsActive "NN"
+        uuid Version "NN"
+        timestamptz CreatedAt "NN"
+        timestamptz UpdatedAt "NN"
+        integer FailedLoginCount "NN"
+        timestamptz LockoutEnd "NULL"
+        varchar(320) NormalizedEmail "NULL"
+        varchar(1000) PasswordHash "NULL"
+    }
+    %% ledger.assignments — full table
+    ledger_assignments {
+        uuid user_id PK,FK "NN"
+        uuid facility_id PK,FK "NN"
+        uuid created_by FK "NULL"
+        uuid version "NN"
+        boolean is_deleted "NN"
+    }
+    %% ledger.equipment — full table
+    ledger_equipment {
         uuid id PK "NN"
-        varchar(40) code UK "NN"
+        uuid facility_id FK "NN"
         text name "NN"
-        varchar(32) kind "NN; MILL COLLECTION_SITE"
-        text address "NN"
-        boolean is_active "NN"
+        uuid created_by FK "NULL"
+        uuid version "NN"
+        boolean is_deleted "NN"
     }
-    user_facilities {
+    %% ledger.facilities — full table
+    ledger_facilities {
         uuid id PK "NN"
-        uuid user_id FK "NN"
-        uuid facility_id FK "NN"
+        text name "NN"
+        uuid created_by FK "NULL"
+        uuid version "NN"
+        boolean is_deleted "NN"
     }
-    locations {
-        uuid id PK "NN"
-        uuid facility_id FK "NN"
-        varchar(40) code "NN"
-        varchar(32) kind "NN; RECEIVING DRYING SILO MILLING PACKING QUARANTINE"
-        boolean is_active "NN"
-    }
-    equipment {
+    %% ledger.locations — full table
+    ledger_locations {
         uuid id PK "NN"
         uuid facility_id FK "NN"
-        uuid location_id FK "NULL"
-        varchar(40) code "NN"
-        varchar(32) kind "NN; DRYER MILLING_LINE PACKING_LINE SCALE"
-        numeric(24,12) capacity_value "NULL"
-        varchar(30) capacity_unit "NULL"
-        boolean is_active "NN"
+        text name "NN"
+        text kind "NN"
+        uuid owner_id FK "NULL"
+        boolean cleared "NN"
+        uuid created_by FK "NULL"
+        uuid version "NN"
+        boolean is_deleted "NN"
     }
-    silos {
-        uuid id PK "NN"
-        uuid facility_id FK "NN"
-        varchar(40) code "NN"
-    }
-    silo_compartments {
-        uuid id PK "NN"
-        uuid silo_id FK "NN"
-        uuid location_id FK,UK "NN"
-        varchar(40) code "NN"
-        numeric(20,6) capacity_kg "NN"
-    }
-    compartment_occupancies {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid compartment_id FK "NN"
-        timestamptz started_at "NN"
-        timestamptz cleared_at "NULL"
-        uuid cleared_by FK "NULL"
-        text clearance_note "NULL"
-    }
-    organizations o|..o{ users : OrganizationId
-    users ||..o{ sessions : UserId
-    users ||..o{ user_facilities : user
-    facilities ||..o{ user_facilities : facility
-    facilities ||..o{ locations : facility
-    facilities ||..o{ equipment : facility
-    locations o|..o{ equipment : location
-    facilities ||..o{ silos : facility
-    silos ||..o{ silo_compartments : silo
-    locations ||..o| silo_compartments : location
-    organizations ||..o{ compartment_occupancies : company
-    silo_compartments ||..o{ compartment_occupancies : compartment
-    users o|..o{ compartment_occupancies : cleared_by
+
+    identity_organizations o|..o{ identity_users : "FK_users_organizations_OrganizationId"
+    identity_organizations o|..o{ ledger_locations : "locations_owner_id_fkey"
+    identity_users o|..o{ ledger_assignments : "assignments_created_by_fkey"
+    identity_users o|..o{ ledger_equipment : "equipment_created_by_fkey"
+    identity_users o|..o{ ledger_facilities : "facilities_created_by_fkey"
+    identity_users o|..o{ ledger_locations : "locations_created_by_fkey"
+    identity_users ||--o{ ledger_assignments : "assignments_user_id_fkey"
+    identity_users ||..o{ identity_password_reset_codes : "FK_password_reset_codes_users_UserId"
+    identity_users ||..o{ identity_sessions : "FK_sessions_users_UserId"
+    ledger_facilities ||--o{ ledger_assignments : "assignments_facility_id_fkey"
+    ledger_facilities ||..o{ ledger_equipment : "equipment_facility_id_fkey"
+    ledger_facilities ||..o{ ledger_locations : "locations_facility_id_fkey"

@@ -38,10 +38,12 @@ public sealed class BrowserWorkflowHost
             verification.EnsureSuccessStatusCode();
         }
         using var scenario = await LedgerScenario.CreateAsync(factory);
+        var (exportUser, exportSession) = await factory.SeedUserAsync(Roles.ExportStaff, scenario.OwnerId);
+        var exportClient = factory.CreateRealCookieClient(exportUser, exportSession);
+        await LedgerScenario.CsrfAsync(exportClient);
+        scenario.Accounts.Add("export", (exportUser, exportSession, exportClient));
         await scenario.ReceiptAsync("10");
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
-        var (exportUser, exportSession) = await factory.SeedUserAsync(Roles.ExportStaff, scenario.OwnerId);
-        scenario.Accounts.Add("export", (exportUser, exportSession, factory.CreateRealCookieClient(exportUser, exportSession)));
         using (var scope = factory.Services.CreateScope())
         {
             var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();

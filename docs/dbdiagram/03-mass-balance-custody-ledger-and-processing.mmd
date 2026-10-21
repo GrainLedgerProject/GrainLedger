@@ -1,171 +1,180 @@
 erDiagram
-    %% NN = NOT NULL; NULL = nullable. Composite FKs and indexes are in DBML.
-    lots {
+    %% Live catalog snapshot 2026-10-19. Exact type aliases: varchar(n)=character varying(n); timestamptz=timestamp with time zone.
+    %% NN = NOT NULL; NULL = nullable. PK/FK mark catalog constraints; FK labels are exact constraint names.
+
+    %% catalog.commodities — reference only; full fields in owning diagram
+    catalog_commodities {
         uuid id PK "NN"
-        uuid company_id FK "NN"
-        varchar(60) code "NN"
-        uuid commodity_id FK "NN"
-        varchar(32) stage "NN; RAW_PADDY DRIED_PADDY HEAD_RICE BROKEN_RICE BRAN HUSK BLENDED_RICE BAGGED_RICE"
+    }
+    %% identity.organizations — reference only; full fields in owning diagram
+    identity_organizations {
+        uuid Id PK "NN"
+    }
+    %% identity.users — reference only; full fields in owning diagram
+    identity_users {
+        uuid Id PK "NN"
+    }
+    %% ledger.__EFMigrationsHistory — full table
+    ledger___EFMigrationsHistory {
+        varchar(150) MigrationId PK "NN"
+        varchar(32) ProductVersion "NN"
+    }
+    %% ledger.catalog_commodities — full table
+    ledger_catalog_commodities {
+        uuid catalog_commodity_id PK,FK "NN"
+        uuid ledger_commodity_id FK "NN"
+    }
+    %% ledger.commodities — full table
+    ledger_commodities {
+        uuid id PK "NN"
+        text name "NN"
+    }
+    %% ledger.compatibilities — full table
+    ledger_compatibilities {
+        uuid id PK "NN"
+        uuid facility_id FK "NN"
+        text[] input_products "NN"
+        uuid output_commodity_id FK "NN"
+        timestamptz effective_from "NN"
+        uuid evidence_id FK "NN"
+    }
+    %% ledger.contributions — full table
+    ledger_contributions {
+        uuid lot_id PK,FK "NN"
+        uuid source_lot_id PK,FK "NN"
+        numeric(20,6) quantity_kg "NN"
+    }
+    %% ledger.equipment — reference only; full fields in owning diagram
+    ledger_equipment {
+        uuid id PK "NN"
+    }
+    %% ledger.events — reference only; full fields in owning diagram
+    ledger_events {
+        uuid id PK "NN"
+    }
+    %% ledger.evidence — full table
+    ledger_evidence {
+        uuid id PK "NN"
+        uuid owner_id FK "NN"
+        uuid facility_id FK "NN"
+        text file_name "NN"
+        text content_type "NN"
+        bytea content "NN"
+        text sha256 "NN"
+        uuid actor_id FK "NN"
         timestamptz created_at "NN"
     }
-    stock_positions {
+    %% ledger.facilities — reference only; full fields in owning diagram
+    ledger_facilities {
         uuid id PK "NN"
-        uuid company_id FK "NN"
+    }
+    %% ledger.locations — reference only; full fields in owning diagram
+    ledger_locations {
+        uuid id PK "NN"
+    }
+    %% ledger.lot_code_reservations — full table
+    ledger_lot_code_reservations {
+        uuid lot_id PK "NN"
+        text code "NN"
+        uuid owner_id FK "NN"
+        text context_kind "NN"
+        uuid context_id "NN"
+        text stage "NN"
+        text product_identity "NN"
+        timestamptz issued_at "NN"
+    }
+    %% ledger.lot_codes — full table
+    ledger_lot_codes {
+        text code PK "NN"
+        uuid origin_lot_id FK "NN"
+    }
+    %% ledger.lots — full table
+    ledger_lots {
+        uuid id PK "NN"
+        text code FK "NN"
+        uuid code_origin_id FK "NN"
+        uuid owner_id FK "NN"
+        uuid commodity_id FK "NN"
+        text stage "NN"
+        text product_identity "NN"
+        uuid receipt_id "NULL"
+        uuid receipt_line_id "NULL"
+        uuid operation_id FK "NULL"
+        timestamptz created_at "NN"
+    }
+    %% ledger.operations — full table
+    ledger_operations {
+        uuid id PK "NN"
+        uuid owner_id FK "NN"
+        uuid facility_id FK "NN"
+        text kind "NN"
+        timestamptz occurred_at "NN"
+        uuid equipment_id FK "NN"
+        jsonb content "NN"
+        text status "NN"
+        uuid version "NN"
+        uuid confirmed_version "NULL"
+        uuid confirmed_by FK "NULL"
+        uuid confirmation_evidence_id FK "NULL"
+        numeric(20,6) variance_kg "NULL"
+        numeric(20,6) allowed_variance_kg "NULL"
+        uuid correction_id "NULL"
+        uuid created_by FK "NULL"
+        boolean is_deleted "NN"
+        text lot_code_scheme "NN"
+    }
+    %% ledger.policies — full table
+    ledger_policies {
+        uuid id PK "NN"
+        uuid facility_id FK "NN"
+        text kind "NN"
+        numeric(20,6) tolerance_percent "NN"
+        timestamptz effective_from "NN"
+        uuid evidence_id FK "NN"
+    }
+    %% ledger.positions — full table
+    ledger_positions {
+        uuid lot_id PK,FK "NN"
+        uuid location_id PK,FK "NN"
+        numeric(20,6) quantity_kg "NN"
+    }
+    %% ledger.postings — full table
+    ledger_postings {
+        uuid id PK "NN"
+        uuid event_id FK "NN"
         uuid lot_id FK "NN"
         uuid location_id FK "NN"
-        numeric(20,6) on_hand_kg "NN"
-        numeric(20,6) reserved_kg "NN"
-        timestamptz updated_at "NN"
+        numeric(20,6) quantity_kg "NN"
+        uuid reverses_posting_id FK "NULL"
     }
-    balance_policies {
-        uuid id PK "NN"
-        varchar(40) conversion_type "NN"
-        integer version_no "NN"
-        varchar(32) tolerance_mode "NN; PERCENT_INPUT"
-        numeric(20,6) tolerance_value "NN"
-        uuid configured_by FK "NN"
-        timestamptz effective_from "NN"
-        text evidence_ref "NN"
-    }
-    conversions {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        varchar(60) code "NN"
-        varchar(32) kind "NN; DRYING MILLING MERGE BLENDING BAGGING COMPENSATION"
-        varchar(32) status "NN; DRAFT COMMITTED"
-        uuid balance_policy_id FK "NN"
-        uuid equipment_id FK "NULL"
-        uuid plan_id FK "NULL"
-        uuid original_conversion_id FK "NULL"
-        numeric(20,6) declared_loss_kg "NN"
-        numeric(24,12) declared_loss_value "NULL"
-        varchar(20) declared_loss_unit "NULL"
-        text loss_reason "NULL"
-        numeric(20,6) measurement_variance_kg "NULL"
-        varchar(32) variance_reason "NULL; SCALE_ROUNDING MEASUREMENT_ERROR MOISTURE_ESTIMATION OTHER_CONFIRMED"
-        uuid variance_confirmed_by FK "NULL"
-        uuid recorded_by FK "NN"
-        timestamptz occurred_at "NN"
-        uuid event_id FK,UK "NULL"
-        timestamptz committed_at "NULL"
-    }
-    conversion_inputs {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid conversion_id FK "NN"
-        uuid lot_id FK "NN"
-        numeric(20,6) mass_kg "NN"
-        numeric(24,12) measured_value "NULL"
-        varchar(20) measured_unit "NULL"
-    }
-    conversion_outputs {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid conversion_id FK "NN"
-        uuid lot_id FK,UK "NN"
-        numeric(20,6) mass_kg "NN"
-        numeric(24,12) measured_value "NULL"
-        varchar(20) measured_unit "NULL"
-    }
-    mass_contributions {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid input_id FK "NN"
-        uuid output_id FK "NN"
-        numeric(20,6) output_mass_kg "NN"
-    }
-    stock_postings {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid event_id FK "NN"
-        integer line_no "NN"
-        uuid position_id FK "NN"
-        numeric(20,6) delta_kg "NN"
-        uuid reservation_id FK "NULL"
-        uuid input_id FK "NULL"
-        uuid output_id FK "NULL"
-        uuid loading_item_id FK "NULL"
-        uuid reverses_posting_id FK,UK "NULL"
-    }
-    correction_requests {
-        uuid id PK "NN"
-        uuid company_id FK "NN"
-        uuid original_conversion_id FK "NN"
-        uuid compensation_id FK,UK "NULL"
-        uuid replacement_id FK,UK "NULL"
-        uuid requested_by FK "NN"
-        uuid reconciled_by FK "NULL"
-        text reconciliation_ref "NULL"
-        timestamptz requested_at "NN"
-        timestamptz resolved_at "NULL"
-        text reason "NN"
-        varchar(32) outcome "NN; PENDING_RECONCILIATION BLOCKED_DOWNSTREAM COMPLETED CANCELLED_VERIFIED"
-        text handling_note "NULL"
-    }
-    organizations {
-        uuid Id PK "Reference table; identity.organizations"
-    }
-    commodities {
-        uuid id PK "Reference table; defined in another module"
-    }
-    locations {
-        uuid id PK "Reference table; defined in another module"
-    }
-    users {
-        uuid Id PK "Reference table; identity.users"
-    }
-    equipment {
-        uuid id PK "Reference table; defined in another module"
-    }
-    blend_plans {
-        uuid id PK "Reference table; defined in another module"
-        uuid company_id FK "Reference table"
-    }
-    business_events {
-        uuid id PK "Reference table; defined in another module"
-    }
-    stock_reservations {
-        uuid id PK "Reference table; defined in another module"
-        uuid company_id FK "Reference table"
-    }
-    loading_items {
-        uuid id PK "Reference table; defined in another module"
-        uuid company_id FK "Reference table"
-    }
-    organizations ||..o{ lots : company
-    commodities ||..o{ lots : commodity
-    organizations ||..o{ stock_positions : company
-    lots ||..o{ stock_positions : lot
-    locations ||..o{ stock_positions : location
-    users ||..o{ balance_policies : configured_by
-    organizations ||..o{ conversions : company
-    balance_policies ||..o{ conversions : balance_policy
-    equipment o|..o{ conversions : equipment
-    blend_plans o|..o{ conversions : plan
-    conversions o|..o{ conversions : original_conversion
-    users o|..o{ conversions : variance_confirmed_by
-    users ||..o{ conversions : recorded_by
-    business_events o|..o| conversions : event
-    organizations ||..o{ conversion_inputs : company
-    conversions ||..o{ conversion_inputs : conversion
-    lots ||..o{ conversion_inputs : lot
-    organizations ||..o{ conversion_outputs : company
-    conversions ||..o{ conversion_outputs : conversion
-    lots ||..o| conversion_outputs : lot
-    organizations ||..o{ mass_contributions : company
-    conversion_inputs ||..o{ mass_contributions : input
-    conversion_outputs ||..o{ mass_contributions : output
-    organizations ||..o{ stock_postings : company
-    business_events ||..o{ stock_postings : event
-    stock_positions ||..o{ stock_postings : position
-    stock_reservations o|..o{ stock_postings : reservation
-    conversion_inputs o|..o{ stock_postings : input
-    conversion_outputs o|..o{ stock_postings : output
-    loading_items o|..o{ stock_postings : loading_item
-    stock_postings o|..o| stock_postings : reverses_posting
-    organizations ||..o{ correction_requests : company
-    conversions ||..o{ correction_requests : original_conversion
-    conversions o|..o| correction_requests : compensation
-    conversions o|..o| correction_requests : replacement
-    users ||..o{ correction_requests : requested_by
-    users o|..o{ correction_requests : reconciled_by
+
+    catalog_commodities ||--o| ledger_catalog_commodities : "catalog_commodities_catalog_commodity_id_fkey"
+    identity_organizations ||..o{ ledger_evidence : "evidence_owner_id_fkey"
+    identity_organizations ||..o{ ledger_lot_code_reservations : "lot_code_reservations_owner_id_fkey"
+    identity_organizations ||..o{ ledger_lots : "lots_owner_id_fkey"
+    identity_organizations ||..o{ ledger_operations : "operations_owner_id_fkey"
+    identity_users o|..o{ ledger_operations : "operations_confirmed_by_fkey"
+    identity_users o|..o{ ledger_operations : "operations_created_by_fkey"
+    identity_users ||..o{ ledger_evidence : "evidence_actor_id_fkey"
+    ledger_commodities ||..o{ ledger_compatibilities : "compatibilities_output_commodity_id_fkey"
+    ledger_commodities ||..o{ ledger_lots : "lots_commodity_id_fkey"
+    ledger_commodities ||..o| ledger_catalog_commodities : "catalog_commodities_ledger_commodity_id_fkey"
+    ledger_equipment ||..o{ ledger_operations : "operations_equipment_id_fkey"
+    ledger_events ||..o{ ledger_postings : "postings_event_id_fkey"
+    ledger_evidence o|..o{ ledger_operations : "operations_confirmation_evidence_id_fkey"
+    ledger_evidence ||..o{ ledger_compatibilities : "compatibilities_evidence_id_fkey"
+    ledger_evidence ||..o{ ledger_policies : "policies_evidence_id_fkey"
+    ledger_facilities ||..o{ ledger_compatibilities : "compatibilities_facility_id_fkey"
+    ledger_facilities ||..o{ ledger_evidence : "evidence_facility_id_fkey"
+    ledger_facilities ||..o{ ledger_operations : "operations_facility_id_fkey"
+    ledger_facilities ||..o{ ledger_policies : "policies_facility_id_fkey"
+    ledger_locations ||--o{ ledger_positions : "positions_location_id_fkey"
+    ledger_locations ||..o{ ledger_postings : "postings_location_id_fkey"
+    ledger_lot_codes ||..o{ ledger_lots : "lot_code_lineage"
+    ledger_lots ||--o{ ledger_contributions : "contributions_lot_id_fkey"
+    ledger_lots ||--o{ ledger_contributions : "contributions_source_lot_id_fkey"
+    ledger_lots ||--o{ ledger_positions : "positions_lot_id_fkey"
+    ledger_lots ||..o{ ledger_lot_codes : "lot_codes_origin_lot_id_fkey"
+    ledger_lots ||..o{ ledger_postings : "postings_lot_id_fkey"
+    ledger_operations o|..o{ ledger_lots : "lots_operation_id_fkey"
+    ledger_postings o|..o| ledger_postings : "postings_reverses_posting_id_fkey"
