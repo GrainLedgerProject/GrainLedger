@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useState } from 'react';
@@ -62,6 +62,42 @@ it('refreshes selected lot detail when stock view becomes active again', async (
   view.rerender(<LedgerStock user={user} active />);
   await waitFor(() => expect(positionRow()).toHaveTextContent('7'));
   expect(await screen.findByText('HOLD restriction')).toBeInTheDocument();
+});
+it('waits for complete deep-linked lot detail and displays scoped source composition', async () => {
+  let resolveDetail!: (value: Response) => void;
+  const pendingDetail = new Promise<Response>(resolve => { resolveDetail = resolve; });
+  const pool = { ...lot('pool', 'POOL-001'), mixedBulk: true, isCurrentPool: true, poolRevision: 4, positions: [{ locationId: 'location-a', facilityId: 'facility-a', quantityKg: '100', availableKg: '100', poolRevision: 4 }], sourceComposition: [{ sourceLotId: 'source-a', sourceLotCode: 'SRC-A', quantityKg: '50' }, { sourceLotId: 'source-b', sourceLotCode: 'SRC-B', quantityKg: '30' }, { sourceLotId: 'source-c', sourceLotCode: 'SRC-C', quantityKg: '20' }], history: { items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false } };
+  fetchMock.mockImplementation(async url => {
+    const path = String(url).split('?')[0];
+    if (path === '/api/ledger/lookups') return response({ owners: [], facilities: [{ id: 'facility-a', name: 'Mill A' }], locations: [{ id: 'location-a', name: 'Silo' }], commodities: [], equipment: [] });
+    if (path === '/api/ledger/lots') return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+    if (path === '/api/ledger/lots/pool') return pendingDetail;
+    return response({ title: `Unexpected route ${path}` });
+  });
+  render(<LedgerStock user={user} initialLotId="pool" />);
+  expect(await screen.findByRole('status')).toHaveTextContent('Loading lot detail');
+  expect(screen.queryByRole('heading', { name: 'Lot detail: POOL-001' })).not.toBeInTheDocument();
+  await act(async () => { resolveDetail(response(pool)); });
+  expect(await screen.findByRole('heading', { name: 'Lot detail: POOL-001' })).toBeInTheDocument();
+  const composition = screen.getByRole('table', { name: 'source composition' });
+  expect(within(composition).getByText('SRC-A')).toBeInTheDocument();
+  expect(within(composition).getByText('50')).toBeInTheDocument();
+  expect(screen.getByText(/not separate withdrawable stock/)).toBeInTheDocument();
+});
+it('keeps positive custody-derived aliquots selectable at ordinary positions', async () => {
+  const browser = userEvent.setup(), onSubmit = vi.fn(), aliquot = { ...lot('aliquot', 'ALIQUOT-001'), mixedBulk: true, isCurrentPool: false, custodyDerived: true, positions: [{ locationId: 'store', facilityId: 'facility-a', quantityKg: '40', availableKg: '40' }] };
+  fetchMock.mockImplementation(async url => {
+    const path = String(url).split('?')[0];
+    if (path === '/api/ledger/lookups') return response({ owners: [{ id: 'owner-a', name: 'Owner A' }], facilities: [], locations: [{ id: 'store', name: 'Store' }], commodities: [], equipment: [] });
+    if (path === '/api/ledger/lots') return response({ items: [aliquot], page: 1, pageSize: 25, totalCount: 1, hasMore: false });
+    return response({ title: `Unexpected route ${path}` });
+  });
+  render(<PickerConsumer onSubmit={onSubmit} />);
+  const option = await screen.findByRole('option', { name: /ALIQUOT-001/ });
+  expect(option).toBeEnabled();
+  expect(option).toHaveTextContent(/custody-derived stock at current position/);
+  await browser.selectOptions(screen.getByLabelText('Transfer lot'), 'aliquot');
+  expect(await screen.findByText('Selected lot: ALIQUOT-001')).toBeInTheDocument();
 });
 it('pages lot choices beyond the first page', async () => {
   const browser = userEvent.setup(), onSubmit = vi.fn();

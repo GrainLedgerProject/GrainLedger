@@ -1,6 +1,6 @@
 # Ledger implementation and verification
 
-Status: Receiving-loss threshold implemented. Procurement registers source expectation without creating usable Ledger stock; exact-match or within-threshold operator acceptance posts measured arrival mass, and above-threshold/surplus cases require assigned MillManager evidence-backed resolution. Capture route contract is in [procurement-api.md](procurement-api.md). Historical source evidence and stock are grandfathered unchanged; receiving migrations do not retroactively freeze, reinterpret or assign thresholds to legacy records. Shared-database migrations, seeds and schema/role/grant changes require explicit database-owner approval.
+Status: Core ledger workflows and mixed-bulk storage implemented locally; mixed-bulk isolated verification completed on 2026-10-20. Final build passed, backend suite passed 330 tests, web suite passed 112 tests, and production frontend build passed. Authenticated HTTP/browser evidence and remaining fail-closed policy boundaries are recorded in [mixed-bulk storage plan](mixed-bulk-storage-plan.md). This is not a deployment/production-readiness claim. Shared-database migrations, seeds and schema/role/grant changes require explicit database-owner approval.
 
 ## 1. Scope and sources
 
@@ -32,7 +32,7 @@ These source revisions were inspected. Diagram design is not proof of factory/su
 
 ### Separate milestones
 
-Not included: offline capture, pesticide declarations, sampling/lab workflows, residue propagation/compliance, export orders, blend approval, reservation, loading/container traceability, and settlement of genuine transport shortage/gain. Physical blending records processing; it does not certify export compliance. No factory approval claimed.
+- Mixed-bulk location pooling and custody accounting are implemented locally. Eligibility is explicit and evidence-backed; see [mixed-bulk storage plan](mixed-bulk-storage-plan.md). Sampling/lab workflow is implemented separately; residue propagation/compliance, export orders, reservation, loading/container traceability, and genuine transport shortage/gain settlement remain excluded.
 
 ## 2. Architecture and database boundary
 
@@ -78,6 +78,14 @@ Procurement contract uses `POST /api/procurements` for source registration, `GET
 - Quantities use exact decimal and `numeric(20,6)` kg. Original units/measure remain available. Invalid precision/conversion fails instead of rounding silently.
 - Largest-remainder lineage uses integer micro-kg: for each output allocate across inputs, then each input share across its source contributions; UUID tie-break at each allocation; combine equal source rows. Contributions exactly sum output mass. Transfer adds no lineage.
 
+### Mixed-bulk location pools
+
+Local Ledger opt-in uses location `mixedBulk` (false by default) and explicit append-only policy bound to location kind, owner, commodity, stage and product identity, effective time and evidence. Supported kinds are `STORE`, `SILO`, `COMPARTMENT`; not `ISOLATION`. Policy writes use `POST /api/ledger/mixed-bulk-policies` and require `identityScopeConfirmed: true`; no policy defaults or seeds exist. Current pool generations and revisions are read from Ledger stock/setup; write inputs include `poolRevision`, and stale generations require explicit reload, reselect and draft resave.
+
+Arrivals, eligible transfers and processing outputs entering mixed locations merge into a new generation; withdrawals allocate aliquot source shares by integer micro-kg largest remainder and UUID tie-break, with exact source-wise complement. Pool composition is not a second withdrawable balance. Procurement source expectation remains unchanged; source-attributed remaining/available stock, pool total and current lot/revision are distinct fields. Positive ancestry drives HOLD through pool and processing descendants; later source top-up does not taint earlier aliquots. Lab evidence remains tied to original source and `NOT_ASSESSED`, with no automatic stock/HOLD change.
+
+Ambiguous multi-position residual attribution, mismatched identities, absent policy, held ingress/top-up and custody corrections fail closed. No unmix, downstream correction cascade, or correction of an untouched mixed-custody package is enabled without approved policy. Full drain retains identity until clearance. Migration `20261020000000_MixedBulkStorage` is forward-only, local implementation only; no reset/backfill/conversion and no shared deployment. Approval required before shared migrations, grants, seeds or schema changes.
+
 ### Corrections, HOLD and evidence
 
 - Customer Manager creates own-company HOLD. Manager assigned facility can acknowledge, isolate, respond with scoped evidence; notification creation/read does not release. No HOLD release action exists.
@@ -99,8 +107,8 @@ Enforced implementation baseline; not externally approved factory rules.
 | Merge | Same commodity, stage and product identity | Same commodity, stage and product identity, new lot |
 | Blending | Explicitly compatible products | BLENDED_RICE |
 | Bagging | Head/broken/blended rice | BAGGED_RICE preserving product identity |
-| Transfer | Existing lot | Same lot, commodity, stage |
-| Compensation | Original eligible postings | Accounting reversal within atomic correction; no reverse-production lineage |
+| Transfer | Existing lot | Ordinary destination retains lot; mixed-bulk destination creates current successor generation |
+| Compensation | Original eligible postings | Accounting reversal within atomic correction; mixed-bulk custody corrections fail closed |
 
 Milling records positive fractions actually produced, not fabricated four outputs. Byproducts remain stock; no dispatch/disposal workflow. Rice label alone does not imply compatibility. Repeated drying, remilling, unpacking, standalone write-off, generic stock adjustment and HOLD release are undefined/unsupported and fail closed.
 

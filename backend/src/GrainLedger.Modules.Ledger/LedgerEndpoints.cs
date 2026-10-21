@@ -23,7 +23,7 @@ public static class LedgerEndpoints
             group.MapGet('/' + route, async (HttpRequest request, LedgerService ledger, CancellationToken ct) =>
             {
                 var query = new JsonObject();
-                foreach (var key in new[] { "page", "pageSize", "search", "sortBy", "sortDirection", "ownerId", "facilityId", "locationId", "lotId", "stage", "status", "kind", "ids", "queueOnly" })
+                foreach (var key in new[] { "page", "pageSize", "search", "sortBy", "sortDirection", "ownerId", "facilityId", "locationId", "lotId", "stage", "status", "kind", "ids", "queueOnly", "availableOnly" })
                 {
                     if (!request.Query.TryGetValue(key, out var value)) continue;
                     if (value.Count != 1 || string.IsNullOrWhiteSpace(value[0])) throw new LedgerException(400, "Invalid query value");
@@ -46,7 +46,7 @@ public static class LedgerEndpoints
             request["id"] = id;
             return Results.Ok(await ledger.ReceivingAsync("reviews", request, ct));
         }).RequireAuthorization("receiving.reconcile");
-        foreach (var route in new[] { "facilities", "locations", "equipment", "assignments", "policies", "compatibilities" })
+        foreach (var route in new[] { "facilities", "locations", "equipment", "assignments", "policies", "compatibilities", "mixed-bulk-policies" })
         {
             var action = route;
             group.MapPost('/' + route, async (JsonObject request, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.CommandAsync(action, request, ct))).RequireAuthorization("platform.configure");

@@ -182,20 +182,59 @@ public sealed class ProcurementLedgerPort(IConfiguration configuration) : IProcu
         return await reader.ReadAsync(ct) ? new(reader.GetString(0), reader.GetInt32(1)) : null;
     }
 
-    public async Task<IReadOnlyList<ProcurementStockPosition>> GetCurrentStockAsync(Guid companyId, Guid lotId, CancellationToken ct)
+    public Task<IReadOnlyList<ProcurementStockPosition>> GetCurrentStockAsync(Guid companyId,
+        Guid sourceLotId, CancellationToken ct) => GetCurrentStockBulkAsync(companyId, [sourceLotId], ct);
+
+    public async Task<IReadOnlyList<ProcurementStockPosition>> GetCurrentStockBulkAsync(Guid companyId,
+        IReadOnlyCollection<Guid> sourceLotIds, CancellationToken ct)
     {
+        var ids = sourceLotIds.Distinct().ToArray();
+        if (ids.Length == 0) return [];
         await using var connection = await OpenAsync(ct);
-        await using var command = new NpgsqlCommand("SELECT location_id,on_hand_kg,available_kg FROM ledger.procurement_stock($1,$2) ORDER BY location_id", connection);
+        await using var command = new NpgsqlCommand(
+            "SELECT source_lot_id,current_stock_lot_id,current_stock_lot_code,location_id,on_hand_kg,available_kg,pool_total_kg,is_mixed_bulk,pool_revision FROM ledger.procurement_stock_bulk($1,$2)",
+            connection);
         command.Parameters.AddWithValue(companyId);
-        command.Parameters.AddWithValue(lotId);
+        command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Uuid, Value = ids });
         await using var reader = await command.ExecuteReaderAsync(ct);
         var positions = new List<ProcurementStockPosition>();
         while (await reader.ReadAsync(ct))
         {
-            if (reader.IsDBNull(0)) throw new ProcurementLedgerUnavailableException();
-            positions.Add(new(reader.GetGuid(0), reader.GetDecimal(1).ToString("0.######", CultureInfo.InvariantCulture),
-                reader.GetDecimal(2).ToString("0.######", CultureInfo.InvariantCulture)));
+            positions.Add(new(reader.GetGuid(1), reader.GetString(2), reader.GetGuid(0), reader.GetGuid(3),
+                reader.GetDecimal(4).ToString("0.######", CultureInfo.InvariantCulture),
+                reader.GetDecimal(5).ToString("0.######", CultureInfo.InvariantCulture),
+                reader.GetDecimal(6).ToString("0.######", CultureInfo.InvariantCulture),
+                reader.GetBoolean(7), reader.IsDBNull(8) ? null : reader.GetInt64(8)));
         }
         return positions;
+    }
+
+    public async Task<ProcurementSourceLineage> GetSourceLineageAsync(Guid companyId, Guid sourceLotId,
+        CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct);
+        await using var command = new NpgsqlCommand(
+            "SELECT lot_id,lot_code,location_id,is_current_pool,pool_revision,quantity_kg FROM ledger.procurement_source_lineage($1,$2)",
+            connection);
+        command.Parameters.AddWithValue(companyId);
+        command.Parameters.AddWithValue(sourceLotId);
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            var descendants = new List<ProcurementLineageLink>();
+            while (await reader.ReadAsync(ct))
+            {
+                descendants.Add(new(reader.GetGuid(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetGuid(2),
+                    reader.GetBoolean(3), reader.IsDBNull(4) ? null : reader.GetInt64(4),
+                    reader.GetDecimal(5).ToString("0.######", CultureInfo.InvariantCulture)));
+            }
+            return descendants.Count == 0
+                ? throw new ProcurementLedgerUnavailableException()
+                : new(descendants);
+        }
+        catch (PostgresException ex) when (ex.SqlState == "GL001")
+        {
+            throw new ProcurementLedgerUnavailableException();
+        }
     }
 }

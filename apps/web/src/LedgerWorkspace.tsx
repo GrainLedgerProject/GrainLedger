@@ -14,9 +14,9 @@ export const ledgerSections = [
   { id: 'operations', label: 'Process & correct', description: 'Processing, transfers & corrections', permissions: ['conversions.read', 'conversions.write', 'conversions.confirm', 'corrections.reconcile'] },
   { id: 'setup', label: 'Setup', description: 'Catalog, facilities & policies', permissions: ['platform.read', 'platform.configure'] },
 ] as const;
-export function LedgerWorkspace({ user }: { user: User }) {
+export function LedgerWorkspace({ user, initialLotId }: { user: User; initialLotId?: string }) {
   const allowed = ledgerSections.filter(section => section.permissions.some(permission => user.permissions.includes(permission)));
-  const preferred = user.permissions.includes('platform.configure') ? 'setup'
+  const preferred = initialLotId && allowed.some(section => section.id === 'inventory') ? 'inventory' : user.permissions.includes('platform.configure') ? 'setup'
     : user.permissions.some(permission => ['purchases.write', 'lots.receive', 'receiving.reconcile'].includes(permission)) ? 'receiving' : 'inventory';
   const initial = allowed.some(section => section.id === preferred) ? preferred : allowed[0]?.id || '';
   const [selected, setSelected] = useState<string>(initial);
@@ -31,7 +31,7 @@ export function LedgerWorkspace({ user }: { user: User }) {
     {['CustomerManager', 'PurchasingStaff', 'ExportStaff'].includes(user.role || '') && <OwnReceivingThreshold active />}
     <nav className="ledger-nav" aria-label="Ledger sections">{allowed.map(section => <button key={section.id} aria-label={section.label} aria-current={tab === section.id ? 'page' : undefined} aria-controls={`ledger-${section.id}`} onClick={() => selectSection(section.id)}><strong>{section.label}</strong><small>{section.description}</small></button>)}</nav>
     {allowed.map(section => <div key={section.id} id={`ledger-${section.id}`} hidden={tab !== section.id}>
-      {(visited.includes(section.id) || tab === section.id) && (section.id === 'traceability' ? <LedgerTraceability user={user} active={tab === section.id} /> : section.id === 'inventory' ? <LedgerStock user={user} active={tab === section.id} /> : section.id === 'receiving' ? <LedgerReceiving user={user} active={tab === section.id} /> : section.id === 'operations' ? <LedgerOperations user={user} active={tab === section.id} /> : <LedgerSetup user={user} active={tab === section.id} />)}
+      {(visited.includes(section.id) || tab === section.id) && (section.id === 'traceability' ? <LedgerTraceability user={user} active={tab === section.id} /> : section.id === 'inventory' ? <LedgerStock user={user} active={tab === section.id} initialLotId={initialLotId} /> : section.id === 'receiving' ? <LedgerReceiving user={user} active={tab === section.id} /> : section.id === 'operations' ? <LedgerOperations user={user} active={tab === section.id} /> : <LedgerSetup user={user} active={tab === section.id} />)}
     </div>)}
     {!allowed.length && <p className="notice">No ledger permissions assigned.</p>}
   </div>;
