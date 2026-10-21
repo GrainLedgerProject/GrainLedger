@@ -3,7 +3,7 @@ import { api, errorMessage } from './api';
 
 export type Row = Record<string, any>;
 export type Lookup = { owners: Row[]; facilities: Row[]; locations: Row[]; commodities: Row[]; equipment: Row[] };
-export type Lot = { id: string; code: string; ownerId: string; commodityId: string; stage: string; productIdentity: string | null; positions: Row[]; restrictions: string[]; contributions?: Row[]; history?: Page<Row> };
+export type Lot = { id: string; code: string; ownerId: string; commodityId: string; stage: string; productIdentity: string | null; positions: Row[]; restrictions: string[]; mixedBulk?: boolean; poolLocationId?: string | null; poolRevision?: number | null; isCurrentPool?: boolean; custodyDerived?: boolean; sourceComposition?: Row[]; contributions?: Row[]; history?: Page<Row> };
 export type Operation = { id: string; ownerId: string; facilityId: string; kind: string; occurredAt: string; equipmentId: string; inputs: Row[]; outputs: Row[]; declaredLossKg: string; status: string; version: string; confirmedVersion?: string | null; varianceKg?: string | null; allowedVarianceKg?: string | null; createdBy?: string; canEdit?: boolean; canDelete?: boolean; boundCorrectionId?: string | null };
 export type Page<T> = { items: T[]; page: number; pageSize: number; totalCount: number; hasMore: boolean };
 export type PaginationProps = { page: number; pageSize: number; totalCount: number; onChange: (page: number) => void; label: string; busy?: boolean };
@@ -27,6 +27,8 @@ export function localTime(value: string) { const date = new Date(value); return 
 export const iso = (value: string) => new Date(value).toISOString();
 export const name = (rows: Row[], value: string) => String(rows.find(row => row.id === value)?.name || value);
 export const positive = (value: string) => /[1-9]/.test(value);
+export const hasPositivePhysicalPosition = (lot: Lot) => lot.positions.some(position => positive(String(position.quantityKg ?? '0')));
+export const isUnavailableHistoricalMixedLot = (lot: Lot) => lot.mixedBulk === true && !lot.isCurrentPool && !hasPositivePhysicalPosition(lot);
 export function lotLabel(lot: Lot, locations: Row[]) {
   const positions = lot.positions.map(position => `${name(locations, position.locationId)}: physical ${position.quantityKg} kg, available ${position.availableKg} kg`).join('; ');
   return `${lot.code} [${lot.id.slice(0, 8)}] — ${lot.stage} — ${lot.restrictions.join(', ') || 'Unrestricted'} — ${positions || 'No recorded positions'}`;

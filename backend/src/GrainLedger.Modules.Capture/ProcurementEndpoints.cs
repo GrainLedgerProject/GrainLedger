@@ -35,7 +35,8 @@ public sealed record ProcurementResponse(Guid Id, string Code, Guid FarmerId, Gu
     Guid EventId, string TotalNetMassKg, IReadOnlyList<ProcurementLineResponse> Items, int ReceivingVersion = 0,
     string? FarmerName = null, string? FarmerCode = null);
 public sealed record ProcurementSummary(Guid Id, string Code, Guid FarmerId, string FarmerName,
-    DateTimeOffset ReceivedAt, string Status, int ItemCount, string TotalNetMassKg);
+    DateTimeOffset ReceivedAt, string Status, int ItemCount, string TotalNetMassKg,
+    string RemainingStockKg, string AvailableStockKg);
 public sealed record ProcurementListResponse(IReadOnlyList<ProcurementSummary> Items,
     int Page, int PageSize, int TotalCount, bool HasMore);
 public sealed record ProcurementCommodity(Guid Id, string Code, string Name);
@@ -48,8 +49,9 @@ public sealed record SourceLotResponse(Guid Id, Guid LotId, string LotCode, Guid
     Guid PlotId, Guid SeasonId, Guid PlotSeasonId, string RiceVariety,
     DateTimeOffset ReceivedAt, Guid CollectionSiteId, Guid InitialReceivingLocationId,
     string InitialNetMassKg, string MoisturePercent,
-    IReadOnlyList<ProcurementStockPosition> CurrentStock, DateTimeOffset StockAsOf,
-    string ReceivingStatus, string UsableStockKg, string? FarmerName = null,
+    IReadOnlyList<ProcurementStockPosition> CurrentStock, IReadOnlyList<ProcurementLineageLink> Lineage,
+    IReadOnlyList<Guid> SampleIds, IReadOnlyList<Guid> ConfirmedLabReportIds,
+    DateTimeOffset StockAsOf, string ReceivingStatus, string UsableStockKg, string? FarmerName = null,
     string? FarmerCode = null, string? PlotCode = null, string? SeasonName = null);
 internal sealed record ReceivingProjection(Guid ProcurementId, string Status, int Version);
 
@@ -326,12 +328,27 @@ public static class ProcurementEndpoints
                 .GroupBy(x => x.ProcurementId)
                 .Select(g => new { Id = g.Key, Count = g.Count(), Total = g.Sum(x => x.NetMassKg) })
                 .ToDictionaryAsync(x => x.Id, ct);
+            var stockSources = await (from source in db.SourceLots.AsNoTracking()
+                join line in db.ProcurementItems.AsNoTracking() on new { source.CompanyId, Id = source.ProcurementItemId } equals new { line.CompanyId, line.Id }
+                where source.CompanyId == companyId && ids.Contains(line.ProcurementId)
+                select new { line.ProcurementId, SourceLotId = source.LotId }).ToArrayAsync(ct);
+            var stock = await ledger.GetCurrentStockBulkAsync(companyId.Value, stockSources.Select(x => x.SourceLotId).ToArray(), ct);
+            var sourceToProcurement = stockSources.ToDictionary(x => x.SourceLotId, x => x.ProcurementId);
+            var stockByProcurement = stock.GroupBy(x => sourceToProcurement[x.SourceLotId]).ToDictionary(
+                group => group.Key,
+                group => new
+                {
+                    OnHand = group.Sum(x => decimal.Parse(x.OnHandKg, CultureInfo.InvariantCulture)),
+                    Available = group.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture))
+                });
             var summaries = result.Items.Select(item =>
             {
                 var header = headers[item.Id];
                 var total = totals[item.Id];
+                var remaining = stockByProcurement.GetValueOrDefault(item.Id);
                 return new ProcurementSummary(item.Id, header.Code, header.FarmerId, header.FarmerName,
-                    header.ReceivedAt, item.Status, total.Count, Number(total.Total));
+                    header.ReceivedAt, item.Status, total.Count, Number(total.Total),
+                    Number(remaining?.OnHand ?? 0), Number(remaining?.Available ?? 0));
             }).ToArray();
             return Results.Ok(new ProcurementListResponse(summaries, page, size, result.TotalCount,
                 (long)page * size < result.TotalCount));
@@ -397,7 +414,21 @@ public static class ProcurementEndpoints
             var state = await ledger.GetReceivingStateAsync(header.Id, ct);
             if (state is null && snapshot.Status == "PENDING_ARRIVAL") return LedgerUnavailable();
             var accepted = state is null || state.Status is "RECEIVED_MATCHED" or "RECEIVED_WITHIN_TOLERANCE" or "RECEIVED_SHORTAGE_APPROVED";
-            IReadOnlyList<ProcurementStockPosition> stock = accepted ? await ledger.GetCurrentStockAsync(companyId.Value, source.LotId, ct) : [];
+            IReadOnlyList<ProcurementStockPosition> stock = accepted
+                ? await ledger.GetCurrentStockAsync(companyId.Value, source.LotId, ct) : [];
+            var lineage = accepted
+                ? await ledger.GetSourceLineageAsync(companyId.Value, source.LotId, ct)
+                : new ProcurementSourceLineage([]);
+            var sampleIds = await db.Samples.AsNoTracking()
+                .Where(x => x.CompanyId == companyId && x.SourceLotId == source.Id)
+                .OrderBy(x => x.CollectedAt).ThenBy(x => x.Id)
+                .Select(x => x.Id).ToArrayAsync(ct);
+            var reportIds = sampleIds.Length == 0 ? Array.Empty<Guid>() : await (
+                from association in db.LabConfirmedAssociations.AsNoTracking()
+                join resultSet in db.LabResultSets.AsNoTracking()
+                    on new { association.CompanyId, Id = association.ResultSetId } equals new { resultSet.CompanyId, resultSet.Id }
+                where association.CompanyId == companyId && sampleIds.Contains(association.SampleId)
+                select resultSet.ReportId).Distinct().OrderBy(x => x).ToArrayAsync(ct);
             var farmer = await db.Farmers.IgnoreQueryFilters().AsNoTracking()
                 .Where(x => x.CompanyId == companyId && x.Id == header.FarmerId)
                 .Select(x => new { x.Name, x.Code }).SingleOrDefaultAsync(ct);
@@ -411,7 +442,8 @@ public static class ProcurementEndpoints
                 snapshot.CommodityId, line.Stage, header.Id, header.Code, item.Id, header.FarmerId,
                 line.PlotId, line.SeasonId, line.PlotSeasonId, line.RiceVariety, header.ReceivedAt,
                 header.CollectionSiteId, snapshot.ReceivingLocationId, line.NetMassKg,
-                line.MoisturePercent, stock, clock.GetUtcNow(), state?.Status ?? snapshot.Status,
+                line.MoisturePercent, stock, lineage.Descendants, sampleIds, reportIds, clock.GetUtcNow(),
+                state?.Status ?? snapshot.Status,
                 Number(stock.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture))),
                 farmer?.Name, farmer?.Code, plotCode, seasonName));
         }

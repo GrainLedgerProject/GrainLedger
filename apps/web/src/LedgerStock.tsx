@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
-import { Choice, Enum, Evidence, Feedback, ListControls, Mass, Pagination, Panel, Table, emptyLookup, id, iso, mutate, name, now, positive, stages, useAction, type Lookup, type Lot, type Page, type Row } from './ledger-ui';
+import { Choice, Enum, Evidence, Feedback, hasPositivePhysicalPosition, isUnavailableHistoricalMixedLot, ListControls, Mass, Pagination, Panel, Table, emptyLookup, id, iso, mutate, name, now, positive, stages, useAction, type Lookup, type Lot, type Page, type Row } from './ledger-ui';
 import { LedgerLotPicker } from './LedgerLotPicker';
 
 const emptyPage = <T,>(): Page<T> => ({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
@@ -9,15 +9,15 @@ const eventSort = [{ value: 'occurredAt', label: 'Date' }, { value: 'kind', labe
 const holdSort = [{ value: 'createdAt', label: 'Created' }, { value: 'status', label: 'Status' }, { value: 'owner', label: 'Owner' }];
 const notificationSort = [{ value: 'createdAt', label: 'Created' }, { value: 'readAt', label: 'Read date' }];
 
-export function LedgerStock({ user, active = true }: { user: User; active?: boolean }) {
-  const [look, setLook] = useState<Lookup>(emptyLookup), [stock, setStock] = useState<Page<Lot>>(emptyPage()), [facility, setFacility] = useState(''), [owner, setOwner] = useState(''), [location, setLocation] = useState(''), [stage, setStage] = useState(''), [search, setSearch] = useState(''), [page, setPage] = useState(1), [sortBy, setSortBy] = useState('code'), [direction, setDirection] = useState<'asc' | 'desc'>('asc'), [selected, setSelected] = useState<Lot | null>(null), [task, setTask] = useState<'stock' | 'holds' | 'history'>('stock'), [stockRevision, setStockRevision] = useState(0);
+export function LedgerStock({ user, active = true, initialLotId }: { user: User; active?: boolean; initialLotId?: string }) {
+  const [look, setLook] = useState<Lookup>(emptyLookup), [stock, setStock] = useState<Page<Lot>>(emptyPage()), [facility, setFacility] = useState(''), [owner, setOwner] = useState(''), [location, setLocation] = useState(''), [stage, setStage] = useState(''), [search, setSearch] = useState(''), [page, setPage] = useState(1), [sortBy, setSortBy] = useState('code'), [direction, setDirection] = useState<'asc' | 'desc'>('asc'), [selectedId, setSelectedId] = useState<string | null>(null), [selected, setSelected] = useState<Lot | null>(null), [task, setTask] = useState<'stock' | 'holds' | 'history'>('stock'), [stockRevision, setStockRevision] = useState(0);
   const action = useAction(), requestId = useRef(0), detailRequestId = useRef(0);
   useEffect(() => { if (active) void action.run(async () => setLook(await api<Lookup>('/api/ledger/lookups'))); }, [active]);
   useEffect(() => {
     if (!active) return;
     const request = ++requestId.current;
     void action.run(async () => {
-      const query = new URLSearchParams({ page: String(page), pageSize: '25', sortBy, sortDirection: direction });
+      const query = new URLSearchParams({ page: String(page), pageSize: '25', sortBy, sortDirection: direction, availableOnly: 'true' });
       if (facility) query.set('facilityId', facility);
       if (owner) query.set('ownerId', owner);
       if (location) query.set('locationId', location);
@@ -28,15 +28,16 @@ export function LedgerStock({ user, active = true }: { user: User; active?: bool
     });
     return () => { requestId.current++; };
   }, [active, page, facility, owner, location, stage, search, sortBy, direction, stockRevision]);
+  useEffect(() => { setSelectedId(initialLotId || null); setSelected(null); }, [initialLotId]);
   useEffect(() => {
-    if (!active || !selected) return;
+    if (!active || !selectedId) return;
     const request = ++detailRequestId.current;
     void action.run(async () => {
-      const detail = await api<Lot>(`/api/ledger/lots/${selected.id}`);
+      const detail = await api<Lot>(`/api/ledger/lots/${selectedId}`);
       if (request === detailRequestId.current) setSelected(detail);
     });
     return () => { detailRequestId.current++; };
-  }, [active, selected?.id, stockRevision]);
+  }, [active, selectedId, stockRevision]);
   async function refresh() { await api<Lookup>('/api/ledger/lookups').then(setLook); setStockRevision(value => value + 1); }
   const reset = (change: () => void) => { change(); setPage(1); };
   return <>
@@ -53,17 +54,17 @@ export function LedgerStock({ user, active = true }: { user: User; active?: bool
         </ListControls>
         <p>Remaining physical quantity differs from available quantity when HOLD, correction or receiving restrictions apply.</p>
         <div className="table-scroll"><table><thead><tr><th scope="col">Lot</th><th scope="col">Commodity / stage / identity</th><th scope="col">Owner</th><th scope="col">Positions (kg)</th><th scope="col">Restrictions</th><th scope="col">Detail</th></tr></thead><tbody>
-          {stock.items.map(lot => <tr key={lot.id}><td>{lot.code}</td><td>{name(look.commodities, lot.commodityId)} / {lot.stage} / {lot.productIdentity || '—'}</td><td>{look.owners.find(row => row.id === lot.ownerId)?.name || 'Owner name unavailable in current scope'}</td><td>{lot.positions.map(p => <p key={p.locationId}>{name(look.locations, p.locationId)}: physical {p.quantityKg}; available {p.availableKg}</p>)}</td><td>{lot.restrictions.join(', ') || 'None'}</td><td><button disabled={action.busy} aria-label={`Open lot detail for ${lot.code}`} onClick={() => setSelected(lot)}>Open lot detail</button></td></tr>)}
+          {stock.items.map(lot => <tr key={lot.id}><td>{lot.code}{lot.isCurrentPool && <div className="muted">Current mixed-bulk pool · revision {lot.poolRevision}</div>}{isUnavailableHistoricalMixedLot(lot) && <div className="muted">Historical generation · no positive physical stock</div>}{lot.custodyDerived && !lot.isCurrentPool && hasPositivePhysicalPosition(lot) && <div className="muted">Custody-derived stock at current ordinary position</div>}</td><td>{name(look.commodities, lot.commodityId)} / {lot.stage} / {lot.productIdentity || '—'}</td><td>{look.owners.find(row => row.id === lot.ownerId)?.name || 'Owner name unavailable in current scope'}</td><td>{lot.positions.map(p => <p key={p.locationId}>{name(look.locations, p.locationId)}: physical {p.quantityKg}; available {p.availableKg}{lot.isCurrentPool && p.poolRevision != null ? ` · revision ${p.poolRevision}` : ''}</p>)}</td><td>{lot.restrictions.join(', ') || 'None'}</td><td><button disabled={action.busy} aria-label={`Open lot detail for ${lot.code}`} onClick={() => { setSelected(lot); setSelectedId(lot.id); }}>Open lot detail</button></td></tr>)}
         </tbody></table></div>
         {!stock.items.length && <p className="empty">No stock in current filters.</p>}
         <Pagination page={stock.page} pageSize={stock.pageSize} totalCount={stock.totalCount} onChange={setPage} label="stock" busy={action.busy} />
       </Panel>
     </section>
-    <section hidden={task !== 'stock'}>{selected && <Panel title={`Lot detail: ${selected.code}`}>
-      <button onClick={() => setSelected(null)}>Close lot detail</button>
-      <dl><dt>Owner</dt><dd>{look.owners.find(row => row.id === selected.ownerId)?.name || 'Owner name unavailable in current scope'}</dd><dt>Commodity</dt><dd>{name(look.commodities, selected.commodityId)}</dd><dt>Stage</dt><dd>{selected.stage}</dd><dt>Product identity</dt><dd>{selected.productIdentity || '—'}</dd><dt>Restrictions</dt><dd>{selected.restrictions.join(', ') || 'None'}</dd></dl>
+    <section hidden={task !== 'stock'}>{selectedId && selected?.id !== selectedId && <p role="status">Loading lot detail…</p>}{selected && selected.id === selectedId && <Panel title={`Lot detail: ${selected.code}`}>
+      <button onClick={() => { setSelected(null); setSelectedId(null); }}>Close lot detail</button>
+      <dl><dt>Owner</dt><dd>{look.owners.find(row => row.id === selected.ownerId)?.name || 'Owner name unavailable in current scope'}</dd><dt>Commodity</dt><dd>{name(look.commodities, selected.commodityId)}</dd><dt>Stage</dt><dd>{selected.stage}</dd><dt>Product identity</dt><dd>{selected.productIdentity || '—'}</dd><dt>Restrictions</dt><dd>{selected.restrictions.join(', ') || 'None'}</dd>{selected.isCurrentPool && <><dt>Current mixed-bulk generation</dt><dd>Revision {selected.poolRevision}</dd></>}{isUnavailableHistoricalMixedLot(selected) && <><dt>Generation status</dt><dd>Historical only; no positive physical stock</dd></>}{selected.custodyDerived && !selected.isCurrentPool && hasPositivePhysicalPosition(selected) && <><dt>Custody status</dt><dd>Derived stock at a current ordinary position</dd></>}</dl>
       <h3>Stock positions</h3><Table rows={selected.positions.map(p => ({ Location: name(look.locations, p.locationId), Facility: name(look.facilities, p.facilityId), 'Physical quantity (kg)': p.quantityKg, 'Available quantity (kg)': p.availableKg }))} label="stock positions" />
-      <h3>Source contributions</h3>{selected.contributions ? <details><summary>Source contributions</summary><Table rows={selected.contributions} label="source contributions" /></details> : <p>Source contributions unavailable in current scope.</p>}
+      {selected.isCurrentPool || selected.custodyDerived ? <><h3>Source composition</h3><p>Source quantities describe lineage attribution; they are not separate withdrawable stock.</p>{selected.sourceComposition ? <Table rows={selected.sourceComposition.map(source => ({ 'Source lot': source.sourceLotCode || source.sourceLotId, 'Attributed share (kg)': source.quantityKg }))} label="source composition" /> : <p>Source composition unavailable in current scope.</p>}</> : <><h3>Source contributions</h3>{selected.contributions ? <details><summary>Source contributions</summary><Table rows={selected.contributions} label="source contributions" /></details> : <p>Source contributions unavailable in current scope.</p>}</>}
       <h3>Lot history</h3>{selected.history ? <details><summary>Lot history</summary><LotHistory key={selected.id} lotId={selected.id} initial={selected.history} /></details> : <p>Lot history unavailable in current scope.</p>}
     </Panel>}</section>
     <section hidden={task !== 'history'}><div className="ledger-task-intro"><h2>History</h2><p>Chronological events retain original postings and reversal references.</p></div><History active={active && task === 'history'} look={look} /></section>
@@ -90,19 +91,19 @@ function History({ look, active }: { look: Lookup; active: boolean }) {
   const [lotId, setLotId] = useState(''), [facility, setFacility] = useState(''), [search, setSearch] = useState(''), [sortBy, setSortBy] = useState('occurredAt'), [direction, setDirection] = useState<'asc' | 'desc'>('asc'), [page, setPage] = useState(1), [result, setResult] = useState<Page<Row>>(emptyPage()), action = useAction(), requestId = useRef(0);
   useEffect(() => { if (!active) return; const request = ++requestId.current; void action.run(async () => { const query = new URLSearchParams({ page: String(page), pageSize: '25', sortBy, sortDirection: direction }); if (lotId) query.set('lotId', lotId); if (facility) query.set('facilityId', facility); if (search) query.set('search', search); const next = await api<Page<Row>>(`/api/ledger/history?${query}`); if (request === requestId.current) setResult(next); }); return () => { requestId.current++; }; }, [active, page, lotId, facility, search, sortBy, direction]);
   const reset = (change: () => void) => { change(); setPage(1); };
-  return <Panel title="Chronological events and signed postings"><Feedback {...action} /><p>History retains original postings and reversal references. Declared loss and signed variance appear separately in event details.</p><ListControls label="history" search={search} onSearch={value => reset(() => setSearch(value))} sortBy={sortBy} onSortBy={value => reset(() => setSortBy(value))} sortDirection={direction} onSortDirection={value => reset(() => setDirection(value))} sortOptions={eventSort}><LedgerLotPicker label="History lot" value={lotId} onChange={value => reset(() => setLotId(value))} look={look} /><label>History facility<Choice rows={look.facilities} value={facility} onChange={value => reset(() => setFacility(value))} optional /></label></ListControls><Table rows={result.items} label="history" controls={false} columns={['occurredAt', 'kind', 'ownerName', 'quantityKg', 'details']} /><details><summary>Technical history records</summary><Table rows={result.items} label="history records" controls={false} /></details><Pagination page={result.page} pageSize={result.pageSize} totalCount={result.totalCount} onChange={setPage} label="history" busy={action.busy} /></Panel>;
+  return <Panel title="Chronological events and signed postings"><Feedback {...action} /><p>History retains original postings and reversal references. Declared loss and signed variance appear separately in event details.</p><ListControls label="history" search={search} onSearch={value => reset(() => setSearch(value))} sortBy={sortBy} onSortBy={value => reset(() => setSortBy(value))} sortDirection={direction} onSortDirection={value => reset(() => setDirection(value))} sortOptions={eventSort}><LedgerLotPicker label="History lot" value={lotId} onChange={value => reset(() => setLotId(value))} look={look} availableOnly={false} /><label>History facility<Choice rows={look.facilities} value={facility} onChange={value => reset(() => setFacility(value))} optional /></label></ListControls><Table rows={result.items} label="history" controls={false} columns={['occurredAt', 'kind', 'ownerName', 'quantityKg', 'details']} /><details><summary>Technical history records</summary><Table rows={result.items} label="history records" controls={false} /></details><Pagination page={result.page} pageSize={result.pageSize} totalCount={result.totalCount} onChange={setPage} label="history" busy={action.busy} /></Panel>;
 }
 export function TransferForm({ hold, onChanged, look, pinnedLots = [] }: { look: Lookup; hold?: Row; onChanged: () => Promise<void>; pinnedLots?: Lot[] }) {
   const [lotId, setLotId] = useState(hold?.lotId || ''), [lot, setLot] = useState<Lot>(), [from, setFrom] = useState(''), [to, setTo] = useState(''), [quantity, setQuantity] = useState(''), [when, setWhen] = useState(now()), [commandId, setCommandId] = useState(id()), action = useAction();
-  async function transfer(event: FormEvent) { event.preventDefault(); await action.run(async () => { await mutate('/api/ledger/transfers', { id: commandId, lotId, fromLocationId: from, toLocationId: to, quantityKg: quantity, occurredAt: iso(when), ...(hold ? { holdId: hold.id } : {}) }); setCommandId(id()); await onChanged(); }, hold ? 'Isolation transfer posted; HOLD remains active.' : 'Transfer posted; lot identity and lineage unchanged.'); }
-  return <Panel title={hold ? 'Authorized HOLD isolation transfer' : 'Unchanged-lot transfer'}><Feedback {...action} /><form onSubmit={transfer}>
-    <LedgerLotPicker key={commandId} label="Transfer lot" value={lotId} onChange={value => { setLotId(value); setFrom(''); }} onSelected={setLot} look={look} ownerId={hold?.ownerId} lockedLotId={hold?.lotId} pinnedLots={pinnedLots} />
+  async function transfer(event: FormEvent) { event.preventDefault(); await action.run(async () => { await mutate('/api/ledger/transfers', { id: commandId, lotId, fromLocationId: from, toLocationId: to, quantityKg: quantity, occurredAt: iso(when), ...(lot?.isCurrentPool ? { poolRevision: lot.poolRevision } : {}), ...(hold ? { holdId: hold.id } : {}) }); setCommandId(id()); await onChanged(); }, hold ? 'Isolation transfer posted; HOLD remains active.' : 'Transfer posted.'); }
+  return <Panel title={hold ? 'Authorized HOLD isolation transfer' : 'Stock transfer'}><Feedback {...action} /><form onSubmit={transfer}>
+    <LedgerLotPicker key={commandId} label="Transfer lot" value={lotId} onChange={(value, selected) => { setLotId(value); setFrom(''); setLot(selected); }} onSelected={setLot} look={look} ownerId={hold?.ownerId} lockedLotId={hold?.lotId} pinnedLots={pinnedLots} />
     <label>Source stock position<Choice rows={(lot?.positions || []).filter(p => positive(p.quantityKg)).map(p => ({ id: p.locationId, name: `${name(look.locations, p.locationId)} — physical ${p.quantityKg} kg, available ${p.availableKg} kg` }))} value={from} onChange={setFrom} /></label>
     <label>{hold ? 'Isolation destination' : 'Destination location'}<Choice rows={look.locations.filter(row => row.id !== from && (!hold || row.kind === 'ISOLATION'))} value={to} onChange={setTo} /></label>
     <Mass label="Transfer quantity (kg)" value={quantity} onChange={setQuantity} />
     <label>Transfer occurred at<input required type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} /></label>
-    <button disabled={action.busy}>{hold ? 'Transfer to HOLD isolation' : 'Commit unchanged-lot transfer'}</button>
-  </form><p>{hold ? 'Manager authority required at source and destination. Independent correction/receiving blocks still prevent movement. Transfer does not release HOLD.' : 'No new lot or source attribution. Mixing requires processing, not transfer.'}</p></Panel>;
+    <button disabled={action.busy || lot?.isCurrentPool && lot.poolRevision == null}>{hold ? 'Transfer to HOLD isolation' : lot?.isCurrentPool ? 'Commit pool transfer' : 'Commit unchanged-lot transfer'}</button>
+  </form><p>{hold ? 'Manager authority required at source and destination. Independent correction/receiving blocks still prevent movement. Transfer does not release HOLD.' : 'Ordinary transfers retain lot identity. Pool withdrawals use the selected current generation and observed pool revision; custody-derived stock at ordinary positions retains its lot identity.'}</p></Panel>;
 }
 function Holds({ look, user, onChanged, active }: { look: Lookup; user: User; onChanged: () => Promise<void>; active: boolean }) {
   const [holds, setHolds] = useState<Page<Row>>(emptyPage()), [notifications, setNotifications] = useState<Page<Row>>(emptyPage()), [lotId, setLotId] = useState(''), [reason, setReason] = useState(''), [holdPage, setHoldPage] = useState(1), [notificationPage, setNotificationPage] = useState(1), [holdSearch, setHoldSearch] = useState(''), [notificationSearch, setNotificationSearch] = useState(''), [holdOwner, setHoldOwner] = useState(''), [notificationOwner, setNotificationOwner] = useState(''), [holdStatus, setHoldStatus] = useState(''), [readStatus, setReadStatus] = useState(''), [holdSortBy, setHoldSortBy] = useState('createdAt'), [notificationSortBy, setNotificationSortBy] = useState('createdAt'), [holdDirection, setHoldDirection] = useState<'asc' | 'desc'>('desc'), [notificationDirection, setNotificationDirection] = useState<'asc' | 'desc'>('desc'), action = useAction(), requestId = useRef(0);

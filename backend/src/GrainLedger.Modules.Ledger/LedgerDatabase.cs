@@ -155,6 +155,9 @@ public static class LedgerDatabase
             REVOKE ALL ON ALL TABLES IN SCHEMA ledger FROM {role};
             REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ledger FROM {role};
             GRANT SELECT ON ALL TABLES IN SCHEMA ledger TO {role};
+            REVOKE ALL ON TABLE ledger.mixed_bulk_policies,ledger.mixed_bulk_pools,ledger.custody_events,
+                ledger.custody_edges,ledger.custody_allocations,ledger.custody_processing_allocations,
+                ledger.mixed_bulk_command_results FROM {role};
             REVOKE ALL ON TABLE ledger.receiving_threshold_default,ledger.receiving_threshold_overrides,ledger.receiving_threshold_history FROM {role};
             GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
@@ -165,7 +168,8 @@ public static class LedgerDatabase
                 ledger.provision_catalog_commodities(uuid),
                 ledger.register_pending_procurement(uuid,uuid),ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid),
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
-                ledger.procurement_stock(uuid,uuid),
+                ledger.procurement_stock(uuid,uuid),ledger.procurement_stock_bulk(uuid,uuid[]),
+                ledger.procurement_source_lineage(uuid,uuid),
                 ledger.arrival_command(uuid,uuid,text,jsonb),
                 ledger.receiving_threshold_read(uuid,text,jsonb),ledger.receiving_threshold_command(uuid,text,jsonb),
                 ledger.can_read_lot(uuid,uuid),ledger.assigned(uuid,uuid),
@@ -196,6 +200,35 @@ public static class LedgerDatabase
                   AND has_schema_privilege($1,n.oid,'CREATE'))
               OR has_function_privilege($1,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
               OR has_function_privilege($1,'ledger.provision_catalog_commodity(uuid)','EXECUTE')
+              OR has_function_privilege($1,'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
+              OR has_function_privilege($1,'ledger.pool_withdraw(uuid,uuid,text,uuid,uuid,numeric,bigint)','EXECUTE')
+              OR has_function_privilege($1,'ledger.command_pre_mixed(uuid,text,jsonb)','EXECUTE')
+              OR has_function_privilege($1,'ledger.read_before_mixed_bulk(uuid,text,jsonb)','EXECUTE')
+              OR EXISTS (
+                  SELECT 1 FROM (VALUES
+                      ('ledger.mixed_bulk_eligible(uuid,uuid,uuid,text,text,timestamptz)'),
+                      ('ledger.mixed_bulk_assert_location(uuid)'),('ledger.mixed_bulk_location_guard()'),
+                      ('ledger.mixed_bulk_pool_deferred_guard()'),('ledger.mixed_bulk_pool_row()'),
+                      ('ledger.custody_allocation_guard()'),('ledger.custody_processing_allocation_guard()'),
+                      ('ledger.reserve_lot_code_internal(uuid,uuid,text,uuid,text,text)'),
+                      ('ledger.mixed_bulk_custody_derived(uuid)'),('ledger.effective_hold_ids(uuid)'),
+                      ('ledger.mixed_bulk_independent_blocked(uuid,uuid)'),('ledger.blocked(uuid,uuid)'),
+                      ('ledger.require_mixed_correction_safe(text,jsonb)')
+                  ) private_function(signature)
+                  WHERE has_function_privilege($1,private_function.signature,'EXECUTE')
+              )
+              OR EXISTS (
+                  SELECT 1 FROM (VALUES
+                      ('ledger.mixed_bulk_policies'),('ledger.mixed_bulk_pools'),('ledger.custody_events'),
+                      ('ledger.custody_edges'),('ledger.custody_allocations'),('ledger.custody_processing_allocations'),
+                      ('ledger.mixed_bulk_command_results')
+                  ) protected(table_name)
+                  WHERE has_table_privilege($1,protected.table_name::regclass,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                     OR has_any_column_privilege($1,protected.table_name,'SELECT')
+                     OR has_any_column_privilege($1,protected.table_name,'INSERT')
+                     OR has_any_column_privilege($1,protected.table_name,'UPDATE')
+                     OR has_any_column_privilege($1,protected.table_name,'REFERENCES')
+              )
             """, connection);
         inherited.Parameters.AddWithValue(runtimeRole);
         if (Equals(await inherited.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("Runtime role inherits unsafe module mutation authority; remove inherited grants before deployment.");
@@ -256,16 +289,43 @@ public static class LedgerDatabase
             """, connection);
         if (Equals(await command.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("API database role must not be superuser, schema/table owner or owner-role member. Configure separate migration and runtime credentials.");
         await using var required = new NpgsqlCommand("""
-            SELECT has_function_privilege(current_user,'ledger.register_pending_procurement(uuid,uuid)','EXECUTE')
-               AND has_function_privilege(current_user,'ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid)','EXECUTE')
+            SELECT has_function_privilege(current_user,'ledger.procurement_stock_bulk(uuid,uuid[])','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.procurement_source_lineage(uuid,uuid)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.register_pending_procurement(uuid,uuid)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.arrival_command(uuid,uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.receiving_threshold_read(uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.receiving_threshold_command(uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.lock_writes()','EXECUTE')
                AND has_function_privilege(current_user,'ledger.provision_catalog_commodities(uuid)','EXECUTE')
-               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_default','SELECT')
-               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_overrides','SELECT')
-               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_history','SELECT')
+               AND NOT has_function_privilege(current_user,'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
+               AND NOT has_function_privilege(current_user,'ledger.pool_withdraw(uuid,uuid,text,uuid,uuid,numeric,bigint)','EXECUTE')
+               AND NOT has_function_privilege(current_user,'ledger.command_pre_mixed(uuid,text,jsonb)','EXECUTE')
+               AND NOT has_function_privilege(current_user,'ledger.read_before_mixed_bulk(uuid,text,jsonb)','EXECUTE')
+               AND NOT EXISTS (
+                   SELECT 1 FROM (VALUES
+                       ('ledger.mixed_bulk_eligible(uuid,uuid,uuid,text,text,timestamptz)'),
+                       ('ledger.mixed_bulk_assert_location(uuid)'),('ledger.mixed_bulk_location_guard()'),
+                       ('ledger.mixed_bulk_pool_deferred_guard()'),('ledger.mixed_bulk_pool_row()'),
+                       ('ledger.custody_allocation_guard()'),('ledger.custody_processing_allocation_guard()'),
+                       ('ledger.reserve_lot_code_internal(uuid,uuid,text,uuid,text,text)'),
+                       ('ledger.mixed_bulk_custody_derived(uuid)'),('ledger.effective_hold_ids(uuid)'),
+                       ('ledger.mixed_bulk_independent_blocked(uuid,uuid)'),('ledger.blocked(uuid,uuid)'),
+                       ('ledger.require_mixed_correction_safe(text,jsonb)')
+                   ) private_function(signature)
+                   WHERE has_function_privilege(current_user,private_function.signature,'EXECUTE')
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM (VALUES
+                       ('ledger.mixed_bulk_policies'),('ledger.mixed_bulk_pools'),('ledger.custody_events'),
+                       ('ledger.custody_edges'),('ledger.custody_allocations'),('ledger.custody_processing_allocations'),
+                       ('ledger.mixed_bulk_command_results')
+                   ) protected(table_name)
+                   WHERE has_table_privilege(current_user,protected.table_name::regclass,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                      OR has_any_column_privilege(current_user,protected.table_name,'SELECT')
+                      OR has_any_column_privilege(current_user,protected.table_name,'INSERT')
+                      OR has_any_column_privilege(current_user,protected.table_name,'UPDATE')
+                      OR has_any_column_privilege(current_user,protected.table_name,'REFERENCES')
+               )
                AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','SELECT')
                AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','INSERT')
                AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','UPDATE')

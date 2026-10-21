@@ -250,6 +250,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         var draft = await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", body);
         var version = draft.GetProperty("version").GetString();
         await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/operations/{id}/confirm", new { version, evidenceId = s.EvidenceId });
+        body["outputs"] = JsonNode.Parse(draft.GetProperty("outputs").GetRawText());
         body["version"] = version;
         body["equipmentId"] = s.EquipmentId.ToString();
         body["outputs"]!.AsArray()[0]!.AsObject()["locationId"] = s.SecondLocationId.ToString();

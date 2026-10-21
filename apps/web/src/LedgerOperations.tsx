@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, errorMessage, type User } from './api';
-import { Choice, Enum, Evidence, Feedback, ListControls, Mass, Pagination, Panel, Table, emptyLookup, id, iso, kinds, localTime, mutate, name, now, positive, useAction, type Lookup, type Lot, type Operation, type Page, type Row } from './ledger-ui';
+import { Choice, Enum, Evidence, Feedback, isUnavailableHistoricalMixedLot, ListControls, Mass, Pagination, Panel, Table, emptyLookup, id, iso, kinds, localTime, mutate, name, now, positive, useAction, type Lookup, type Lot, type Operation, type Page, type Row } from './ledger-ui';
 import { LedgerLotPicker } from './LedgerLotPicker';
 import { TransferForm } from './LedgerStock';
 
@@ -119,7 +119,7 @@ export function LedgerOperations({ user, active = true }: { user: User; active?:
       </Panel>
       {write && <details ref={editorRef} className="ledger-disclosure" open={!!editing || replacement}><summary>{replacement ? 'Correction replacement draft' : editing ? 'Edit processing draft' : 'Create processing draft'}</summary><OperationEditor key={editorKey} look={look} lots={lots} operation={editing} replacement={replacement} command={command} onSaved={saved => { setSavedLotCodes((saved.outputs || []).map((row: Row) => row.code).filter(Boolean)); edit(null); }} onClose={() => edit(null)} /></details>}
     </section>
-    {write && <section hidden={task !== 'transfers'}><div className="ledger-task-intro"><h2>Transfers</h2><p>Move unchanged lot stock between eligible locations.</p></div><TransferForm look={look} onChanged={load} /></section>}
+    {write && <section hidden={task !== 'transfers'}><div className="ledger-task-intro"><h2>Transfers</h2><p>Move stock between eligible locations. Ordinary lots retain identity; mixed-bulk moves use current pool generations and observed revisions.</p></div><TransferForm look={look} onChanged={load} /></section>}
     <section hidden={task !== 'corrections'}>
       <div className="ledger-task-intro"><h2>Corrections</h2><p>Request blocks original outputs immediately. Compensation and replacement commit together. No automatic downstream reversal. Independent HOLD or receiving blocks remain effective.</p></div>
       {write && <CorrectionRequest look={look} command={command} active={active && task === 'corrections'} refresh={refresh} />}
@@ -211,7 +211,8 @@ function OperationEditor({ look, lots, operation, replacement, command, onSaved,
       const lot = selectedLots.find(lot => lot.id === input.lotId);
       return <fieldset key={index}>
         <legend>Input {index + 1}</legend>
-        <LedgerLotPicker label="Input lot" value={input.lotId} onChange={value => updateInput(index, { lotId: value, locationId: '' })} onSelected={lot => { selectedLot(lot); if (index === 0 && lot && lot.id !== firstLot?.id) setOutputs(rows => rows.map(row => updateDerivedOutput(row, lot))); }} look={look} ownerId={owner} facilityId={facility} disabled={!owner || !facility || !pinsReady} pinnedLots={selectedLots} />
+        <LedgerLotPicker label="Input lot" value={input.lotId} onChange={(value, selected) => updateInput(index, { lotId: value, locationId: '', poolRevision: selected?.isCurrentPool ? selected.poolRevision : undefined })} onSelected={lot => { selectedLot(lot); if (index === 0 && lot && lot.id !== firstLot?.id) setOutputs(rows => rows.map(row => updateDerivedOutput(row, lot))); }} look={look} ownerId={owner} facilityId={facility} disabled={!owner || !facility || !pinsReady} pinnedLots={selectedLots} />
+        {lot?.isCurrentPool && <p role="status">Draft revision: {input.poolRevision ?? 'not recorded'} · current revision: {lot.poolRevision}. If these differ, use “Reload stock options and reselect,” then save draft explicitly.</p>}
         <label>Input stock position<Choice rows={(lot?.positions || []).filter(position => position.facilityId === facility).map(position => ({ id: position.locationId, name: `${name(look.locations, position.locationId)} — physical ${position.quantityKg} kg; available ${position.availableKg} kg` }))} value={input.locationId} onChange={value => updateInput(index, { locationId: value })} /></label>
         <Mass label="Allocated input (kg)" value={input.quantityKg} onChange={value => updateInput(index, { quantityKg: value })} />
         <button type="button" disabled={inputs.length === 1} onClick={() => setInputs(rows => rows.filter((_, i) => i !== index))}>Remove input</button>
@@ -232,7 +233,7 @@ function OperationEditor({ look, lots, operation, replacement, command, onSaved,
     </fieldset>)}
     <button type="button" onClick={() => setOutputs(rows => [...rows, outputRules({ id: id(), code: '', commodityId: '', stage: kind === 'BLENDING' ? '' : outputs[0]?.stage || 'DRIED_PADDY', productIdentity: outputs[0]?.productIdentity || 'DRIED_PADDY', locationId: '', quantityKg: '' })])}>Add actual output</button>
     <Mass label="Declared loss (kg, nonnegative)" value={loss} onChange={setLoss} />
-    <div className="ledger-actions"><button disabled={action.busy || !pinsReady || inputs.some(input => !selectedLots.some(lot => lot.id === input.lotId))}>{operation && !replacement ? 'Save draft changes' : 'Save processing draft'}</button>{operation && <button type="button" onClick={onClose}>Close processing editor</button>}</div>
+    <div className="ledger-actions"><button disabled={action.busy || !pinsReady || inputs.some(input => { const selected = selectedLots.find(lot => lot.id === input.lotId); return !selected || isUnavailableHistoricalMixedLot(selected) || selected.isCurrentPool && (input.poolRevision == null || input.poolRevision !== selected.poolRevision); })}>{operation && !replacement ? 'Save draft changes' : 'Save processing draft'}</button>{operation && <button type="button" onClick={onClose}>Close processing editor</button>}</div>
   </form></Panel>;
 }
 function OperationDetail({ operation, lots, look, user, command, onEdit }: { operation: Operation; lots: Lot[]; look: Lookup; user: User; command: (path: string, body: Row, method?: string) => Promise<Row>; onEdit: () => void }) {
@@ -240,6 +241,7 @@ function OperationDetail({ operation, lots, look, user, command, onEdit }: { ope
   const inputSummary = operation.inputs.map(row => `${row.quantityKg} kg — ${lots.find(lot => lot.id === row.lotId)?.code || name(look.locations, row.locationId)}`).join('; ');
   const action = useAction(), [evidence, setEvidence] = useState(''), [reason, setReason] = useState('');
   const [visited, setVisited] = useState(false);
+  useEffect(() => { action.setError(''); action.setStatus(''); }, [operation.version]);
   return <details onToggle={event => { if (event.target === event.currentTarget && event.currentTarget.open) setVisited(true); }}>
     <summary onClick={() => setVisited(true)}>{operationLabel(operation, look)}</summary>
     {visited && <><Feedback {...action} />
