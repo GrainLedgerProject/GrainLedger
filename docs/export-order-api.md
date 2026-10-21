@@ -37,7 +37,7 @@ Example create body:
 }
 ```
 
-Mass inputs are decimal strings in configured KG/G/T. Normalized kg uses `numeric(20,6)` and rejects rounding. Quality bounds use `numeric(24,12)`. Shipping dates are calendar dates, not timestamps. Sum of targets may be less than or equal to required mass. `EXP-YYYYMMDD-NNNNNN` and `CTN-YYYYMMDD-NNNNNN` are issued on the backend in Asia/Ho_Chi_Minh, with separate per-company counters that never reset. UUIDs remain the API identifiers.
+Mass inputs are decimal strings in configured KG/G/T. Normalized kg uses `numeric(20,6)` and rejects rounding. Quality bounds use `numeric(24,12)`. Shipping dates are calendar dates, not timestamps. Sum of targets may be less than or equal to required mass. New order codes use `EXP-YYMMDD-NNNNNN` (for example, `EXP-261020-000001`); container codes use `CTN-YYYYMMDD-NNNNNN`. Both are issued on the backend using Asia/Ho_Chi_Minh time, with separate per-company counters that never reset. Existing order codes retain their original format. UUIDs remain the API identifiers.
 
 Validation returns field paths such as `specification.limits[0].maxValue` and `containers[1].targetMass`. A stale ETag returns 412; duplicate operation ID with changed payload returns 409. Read of another company's resource returns 404. The current schema has no downstream plan; when F14 is implemented, all writes that affect a referenced plan must gain an atomic dependency guard and amendment/review flow before planning is enabled.
 

@@ -243,12 +243,12 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", payload);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var order = (await created.Content.ReadFromJsonAsync<ExportOrderDto>())!;
-        Assert.StartsWith("EXP-", order.Code);
+        Assert.Matches(@"^EXP-\d{6}-\d{6,}$", order.Code);
         Assert.Equal("48000", order.RequiredMassKg);
         Assert.Equal("0", order.RemainingMassKg);
         var targets = await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>($"/api/export-orders/{order.Id}/containers");
         Assert.Equal(2, targets!.TotalCount);
-        Assert.All(targets.Items, x => Assert.StartsWith("CTN-", x.InternalCode));
+        Assert.All(targets.Items, x => Assert.Matches(@"^CTN-\d{8}-\d{6,}$", x.InternalCode));
         var replay = await writer.PostAsJsonAsync("/api/export-orders", payload);
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
         Assert.Equal(order.Id, (await replay.Content.ReadFromJsonAsync<ExportOrderDto>())!.Id);
