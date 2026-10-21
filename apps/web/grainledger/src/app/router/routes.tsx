@@ -7,6 +7,7 @@ import { PlaceholderPage } from "@/components/PlaceholderPage/PlaceholderPage";
 import { BalancePolicyPage } from "@/features/admin/pages/BalancePolicyPage";
 import { CustomerOrganizationsPage } from "@/features/admin/pages/CustomerOrganizationsPage";
 import { FacilityConfigPage } from "@/features/admin/pages/FacilityConfigPage";
+import { ReceivingThresholdsPage } from "@/features/admin/pages/ReceivingThresholdsPage";
 import { UserAccessManagementPage } from "@/features/admin/pages/UserAccessManagementPage";
 import { EventHistoryPage } from "@/features/audit/pages/EventHistoryPage";
 import { AcceptInvitationPage } from "@/features/auth/pages/AcceptInvitationPage";
@@ -21,6 +22,7 @@ import { MrlComplianceCheckPage } from "@/features/compliance/pages/MrlComplianc
 import { SafetyMarginPolicyPage } from "@/features/compliance/pages/SafetyMarginPolicyPage";
 import { RoleHomePage } from "@/features/dashboard/pages/RoleHomePage";
 import { FarmerRegistrationPage } from "@/features/field/pages/FarmerRegistrationPage";
+import { FieldSampleRegistrationPage } from "@/features/field/pages/FieldSampleRegistrationPage";
 import { OfflineSyncQueuePage } from "@/features/field/pages/OfflineSyncQueuePage";
 import { PesticideDeclarationPage } from "@/features/field/pages/PesticideDeclarationPage";
 import { PlotRegistrationPage } from "@/features/field/pages/PlotRegistrationPage";
@@ -121,6 +123,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "/admin/receiving-thresholds",
+        element: (
+          <ProtectedRoute allowedRoles={["MILL_ADMIN", "MILL_MANAGER"]}>
+            <ReceivingThresholdsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
         path: "/admin/master-data",
         element: (
           <ProtectedRoute allowedRoles={["MILL_ADMIN"]}>
@@ -190,13 +200,7 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlaceholderPage
-              titleVi="Lấy Mẫu Niêm Phong Thu Mua (Procurement Sample)"
-              titleEn="Procurement Sample"
-              roles={["CUSTOMER_PROCUREMENT_OFFICER"]}
-              descriptionVi="Ghi nhận mã niêm chì và mã barcode của mẫu thóc đại diện được lấy tại điểm thu mua trước khi đưa về nhà máy."
-              businessRuleCodes={["BR-05", "BR-19"]}
-            />
+            <FieldSampleRegistrationPage />
           </ProtectedRoute>
         ),
       },

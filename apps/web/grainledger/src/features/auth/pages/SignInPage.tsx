@@ -90,7 +90,19 @@ export const SignInPage: React.FC = () => {
         values.password,
       );
       loginSuccess(user, tokens, values.rememberMe);
-
+      if ("PasswordCredential" in window && navigator.credentials) {
+        try {
+          const cred = new (window as unknown as {
+            PasswordCredential: new (data: unknown) => unknown;
+          }).PasswordCredential({
+            id: values.email,
+            password: values.password,
+          });
+          await navigator.credentials.store(cred as Credential);
+        } catch {
+          // Fallback tự nhiên theo browser heuristics
+        }
+      }
       // Determine redirect destination
       const targetPath = returnUrl || getRedirectPathForRole(user.role);
       navigate(targetPath, { replace: true });
@@ -256,23 +268,23 @@ export const SignInPage: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             {/* Email Field */}
             <div>
-              <label className="block text-xs font-semibold text-ink-secondary mb-1">
+              <label htmlFor="email" className="block text-xs font-semibold text-ink-secondary mb-1">
                 {t("auth.emailLabel", "Địa chỉ email tài khoản")}
               </label>
               <div className="relative">
                 <input
+                  id="email"
                   type="email"
                   autoComplete="username"
                   {...register("email")}
                   placeholder={t("auth.emailPlaceholder", "ten.ban@congty.com")}
-                  className={`w-full pl-9 pr-3 py-2 text-sm rounded-md bg-surface-raised dark:bg-surface-overlay border ${
-                    errors.email
-                      ? "border-accent-danger"
-                      : "border-ink-tertiary/30"
-                  } focus:border-accent-primary focus:outline-none transition-colors font-body`}
+                  className={`w-full pl-9 pr-3 py-2 text-sm rounded-md bg-surface-raised dark:bg-surface-overlay border ${errors.email
+                    ? "border-accent-danger"
+                    : "border-ink-tertiary/30"
+                    } focus:border-accent-primary focus:outline-none transition-colors font-body`}
                 />
                 <User
                   size={16}
@@ -289,7 +301,7 @@ export const SignInPage: React.FC = () => {
             {/* Password Field */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-semibold text-ink-secondary">
+                <label htmlFor="password" className="block text-xs font-semibold text-ink-secondary">
                   {t("auth.passwordLabel", "Mật khẩu")}
                 </label>
                 <Link
@@ -302,15 +314,15 @@ export const SignInPage: React.FC = () => {
               </div>
               <div className="relative">
                 <input
+                  id="password"
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   {...register("password")}
                   placeholder="••••••••••••"
-                  className={`w-full pl-9 pr-10 py-2 text-sm rounded-md bg-surface-raised dark:bg-surface-overlay border ${
-                    errors.password
-                      ? "border-accent-danger"
-                      : "border-ink-tertiary/30"
-                  } focus:border-accent-primary focus:outline-none transition-colors font-mono`}
+                  className={`w-full pl-9 pr-10 py-2 text-sm rounded-md bg-surface-raised dark:bg-surface-overlay border ${errors.password
+                    ? "border-accent-danger"
+                    : "border-ink-tertiary/30"
+                    } focus:border-accent-primary focus:outline-none transition-colors font-mono`}
                 />
                 <LockSimple
                   size={16}

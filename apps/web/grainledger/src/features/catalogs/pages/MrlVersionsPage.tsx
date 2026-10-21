@@ -20,6 +20,7 @@ import {
   X,
   PencilSimple,
   Trash,
+  FileArrowUp,
 } from "@phosphor-icons/react";
 
 interface MrlTableItem {
@@ -61,6 +62,18 @@ export const MrlVersionsPage: React.FC = () => {
 
   // Create Version Modal
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importRawJson, setImportRawJson] = useState(`{
+  "marketId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "commodityId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "effectiveFrom": "2026-01-01",
+  "effectiveTo": "2026-12-31",
+  "sourceRef": "Regulation (EC) No 396/2005 Standard",
+  "limits": [
+    { "substanceCode": "TCZ001", "limitValue": "0.010", "unit": "mg/kg" },
+    { "substanceCode": "HEX002", "limitValue": "0.020", "unit": "mg/kg" }
+  ]
+}`);
   const [createForm, setCreateForm] = useState({
     marketId: "",
     commodityId: "",
@@ -221,6 +234,45 @@ export const MrlVersionsPage: React.FC = () => {
     }
   };
 
+  const handleImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const parsed = JSON.parse(importRawJson);
+      await catalogsEndpoints.importMrlVersion(parsed);
+      setSuccessMsg("Đã import thành công bảng MRL chuẩn quốc tế.");
+      setIsImportModalOpen(false);
+      await loadData();
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Không thể import dữ liệu MRL.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteLimit = async (substanceId: string, substanceName: string) => {
+    if (!selectedVersion) return;
+    if (!window.confirm(`Xóa giới hạn hoạt chất ${substanceName}?`)) return;
+    try {
+      await catalogsEndpoints.deleteMrlLimit(selectedVersion.id, substanceId);
+      setSuccessMsg(`Đã xóa thành công ngưỡng hoạt chất ${substanceName}`);
+      const limits = await catalogsEndpoints.getMrlLimits(selectedVersion.id);
+      setSelectedVersion({
+        ...selectedVersion,
+        limits: Array.isArray(limits)
+          ? limits
+          : selectedVersion.limits?.filter((l) => l.substanceId !== substanceId),
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error) setError(err.message);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -248,6 +300,14 @@ export const MrlVersionsPage: React.FC = () => {
             title={t("common.reload", "Tải lại danh sách")}
           >
             <ArrowsClockwise size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsImportModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-primary font-semibold text-xs transition-colors"
+          >
+            <FileArrowUp size={15} />
+            <span>Import MRL JSON</span>
           </button>
           <button
             type="button"
@@ -676,6 +736,62 @@ export const MrlVersionsPage: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import MRL Modal */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-lg bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl shadow-xl overflow-hidden animate-ledger-in">
+            <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between">
+              <h3 className="font-display font-bold text-base text-ink-primary flex items-center gap-2">
+                <FileArrowUp size={18} className="text-accent-primary" />
+                <span>Import Dữ liệu Phiên bản MRL</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(false)}
+                className="p-1 rounded-md text-ink-tertiary hover:text-ink-primary"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleImport} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-ink-secondary mb-1">
+                  JSON Cấu hình Bảng MRL & Giới hạn hoạt chất *
+                </label>
+                <textarea
+                  rows={9}
+                  required
+                  value={importRawJson}
+                  onChange={(e) => setImportRawJson(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/20 focus:border-accent-primary focus:outline-none font-mono text-[11px]"
+                />
+                <span className="text-[11px] text-ink-tertiary mt-1 block">
+                  Định dạng JSON chuẩn theo schema OpenAPI: marketId, commodityId, effectiveFrom, sourceRef, limits[].
+                </span>
+              </div>
+
+              <div className="pt-3 border-t border-ink-tertiary/15 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-ink-tertiary/20 hover:bg-surface-raised font-semibold text-ink-secondary"
+                >
+                  {t("common.cancel", "Huỷ")}
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-5 py-2 rounded-lg bg-accent-primary text-white font-semibold hover:bg-accent-primary-dim transition-colors disabled:opacity-60"
+                >
+                  {submitting ? "Đang import..." : "Bắt đầu Import"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -87,6 +87,60 @@ export interface RecordSprayDeclarationRequest {
   };
 }
 
+export interface FarmerDuplicateRequest {
+  name: string;
+  contact: string;
+  excludeId?: string | null;
+}
+
+export interface PlotDuplicateRequest {
+  geometry: unknown;
+  excludeId?: string | null;
+}
+
+export interface CreateCropSeasonRequest {
+  companyId: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+}
+
+export interface UpdateCropSeasonRequest {
+  companyId: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+  expectedVersion: number;
+}
+
+export interface DeleteCropSeasonRequest {
+  version: number;
+}
+
+export interface RegisterPlotSeasonRequest {
+  deviceId?: string | null;
+  clientOperationId: string;
+  capturedAt: string;
+  payloadSchemaVersion: number;
+  payload: {
+    entityId: string;
+    plotId: string;
+    seasonId: string;
+    riceVariety: string;
+  } | null;
+}
+
+export interface UpdatePlotSeasonRequest {
+  plotId: string;
+  seasonId: string;
+  riceVariety: string;
+  expectedVersion: number;
+}
+
+export interface DeletePlotSeasonRequest {
+  version: number;
+}
+
 export const procurementEndpoints = {
   getReferenceData: () => apiFetch<unknown>('/api/procurement-reference-data'),
   getProcurementReferenceData: () => apiFetch<unknown>('/api/procurement-reference-data'),
@@ -99,6 +153,11 @@ export const procurementEndpoints = {
   },
   createFarmer: (req: RegisterFarmerRequest) =>
     apiFetch<unknown>('/api/farmers', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  checkFarmerDuplicate: (req: FarmerDuplicateRequest) =>
+    apiFetch<unknown>('/api/farmers/duplicate-check', {
       method: 'POST',
       body: JSON.stringify(req),
     }),
@@ -124,6 +183,11 @@ export const procurementEndpoints = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+  checkPlotDuplicate: (req: PlotDuplicateRequest) =>
+    apiFetch<unknown>('/api/plots/duplicate-check', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
   updatePlot: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/plots/${id}`, {
       method: 'PUT',
@@ -141,10 +205,21 @@ export const procurementEndpoints = {
     const qs = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
     return apiFetch<unknown>(`/api/crop-seasons${qs}`);
   },
-  createCropSeason: (req: unknown) =>
+  getCropSeason: (id: string) => apiFetch<unknown>(`/api/crop-seasons/${id}`),
+  createCropSeason: (req: CreateCropSeasonRequest | unknown) =>
     apiFetch<unknown>('/api/crop-seasons', {
       method: 'POST',
       body: JSON.stringify(req),
+    }),
+  updateCropSeason: (id: string, req: UpdateCropSeasonRequest | unknown) =>
+    apiFetch<unknown>(`/api/crop-seasons/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    }),
+  deleteCropSeason: (id: string, req?: DeleteCropSeasonRequest | unknown) =>
+    apiFetch<unknown>(`/api/crop-seasons/${id}`, {
+      method: 'DELETE',
+      body: req ? JSON.stringify(req) : undefined,
     }),
 
   // Plot Seasons
@@ -152,14 +227,26 @@ export const procurementEndpoints = {
     const qs = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
     return apiFetch<unknown>(`/api/plot-seasons${qs}`);
   },
-  createPlotSeason: (req: unknown) =>
+  getPlotSeason: (id: string) => apiFetch<unknown>(`/api/plot-seasons/${id}`),
+  createPlotSeason: (req: RegisterPlotSeasonRequest | unknown) =>
     apiFetch<unknown>('/api/plot-seasons', {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+  updatePlotSeason: (id: string, req: UpdatePlotSeasonRequest | unknown) =>
+    apiFetch<unknown>(`/api/plot-seasons/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    }),
+  deletePlotSeason: (id: string, req?: DeletePlotSeasonRequest | unknown) =>
+    apiFetch<unknown>(`/api/plot-seasons/${id}`, {
+      method: 'DELETE',
+      body: req ? JSON.stringify(req) : undefined,
+    }),
 
   // Spray Declarations
   getSprayDeclarations: () => apiFetch<unknown>('/api/spray-declarations'),
+  getSprayDeclaration: (id: string) => apiFetch<unknown>(`/api/spray-declarations/${id}`),
   recordSprayDeclaration: (req: RecordSprayDeclarationRequest) =>
     apiFetch<unknown>('/api/spray-declarations', {
       method: 'POST',
@@ -175,3 +262,4 @@ export const procurementEndpoints = {
     }),
   getProcurement: (id: string) => apiFetch<unknown>(`/api/procurements/${id}`),
 };
+

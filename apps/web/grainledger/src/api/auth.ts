@@ -83,6 +83,12 @@ export const authEndpoints = {
       body: JSON.stringify(req),
     }),
 
+  webLogin: (req: LoginRequest) =>
+    apiFetch<SessionUserDto>('/api/auth/web-login', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
   refresh: (refreshToken: string) =>
     apiFetch<IssuedTokens>('/api/auth/refresh', {
       method: 'POST',
@@ -104,6 +110,21 @@ export const authEndpoints = {
   getSession: () => apiFetch<SessionUserDto>('/api/auth/session'),
 
   getCsrf: () => apiFetch<{ token: string }>('/api/auth/csrf'),
+
+  getGoogleAuthUrl: (returnUrl?: string) =>
+    returnUrl ? `/api/auth/google?returnUrl=${encodeURIComponent(returnUrl)}` : '/api/auth/google',
+
+  loginGoogle: (returnUrl?: string) => {
+    const qs = returnUrl ? `?returnUrl=${encodeURIComponent(returnUrl)}` : '';
+    return apiFetch<void>(`/api/auth/google${qs}`);
+  },
+
+  googleComplete: (returnUrl?: string) => {
+    const qs = returnUrl ? `?returnUrl=${encodeURIComponent(returnUrl)}` : '';
+    return apiFetch<void>(`/api/auth/google/complete${qs}`);
+  },
+
+  getHealth: () => apiFetch<void>('/health'),
 
   logout: () =>
     apiFetch<void>('/api/auth/logout', {

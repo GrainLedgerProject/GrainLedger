@@ -148,6 +148,7 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const isAuthEndpoint =
     endpoint.includes('/api/auth/login') ||
+    endpoint.includes('/api/auth/web-login') ||
     endpoint.includes('/api/auth/refresh') ||
     endpoint.includes('/api/auth/register') ||
     endpoint.includes('/api/auth/verify-email') ||

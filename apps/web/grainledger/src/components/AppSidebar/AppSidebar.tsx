@@ -80,6 +80,11 @@ export const AppSidebar: React.FC = () => {
             icon: Scales,
           },
           {
+            label: t("nav.admin.receivingThresholds", "Ngưỡng tiếp nhận"),
+            path: "/admin/receiving-thresholds",
+            icon: Scales,
+          },
+          {
             label: t("nav.admin.masterData", "Danh mục vận hành"),
             path: "/admin/master-data",
             icon: ListBullets,

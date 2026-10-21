@@ -1,25 +1,24 @@
 import { ledgerEndpoints } from "@/api/ledger";
 import { useAuthStore } from "@/app/store/authStore";
+import { GrainLoader } from "@/components/GrainLoader/GrainLoader";
+import { StatusBadge } from "@/components/StatusBadge/StatusBadge";
 import {
-  ArrowClockwise,
   ArrowRight,
+  ArrowsClockwise,
   Calculator,
   CaretRight,
   CheckCircle,
   ClockCounterClockwise,
   FileText,
   FolderOpen,
-  Info,
   Lock,
   MagnifyingGlass,
   Plus,
   Scales,
   ShieldCheck,
   ShieldWarning,
-  SlidersHorizontal,
   WarningCircle,
   X,
-  XCircle,
 } from "@phosphor-icons/react";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -155,7 +154,7 @@ export const PendingCorrectionsPage: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
-    fetchCorrections();
+    void fetchCorrections();
   }, []);
 
   // Handle route param if deep linked with /mill/reconciliations/:id
@@ -234,10 +233,10 @@ export const PendingCorrectionsPage: React.FC = () => {
         prev.map((c) =>
           c.id === selectedCorrection.id
             ? {
-                ...c,
-                status: "RECONCILED" as const,
-                reconciliationNotes: reviewNotes.trim(),
-              }
+              ...c,
+              status: "RECONCILED" as const,
+              reconciliationNotes: reviewNotes.trim(),
+            }
             : c,
         ),
       );
@@ -245,10 +244,10 @@ export const PendingCorrectionsPage: React.FC = () => {
       setSelectedCorrection((prev) =>
         prev
           ? {
-              ...prev,
-              status: "RECONCILED",
-              reconciliationNotes: reviewNotes.trim(),
-            }
+            ...prev,
+            status: "RECONCILED",
+            reconciliationNotes: reviewNotes.trim(),
+          }
           : null,
       );
 
@@ -365,109 +364,111 @@ export const PendingCorrectionsPage: React.FC = () => {
     switch (status) {
       case "PENDING_REVIEW":
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-functional-held-bg text-accent-warning border border-functional-held-border">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent-warning animate-pulse" />
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
             {t("mill.pendingCorrections.statusPendingReview", "Chờ Quản lý đối soát")}
           </span>
         );
       case "RECONCILED":
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent-info/10 text-accent-info border border-accent-info/20">
-            <CheckCircle size={12} weight="fill" />
-            {t("mill.pendingCorrections.statusReconciled", "Đã đối soát xong")}
-          </span>
+          <StatusBadge
+            status="BALANCED"
+            label={t("mill.pendingCorrections.statusReconciled", "Đã đối soát xong")}
+          />
         );
       case "COMMITTED":
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-functional-committed-bg text-accent-success border border-functional-committed-border">
-            <CheckCircle size={12} weight="fill" />
-            {t("mill.pendingCorrections.statusCommitted", "Đã chốt bút toán bù")}
-          </span>
+          <StatusBadge
+            status="BALANCED"
+            label={t("mill.pendingCorrections.statusCommitted", "Đã chốt bút toán bù")}
+          />
         );
       case "CANCELLED":
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-surface-raised text-ink-tertiary border border-ink-tertiary/20">
-            {t("mill.pendingCorrections.statusCancelled", "Đã hủy")}
-          </span>
+          <StatusBadge
+            status="REJECTED"
+            label={t("mill.pendingCorrections.statusCancelled", "Đã hủy")}
+          />
         );
     }
   };
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Top Breadcrumb & Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-ink-secondary">
-          <Link to="/home" className="hover:text-ink-primary transition">
-            {t("nav.manager.home", "Bàn điều hành Quản lý")}
-          </Link>
-          <span>/</span>
-          <span className="text-ink-primary font-semibold">
-            {t("nav.mill.commitCorrection", "Ghi bút toán bù")}
+      {/* Page Header - Synchronized with CustomerOrganizationsPage */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-ink-tertiary/15 pb-4">
+        <div>
+          <span className="text-xs font-mono font-bold text-accent-primary uppercase tracking-wider block">
+            {t("mill.pendingCorrections.tag", "HẠCH TOÁN ĐẢO NGƯỢC & BÚT TOÁN BÙ")}
           </span>
+          <h2 className="text-2xl font-display font-bold text-ink-primary">
+            {t("mill.pendingCorrections.pageTitle", "Ghi Bút Toán Bù Sổ Cái")}
+          </h2>
+          <p className="text-xs text-ink-secondary mt-0.5">
+            {t(
+              "mill.pendingCorrections.pageSubtitle",
+              "Thực hiện chốt phát hành các bút toán đảo ngược (Reversal Entry) theo chuẩn cân bằng khối lượng ISO 22095 và ghi nhận điều chỉnh vào Sổ cái bất biến cho các mẻ đã hoàn tất bước đối soát bằng chứng."
+            )}
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
           <Link
             to="/mill/reconciliations"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-amber-300 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 text-amber-900 dark:text-amber-200 transition shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-secondary hover:text-ink-primary text-xs font-semibold transition-colors shadow-xs"
             title={t("mill.pendingCorrections.goToReconcileTooltip", "Chuyển sang màn hình Đối soát & Xác nhận bằng chứng")}
           >
-            <ShieldCheck size={14} className="text-amber-600" />
+            <ShieldCheck size={16} className="text-accent-primary" />
             <span>{t("mill.pendingCorrections.goToReconcile", "Đi tới Đối soát & Xác nhận")}</span>
-            <ArrowRight size={13} />
+            <ArrowRight size={14} />
           </Link>
 
           <button
+            type="button"
             onClick={fetchCorrections}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-secondary hover:text-ink-primary transition"
+            className="p-2.5 rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-secondary hover:text-ink-primary transition-colors"
+            title={t("common.reload", "Tải lại danh sách")}
           >
-            <ArrowClockwise
-              size={14}
+            <ArrowsClockwise
+              size={16}
               className={loading ? "animate-spin" : ""}
             />
-            <span>{t("common.refresh", "Làm mới")}</span>
           </button>
 
           <Link
             to="/mill/corrections/new"
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-accent-primary hover:bg-accent-primary-dim text-white transition shadow-xs"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-primary text-white font-semibold text-xs hover:bg-accent-primary-dim transition-all shadow-xs"
           >
-            <Plus size={14} weight="bold" />
+            <Plus size={16} weight="bold" />
             <span>{t("mill.pendingCorrections.createNewRequest", "Tạo yêu cầu sửa mới")}</span>
           </Link>
         </div>
       </div>
 
-      {/* Main Header Banner */}
-      <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl p-5 sm:p-6 shadow-xs relative overflow-hidden">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl bg-accent-info/10 text-accent-info flex items-center justify-center shrink-0 border border-accent-info/20">
-            <ClockCounterClockwise size={26} weight="duotone" />
-          </div>
-          <div className="space-y-1">
-            <h1 className="text-xl sm:text-2xl font-bold font-serif text-ink-primary">
-              {t("mill.pendingCorrections.pageTitle", "Ghi Bút Toán Bù Sổ Cái (Compensating Ledger Postings)")}
-            </h1>
-            <p className="text-xs sm:text-sm text-ink-secondary leading-relaxed max-w-3xl">
-              {t(
-                "mill.pendingCorrections.pageSubtitle",
-                "Thực hiện chốt phát hành các bút toán đảo ngược (Reversal Entry) theo chuẩn cân bằng khối lượng ISO 22095 và ghi nhận điều chỉnh vào Sổ cái bất biến cho các mẻ đã hoàn tất bước đối soát bằng chứng. Tự động giải phóng trạng thái tạm khóa HOLD của các lô hàng thành phẩm."
-              )}
-            </p>
-          </div>
+      {/* Alerts */}
+      {error && (
+        <div className="p-3.5 rounded-lg bg-functional-rejected-bg border border-functional-rejected-border text-accent-danger text-xs flex items-center gap-2">
+          <WarningCircle size={18} weight="fill" className="shrink-0" />
+          <span>{error}</span>
         </div>
-      </div>
+      )}
+
+      {actionSuccess && (
+        <div className="p-3.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/30 text-[#2F6B3A] dark:text-emerald-300 text-xs flex items-center gap-2 font-medium">
+          <CheckCircle size={18} weight="fill" className="shrink-0" />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="p-4 rounded-xl bg-surface-base border border-ink-tertiary/20 shadow-xs">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="p-4 sm:p-5 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between text-xs text-ink-secondary mb-1">
             <span>{t("mill.pendingCorrections.kpiPending", "Chờ duyệt đối soát")}</span>
-            <span className="w-2 h-2 rounded-full bg-accent-warning" />
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
           </div>
-          <div className="text-2xl font-bold font-mono text-accent-warning">
+          <div className="text-2xl font-bold font-mono text-amber-600 dark:text-amber-400">
             {stats.pending}
           </div>
           <p className="text-[11px] text-ink-tertiary mt-1">
@@ -475,12 +476,12 @@ export const PendingCorrectionsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="p-4 rounded-xl bg-surface-base border border-ink-tertiary/20 shadow-xs">
+        <div className="p-4 sm:p-5 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between text-xs text-ink-secondary mb-1">
             <span>{t("mill.pendingCorrections.kpiReconciled", "Đã đối soát xong")}</span>
-            <span className="w-2 h-2 rounded-full bg-accent-info" />
+            <span className="w-2.5 h-2.5 rounded-full bg-accent-primary" />
           </div>
-          <div className="text-2xl font-bold font-mono text-accent-info">
+          <div className="text-2xl font-bold font-mono text-accent-primary">
             {stats.reconciled}
           </div>
           <p className="text-[11px] text-ink-tertiary mt-1">
@@ -488,12 +489,12 @@ export const PendingCorrectionsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="p-4 rounded-xl bg-surface-base border border-ink-tertiary/20 shadow-xs">
+        <div className="p-4 sm:p-5 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between text-xs text-ink-secondary mb-1">
             <span>{t("mill.pendingCorrections.kpiCommitted", "Đã chốt sổ cái")}</span>
-            <span className="w-2 h-2 rounded-full bg-accent-success" />
+            <CheckCircle size={16} className="text-emerald-600 dark:text-emerald-400" weight="fill" />
           </div>
-          <div className="text-2xl font-bold font-mono text-accent-success">
+          <div className="text-2xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
             {stats.committed}
           </div>
           <p className="text-[11px] text-ink-tertiary mt-1">
@@ -501,7 +502,7 @@ export const PendingCorrectionsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="p-4 rounded-xl bg-surface-base border border-ink-tertiary/20 shadow-xs">
+        <div className="p-4 sm:p-5 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between text-xs text-ink-secondary mb-1">
             <span>{t("mill.pendingCorrections.kpiTotal", "Tổng yêu cầu trong kỳ")}</span>
             <FolderOpen size={16} className="text-ink-tertiary" />
@@ -515,195 +516,203 @@ export const PendingCorrectionsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter Tabs & Search */}
-      <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+      {/* Filter Tabs & Search Card */}
+      <div className="p-4 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
         {/* Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
+        <div className="flex items-center gap-1 p-1 bg-surface-raised dark:bg-surface-overlay rounded-xl border border-ink-tertiary/15 text-xs overflow-x-auto">
           <button
+            type="button"
             onClick={() => setStatusFilter("ALL")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
-              statusFilter === "ALL"
-                ? "bg-accent-primary text-white shadow-xs"
-                : "text-ink-secondary hover:text-ink-primary hover:bg-surface-raised"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${statusFilter === "ALL"
+              ? "bg-surface-base dark:bg-surface-raised text-ink-primary font-bold shadow-xs"
+              : "text-ink-secondary hover:text-ink-primary"
+              }`}
           >
             {t("common.all", "Tất cả")} ({corrections.length})
           </button>
           <button
+            type="button"
             onClick={() => setStatusFilter("PENDING_REVIEW")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
-              statusFilter === "PENDING_REVIEW"
-                ? "bg-accent-warning text-white shadow-xs"
-                : "text-ink-secondary hover:text-ink-primary hover:bg-surface-raised"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${statusFilter === "PENDING_REVIEW"
+              ? "bg-surface-base dark:bg-surface-raised text-amber-600 dark:text-amber-400 font-bold shadow-xs"
+              : "text-ink-secondary hover:text-ink-primary"
+              }`}
           >
             {t("mill.pendingCorrections.tabPending", "Chờ duyệt")} ({stats.pending})
           </button>
           <button
+            type="button"
             onClick={() => setStatusFilter("RECONCILED")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
-              statusFilter === "RECONCILED"
-                ? "bg-accent-info text-white shadow-xs"
-                : "text-ink-secondary hover:text-ink-primary hover:bg-surface-raised"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${statusFilter === "RECONCILED"
+              ? "bg-surface-base dark:bg-surface-raised text-accent-primary font-bold shadow-xs"
+              : "text-ink-secondary hover:text-ink-primary"
+              }`}
           >
             {t("mill.pendingCorrections.tabReconciled", "Đã đối soát")} ({stats.reconciled})
           </button>
           <button
+            type="button"
             onClick={() => setStatusFilter("COMMITTED")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
-              statusFilter === "COMMITTED"
-                ? "bg-accent-success text-white shadow-xs"
-                : "text-ink-secondary hover:text-ink-primary hover:bg-surface-raised"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${statusFilter === "COMMITTED"
+              ? "bg-surface-base dark:bg-surface-raised text-emerald-600 dark:text-emerald-400 font-bold shadow-xs"
+              : "text-ink-secondary hover:text-ink-primary"
+              }`}
           >
             {t("mill.pendingCorrections.tabCommitted", "Đã chốt bù")} ({stats.committed})
           </button>
         </div>
 
         {/* Search Input */}
-        <div className="relative w-full md:w-72">
+        <div className="relative w-full md:w-80">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("mill.pendingCorrections.searchPlaceholder", "Tìm theo mã CORR-, OP-, lý do...")}
-            className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-ink-tertiary/30 focus:border-accent-primary focus:outline-none"
+            className="w-full pl-9 pr-8 py-2 text-xs rounded-lg border border-ink-tertiary/20 bg-surface-raised dark:bg-surface-overlay text-ink-primary placeholder:text-ink-tertiary focus:border-accent-primary focus:outline-none transition-colors"
           />
           <MagnifyingGlass
-            size={14}
-            className="absolute left-3 top-2 text-ink-tertiary"
+            size={16}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
           />
           {searchQuery && (
             <button
+              type="button"
               onClick={() => setSearchQuery("")}
-              className="absolute right-2.5 top-2 text-ink-tertiary hover:text-ink-primary"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary hover:text-ink-primary"
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           )}
         </div>
       </div>
 
       {/* Main Table */}
-      <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-surface-raised dark:bg-surface-overlay text-ink-secondary font-semibold border-b border-ink-tertiary/20 uppercase tracking-wider">
-              <tr>
-                <th className="py-3 px-4">{t("mill.pendingCorrections.colCorrId", "Mã yêu cầu")}</th>
-                <th className="py-3 px-4">{t("mill.pendingCorrections.colOpId", "Mã công đoạn")}</th>
-                <th className="py-3 px-4">{t("mill.pendingCorrections.colReason", "Phân loại & Lý do sai sót")}</th>
-                <th className="py-3 px-4">{t("mill.pendingCorrections.colProposedDelta", "Đề xuất bù khối lượng")}</th>
-                <th className="py-3 px-4">{t("mill.pendingCorrections.colAuthor", "Người lập")}</th>
-                <th className="py-3 px-4">{t("common.status", "Trạng thái")}</th>
-                <th className="py-3 px-4 text-right">{t("common.action", "Thao tác")}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-tertiary/15">
-              {filteredCorrections.length === 0 ? (
+      {loading ? (
+        <div className="py-16 flex justify-center">
+          <GrainLoader label="Đang tải danh sách bút toán bù..." />
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised shadow-xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-surface-raised dark:bg-surface-overlay text-ink-secondary font-semibold border-b border-ink-tertiary/15 uppercase tracking-wider text-[11px]">
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="py-12 text-center text-ink-tertiary"
-                  >
-                    {t("mill.pendingCorrections.noRecords", "Không tìm thấy yêu cầu sửa đổi nào phù hợp.")}
-                  </td>
+                  <th className="py-3.5 px-4">{t("mill.pendingCorrections.colCorrId", "Mã yêu cầu")}</th>
+                  <th className="py-3.5 px-4">{t("mill.pendingCorrections.colOpId", "Mã công đoạn")}</th>
+                  <th className="py-3.5 px-4">{t("mill.pendingCorrections.colReason", "Phân loại & Lý do sai sót")}</th>
+                  <th className="py-3.5 px-4">{t("mill.pendingCorrections.colProposedDelta", "Đề xuất bù khối lượng")}</th>
+                  <th className="py-3.5 px-4">{t("mill.pendingCorrections.colAuthor", "Người lập")}</th>
+                  <th className="py-3.5 px-4">{t("common.status", "Trạng thái")}</th>
+                  <th className="py-3.5 px-4 text-right">{t("common.action", "Thao tác")}</th>
                 </tr>
-              ) : (
-                filteredCorrections.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="hover:bg-surface-raised/60 transition group cursor-pointer"
-                    onClick={() => handleOpenWorkbench(item)}
-                  >
-                    <td className="py-3.5 px-4 font-mono font-bold text-ink-primary">
-                      {item.id}
+              </thead>
+              <tbody className="divide-y divide-ink-tertiary/10 font-sans">
+                {filteredCorrections.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="py-12 text-center text-ink-tertiary"
+                    >
+                      {t("mill.pendingCorrections.noRecords", "Không tìm thấy yêu cầu sửa đổi nào phù hợp.")}
                     </td>
-                    <td className="py-3.5 px-4 font-mono font-semibold text-accent-primary">
-                      {item.operationId}
-                    </td>
-                    <td className="py-3.5 px-4 max-w-xs">
-                      {item.category && (
-                        <span className="block text-[10px] font-semibold text-accent-info uppercase">
-                          {item.category}
+                  </tr>
+                ) : (
+                  filteredCorrections.map((item) => (
+                    <tr
+                      key={item.id}
+                      className="hover:bg-surface-raised/60 dark:hover:bg-surface-overlay/40 transition-colors cursor-pointer"
+                      onClick={() => handleOpenWorkbench(item)}
+                    >
+                      <td className="py-3.5 px-4">
+                        <span className="font-mono text-xs font-bold text-accent-primary bg-accent-primary/10 px-2 py-0.5 rounded-md inline-block">
+                          {item.id}
                         </span>
-                      )}
-                      <span className="text-ink-primary line-clamp-1">
-                        {item.reason}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 font-mono">
-                      {item.proposedReversals &&
-                      item.proposedReversals.length > 0 ? (
-                        <div className="space-y-0.5">
-                          {item.proposedReversals.map((r, idx) => (
-                            <div
-                              key={idx}
-                              className="text-[11px] text-ink-secondary"
-                            >
-                              <span className="text-ink-tertiary font-mono">
-                                {r.lotId}:
-                              </span>{" "}
-                              <span
-                                className={`font-semibold ${
-                                  r.deltaMassKg.startsWith("+")
-                                    ? "text-accent-success"
+                      </td>
+                      <td className="py-3.5 px-4 font-mono font-semibold text-ink-primary">
+                        {item.operationId}
+                      </td>
+                      <td className="py-3.5 px-4 max-w-xs">
+                        {item.category && (
+                          <span className="block text-[10px] font-mono font-bold text-accent-primary uppercase tracking-wider mb-0.5">
+                            {item.category}
+                          </span>
+                        )}
+                        <span className="text-ink-primary text-xs line-clamp-1">
+                          {item.reason}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 font-mono">
+                        {item.proposedReversals &&
+                          item.proposedReversals.length > 0 ? (
+                          <div className="space-y-0.5">
+                            {item.proposedReversals.map((r, idx) => (
+                              <div
+                                key={idx}
+                                className="text-[11px] text-ink-secondary"
+                              >
+                                <span className="text-ink-tertiary font-mono">
+                                  {r.lotId}:
+                                </span>{" "}
+                                <span
+                                  className={`font-bold ${r.deltaMassKg.startsWith("+")
+                                    ? "text-emerald-600 dark:text-emerald-400"
                                     : r.deltaMassKg.startsWith("-")
                                       ? "text-accent-danger"
                                       : "text-ink-tertiary"
-                                }`}
-                              >
-                                {r.deltaMassKg} kg
-                              </span>
-                            </div>
-                          ))}
+                                    }`}
+                                >
+                                  {r.deltaMassKg} kg
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-ink-tertiary">—</span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-ink-secondary whitespace-nowrap">
+                        <div className="text-xs text-ink-primary font-medium">
+                          {item.createdBy?.split("(")[0] || "Vận hành viên"}
                         </div>
-                      ) : (
-                        <span className="text-ink-tertiary">—</span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-ink-secondary whitespace-nowrap">
-                      <div>
-                        {item.createdBy?.split("(")[0] || "Vận hành viên"}
-                      </div>
-                      <div className="text-[10px] text-ink-tertiary">
-                        {new Date(item.createdAt).toLocaleDateString("vi-VN")}
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      {renderStatusBadge(item.status)}
-                    </td>
-                    <td
-                      className="py-3.5 px-4 text-right whitespace-nowrap"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleOpenWorkbench(item)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary transition"
+                        <div className="text-[10px] text-ink-tertiary font-mono">
+                          {new Date(item.createdAt).toLocaleDateString("vi-VN")}
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        {renderStatusBadge(item.status)}
+                      </td>
+                      <td
+                        className="py-3.5 px-4 text-right whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <span>{t("mill.pendingCorrections.actionReconcileAndCommit", "Đối soát & Ghi bù")}</span>
-                        <CaretRight size={14} weight="bold" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenWorkbench(item)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-raised dark:bg-surface-overlay hover:bg-accent-primary/10 hover:text-accent-primary border border-ink-tertiary/20 text-ink-primary transition-colors shadow-xs"
+                        >
+                          <span>{t("mill.pendingCorrections.actionReconcileAndCommit", "Đối soát & Ghi bù")}</span>
+                          <CaretRight size={14} weight="bold" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Reconciliation Workbench Modal (SC-17 & SC-18) */}
       {selectedCorrection && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 z-50 animate-in fade-in duration-150">
-          <div className="bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-3 sm:p-6">
+          <div className="bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl shadow-xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-ledger-in">
             {/* Modal Header */}
-            <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between bg-surface-raised dark:bg-surface-overlay">
+            <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-accent-primary/10 text-accent-primary flex items-center justify-center shrink-0">
-                  <Scales size={22} weight="duotone" />
+                  <Scales size={22} weight="bold" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -724,16 +733,16 @@ export const PendingCorrectionsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSelectedCorrection(null)}
-                className="p-1.5 rounded-lg text-ink-tertiary hover:text-ink-primary hover:bg-surface-base transition"
+                className="p-1.5 rounded-lg text-ink-tertiary hover:text-ink-primary hover:bg-surface-raised transition-colors"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-6 text-xs sm:text-sm">
               {actionSuccess && (
-                <div className="p-3.5 rounded-xl bg-functional-committed-bg border border-functional-committed-border text-accent-success text-xs flex items-center gap-2.5 font-medium animate-in fade-in">
+                <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/30 text-[#2F6B3A] dark:text-emerald-300 text-xs flex items-center gap-2.5 font-medium animate-ledger-in">
                   <CheckCircle size={18} weight="fill" className="shrink-0" />
                   <span>{actionSuccess}</span>
                 </div>
@@ -741,20 +750,20 @@ export const PendingCorrectionsPage: React.FC = () => {
 
               {/* Side-by-side: Mẻ gốc vs Bút toán bù */}
               <div>
-                <h3 className="font-bold text-sm text-ink-primary mb-3 flex items-center gap-2">
+                <h3 className="font-bold font-display text-sm text-ink-primary mb-3 flex items-center gap-2">
                   <Calculator size={18} className="text-accent-primary" />
                   <span>{t("mill.pendingCorrections.compareTitle", "Đối chiếu cân bằng khối lượng ISO 22095 (BR-03):")}</span>
                 </h3>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Left Column: Mẻ gốc bất biến */}
-                  <div className="p-4 rounded-xl border border-ink-tertiary/20 bg-surface-raised dark:bg-surface-overlay space-y-3">
+                  <div className="p-4 rounded-xl border border-ink-tertiary/15 bg-surface-raised dark:bg-surface-overlay space-y-3">
                     <div className="flex items-center justify-between border-b border-ink-tertiary/15 pb-2">
                       <span className="font-semibold text-xs text-ink-primary flex items-center gap-1.5">
                         <Lock size={14} className="text-ink-tertiary" />
                         {t("mill.pendingCorrections.immutableOriginal", "Bản ghi gốc đã Commit (Bất biến)")}
                       </span>
-                      <span className="text-[10px] font-mono text-ink-tertiary">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-base dark:bg-surface-raised border border-ink-tertiary/15 text-ink-secondary font-bold">
                         IMMUTABLE
                       </span>
                     </div>
@@ -776,7 +785,7 @@ export const PendingCorrectionsPage: React.FC = () => {
                         <span className="text-ink-tertiary">
                           {t("mill.pendingCorrections.committedTime", "Thời gian chốt:")}
                         </span>
-                        <span className="text-ink-secondary">
+                        <span className="text-ink-secondary font-mono text-[11px]">
                           {new Date(
                             selectedCorrection.createdAt,
                           ).toLocaleString("vi-VN")}
@@ -786,7 +795,7 @@ export const PendingCorrectionsPage: React.FC = () => {
                         <span className="text-ink-tertiary">
                           {t("mill.pendingCorrections.outputStatus", "Trạng thái lô đầu ra:")}
                         </span>
-                        <span className="font-semibold text-accent-warning">
+                        <span className="font-semibold text-amber-600 dark:text-amber-400">
                           {t("mill.pendingCorrections.holdPendingRecon", "Tạm khóa chờ đối soát (HOLD)")}
                         </span>
                       </div>
@@ -794,22 +803,22 @@ export const PendingCorrectionsPage: React.FC = () => {
                   </div>
 
                   {/* Right Column: Bút toán bù đề xuất */}
-                  <div className="p-4 rounded-xl border border-accent-primary/30 bg-accent-primary/5 space-y-3">
+                  <div className="p-4 rounded-xl border border-accent-primary/30 bg-accent-primary/5 dark:bg-accent-primary/10 space-y-3">
                     <div className="flex items-center justify-between border-b border-accent-primary/20 pb-2">
                       <span className="font-semibold text-xs text-accent-primary flex items-center gap-1.5">
                         <Scales size={14} />
                         {t("mill.pendingCorrections.compensatingEntryTitle", "Bút toán bù điều chỉnh (Compensating Entry)")}
                       </span>
-                      <span className="text-[10px] font-mono text-accent-primary font-bold">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent-primary text-white font-bold">
                         REVERSAL
                       </span>
                     </div>
 
-                    <div className="space-y-1.5 text-xs">
+                    <div className="space-y-2 text-xs">
                       {selectedCorrection.proposedReversals?.map((rev, idx) => (
                         <div
                           key={idx}
-                          className="flex items-center justify-between bg-surface-base p-2 rounded-lg border border-ink-tertiary/15 font-mono"
+                          className="flex items-center justify-between bg-surface-base dark:bg-surface-raised p-2.5 rounded-lg border border-ink-tertiary/15 font-mono"
                         >
                           <div>
                             <span className="font-semibold text-ink-primary block">
@@ -820,13 +829,12 @@ export const PendingCorrectionsPage: React.FC = () => {
                             </span>
                           </div>
                           <span
-                            className={`font-bold text-xs ${
-                              rev.deltaMassKg.startsWith("+")
-                                ? "text-accent-success"
-                                : rev.deltaMassKg.startsWith("-")
-                                  ? "text-accent-danger"
-                                  : "text-ink-primary"
-                            }`}
+                            className={`font-bold text-xs ${rev.deltaMassKg.startsWith("+")
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : rev.deltaMassKg.startsWith("-")
+                                ? "text-accent-danger"
+                                : "text-ink-primary"
+                              }`}
                           >
                             {rev.deltaMassKg} kg
                           </span>
@@ -840,20 +848,20 @@ export const PendingCorrectionsPage: React.FC = () => {
               {/* Nguyên nhân & Căn cứ kỹ thuật */}
               <div className="p-4 rounded-xl bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/15 space-y-2">
                 <div className="font-semibold text-xs text-ink-primary flex items-center gap-1.5">
-                  <FileText size={16} className="text-accent-info" />
+                  <FileText size={16} className="text-accent-primary" />
                   <span>{t("mill.pendingCorrections.reasonSectionTitle", "Lý do sai sót & Căn cứ hồ sơ:")}</span>
                 </div>
-                <p className="text-xs text-ink-secondary leading-relaxed bg-surface-base p-3 rounded-lg border border-ink-tertiary/10">
+                <p className="text-xs text-ink-secondary leading-relaxed bg-surface-base dark:bg-surface-raised p-3 rounded-lg border border-ink-tertiary/10">
                   {selectedCorrection.reason}
                 </p>
                 {selectedCorrection.evidenceReference && (
                   <div className="flex items-center gap-2 text-xs text-ink-tertiary pt-1">
                     <span>{t("mill.pendingCorrections.evidenceDocNumber", "Số hiệu văn bản minh chứng:")}</span>
-                    <span className="font-mono font-bold text-ink-primary">
+                    <span className="font-mono font-bold text-accent-primary">
                       {selectedCorrection.evidenceReference}
                     </span>
                     {selectedCorrection.evidenceFileName && (
-                      <span className="text-[11px] text-accent-info underline font-mono">
+                      <span className="text-[11px] text-accent-primary underline font-mono">
                         ({selectedCorrection.evidenceFileName})
                       </span>
                     )}
@@ -882,36 +890,18 @@ export const PendingCorrectionsPage: React.FC = () => {
                     "mill.pendingCorrections.managerNotesPlaceholder",
                     "Ghi rõ kết luận đối soát: Đã xác minh lại phiếu cân / mẫu KCS, chuẩn y số liệu bù đảo ngược..."
                   )}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-ink-tertiary/30 focus:border-accent-primary focus:outline-none disabled:bg-surface-raised disabled:text-ink-secondary"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised text-ink-primary placeholder:text-ink-tertiary focus:border-accent-primary focus:outline-none disabled:bg-surface-raised disabled:text-ink-secondary transition-colors"
                 />
               </div>
 
-              {/* Role Permission Check Warning */}
-              {!isManager && (
-                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-2.5">
-                  <ShieldWarning
-                    size={20}
-                    className="text-amber-600 shrink-0"
-                  />
-                  <div>
-                    <strong>{t("mill.pendingCorrections.rolePermissionTitle", "Phân quyền nghiệp vụ (BR-12):")}</strong>{" "}
-                    {t("mill.pendingCorrections.rolePermissionPrefix", "Tài khoản của bạn hiện là")}{" "}
-                    <span className="font-semibold">{user?.role}</span>.{" "}
-                    {t(
-                      "mill.pendingCorrections.rolePermissionDesc",
-                      "Chỉ có Quản lý nhà máy (MILL_MANAGER) hoặc Admin mới có quyền ký duyệt đối soát và chốt bút toán bù vào sổ cái."
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Modal Actions */}
-            <div className="p-4 border-t border-ink-tertiary/15 bg-surface-raised dark:bg-surface-overlay flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="p-4 border-t border-ink-tertiary/15 bg-surface-base dark:bg-surface-raised flex flex-col sm:flex-row items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setSelectedCorrection(null)}
-                className="w-full sm:w-auto px-4 py-2 rounded-lg border border-ink-tertiary/30 text-ink-secondary hover:text-ink-primary hover:bg-surface-base text-xs font-semibold transition"
+                className="w-full sm:w-auto px-4 py-2 rounded-lg border border-ink-tertiary/20 text-ink-secondary hover:text-ink-primary hover:bg-surface-raised text-xs font-semibold transition-colors"
               >
                 {t("common.close", "Đóng")}
               </button>
@@ -924,14 +914,14 @@ export const PendingCorrectionsPage: React.FC = () => {
                         type="button"
                         disabled={isProcessing}
                         onClick={handleCancel}
-                        className="px-3.5 py-2 rounded-lg border border-accent-danger/30 text-accent-danger hover:bg-functional-rejected-bg text-xs font-semibold transition"
+                        className="px-3.5 py-2 rounded-lg border border-accent-danger/30 text-accent-danger hover:bg-functional-rejected-bg text-xs font-semibold transition-colors"
                       >
                         {t("mill.pendingCorrections.btnRejectRequest", "Từ chối yêu cầu")}
                       </button>
 
                       <Link
                         to={`/mill/reconciliations/${selectedCorrection.id}`}
-                        className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition shadow-xs flex items-center gap-1.5"
+                        className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5"
                       >
                         <ShieldCheck size={15} weight="bold" />
                         <span>{t("mill.pendingCorrections.btnInspectEvidence", "Thẩm định đối soát bằng chứng")}</span>
@@ -942,7 +932,7 @@ export const PendingCorrectionsPage: React.FC = () => {
                         type="button"
                         disabled={isProcessing}
                         onClick={handleReconcile}
-                        className="px-3.5 py-2 rounded-lg bg-accent-info hover:bg-accent-info/90 text-white text-xs font-semibold transition shadow-xs flex items-center gap-1.5"
+                        className="px-3.5 py-2 rounded-lg bg-accent-primary hover:bg-accent-primary-dim text-white text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5"
                         title={t("mill.pendingCorrections.btnQuickReconcileTitle", "Duyệt nhanh đối soát")}
                       >
                         <CheckCircle size={15} weight="bold" />
@@ -956,7 +946,7 @@ export const PendingCorrectionsPage: React.FC = () => {
                       type="button"
                       disabled={isProcessing}
                       onClick={handleCommit}
-                      className="px-4 py-2 rounded-lg bg-accent-primary hover:bg-accent-primary-dim text-white text-xs font-semibold transition shadow-xs flex items-center gap-1.5"
+                      className="px-4 py-2 rounded-lg bg-accent-primary hover:bg-accent-primary-dim text-white text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5"
                     >
                       <Scales size={15} weight="bold" />
                       <span>{t("mill.pendingCorrections.btnCommitToLedger", "Chốt Bút toán Bù vào Sổ cái")}</span>

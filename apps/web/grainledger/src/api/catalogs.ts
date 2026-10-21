@@ -30,9 +30,38 @@ export interface MrlVersionDto {
   publishedAt?: string;
 }
 
+export interface ImportMrlLimitRequest {
+  substanceCode: string | null;
+  limitValue: string | null;
+  unit: string | null;
+}
+
+export interface ImportMrlVersionRequest {
+  marketId: string;
+  commodityId: string;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  sourceRef: string | null;
+  limits: ImportMrlLimitRequest[] | null;
+}
+
+export interface CreateMrlVersionRequest {
+  marketId: string;
+  commodityId: string;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  sourceRef: string | null;
+}
+
+export interface UpsertMrlLimitRequest {
+  limitValue: number | string | null;
+  unit: string | null;
+}
+
 export const catalogEndpoints = {
   // Active substances
   getActiveSubstances: (_params?: unknown) => apiFetch<unknown>('/api/active-substances'),
+  getActiveSubstance: (id: string) => apiFetch<unknown>(`/api/active-substances/${id}`),
   createActiveSubstance: (req: { code: string; name: string }) =>
     apiFetch<unknown>('/api/active-substances', {
       method: 'POST',
@@ -40,7 +69,12 @@ export const catalogEndpoints = {
     }),
   updateActiveSubstance: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/active-substances/${id}`, {
-      method: 'PUT',
+      method: 'PATCH',
+      body: JSON.stringify(req),
+    }),
+  patchActiveSubstance: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/active-substances/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(req),
     }),
   deleteActiveSubstance: (id: string) =>
@@ -50,6 +84,7 @@ export const catalogEndpoints = {
 
   // Markets
   getMarkets: (_params?: unknown) => apiFetch<unknown>('/api/markets'),
+  getMarket: (id: string) => apiFetch<unknown>(`/api/markets/${id}`),
   createMarket: (req: { code: string; name: string }) =>
     apiFetch<unknown>('/api/markets', {
       method: 'POST',
@@ -57,7 +92,12 @@ export const catalogEndpoints = {
     }),
   updateMarket: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/markets/${id}`, {
-      method: 'PUT',
+      method: 'PATCH',
+      body: JSON.stringify(req),
+    }),
+  patchMarket: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/markets/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(req),
     }),
   deleteMarket: (id: string) =>
@@ -67,6 +107,7 @@ export const catalogEndpoints = {
 
   // Commodities
   getCommodities: (_params?: unknown) => apiFetch<unknown>('/api/commodities'),
+  getCommodity: (id: string) => apiFetch<unknown>(`/api/commodities/${id}`),
   createCommodity: (req: { code: string; name: string }) =>
     apiFetch<unknown>('/api/commodities', {
       method: 'POST',
@@ -74,7 +115,12 @@ export const catalogEndpoints = {
     }),
   updateCommodity: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/commodities/${id}`, {
-      method: 'PUT',
+      method: 'PATCH',
+      body: JSON.stringify(req),
+    }),
+  patchCommodity: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/commodities/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(req),
     }),
   deleteCommodity: (id: string) =>
@@ -84,6 +130,7 @@ export const catalogEndpoints = {
 
   // Quality attributes
   getQualityAttributes: (_params?: unknown) => apiFetch<unknown>('/api/quality-attributes'),
+  getQualityAttribute: (id: string) => apiFetch<unknown>(`/api/quality-attributes/${id}`),
   createQualityAttribute: (req: { code: string; name: string; unit: string }) =>
     apiFetch<unknown>('/api/quality-attributes', {
       method: 'POST',
@@ -91,7 +138,12 @@ export const catalogEndpoints = {
     }),
   updateQualityAttribute: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/quality-attributes/${id}`, {
-      method: 'PUT',
+      method: 'PATCH',
+      body: JSON.stringify(req),
+    }),
+  patchQualityAttribute: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/quality-attributes/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(req),
     }),
   deleteQualityAttribute: (id: string) =>
@@ -101,6 +153,7 @@ export const catalogEndpoints = {
 
   // Rice varieties
   getRiceVarieties: (_params?: unknown) => apiFetch<unknown>('/api/rice-varieties'),
+  getRiceVariety: (id: string) => apiFetch<unknown>(`/api/rice-varieties/${id}`),
   createRiceVariety: (req: { code: string; name: string }) =>
     apiFetch<unknown>('/api/rice-varieties', {
       method: 'POST',
@@ -108,7 +161,12 @@ export const catalogEndpoints = {
     }),
   updateRiceVariety: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/rice-varieties/${id}`, {
-      method: 'PUT',
+      method: 'PATCH',
+      body: JSON.stringify(req),
+    }),
+  patchRiceVariety: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/rice-varieties/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(req),
     }),
   deleteRiceVariety: (id: string) =>
@@ -118,6 +176,7 @@ export const catalogEndpoints = {
 
   // Measurement units
   getMeasurementUnits: (_params?: unknown) => apiFetch<unknown>('/api/measurement-units'),
+  getMeasurementUnit: (id: string) => apiFetch<unknown>(`/api/measurement-units/${id}`),
   createMeasurementUnit: (req: { code: string; name: string; quantityKind: string }) =>
     apiFetch<unknown>('/api/measurement-units', {
       method: 'POST',
@@ -125,7 +184,12 @@ export const catalogEndpoints = {
     }),
   updateMeasurementUnit: (id: string, req: unknown) =>
     apiFetch<unknown>(`/api/measurement-units/${id}`, {
-      method: 'PUT',
+      method: 'PATCH',
+      body: JSON.stringify(req),
+    }),
+  patchMeasurementUnit: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/measurement-units/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(req),
     }),
   deleteMeasurementUnit: (id: string) =>
@@ -135,17 +199,32 @@ export const catalogEndpoints = {
 
   // MRL table versions
   getMrlVersions: () => apiFetch<unknown>('/api/mrl-versions'),
-  createMrlVersion: (req: unknown) =>
+  getMrlVersion: (id: string) => apiFetch<unknown>(`/api/mrl-versions/${id}`),
+  createMrlVersion: (req: CreateMrlVersionRequest | unknown) =>
     apiFetch<unknown>('/api/mrl-versions', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  updateMrlVersion: (id: string, req: unknown) =>
+    apiFetch<unknown>(`/api/mrl-versions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(req),
+    }),
+  importMrlVersion: (req: ImportMrlVersionRequest | unknown) =>
+    apiFetch<unknown>('/api/mrl-versions/import', {
       method: 'POST',
       body: JSON.stringify(req),
     }),
   getMrlLimits: (versionId: string) =>
     apiFetch<unknown>(`/api/mrl-versions/${versionId}/limits`),
-  upsertMrlLimit: (versionId: string, substanceId: string, req: { limitValue: number; unit: string }) =>
+  upsertMrlLimit: (versionId: string, substanceId: string, req: UpsertMrlLimitRequest | { limitValue: number; unit: string }) =>
     apiFetch<unknown>(`/api/mrl-versions/${versionId}/limits/${substanceId}`, {
       method: 'PUT',
       body: JSON.stringify(req),
+    }),
+  deleteMrlLimit: (versionId: string, substanceId: string) =>
+    apiFetch<unknown>(`/api/mrl-versions/${versionId}/limits/${substanceId}`, {
+      method: 'DELETE',
     }),
   publishMrlVersion: (versionId: string) =>
     apiFetch<unknown>(`/api/mrl-versions/${versionId}/publish`, {

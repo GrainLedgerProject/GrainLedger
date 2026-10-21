@@ -1,26 +1,19 @@
 import { ledgerEndpoints } from "@/api/ledger";
 import { useAuthStore } from "@/app/store/authStore";
+import { StatusBadge } from "@/components/StatusBadge/StatusBadge";
 import {
-  ArrowClockwise,
   ArrowRight,
-  ArrowsLeftRight,
-  CaretRight,
+  ArrowsClockwise,
   CheckCircle,
   ClipboardText,
   ClockCounterClockwise,
-  Eye,
   FilePdf,
   FileText,
-  Funnel,
-  Info,
-  LockSimple,
   MagnifyingGlass,
   Scales,
   ShieldCheck,
   ShieldWarning,
-  Warning,
   WarningCircle,
-  X,
   XCircle,
 } from "@phosphor-icons/react";
 import React, { useEffect, useMemo, useState } from "react";
@@ -215,9 +208,6 @@ export const ReconciliationReviewPage: React.FC = () => {
   const { id: routeId } = useParams<{ id?: string }>();
   const { user } = useAuthStore();
 
-  const isManager =
-    user?.role === "MILL_MANAGER" || user?.role === "MILL_ADMIN";
-
   const [items, setItems] = useState<ReconciliationItem[]>(
     SAMPLE_RECONCILIATIONS,
   );
@@ -236,9 +226,6 @@ export const ReconciliationReviewPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
 
   // Review Form state
-  const [reviewVerdict, setReviewVerdict] = useState<"APPROVE" | "REJECT">(
-    "APPROVE",
-  );
   const [reviewNotes, setReviewNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionMessage, setActionMessage] = useState<{
@@ -267,12 +254,10 @@ export const ReconciliationReviewPage: React.FC = () => {
         setSelectedItem(found);
         setReviewNotes(found.managerNotes || "");
       } else {
-        // Fallback: pick the first item if specific ID not matched
         setSelectedItem(items[0]);
         setReviewNotes(items[0].managerNotes || "");
       }
     } else if (!selectedItem && items.length > 0) {
-      // Select first item by default on desktop
       setSelectedItem(items[0]);
       setReviewNotes(items[0].managerNotes || "");
     }
@@ -318,12 +303,12 @@ export const ReconciliationReviewPage: React.FC = () => {
         prev.map((it) =>
           it.id === selectedItem.id
             ? {
-                ...it,
-                status: "RECONCILED",
-                managerNotes: updatedNotes,
-                reviewedAt: updatedTimestamp,
-                reviewedBy: reviewerName,
-              }
+              ...it,
+              status: "RECONCILED",
+              managerNotes: updatedNotes,
+              reviewedAt: updatedTimestamp,
+              reviewedBy: reviewerName,
+            }
             : it,
         ),
       );
@@ -331,12 +316,12 @@ export const ReconciliationReviewPage: React.FC = () => {
       setSelectedItem((prev) =>
         prev
           ? {
-              ...prev,
-              status: "RECONCILED",
-              managerNotes: updatedNotes,
-              reviewedAt: updatedTimestamp,
-              reviewedBy: reviewerName,
-            }
+            ...prev,
+            status: "RECONCILED",
+            managerNotes: updatedNotes,
+            reviewedAt: updatedTimestamp,
+            reviewedBy: reviewerName,
+          }
           : null,
       );
 
@@ -369,12 +354,12 @@ export const ReconciliationReviewPage: React.FC = () => {
         prev.map((it) =>
           it.id === selectedItem.id
             ? {
-                ...it,
-                status: "REJECTED",
-                managerNotes: updatedNotes,
-                reviewedAt: updatedTimestamp,
-                reviewedBy: reviewerName,
-              }
+              ...it,
+              status: "REJECTED",
+              managerNotes: updatedNotes,
+              reviewedAt: updatedTimestamp,
+              reviewedBy: reviewerName,
+            }
             : it,
         ),
       );
@@ -382,12 +367,12 @@ export const ReconciliationReviewPage: React.FC = () => {
       setSelectedItem((prev) =>
         prev
           ? {
-              ...prev,
-              status: "REJECTED",
-              managerNotes: updatedNotes,
-              reviewedAt: updatedTimestamp,
-              reviewedBy: reviewerName,
-            }
+            ...prev,
+            status: "REJECTED",
+            managerNotes: updatedNotes,
+            reviewedAt: updatedTimestamp,
+            reviewedBy: reviewerName,
+          }
           : null,
       );
 
@@ -436,136 +421,115 @@ export const ReconciliationReviewPage: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Top Breadcrumb & Workflow Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-ink-secondary">
-          <Link to="/home" className="hover:text-ink-primary transition">
-            {t("nav.manager.home", "Bàn điều hành Quản lý")}
-          </Link>
-          <span>/</span>
-          <span className="text-ink-primary font-semibold">
-            {t("mill.reconciliation.breadcrumb", "Đối soát & Xác nhận (SC-17)")}
+      {/* Page Header - Synchronized with CustomerOrganizationsPage */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-ink-tertiary/15 pb-4">
+        <div>
+          <span className="text-xs font-mono font-bold text-accent-primary uppercase tracking-wider block">
+            {t("mill.reconciliation.tag", "ĐỐI SOÁT & XÁC NHẬN BẰNG CHỨNG")}
           </span>
+          <h2 className="text-2xl font-display font-bold text-ink-primary">
+            {t(
+              "mill.reconciliation.pageTitle",
+              "Đối Soát & Xác Nhận Bằng Chứng"
+            )}
+          </h2>
+          <p className="text-xs text-ink-secondary mt-0.5">
+            {t(
+              "mill.reconciliation.pageSubtitle",
+              "Thẩm định bằng chứng đo lường thực tế (phiếu cân bàn, biên bản KCS kiểm tra độ ẩm/tạp chất), so sánh mức độ sai lệch với ngưỡng dung sai chính sách và ký biên bản đối soát trước khi chuyển giao sang quy trình ghi bút toán bù sổ cái."
+            )}
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              setTimeout(() => setLoading(false), 500);
+            }}
+            disabled={loading}
+            className="p-2.5 rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-secondary hover:text-ink-primary transition-colors"
+            title={t("common.reload", "Tải lại danh sách")}
+          >
+            <ArrowsClockwise
+              size={16}
+              className={loading ? "animate-spin" : ""}
+            />
+          </button>
+
           <Link
             to="/mill/corrections/pending"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-ink-tertiary/20 bg-surface-base hover:bg-surface-raised text-ink-primary transition shadow-xs"
-            title={t("mill.reconciliation.switchCommitLink", "Chuyển sang Ghi bút toán bù (SC-18)")}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-primary text-white font-semibold text-xs hover:bg-accent-primary-dim transition-all shadow-xs"
           >
-            <ClockCounterClockwise size={14} className="text-accent-info" />
+            <ClockCounterClockwise size={16} weight="bold" />
             <span>{t("mill.reconciliation.switchCommitLink", "Chuyển sang Ghi bút toán bù (SC-18)")}</span>
-            <ArrowRight size={13} />
+            <ArrowRight size={14} weight="bold" />
           </Link>
         </div>
       </div>
 
-      {/* Main Header Banner */}
-      <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl p-5 sm:p-6 shadow-xs relative overflow-hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
-              <ClipboardText size={28} weight="duotone" />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50">
-                  {t("mill.reconciliation.tagRule", "SC-17 • Feature F08 / Rule BR-01 & BR-12")}
-                </span>
-                <span className="text-xs text-ink-tertiary">
-                  {t("mill.reconciliation.roleTag", "Quyền: Quản lý nhà máy (Mill Manager)")}
-                </span>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-bold font-serif text-ink-primary">
-                {t(
-                  "mill.reconciliation.pageTitle",
-                  "Đối Soát & Xác Nhận Bằng Chứng (Reconciliation & Evidence Review)"
-                )}
-              </h1>
-              <p className="text-xs sm:text-sm text-ink-secondary leading-relaxed max-w-3xl">
-                {t(
-                  "mill.reconciliation.pageSubtitle",
-                  "Thẩm định bằng chứng đo lường thực tế (phiếu cân bàn, biên bản KCS kiểm tra độ ẩm/tạp chất), so sánh mức độ sai lệch với ngưỡng dung sai chính sách và ký biên bản đối soát trước khi chuyển giao sang quy trình ghi bút toán bù sổ cái."
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className="shrink-0 flex items-center gap-2">
-            <button
-              onClick={() => {
-                setLoading(true);
-                setTimeout(() => setLoading(false), 500);
-              }}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-ink-tertiary/20 bg-surface-raised hover:bg-surface-overlay text-ink-secondary hover:text-ink-primary transition"
-            >
-              <ArrowClockwise
-                size={14}
-                className={loading ? "animate-spin" : ""}
-              />
-              <span>{t("common.update", "Cập nhật")}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* KPI Stats Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl p-4 shadow-xs">
+      {/* KPI Stats Bar - Synchronized with Surface Card Design */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="p-4 sm:p-5 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between text-xs text-ink-secondary">
             <span>{t("mill.reconciliation.kpiPending", "Chờ thẩm định đối soát")}</span>
-            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-amber-700 dark:text-amber-400">
+            <span className="text-2xl font-bold font-mono text-amber-600 dark:text-amber-400">
               {stats.pending}
             </span>
-            <span className="text-xs text-ink-tertiary">{t("mill.reconciliation.dossiersUnit", "hồ sơ")}</span>
+            <span className="text-xs text-ink-tertiary font-mono">
+              {t("mill.reconciliation.dossiersUnit", "hồ sơ")}
+            </span>
           </div>
         </div>
 
-        <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl p-4 shadow-xs">
+        <div className="p-4 sm:p-5 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between text-xs text-ink-secondary">
             <span>{t("mill.reconciliation.kpiWithinTol", "Trong dung sai cho phép")}</span>
             <ShieldCheck
-              size={16}
-              className="text-accent-success"
+              size={18}
+              className="text-emerald-600 dark:text-emerald-400"
               weight="fill"
             />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-accent-success">
+            <span className="text-2xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
               {stats.withinToleranceCount} / {stats.total}
             </span>
-            <span className="text-xs text-ink-tertiary">(≤ 0.5%)</span>
+            <span className="text-xs text-ink-tertiary font-mono">(≤ 0.5%)</span>
           </div>
         </div>
 
-        <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl p-4 shadow-xs">
+        <div className="p-4 sm:p-5 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between text-xs text-ink-secondary">
             <span>{t("mill.reconciliation.kpiReconciled", "Đã đối soát & chuẩn y")}</span>
-            <CheckCircle size={16} className="text-accent-info" weight="fill" />
+            <CheckCircle size={18} className="text-accent-primary" weight="fill" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-accent-info">
+            <span className="text-2xl font-bold font-mono text-accent-primary">
               {stats.reconciled}
             </span>
-            <span className="text-xs text-ink-tertiary">{t("mill.reconciliation.dossiersUnit", "hồ sơ")}</span>
+            <span className="text-xs text-ink-tertiary font-mono">
+              {t("mill.reconciliation.dossiersUnit", "hồ sơ")}
+            </span>
           </div>
         </div>
 
-        <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl p-4 shadow-xs">
+        <div className="p-4 sm:p-5 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between text-xs text-ink-secondary">
             <span>{t("mill.reconciliation.kpiRejected", "Yêu cầu cân lại / Từ chối")}</span>
-            <XCircle size={16} className="text-accent-danger" weight="fill" />
+            <XCircle size={18} className="text-accent-danger" weight="fill" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono text-accent-danger">
               {stats.rejected}
             </span>
-            <span className="text-xs text-ink-tertiary">{t("mill.reconciliation.dossiersUnit", "hồ sơ")}</span>
+            <span className="text-xs text-ink-tertiary font-mono">
+              {t("mill.reconciliation.dossiersUnit", "hồ sơ")}
+            </span>
           </div>
         </div>
       </div>
@@ -574,43 +538,46 @@ export const ReconciliationReviewPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: List of Reconciliation Requests (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl p-4 shadow-xs space-y-3">
+          <div className="p-4 rounded-2xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-ink-primary font-serif flex items-center gap-1.5">
-                <FileText size={16} className="text-accent-primary" />
-                <span>{t("mill.reconciliation.listTitle", "Danh mục hồ sơ đối soát")} ({filteredItems.length})</span>
+              <h2 className="text-sm font-bold text-ink-primary font-display flex items-center gap-2">
+                <FileText size={18} className="text-accent-primary" />
+                <span>{t("mill.reconciliation.listTitle", "Danh mục hồ sơ đối soát")}</span>
+                <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-accent-primary/10 text-accent-primary font-bold">
+                  {filteredItems.length}
+                </span>
               </h2>
             </div>
 
             {/* Filter Tabs */}
-            <div className="flex items-center gap-1.5 p-1 bg-surface-raised rounded-lg border border-ink-tertiary/10 text-xs">
+            <div className="flex items-center gap-1 p-1 bg-surface-raised dark:bg-surface-overlay rounded-xl border border-ink-tertiary/15 text-xs">
               <button
+                type="button"
                 onClick={() => setStatusFilter("ALL")}
-                className={`flex-1 py-1 rounded font-semibold transition ${
-                  statusFilter === "ALL"
-                    ? "bg-surface-base text-ink-primary shadow-xs"
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${statusFilter === "ALL"
+                    ? "bg-surface-base dark:bg-surface-raised text-ink-primary shadow-xs font-bold"
                     : "text-ink-secondary hover:text-ink-primary"
-                }`}
+                  }`}
               >
                 {t("common.all", "Tất cả")} ({items.length})
               </button>
               <button
+                type="button"
                 onClick={() => setStatusFilter("PENDING_REVIEW")}
-                className={`flex-1 py-1 rounded font-semibold transition ${
-                  statusFilter === "PENDING_REVIEW"
-                    ? "bg-surface-base text-amber-700 dark:text-amber-400 shadow-xs"
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${statusFilter === "PENDING_REVIEW"
+                    ? "bg-surface-base dark:bg-surface-raised text-amber-600 dark:text-amber-400 shadow-xs font-bold"
                     : "text-ink-secondary hover:text-ink-primary"
-                }`}
+                  }`}
               >
                 {t("mill.reconciliation.tabPending", "Chờ duyệt")} ({stats.pending})
               </button>
               <button
+                type="button"
                 onClick={() => setStatusFilter("RECONCILED")}
-                className={`flex-1 py-1 rounded font-semibold transition ${
-                  statusFilter === "RECONCILED"
-                    ? "bg-surface-base text-accent-info shadow-xs"
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${statusFilter === "RECONCILED"
+                    ? "bg-surface-base dark:bg-surface-raised text-accent-primary shadow-xs font-bold"
                     : "text-ink-secondary hover:text-ink-primary"
-                }`}
+                  }`}
               >
                 {t("mill.reconciliation.tabReconciled", "Đã duyệt")} ({stats.reconciled})
               </button>
@@ -619,7 +586,7 @@ export const ReconciliationReviewPage: React.FC = () => {
             {/* Search Input */}
             <div className="relative">
               <MagnifyingGlass
-                size={14}
+                size={16}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
               />
               <input
@@ -630,56 +597,55 @@ export const ReconciliationReviewPage: React.FC = () => {
                   "mill.reconciliation.searchPlaceholder",
                   "Tìm mã hồ sơ, mẻ vận hành, người gửi..."
                 )}
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-ink-tertiary/20 bg-surface-raised dark:bg-surface-base text-ink-primary placeholder:text-ink-tertiary focus:outline-none focus:ring-1 focus:ring-accent-primary"
+                className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-ink-tertiary/20 bg-surface-raised dark:bg-surface-overlay text-ink-primary placeholder:text-ink-tertiary focus:border-accent-primary focus:outline-none transition-colors"
               />
             </div>
           </div>
 
           {/* List items */}
-          <div className="space-y-2.5 max-h-[640px] overflow-y-auto pr-1">
+          <div className="space-y-3 max-h-[640px] overflow-y-auto pr-1">
             {filteredItems.map((item) => {
               const isSelected = selectedItem?.id === item.id;
               return (
                 <div
                   key={item.id}
                   onClick={() => handleSelectItem(item)}
-                  className={`p-3.5 rounded-xl border cursor-pointer transition text-left space-y-2 relative ${
-                    isSelected
-                      ? "bg-accent-primary/5 border-accent-primary ring-1 ring-accent-primary shadow-xs"
-                      : "bg-surface-base border-ink-tertiary/20 hover:border-ink-tertiary/40 hover:bg-surface-raised/40"
-                  }`}
+                  className={`p-4 rounded-2xl border cursor-pointer transition-all text-left space-y-2.5 relative shadow-xs ${isSelected
+                      ? "bg-accent-primary/5 dark:bg-accent-primary/10 border-accent-primary ring-1 ring-accent-primary"
+                      : "bg-surface-base dark:bg-surface-raised border-ink-tertiary/20 hover:border-ink-tertiary/40 hover:bg-surface-raised/60"
+                    }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-xs font-bold text-ink-primary">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-accent-primary bg-accent-primary/10 px-2 py-0.5 rounded-md">
                         {item.id}
                       </span>
-                      <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-surface-raised text-ink-secondary border border-ink-tertiary/10">
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-surface-raised dark:bg-surface-overlay text-ink-secondary border border-ink-tertiary/15">
                         {item.operationId}
                       </span>
                     </div>
 
                     {item.status === "PENDING_REVIEW" && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/50">
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-500/30">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
                         {t("mill.reconciliation.statusPending", "Chờ đối soát")}
                       </span>
                     )}
                     {item.status === "RECONCILED" && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-accent-info/10 text-accent-info border border-accent-info/20">
-                        <CheckCircle size={12} weight="fill" />
-                        {t("mill.reconciliation.statusReconciled", "Đã đối soát")}
-                      </span>
+                      <StatusBadge
+                        status="BALANCED"
+                        label={t("mill.reconciliation.statusReconciled", "Đã đối soát")}
+                      />
                     )}
                     {item.status === "REJECTED" && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-accent-danger/10 text-accent-danger border border-accent-danger/20">
-                        <XCircle size={12} weight="fill" />
-                        {t("mill.reconciliation.statusRejected", "Cần cân lại")}
-                      </span>
+                      <StatusBadge
+                        status="REJECTED"
+                        label={t("mill.reconciliation.statusRejected", "Cần cân lại")}
+                      />
                     )}
                   </div>
 
-                  <p className="text-xs font-semibold text-ink-primary line-clamp-1">
+                  <p className="text-xs font-display font-bold text-ink-primary line-clamp-1">
                     {item.category}
                   </p>
 
@@ -687,32 +653,30 @@ export const ReconciliationReviewPage: React.FC = () => {
                     {item.description}
                   </p>
 
-                  <div className="pt-1.5 border-t border-ink-tertiary/10 flex items-center justify-between text-[11px]">
+                  <div className="pt-2 border-t border-ink-tertiary/15 flex items-center justify-between text-[11px]">
                     <div className="flex items-center gap-1 font-mono">
                       <span className="text-ink-tertiary">{t("mill.reconciliation.varianceLabel", "Lệch:")}</span>
                       <span
-                        className={`font-bold ${
-                          item.varianceKg > 0
-                            ? "text-accent-warning"
+                        className={`font-bold ${item.varianceKg > 0
+                            ? "text-amber-600 dark:text-amber-400"
                             : "text-accent-danger"
-                        }`}
+                          }`}
                       >
                         {item.varianceKg > 0
                           ? `+${item.varianceKg}`
                           : item.varianceKg}{" "}
                         kg
                       </span>
-                      <span className="text-ink-tertiary">
+                      <span className="text-ink-tertiary font-sans">
                         ({Math.abs(item.variancePercent)}%)
                       </span>
                     </div>
 
                     <span
-                      className={`font-semibold px-1.5 py-0.5 rounded text-[10px] ${
-                        item.withinTolerance
-                          ? "bg-accent-success/10 text-accent-success"
-                          : "bg-accent-danger/10 text-accent-danger"
-                      }`}
+                      className={`font-semibold px-2 py-0.5 rounded-md text-[10px] ${item.withinTolerance
+                          ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20"
+                          : "bg-functional-rejected-bg text-accent-danger border border-functional-rejected-border"
+                        }`}
                     >
                       {item.withinTolerance
                         ? t("mill.reconciliation.withinTolTag", "Trong dung sai")
@@ -724,7 +688,7 @@ export const ReconciliationReviewPage: React.FC = () => {
             })}
 
             {filteredItems.length === 0 && (
-              <div className="p-8 text-center bg-surface-base rounded-xl border border-ink-tertiary/20 text-xs text-ink-secondary">
+              <div className="p-8 text-center bg-surface-base dark:bg-surface-raised rounded-2xl border border-ink-tertiary/20 text-xs text-ink-secondary">
                 {t(
                   "mill.reconciliation.noItemsFound",
                   "Không tìm thấy hồ sơ đối soát nào phù hợp với bộ lọc."
@@ -737,18 +701,18 @@ export const ReconciliationReviewPage: React.FC = () => {
         {/* Right Column: Detailed Evidence Inspector & Manager Sign-off (7 cols) */}
         <div className="lg:col-span-7 space-y-4">
           {selectedItem ? (
-            <div className="bg-surface-base border border-ink-tertiary/20 rounded-xl shadow-xs overflow-hidden">
+            <div className="bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl shadow-xs overflow-hidden">
               {/* Header Panel */}
-              <div className="p-5 border-b border-ink-tertiary/20 bg-surface-raised/40 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="p-5 border-b border-ink-tertiary/15 bg-surface-raised/40 dark:bg-surface-overlay/30 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h2 className="text-lg font-bold font-serif text-ink-primary">
+                      <h2 className="text-lg font-bold font-display text-ink-primary">
                         {t("mill.reconciliation.dossierDetailTitle", "Hồ Sơ Đối Soát {{id}}", {
                           id: selectedItem.id,
                         })}
                       </h2>
-                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-base border border-ink-tertiary/20 text-ink-secondary">
+                      <span className="text-xs font-mono px-2 py-0.5 rounded-lg bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 text-ink-secondary font-bold">
                         {t("mill.reconciliation.batchPrefix", "Mẻ: {{id}}", {
                           id: selectedItem.operationId,
                         })}
@@ -764,10 +728,10 @@ export const ReconciliationReviewPage: React.FC = () => {
                     {selectedItem.status === "RECONCILED" && (
                       <Link
                         to="/mill/corrections/pending"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-accent-primary hover:bg-accent-primary-dim text-white transition shadow-xs"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg bg-accent-primary hover:bg-accent-primary-dim text-white transition-all shadow-xs"
                       >
                         <span>{t("mill.reconciliation.btnPostCompensation", "Ghi bút toán bù (SC-18)")}</span>
-                        <ArrowRight size={13} weight="bold" />
+                        <ArrowRight size={14} weight="bold" />
                       </Link>
                     )}
                   </div>
@@ -776,50 +740,53 @@ export const ReconciliationReviewPage: React.FC = () => {
                 {/* Status alert message */}
                 {actionMessage && (
                   <div
-                    className={`p-3 rounded-lg text-xs font-semibold flex items-center gap-2 ${
-                      actionMessage.type === "success"
-                        ? "bg-accent-success/10 text-accent-success border border-accent-success/20"
-                        : "bg-accent-danger/10 text-accent-danger border border-accent-danger/20"
-                    }`}
+                    className={`p-3.5 rounded-xl text-xs font-semibold flex items-center gap-2.5 ${actionMessage.type === "success"
+                        ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                        : "bg-functional-rejected-bg text-accent-danger border border-functional-rejected-border"
+                      }`}
                   >
-                    <CheckCircle size={16} weight="fill" />
+                    {actionMessage.type === "success" ? (
+                      <CheckCircle size={18} weight="fill" className="shrink-0" />
+                    ) : (
+                      <WarningCircle size={18} weight="fill" className="shrink-0" />
+                    )}
                     <span>{actionMessage.text}</span>
                   </div>
                 )}
 
                 {/* Inspector Tabs */}
-                <div className="flex items-center gap-2 border-b border-ink-tertiary/10 pt-2 text-xs">
+                <div className="flex items-center gap-3 border-b border-ink-tertiary/15 pt-2 text-xs">
                   <button
+                    type="button"
                     onClick={() => setActiveTab("EVIDENCE")}
-                    className={`pb-2 px-1 font-bold border-b-2 transition flex items-center gap-1.5 ${
-                      activeTab === "EVIDENCE"
-                        ? "border-accent-primary text-accent-primary"
+                    className={`pb-2.5 px-1 font-semibold border-b-2 transition-all flex items-center gap-1.5 ${activeTab === "EVIDENCE"
+                        ? "border-accent-primary text-accent-primary font-bold"
                         : "border-transparent text-ink-secondary hover:text-ink-primary"
-                    }`}
+                      }`}
                   >
-                    <Scales size={15} />
+                    <Scales size={16} />
                     <span>{t("mill.reconciliation.tabEvidence", "1. Bằng chứng phiếu cân & KCS")}</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setActiveTab("TOLERANCE")}
-                    className={`pb-2 px-1 font-bold border-b-2 transition flex items-center gap-1.5 ${
-                      activeTab === "TOLERANCE"
-                        ? "border-accent-primary text-accent-primary"
+                    className={`pb-2.5 px-1 font-semibold border-b-2 transition-all flex items-center gap-1.5 ${activeTab === "TOLERANCE"
+                        ? "border-accent-primary text-accent-primary font-bold"
                         : "border-transparent text-ink-secondary hover:text-ink-primary"
-                    }`}
+                      }`}
                   >
-                    <ShieldCheck size={15} />
+                    <ShieldCheck size={16} />
                     <span>{t("mill.reconciliation.tabTolerance", "2. Đánh giá dung sai & Cân bằng")}</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setActiveTab("SIGN_OFF")}
-                    className={`pb-2 px-1 font-bold border-b-2 transition flex items-center gap-1.5 ${
-                      activeTab === "SIGN_OFF"
-                        ? "border-accent-primary text-accent-primary"
+                    className={`pb-2.5 px-1 font-semibold border-b-2 transition-all flex items-center gap-1.5 ${activeTab === "SIGN_OFF"
+                        ? "border-accent-primary text-accent-primary font-bold"
                         : "border-transparent text-ink-secondary hover:text-ink-primary"
-                    }`}
+                      }`}
                   >
-                    <ClipboardText size={15} />
+                    <ClipboardText size={16} />
                     <span>{t("mill.reconciliation.tabSignOff", "3. Biên bản & Ký duyệt Quản lý")}</span>
                   </button>
                 </div>
@@ -827,13 +794,13 @@ export const ReconciliationReviewPage: React.FC = () => {
 
               {/* Tab 1: Physical Evidence Inspector */}
               {activeTab === "EVIDENCE" && (
-                <div className="p-5 space-y-5">
+                <div className="p-5 space-y-4">
                   {/* Category & Reason Description */}
-                  <div className="p-4 rounded-xl bg-surface-raised border border-ink-tertiary/10 space-y-1.5">
-                    <span className="text-[11px] font-bold text-accent-primary uppercase tracking-wider">
+                  <div className="p-4 rounded-2xl bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/15 space-y-1.5">
+                    <span className="text-[11px] font-mono font-bold text-accent-primary uppercase tracking-wider block">
                       {t("mill.reconciliation.reasonTitle", "Lý do & Nội dung khai báo sai lệch")}
                     </span>
-                    <p className="text-xs font-semibold text-ink-primary">
+                    <p className="text-xs font-display font-bold text-ink-primary">
                       {selectedItem.category}
                     </p>
                     <p className="text-xs text-ink-secondary leading-relaxed">
@@ -842,17 +809,17 @@ export const ReconciliationReviewPage: React.FC = () => {
                   </div>
 
                   {/* Weighbridge Evidence Slip */}
-                  <div className="p-4 rounded-xl border border-ink-tertiary/20 bg-surface-base space-y-3">
-                    <div className="flex items-center justify-between border-b border-ink-tertiary/10 pb-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-accent-info/10 text-accent-info flex items-center justify-center">
-                          <Scales size={16} weight="duotone" />
+                  <div className="p-4 sm:p-5 rounded-2xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised space-y-3 shadow-xs">
+                    <div className="flex items-center justify-between border-b border-ink-tertiary/15 pb-2.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-accent-primary/10 text-accent-primary flex items-center justify-center shrink-0">
+                          <Scales size={18} weight="bold" />
                         </div>
                         <div>
-                          <h3 className="text-xs font-bold text-ink-primary">
+                          <h3 className="text-xs font-display font-bold text-ink-primary">
                             {t("mill.reconciliation.weighSlipTitle", "Bằng chứng Phiếu Cân Điện Tử")}
                           </h3>
-                          <span className="text-[10px] text-ink-tertiary font-mono">
+                          <span className="text-[11px] text-ink-tertiary font-mono">
                             {t("mill.reconciliation.ticketNumber", "Số phiếu:")} {selectedItem.scaleTicketNumber}
                           </span>
                         </div>
@@ -862,17 +829,17 @@ export const ReconciliationReviewPage: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3 text-center py-2 bg-surface-raised rounded-lg">
-                      <div className="p-2 border-r border-ink-tertiary/10">
-                        <span className="text-[10px] text-ink-tertiary block">
+                    <div className="grid grid-cols-3 gap-3 text-center py-2.5 bg-surface-raised dark:bg-surface-overlay rounded-xl border border-ink-tertiary/15">
+                      <div className="p-2 border-r border-ink-tertiary/15">
+                        <span className="text-[10px] text-ink-tertiary block font-medium">
                           {t("mill.reconciliation.grossWeight", "Tổng bì (Gross)")}
                         </span>
                         <span className="text-xs font-bold font-mono text-ink-primary">
                           {selectedItem.grossWeightKg.toLocaleString()} kg
                         </span>
                       </div>
-                      <div className="p-2 border-r border-ink-tertiary/10">
-                        <span className="text-[10px] text-ink-tertiary block">
+                      <div className="p-2 border-r border-ink-tertiary/15">
+                        <span className="text-[10px] text-ink-tertiary block font-medium">
                           {t("mill.reconciliation.tareWeight", "Bì xe / vỏ (Tare)")}
                         </span>
                         <span className="text-xs font-bold font-mono text-ink-secondary">
@@ -880,7 +847,7 @@ export const ReconciliationReviewPage: React.FC = () => {
                         </span>
                       </div>
                       <div className="p-2">
-                        <span className="text-[10px] text-ink-tertiary block">
+                        <span className="text-[10px] text-ink-tertiary block font-medium">
                           {t("mill.reconciliation.netWeight", "Khối lượng tịnh (Net)")}
                         </span>
                         <span className="text-xs font-bold font-mono text-accent-primary">
@@ -889,7 +856,7 @@ export const ReconciliationReviewPage: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="text-[11px] text-ink-secondary flex items-center justify-between">
+                    <div className="text-[11px] text-ink-secondary flex items-center justify-between pt-1">
                       <span>{t("mill.reconciliation.scaleDevice", "Thiết bị cân:")}</span>
                       <span className="font-mono font-medium text-ink-primary">
                         {selectedItem.scaleDeviceName}
@@ -898,20 +865,20 @@ export const ReconciliationReviewPage: React.FC = () => {
                   </div>
 
                   {/* KCS Lab Evidence Slip */}
-                  <div className="p-4 rounded-xl border border-ink-tertiary/20 bg-surface-base space-y-3">
-                    <div className="flex items-center justify-between border-b border-ink-tertiary/10 pb-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                          <FilePdf size={16} weight="duotone" />
+                  <div className="p-4 sm:p-5 rounded-2xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised space-y-3 shadow-xs">
+                    <div className="flex items-center justify-between border-b border-ink-tertiary/15 pb-2.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                          <FilePdf size={18} weight="bold" />
                         </div>
                         <div>
-                          <h3 className="text-xs font-bold text-ink-primary">
+                          <h3 className="text-xs font-display font-bold text-ink-primary">
                             {t(
                               "mill.reconciliation.labSlipTitle",
                               "Phiếu Kiểm Tra Chất Lượng Phòng Lab (KCS)"
                             )}
                           </h3>
-                          <span className="text-[10px] text-ink-tertiary font-mono">
+                          <span className="text-[11px] text-ink-tertiary font-mono">
                             {t(
                               "mill.reconciliation.kcsReportInspector",
                               "Biên bản: {{slip}} • Giám định viên: {{inspector}}",
@@ -923,33 +890,33 @@ export const ReconciliationReviewPage: React.FC = () => {
                           </span>
                         </div>
                       </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-accent-success/10 text-accent-success">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
                         {t("mill.reconciliation.techStandardPassed", "Đạt chuẩn kỹ thuật")}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-3 gap-3 text-xs">
-                      <div className="p-2.5 rounded-lg bg-surface-raised border border-ink-tertiary/10">
-                        <span className="text-[10px] text-ink-tertiary block">
+                      <div className="p-3 rounded-xl bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/15">
+                        <span className="text-[10px] text-ink-tertiary block font-medium">
                           {t("mill.reconciliation.declaredMoisture", "Độ ẩm khai báo")}
                         </span>
-                        <span className="font-mono font-bold text-ink-primary">
+                        <span className="font-mono font-bold text-ink-primary text-xs mt-0.5 block">
                           {selectedItem.moistureDeclared}%
                         </span>
                       </div>
-                      <div className="p-2.5 rounded-lg bg-surface-raised border border-ink-tertiary/10">
-                        <span className="text-[10px] text-ink-tertiary block">
+                      <div className="p-3 rounded-xl bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/15">
+                        <span className="text-[10px] text-ink-tertiary block font-medium">
                           {t("mill.reconciliation.measuredMoisture", "Độ ẩm đo thực tế KCS")}
                         </span>
-                        <span className="font-mono font-bold text-accent-primary">
+                        <span className="font-mono font-bold text-accent-primary text-xs mt-0.5 block">
                           {selectedItem.moistureMeasured}%
                         </span>
                       </div>
-                      <div className="p-2.5 rounded-lg bg-surface-raised border border-ink-tertiary/10">
-                        <span className="text-[10px] text-ink-tertiary block">
+                      <div className="p-3 rounded-xl bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/15">
+                        <span className="text-[10px] text-ink-tertiary block font-medium">
                           {t("mill.reconciliation.foreignMatter", "Tạp chất đo được")}
                         </span>
-                        <span className="font-mono font-bold text-ink-primary">
+                        <span className="font-mono font-bold text-ink-primary text-xs mt-0.5 block">
                           {selectedItem.foreignMatterPercent}%
                         </span>
                       </div>
@@ -960,43 +927,38 @@ export const ReconciliationReviewPage: React.FC = () => {
 
               {/* Tab 2: Tolerance & Balance Check */}
               {activeTab === "TOLERANCE" && (
-                <div className="p-5 space-y-5">
+                <div className="p-5 space-y-4">
                   {/* Gauge Card */}
                   <div
-                    className={`p-5 rounded-xl border ${
-                      selectedItem.withinTolerance
-                        ? "bg-accent-success/5 border-accent-success/30"
-                        : "bg-accent-danger/5 border-accent-danger/30"
-                    } space-y-3`}
+                    className={`p-5 rounded-2xl border ${selectedItem.withinTolerance
+                        ? "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-500/30"
+                        : "bg-functional-rejected-bg border-functional-rejected-border"
+                      } space-y-3.5 shadow-xs`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3">
                         {selectedItem.withinTolerance ? (
-                          <ShieldCheck
-                            size={22}
-                            weight="fill"
-                            className="text-accent-success"
-                          />
+                          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                            <ShieldCheck size={22} weight="bold" />
+                          </div>
                         ) : (
-                          <ShieldWarning
-                            size={22}
-                            weight="fill"
-                            className="text-accent-danger"
-                          />
+                          <div className="w-10 h-10 rounded-xl bg-accent-danger/10 text-accent-danger flex items-center justify-center shrink-0">
+                            <ShieldWarning size={22} weight="bold" />
+                          </div>
                         )}
                         <div>
-                          <h3 className="text-sm font-bold text-ink-primary">
+                          <h3 className="text-sm font-display font-bold text-ink-primary">
                             {selectedItem.withinTolerance
                               ? t(
-                                  "mill.reconciliation.withinToleranceAlert",
-                                  "Sai lệch NẰM TRONG Dung sai quy định"
-                                )
+                                "mill.reconciliation.withinToleranceAlert",
+                                "Sai lệch NẰM TRONG Dung sai quy định"
+                              )
                               : t(
-                                  "mill.reconciliation.outOfToleranceAlert",
-                                  "CẢNH BÁO: Sai lệch VƯỢT QUÁ Dung sai tối đa"
-                                )}
+                                "mill.reconciliation.outOfToleranceAlert",
+                                "CẢNH BÁO: Sai lệch VƯỢT QUÁ Dung sai tối đa"
+                              )}
                           </h3>
-                          <p className="text-xs text-ink-secondary">
+                          <p className="text-xs text-ink-secondary mt-0.5">
                             {t(
                               "mill.reconciliation.tolerancePolicyDesc",
                               "Ngưỡng cho phép theo Chính sách cân bằng nhà máy: ±{{percent}}%",
@@ -1007,11 +969,10 @@ export const ReconciliationReviewPage: React.FC = () => {
                       </div>
 
                       <span
-                        className={`text-xs font-mono font-bold px-2.5 py-1 rounded-full ${
-                          selectedItem.withinTolerance
-                            ? "bg-accent-success text-white"
+                        className={`text-xs font-mono font-bold px-3 py-1 rounded-full ${selectedItem.withinTolerance
+                            ? "bg-emerald-600 text-white"
                             : "bg-accent-danger text-white"
-                        }`}
+                          }`}
                       >
                         {selectedItem.variancePercent > 0
                           ? `+${selectedItem.variancePercent}%`
@@ -1020,7 +981,7 @@ export const ReconciliationReviewPage: React.FC = () => {
                     </div>
 
                     {/* Visual Progress / Tolerance Range */}
-                    <div className="space-y-1.5 pt-2">
+                    <div className="space-y-1.5 pt-1">
                       <div className="flex justify-between text-[11px] text-ink-secondary font-mono">
                         <span>
                           {t(
@@ -1047,14 +1008,12 @@ export const ReconciliationReviewPage: React.FC = () => {
                           )}
                         </span>
                       </div>
-                      <div className="w-full h-3 rounded-full bg-surface-raised overflow-hidden flex relative">
-                        {/* 0.5% tolerance region marker */}
+                      <div className="w-full h-3 rounded-full bg-surface-raised dark:bg-surface-overlay overflow-hidden flex relative border border-ink-tertiary/15">
                         <div
-                          className={`h-full ${
-                            selectedItem.withinTolerance
-                              ? "bg-accent-success"
+                          className={`h-full ${selectedItem.withinTolerance
+                              ? "bg-emerald-600"
                               : "bg-accent-danger"
-                          }`}
+                            }`}
                           style={{
                             width: `${Math.min(100, (Math.abs(selectedItem.variancePercent) / selectedItem.tolerancePercent) * 70)}%`,
                           }}
@@ -1064,13 +1023,13 @@ export const ReconciliationReviewPage: React.FC = () => {
                   </div>
 
                   {/* Mass Balance Matrix */}
-                  <div className="p-4 rounded-xl border border-ink-tertiary/20 bg-surface-base space-y-3">
-                    <h4 className="text-xs font-bold text-ink-primary font-serif uppercase tracking-wider">
+                  <div className="p-4 sm:p-5 rounded-2xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised space-y-3 shadow-xs">
+                    <h4 className="text-xs font-display font-bold text-ink-primary uppercase tracking-wider">
                       {t("mill.reconciliation.massBalanceTitle", "Cân bằng khối lượng công đoạn")}
                     </h4>
 
                     <div className="space-y-2 text-xs">
-                      <div className="flex justify-between py-1.5 border-b border-ink-tertiary/10">
+                      <div className="flex justify-between py-2 border-b border-ink-tertiary/10">
                         <span className="text-ink-secondary">
                           {t("mill.reconciliation.declaredInputWeight", "Khối lượng đầu vào khai báo:")}
                         </span>
@@ -1078,7 +1037,7 @@ export const ReconciliationReviewPage: React.FC = () => {
                           {selectedItem.sourceQuantityKg.toLocaleString()} kg
                         </span>
                       </div>
-                      <div className="flex justify-between py-1.5 border-b border-ink-tertiary/10">
+                      <div className="flex justify-between py-2 border-b border-ink-tertiary/10">
                         <span className="text-ink-secondary">
                           {t(
                             "mill.reconciliation.actualMeasuredWeight",
@@ -1089,16 +1048,15 @@ export const ReconciliationReviewPage: React.FC = () => {
                           {selectedItem.actualQuantityKg.toLocaleString()} kg
                         </span>
                       </div>
-                      <div className="flex justify-between py-1.5 border-b border-ink-tertiary/10">
+                      <div className="flex justify-between py-2 border-b border-ink-tertiary/10">
                         <span className="text-ink-secondary">
                           {t("mill.reconciliation.deltaNetWeight", "Chênh lệch khối lượng ròng (Delta):")}
                         </span>
                         <span
-                          className={`font-mono font-bold ${
-                            selectedItem.varianceKg > 0
-                              ? "text-accent-warning"
+                          className={`font-mono font-bold ${selectedItem.varianceKg > 0
+                              ? "text-amber-600 dark:text-amber-400"
                               : "text-accent-danger"
-                          }`}
+                            }`}
                         >
                           {selectedItem.varianceKg > 0
                             ? `+${selectedItem.varianceKg}`
@@ -1113,11 +1071,11 @@ export const ReconciliationReviewPage: React.FC = () => {
 
               {/* Tab 3: Manager Sign-off & Verdict */}
               {activeTab === "SIGN_OFF" && (
-                <div className="p-5 space-y-5">
-                  <div className="p-4 rounded-xl bg-surface-raised border border-ink-tertiary/10 space-y-3">
+                <div className="p-5 space-y-4">
+                  <div className="p-4 sm:p-5 rounded-2xl bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/15 space-y-3">
                     <div className="flex items-center gap-2">
                       <ShieldCheck size={20} className="text-accent-primary" />
-                      <h3 className="text-xs font-bold text-ink-primary uppercase tracking-wider">
+                      <h3 className="text-xs font-display font-bold text-ink-primary uppercase tracking-wider">
                         {t(
                           "mill.reconciliation.signOffTitle",
                           "Biên Bản & Quyết Định Đối Soát Của Quản Lý Nhà Máy"
@@ -1125,7 +1083,7 @@ export const ReconciliationReviewPage: React.FC = () => {
                       </h3>
                     </div>
 
-                    <p className="text-xs text-ink-secondary">
+                    <p className="text-xs text-ink-secondary leading-relaxed">
                       {t(
                         "mill.reconciliation.signOffRuleDesc",
                         "Theo quy định Rule BR-01 và BR-12, Quản lý nhà máy có trách nhiệm xác minh toàn bộ chứng từ đo lường. Sau khi ký xác nhận đối soát, hồ sơ sẽ được chuyển sang trạng thái sẵn sàng để phát hành Bút Toán Bù (SC-18) vào Sổ cái bất biến."
@@ -1144,12 +1102,12 @@ export const ReconciliationReviewPage: React.FC = () => {
                           "mill.reconciliation.notesPlaceholder",
                           "Ghi rõ: Đã kiểm tra phiếu cân, mẫu lưu KCS số... Chuẩn y khối lượng điều chỉnh hoặc yêu cầu cân lại..."
                         )}
-                        className="w-full p-3 text-xs rounded-lg border border-ink-tertiary/30 bg-surface-base text-ink-primary placeholder:text-ink-tertiary focus:outline-none focus:ring-1 focus:ring-accent-primary leading-relaxed"
+                        className="w-full p-3 text-xs rounded-xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised text-ink-primary placeholder:text-ink-tertiary focus:border-accent-primary focus:outline-none leading-relaxed transition-colors"
                       />
                     </div>
 
                     {selectedItem.reviewedAt && (
-                      <div className="p-2.5 rounded-lg bg-surface-base border border-ink-tertiary/10 text-[11px] text-ink-secondary space-y-1">
+                      <div className="p-3 rounded-xl bg-surface-base dark:bg-surface-raised border border-ink-tertiary/15 text-[11px] text-ink-secondary space-y-1">
                         <div>
                           <strong className="text-ink-primary">
                             {t("mill.reconciliation.reviewedByLabel", "Ký duyệt bởi:")}
@@ -1168,20 +1126,22 @@ export const ReconciliationReviewPage: React.FC = () => {
                     )}
 
                     {/* Action buttons */}
-                    <div className="pt-3 border-t border-ink-tertiary/10 flex flex-col sm:flex-row items-center gap-3">
+                    <div className="pt-3 border-t border-ink-tertiary/15 flex flex-col sm:flex-row items-center gap-3">
                       <button
+                        type="button"
                         onClick={handleApproveReconciliation}
                         disabled={isSubmitting}
-                        className="w-full sm:w-auto flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-accent-success hover:bg-emerald-600 text-white text-xs font-bold transition shadow-xs disabled:opacity-60"
+                        className="w-full sm:w-auto flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-60"
                       >
                         <CheckCircle size={16} weight="bold" />
                         <span>{t("mill.reconciliation.btnApprove", "Xác nhận đối soát hợp lệ (SC-17)")}</span>
                       </button>
 
                       <button
+                        type="button"
                         onClick={handleRejectReconciliation}
                         disabled={isSubmitting}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-accent-danger/30 text-accent-danger hover:bg-accent-danger/10 text-xs font-bold transition disabled:opacity-60"
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg border border-accent-danger/30 text-accent-danger hover:bg-functional-rejected-bg text-xs font-bold transition-colors disabled:opacity-60"
                       >
                         <XCircle size={16} weight="bold" />
                         <span>{t("mill.reconciliation.btnReject", "Từ chối / Yêu cầu cân lại")}</span>
@@ -1190,9 +1150,9 @@ export const ReconciliationReviewPage: React.FC = () => {
 
                     {/* Next step prompt */}
                     {selectedItem.status === "RECONCILED" && (
-                      <div className="mt-4 p-3.5 rounded-xl bg-accent-info/10 border border-accent-info/20 flex items-center justify-between gap-3">
+                      <div className="mt-4 p-4 rounded-xl bg-accent-primary/10 border border-accent-primary/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="space-y-0.5">
-                          <span className="text-xs font-bold text-accent-info block">
+                          <span className="text-xs font-bold text-accent-primary block">
                             {t(
                               "mill.reconciliation.step1Completed",
                               "Hồ sơ đã hoàn tất bước 1: Đối soát bằng chứng"
@@ -1207,7 +1167,7 @@ export const ReconciliationReviewPage: React.FC = () => {
                         </div>
                         <Link
                           to="/mill/corrections/pending"
-                          className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-accent-info hover:bg-accent-info-dim text-white transition shadow-xs"
+                          className="shrink-0 inline-flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-accent-primary hover:bg-accent-primary-dim text-white transition-all shadow-xs"
                         >
                           <span>{t("mill.reconciliation.btnGoToCompensation", "Chuyển sang Ghi bút toán bù")}</span>
                           <ArrowRight size={14} weight="bold" />
@@ -1219,8 +1179,8 @@ export const ReconciliationReviewPage: React.FC = () => {
               )}
             </div>
           ) : (
-            <div className="p-12 text-center bg-surface-base border border-ink-tertiary/20 rounded-xl space-y-2">
-              <ClipboardText size={40} className="mx-auto text-ink-tertiary" />
+            <div className="p-12 text-center bg-surface-base dark:bg-surface-raised border border-ink-tertiary/20 rounded-2xl space-y-2">
+              <ClipboardText size={40} className="mx-auto text-ink-tertiary opacity-60" />
               <p className="text-sm font-semibold text-ink-primary">
                 {t(
                   "mill.reconciliation.selectDossierPrompt",
