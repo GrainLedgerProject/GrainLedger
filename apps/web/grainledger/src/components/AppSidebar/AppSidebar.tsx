@@ -13,7 +13,6 @@ import {
   CheckSquareIcon,
   ClockCounterClockwise,
   ClockCounterClockwiseIcon,
-  CoinVertical,
   Crosshair,
   Drop,
   Export,
@@ -33,7 +32,6 @@ import {
   TestTube,
   Truck,
   Users,
-  WarningCircle,
 } from "@phosphor-icons/react";
 import React from "react";
 import { useTranslation } from "react-i18next";
@@ -314,27 +312,27 @@ export const AppSidebar: React.FC = () => {
 
   return (
     <aside
-      className={`h-screen sticky top-0 bg-surface-raised dark:bg-surface-base border-r border-ink-tertiary/20 flex flex-col justify-between transition-all duration-300 z-40 ${
-        isSidebarCollapsed ? "w-[64px]" : "w-[248px]"
+      className={`h-screen sticky top-0 backdrop-blur-2xl bg-white/75 dark:bg-[#0E0E11]/85 border-r border-black/[0.06] dark:border-white/[0.08] flex flex-col justify-between transition-all duration-300 z-40 shadow-[1px_0_3px_0_rgba(0,0,0,0.02)] ${
+        isSidebarCollapsed ? "w-[68px]" : "w-[260px]"
       }`}
       aria-label="Sidebar Navigation"
     >
       {/* Top Branding Section */}
       <div>
-        <div className="h-14 px-3 flex items-center justify-between border-b border-ink-tertiary/15">
+        <div className="h-16 px-4 flex items-center justify-between border-b border-black/[0.06] dark:border-white/[0.08]">
           <Link
             to="/home"
-            className={`flex items-center gap-2.5 overflow-hidden transition-all ${
+            className={`flex items-center gap-3 overflow-hidden transition-all group ${
               isSidebarCollapsed ? "justify-center w-full" : ""
             }`}
             title="GrainLedger — Về trang chủ"
           >
-            <div className="w-8 h-8 rounded-md text-white flex items-center justify-center shrink-0 shadow-xs">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-xs transition-transform duration-200 group-hover:scale-105">
               <img src="/favicon.svg" alt="GrainLedger" className="w-8 h-8" />
             </div>
             {!isSidebarCollapsed && (
               <div className="flex flex-col min-w-0">
-                <span className="font-serif font-bold text-base text-ink-primary tracking-tight leading-tight">
+                <span className="font-sans font-extrabold text-base text-ink-primary dark:text-white tracking-tight leading-tight">
                   GrainLedger
                 </span>
                 <span className="text-[10px] text-ink-tertiary uppercase tracking-wider truncate font-mono">
@@ -346,7 +344,7 @@ export const AppSidebar: React.FC = () => {
         </div>
 
         {/* Navigation Links */}
-        <nav className="p-2 space-y-1 overflow-y-auto max-h-[calc(100vh-140px)]">
+        <nav className="p-3 space-y-1.5 overflow-y-auto max-h-[calc(100vh-140px)]">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive =
@@ -358,20 +356,20 @@ export const AppSidebar: React.FC = () => {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`group relative flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                className={`group relative flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-medium transition-all duration-200 ${
                   isActive
-                    ? "bg-surface-base dark:bg-surface-overlay text-accent-primary font-semibold shadow-xs border-l-4 border-accent-primary"
-                    : "text-ink-secondary hover:text-ink-primary hover:bg-surface-base/60 dark:hover:bg-surface-overlay/50"
+                    ? "bg-emerald-500/10 dark:bg-emerald-400/10 text-[#2F6B3A] dark:text-emerald-400 font-semibold shadow-xs border border-emerald-500/20 dark:border-emerald-400/20"
+                    : "text-ink-secondary dark:text-ink-tertiary hover:text-ink-primary dark:hover:text-white hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
                 } ${isSidebarCollapsed ? "justify-center px-0" : ""}`}
                 title={isSidebarCollapsed ? item.label : undefined}
               >
                 <Icon
-                  size={18}
+                  size={19}
                   weight={isActive ? "fill" : "regular"}
-                  className={`shrink-0 ${
+                  className={`shrink-0 transition-transform duration-200 group-hover:scale-105 ${
                     isActive
-                      ? "text-accent-primary"
-                      : "text-ink-tertiary group-hover:text-ink-primary"
+                      ? "text-[#2F6B3A] dark:text-emerald-400"
+                      : "text-ink-tertiary group-hover:text-ink-primary dark:group-hover:text-white"
                   }`}
                 />
 
@@ -384,12 +382,12 @@ export const AppSidebar: React.FC = () => {
                 {/* Badge indicator */}
                 {!isSidebarCollapsed && item.badge !== undefined && (
                   <span
-                    className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full font-mono shrink-0 ${
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full font-mono shrink-0 shadow-2xs ${
                       item.badgeTone === "danger"
                         ? "bg-accent-danger text-white"
                         : item.badgeTone === "warning"
                           ? "bg-accent-warning text-ink-primary"
-                          : "bg-accent-primary text-white"
+                          : "bg-[#2F6B3A] text-white"
                     }`}
                   >
                     {item.badge}
@@ -399,12 +397,12 @@ export const AppSidebar: React.FC = () => {
                 {/* Tooltip on collapsed state */}
                 {isSidebarCollapsed && item.badge !== undefined && (
                   <span
-                    className={`absolute top-1 right-1 w-2 h-2 rounded-full ${
+                    className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-black ${
                       item.badgeTone === "danger"
                         ? "bg-accent-danger"
                         : item.badgeTone === "warning"
                           ? "bg-accent-warning"
-                          : "bg-accent-primary"
+                          : "bg-[#2F6B3A]"
                     }`}
                   />
                 )}
@@ -415,9 +413,9 @@ export const AppSidebar: React.FC = () => {
       </div>
 
       {/* Bottom Section: Role Chip & Collapse Toggle */}
-      <div className="p-2 border-t border-ink-tertiary/15 space-y-2">
+      <div className="p-3 border-t border-black/[0.06] dark:border-white/[0.08] space-y-2">
         {!isSidebarCollapsed && (
-          <div className="px-2 py-1">
+          <div className="px-1 py-1">
             <RoleChip
               role={role}
               size="sm"
@@ -430,7 +428,7 @@ export const AppSidebar: React.FC = () => {
         <button
           type="button"
           onClick={toggleSidebar}
-          className="w-full flex items-center justify-center p-2 rounded-md text-ink-tertiary hover:text-ink-primary hover:bg-surface-base transition-colors text-xs"
+          className="w-full flex items-center justify-center p-2.5 rounded-2xl text-ink-tertiary hover:text-ink-primary dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.08] active:scale-95 transition-all text-xs focus:outline-none"
           aria-label={
             isSidebarCollapsed
               ? t("common.expand", "Mở rộng thanh điều hướng")
@@ -443,12 +441,12 @@ export const AppSidebar: React.FC = () => {
           }
         >
           {isSidebarCollapsed ? (
-            <CaretDoubleRight size={16} />
+            <CaretDoubleRight size={16} weight="bold" />
           ) : (
-            <CaretDoubleLeft size={16} />
+            <CaretDoubleLeft size={16} weight="bold" />
           )}
           {!isSidebarCollapsed && (
-            <span className="ml-2 text-xs">{t("common.collapse", "Thu gọn")}</span>
+            <span className="ml-2 text-xs font-semibold">{t("common.collapse", "Thu gọn")}</span>
           )}
         </button>
       </div>

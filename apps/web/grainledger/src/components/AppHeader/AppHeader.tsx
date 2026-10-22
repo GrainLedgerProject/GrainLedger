@@ -20,7 +20,7 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 export interface AppHeaderProps {
   pageTitle?: string;
@@ -43,7 +43,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const location = useLocation();
   const navigate = useNavigate();
 
   // Determine Initials for Avatar
@@ -62,55 +61,55 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
 
   return (
     <>
-      <header className="h-14 bg-surface-base dark:bg-surface-raised border-b border-ink-tertiary/20 px-4 flex items-center justify-between sticky top-0 z-30 transition-colors">
+      <header className="h-16 backdrop-blur-xl bg-white/70 dark:bg-black/70 border-b border-black/[0.06] dark:border-white/[0.08] px-5 flex items-center justify-between sticky top-0 z-30 transition-all duration-300 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
         {/* Left: Dynamic Title & Breadcrumbs */}
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex flex-col justify-center">
             {breadcrumbs && breadcrumbs.length > 0 ? (
               <nav className="flex items-center gap-1.5 text-xs text-ink-tertiary">
-                <Link to="/home" className="hover:text-ink-primary">
+                <Link to="/home" className="hover:text-ink-primary dark:hover:text-white transition-colors">
                   Home
                 </Link>
                 {breadcrumbs.map((bc, idx) => (
                   <React.Fragment key={idx}>
-                    <span>/</span>
+                    <span className="opacity-40">/</span>
                     {bc.path ? (
-                      <Link to={bc.path} className="hover:text-ink-primary">
+                      <Link to={bc.path} className="hover:text-ink-primary dark:hover:text-white transition-colors">
                         {bc.label}
                       </Link>
                     ) : (
-                      <span className="text-ink-primary font-medium">{bc.label}</span>
+                      <span className="text-ink-primary dark:text-white font-medium">{bc.label}</span>
                     )}
                   </React.Fragment>
                 ))}
               </nav>
             ) : null}
-            <h1 className="text-base font-semibold text-ink-primary truncate font-body">
+            <h1 className="text-base font-semibold text-ink-primary dark:text-white truncate font-sans tracking-tight">
               {pageTitle || t('header.defaultTitle', 'Bàn làm việc vận hành')}
             </h1>
           </div>
         </div>
 
-        {/* Center: Global Search Trigger Button */}
+        {/* Center: Global Search Trigger Button (Apple Pill style) */}
         <div className="hidden md:flex items-center justify-center max-w-sm w-full mx-4">
           <button
             type="button"
             onClick={() => setSearchOpen(true)}
-            className="w-full flex items-center justify-between px-3 py-1.5 rounded-md bg-surface-raised dark:bg-surface-overlay border border-ink-tertiary/25 text-xs text-ink-tertiary hover:text-ink-primary hover:border-ink-tertiary/40 transition-colors shadow-xs"
+            className="w-full flex items-center justify-between px-4 py-2 rounded-full bg-black/[0.03] dark:bg-white/[0.05] border border-black/[0.06] dark:border-white/[0.08] text-xs text-ink-tertiary hover:text-ink-primary dark:hover:text-white hover:bg-black/[0.05] dark:hover:bg-white/[0.08] transition-all duration-200 shadow-xs focus:outline-none"
             aria-label={t('header.searchTitle', 'Tìm kiếm trong hệ thống (Cmd/Ctrl+K)')}
           >
-            <div className="flex items-center gap-2">
-              <MagnifyingGlass size={15} />
+            <div className="flex items-center gap-2.5">
+              <MagnifyingGlass size={15} weight="bold" />
               <span>{t('common.searchPlaceholder', 'Tìm kiếm lô, container, nông hộ...')}</span>
             </div>
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface-base border border-ink-tertiary/30">
+            <kbd className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-white dark:bg-white/10 border border-black/[0.08] dark:border-white/[0.12] text-ink-secondary dark:text-ink-tertiary shadow-2xs">
               ⌘K
             </kbd>
           </button>
         </div>
 
-        {/* Right side controls */}
-        <div className="flex items-center gap-2">
+        {/* Right side controls (Ergonomic Circular Buttons) */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Network Indicator (for field users or test) */}
           <div className="hidden lg:block">
             <NetworkStatusIndicator />
@@ -120,10 +119,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
           <button
             type="button"
             onClick={() => setSearchOpen(true)}
-            className="md:hidden p-2 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-surface-raised transition-colors"
+            className="md:hidden w-10 h-10 rounded-full flex items-center justify-center text-ink-secondary hover:text-ink-primary dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.08] active:scale-95 transition-all"
             aria-label="Tìm kiếm"
           >
-            <MagnifyingGlass size={18} />
+            <MagnifyingGlass size={18} weight="bold" />
           </button>
 
           {/* Notification Bell with Badge */}
@@ -131,26 +130,27 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
             <button
               type="button"
               onClick={() => setNotificationsOpen(!isNotificationsOpen)}
-              className="relative p-2 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-surface-raised transition-colors"
+              className="w-10 h-10 rounded-full flex items-center justify-center relative text-ink-secondary hover:text-ink-primary dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.08] active:scale-95 transition-all"
               aria-label="Thông báo và cảnh báo HOLD"
             >
-              <Bell size={18} />
+              <Bell size={18} weight="bold" />
               {/* Badge: 2 notifications */}
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-danger ring-2 ring-surface-base" />
+              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-accent-danger ring-2 ring-white dark:ring-black animate-pulse" />
             </button>
 
-            {/* Notifications Dropdown */}
+            {/* Notifications Dropdown (Apple Liquid Glass) */}
             <AnimatePresence>
               {isNotificationsOpen && (
                 <motion.div
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 6 }}
-                  className="absolute right-0 mt-2 w-80 bg-surface-base dark:bg-surface-raised border border-ink-tertiary/25 rounded-lg shadow-lg p-3 z-50 text-xs space-y-2"
+                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                  className="absolute right-0 mt-2 w-80 bg-white/90 dark:bg-[#121215]/95 backdrop-blur-2xl border border-black/[0.08] dark:border-white/[0.1] rounded-3xl shadow-apple-card p-4 z-50 text-xs space-y-2.5"
                 >
-                  <div className="flex items-center justify-between pb-2 border-b border-ink-tertiary/15 font-semibold text-ink-primary">
-                    <span>{t('header.notificationsTitle', 'Cảnh báo & Hoạt động cần duyệt')}</span>
-                    <span className="font-mono text-[10px] bg-red-100 text-accent-danger px-1.5 py-0.5 rounded">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-black/[0.06] dark:border-white/[0.08] font-bold text-ink-primary dark:text-white">
+                    <span>{t('header.notificationsTitle', 'Cảnh báo & Duyệt')}</span>
+                    <span className="font-mono text-[10px] bg-red-500/10 text-red-600 dark:text-red-400 font-bold px-2 py-0.5 rounded-full">
                       {t('header.newCount', '2 mới')}
                     </span>
                   </div>
@@ -193,64 +193,64 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
           <button
             type="button"
             onClick={toggleTheme}
-            className="p-2 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-surface-raised transition-colors"
+            className="w-10 h-10 rounded-full flex items-center justify-center text-ink-secondary hover:text-ink-primary dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.08] active:scale-95 transition-all"
             title={theme === 'dark' ? t('header.switchToLight', 'Chuyển sang chế độ sáng') : t('header.switchToDark', 'Chuyển sang chế độ tối')}
             aria-label="Toggle dark mode"
           >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            {theme === 'dark' ? <Sun size={18} weight="bold" /> : <Moon size={18} weight="bold" />}
           </button>
 
           {/* Language Toggle (vi / en) */}
           <button
             type="button"
             onClick={() => setLanguage(language === 'vi' ? 'en' : 'vi')}
-            className="flex items-center gap-1 p-2 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-surface-raised transition-colors text-xs font-semibold"
+            className="h-10 px-3 rounded-full flex items-center gap-1.5 text-ink-secondary hover:text-ink-primary dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.08] active:scale-95 transition-all text-xs font-semibold"
             title={t('header.switchLang', 'Chuyển ngôn ngữ / Switch language')}
             aria-label="Toggle language"
           >
-            <Globe size={16} />
-            <span className="uppercase font-mono">{language}</span>
+            <Globe size={16} weight="bold" />
+            <span className="uppercase font-mono text-[11px]">{language}</span>
           </button>
 
           {/* Help link */}
           <Link
             to="/"
-            className="p-2 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-surface-raised transition-colors"
+            className="w-10 h-10 rounded-full flex items-center justify-center text-ink-secondary hover:text-ink-primary dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.08] active:scale-95 transition-all"
             title={t('header.helpTitle', 'Giới thiệu & Hướng dẫn hệ thống')}
             aria-label="Documentation"
           >
-            <Question size={18} />
+            <Question size={18} weight="bold" />
           </Link>
 
-          {/* User Menu Dropdown */}
+          {/* User Menu Dropdown (Apple Capsule Pill) */}
           <div className="relative" ref={userMenuRef}>
             <button
               type="button"
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              className="flex items-center gap-2 p-1 pl-2 rounded-full hover:bg-surface-raised dark:hover:bg-surface-overlay border border-ink-tertiary/20 transition-colors"
+              className="flex items-center gap-2 p-1.5 pl-2 pr-3 rounded-full hover:bg-black/[0.04] dark:hover:bg-white/[0.08] border border-black/[0.08] dark:border-white/[0.1] active:scale-95 transition-all"
               aria-label={t('header.userMenu', 'Menu hồ sơ người dùng')}
             >
-              <div className="w-7 h-7 rounded-full bg-accent-primary text-white flex items-center justify-center font-bold text-xs shadow-xs">
+              <div className="w-7 h-7 rounded-full bg-[#1B2420] dark:bg-white text-white dark:text-black flex items-center justify-center font-bold text-xs shadow-xs">
                 {getInitials(user?.displayName)}
               </div>
-              <span className="hidden sm:block text-xs font-semibold text-ink-primary max-w-[120px] truncate">
+              <span className="hidden sm:block text-xs font-semibold text-ink-primary dark:text-white max-w-[120px] truncate">
                 {user?.displayName || t('header.notLoggedIn', 'Người dùng')}
               </span>
-              <CaretDown size={12} className="text-ink-tertiary" />
+              <CaretDown size={12} weight="bold" className="text-ink-tertiary" />
             </button>
 
             <AnimatePresence>
               {isUserMenuOpen && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.96, y: 6 }}
+                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.96, y: 6 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute right-0 mt-2 w-72 bg-surface-base dark:bg-surface-raised border border-ink-tertiary/25 rounded-lg shadow-xl p-3 z-50 text-xs space-y-3"
+                  exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                  className="absolute right-0 mt-2 w-72 bg-white/90 dark:bg-[#121215]/95 backdrop-blur-2xl border border-black/[0.08] dark:border-white/[0.1] rounded-3xl shadow-apple-card p-4 z-50 text-xs space-y-3"
                 >
                   {/* User Profile Header in Menu */}
-                  <div className="space-y-1.5 pb-2.5 border-b border-ink-tertiary/15">
-                    <p className="font-bold text-sm text-ink-primary truncate">
+                  <div className="space-y-1.5 pb-3 border-b border-black/[0.06] dark:border-white/[0.08]">
+                    <p className="font-bold text-sm text-ink-primary dark:text-white truncate">
                       {user?.displayName || t('header.notLoggedIn', 'Chưa đăng nhập')}
                     </p>
                     <p className="text-ink-tertiary truncate font-mono text-[11px]">
@@ -259,7 +259,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
                       {user && <RoleChip role={user.role} size="sm" />}
                       {user && isCustomerSide(user.role) && (
-                        <span className="font-medium text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
+                        <span className="font-medium text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400">
                           {user.organizationName || 'Rice'}
                         </span>
                       )}
@@ -271,32 +271,32 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ pageTitle, breadcrumbs }) 
                     <Link
                       to="/settings/profile"
                       onClick={() => setIsUserMenuOpen(false)}
-                      className="flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-surface-raised dark:hover:bg-surface-overlay text-ink-primary transition-colors"
+                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-black/[0.04] dark:hover:bg-white/[0.08] text-ink-primary dark:text-white font-medium transition-colors"
                     >
-                      <User size={16} className="text-ink-secondary" />
+                      <User size={16} weight="bold" className="text-ink-secondary dark:text-ink-tertiary" />
                       <span>{t('nav.profile', 'Thông tin cá nhân')}</span>
                     </Link>
 
                     <Link
                       to="/settings/security"
                       onClick={() => setIsUserMenuOpen(false)}
-                      className="flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-surface-raised dark:hover:bg-surface-overlay text-ink-primary transition-colors"
+                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-black/[0.04] dark:hover:bg-white/[0.08] text-ink-primary dark:text-white font-medium transition-colors"
                     >
-                      <LockSimple size={16} className="text-ink-secondary" />
+                      <LockSimple size={16} weight="bold" className="text-ink-secondary dark:text-ink-tertiary" />
                       <span>{t('nav.security', 'Bảo mật tài khoản')}</span>
                     </Link>
                   </div>
 
-                  <div className="border-t border-ink-tertiary/15 pt-2">
+                  <div className="border-t border-black/[0.06] dark:border-white/[0.08] pt-2">
                     <button
                       type="button"
                       onClick={() => {
                         setIsUserMenuOpen(false);
                         setIsLogoutModalOpen(true);
                       }}
-                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-accent-danger hover:bg-red-50 dark:hover:bg-red-950/30 font-semibold transition-colors"
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl text-accent-danger hover:bg-red-500/10 font-semibold transition-colors"
                     >
-                      <SignOut size={16} />
+                      <SignOut size={16} weight="bold" />
                       <span>{t('nav.signOut', 'Đăng xuất')}</span>
                     </button>
                   </div>
