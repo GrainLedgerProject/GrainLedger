@@ -10,25 +10,26 @@ using Microsoft.EntityFrameworkCore;
 namespace GrainLedger.Modules.Exports;
 
 internal sealed record PlanningCandidate(Guid LotId, string LotCode, Guid LocationId, string LocationName,
-    string Stage, string ProductIdentity, decimal OnHandKg, decimal AvailableKg, string StockKind,
+    Guid LedgerCommodityId, Guid CatalogCommodityId, string Stage, string ProductIdentity, decimal OnHandKg, decimal AvailableKg, string StockKind,
     bool IsCurrentPool, bool CustodyDerived, string? PoolRevision, string CandidateRevision,
     int SourceCount, bool LineageComplete, bool InventoryEligible, string[] Restrictions, string[] Reasons)
 {
-    public object ToResponse() => new
+    public object ToResponse(string productCompatibility = "NOT_EVALUATED") => new
     {
         lotId = LotId, lotCode = LotCode, locationId = LocationId, locationName = LocationName,
-        stage = Stage, productIdentity = ProductIdentity, onHandKg = ExportRules.Text(OnHandKg),
+        catalogCommodityId = CatalogCommodityId, stage = Stage, productIdentity = ProductIdentity, onHandKg = ExportRules.Text(OnHandKg),
         availableKg = ExportRules.Text(AvailableKg), stockKind = StockKind, isCurrentPool = IsCurrentPool,
         custodyDerived = CustodyDerived, poolRevision = PoolRevision, candidateRevision = CandidateRevision,
         sourceCount = SourceCount, lineageComplete = LineageComplete, inventoryEligible = InventoryEligible,
-        restrictions = Restrictions, reasons = Reasons, productCompatibility = "NOT_EVALUATED",
+        restrictions = Restrictions, reasons = Reasons, productCompatibility,
         complianceStatus = "NOT_ASSESSED"
     };
 }
 
 internal sealed record PlanningCandidateSnapshot(Guid ContainerId, Guid FacilityId, int OrderVersion,
     int ContainerVersion, string ContainerStatus, Guid CatalogCommodityId, decimal TargetMassKg, DateTimeOffset ObservedAt,
-    string ScopeRevision, JsonElement Ledger, IReadOnlyList<PlanningCandidate> Candidates);
+    string ScopeRevision, JsonElement Ledger, JsonElement? Compatibilities,
+    IReadOnlyList<PlanningCandidate> Candidates);
 
 internal sealed class CandidateDemandChangedException : Exception;
 
@@ -39,6 +40,23 @@ public static partial class ExportModule
 
     private static decimal LedgerMass(JsonElement value) =>
         decimal.Parse(value.GetString()!, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
+
+    // Ledger compatibility is an exact set rule for a physical BLENDING operation.
+    // One candidate can only be a possible input; approval requires the full set.
+    private static string ProductCompatibility(PlanningCandidate candidate, string target,
+        Guid outputCatalogCommodityId, JsonElement policies)
+    {
+        if (candidate.ProductIdentity == target && candidate.CatalogCommodityId == outputCatalogCommodityId)
+            return "DIRECT_MATCH";
+        if (target != "BLENDED_RICE" || candidate.Stage is not ("HEAD_RICE" or "BROKEN_RICE" or "BLENDED_RICE"))
+            return "PRODUCT_MISMATCH";
+        var key = candidate.LedgerCommodityId.ToString() + ":" + candidate.ProductIdentity;
+        return policies.EnumerateArray().Any(policy =>
+            policy.GetProperty("outputCatalogCommodityId").ValueKind == JsonValueKind.String &&
+            policy.GetProperty("outputCatalogCommodityId").GetGuid() == outputCatalogCommodityId &&
+            policy.GetProperty("inputProducts").EnumerateArray().Any(input => input.GetString() == key))
+            ? "POSSIBLE_BLEND_INPUT" : "BLEND_POLICY_MISSING";
+    }
 
     private static (HashSet<Guid> Nodes, List<JsonElement> Edges, bool Complete) Ancestors(
         Guid lotId, Dictionary<Guid, List<JsonElement>> byOutput, HashSet<Guid> knownNodes)
@@ -68,13 +86,16 @@ public static partial class ExportModule
     }
 
     private static async Task<PlanningCandidateSnapshot> CandidateSnapshotAsync(Guid id, Guid company,
-        Guid facilityId, ExportDbContext db, LedgerService ledger, CancellationToken ct)
+        Guid facilityId, ExportDbContext db, LedgerService ledger, CancellationToken ct,
+        bool withCompatibility = false)
     {
         var container = await db.Containers.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == company, ct);
         if (container is null) throw new KeyNotFoundException();
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
-        var data = await ledger.ReadPlanningCandidatesAsync(company, facilityId, ct);
+        var (data, compatibilities) = withCompatibility
+            ? await ledger.ReadPlanningCandidatesWithCompatibilityAsync(company, facilityId, ct)
+            : (await ledger.ReadPlanningCandidatesAsync(company, facilityId, ct), (JsonElement?)null);
         var current = await db.Containers.AsNoTracking().Where(x => x.Id == id && x.CompanyId == company)
             .Select(x => new { x.Version, x.Status, x.TargetMassKg }).SingleAsync(ct);
         var currentOrder = await db.Orders.AsNoTracking().Where(x => x.Id == container.OrderId)
@@ -152,8 +173,6 @@ public static partial class ExportModule
                 !p.GetProperty("isCurrentPoolAtLocation").GetBoolean()) reasons.Add("POOL_GENERATION_CHANGED");
             if (p.GetProperty("catalogCommodityId").ValueKind == JsonValueKind.Null)
                 reasons.Add("COMMODITY_MAPPING_MISSING");
-            else if (p.GetProperty("catalogCommodityId").GetGuid() != order.CommodityId)
-                reasons.Add("COMMODITY_MISMATCH");
             if (composition.Any(x => x.GetProperty("captureSourceLotId").ValueKind == JsonValueKind.Null))
                 reasons.Add("SOURCE_MAPPING_MISSING");
             var positivePositions = p.GetProperty("positions").EnumerateArray()
@@ -165,14 +184,18 @@ public static partial class ExportModule
             var custodyDerived = p.GetProperty("custodyDerived").GetBoolean();
             var kind = isCurrent ? "CURRENT_POOL" : custodyDerived ? "CUSTODY_DERIVED" : "ORDINARY";
             candidates.Add(new PlanningCandidate(lotId, p.GetProperty("code").GetString()!, locationId,
-                p.GetProperty("locationName").GetString()!, p.GetProperty("stage").GetString()!,
+                p.GetProperty("locationName").GetString()!, p.GetProperty("commodityId").GetGuid(),
+                p.GetProperty("catalogCommodityId").ValueKind == JsonValueKind.Null
+                    ? Guid.Empty : p.GetProperty("catalogCommodityId").GetGuid(),
+                p.GetProperty("stage").GetString()!,
                 p.GetProperty("productIdentity").GetString()!, onHand, available, kind, isCurrent,
                 custodyDerived, isCurrent ? p.GetProperty("positionPoolRevision").GetString() : null,
                 CandidateHash(revision + ":" + lotId + ":" + locationId), composition.Length,
                 lineageComplete, reasons.Count == 0, restrictions, reasons.Distinct().ToArray()));
         }
         return new PlanningCandidateSnapshot(id, facilityId, order.Version, container.Version, container.Status,
-            order.CommodityId, container.TargetMassKg, DateTimeOffset.UtcNow, revision, data, candidates);
+            order.CommodityId, container.TargetMassKg, DateTimeOffset.UtcNow, revision, data,
+            compatibilities, candidates);
     }
 
     private static IResult CandidateFailure(Exception ex) => ex switch
@@ -193,28 +216,70 @@ public static partial class ExportModule
         if (!Guid.TryParse(http.Request.Query["facilityId"], out var facilityId) || facilityId == Guid.Empty ||
             !Page(http.Request.Query["page"], http.Request.Query["pageSize"], out var page, out var size) ||
             http.Request.Query.ContainsKey("includeExcluded") &&
-            !bool.TryParse(http.Request.Query["includeExcluded"], out _))
+            !bool.TryParse(http.Request.Query["includeExcluded"], out _) ||
+            http.Request.Query.ContainsKey("planId") &&
+            (!Guid.TryParse(http.Request.Query["planId"], out var parsedPlanId) || parsedPlanId == Guid.Empty))
             return Invalid(new() { ["query"] = ["Choose a facility and valid pagination/filter values."] });
+        Guid? planId = Guid.TryParse(http.Request.Query["planId"], out var requestedPlanId)
+            ? requestedPlanId : null;
+        string? targetProductIdentity = null;
+        BlendPlanDraft? plan = null;
+        if (planId is not null)
+        {
+            if (!await PlanningReadyAsync(db, ct))
+                return Problem(503, "PLANNING_SCHEMA_NOT_READY", "Blend plan storage is not deployed yet.");
+            plan = await db.BlendPlanDrafts.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.Id == planId && x.ContainerId == id && x.CompanyId == scope.Value.Company, ct);
+            if (plan is null) return Results.NotFound();
+            var container = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == id, ct);
+            var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
+            if (plan.Status != "DRAFT" || !DemandIsCurrent(plan, order, container))
+                return Problem(409, "PLAN_DEMAND_STALE", "Create a current draft before assessing product candidates.");
+            targetProductIdentity = TargetProductFromSnapshot(plan.DemandSnapshot);
+            if (targetProductIdentity is null)
+                return Problem(409, "PLAN_PRODUCT_UNSPECIFIED", "Create a new draft with a target product identity.");
+        }
         PlanningCandidateSnapshot snapshot;
-        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, ledger, ct); }
+        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, ledger, ct,
+            withCompatibility: plan is not null); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException) { return CandidateFailure(ex); }
+        if (plan is not null)
+        {
+            var currentPlan = await db.BlendPlanDrafts.AsNoTracking().SingleAsync(x => x.Id == plan.Id, ct);
+            var currentContainer = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == id, ct);
+            var currentOrder = await db.Orders.AsNoTracking()
+                .SingleAsync(x => x.Id == currentContainer.OrderId, ct);
+            if (currentPlan.Status != "DRAFT" || !DemandIsCurrent(currentPlan, currentOrder, currentContainer))
+                return Problem(409, "PLAN_DEMAND_STALE", "Draft or demand changed during the inventory read.");
+        }
+        var revision = plan is null ? snapshot.ScopeRevision : CandidateHash(
+            snapshot.ScopeRevision + ":" + plan.Id + ":" + targetProductIdentity + ":" +
+            snapshot.Compatibilities!.Value.GetRawText());
         var expected = http.Request.Query["scopeRevision"].ToString();
-        if (expected.Length > 0 && expected != snapshot.ScopeRevision)
+        if (expected.Length > 0 && expected != revision)
             return Problem(409, "CANDIDATE_SNAPSHOT_STALE", "Candidate inventory changed. Reload candidates.");
         var eligible = snapshot.Candidates.Where(x => x.InventoryEligible).ToArray();
         var filtered = bool.TryParse(http.Request.Query["includeExcluded"], out var include) && include
             ? snapshot.Candidates : eligible;
-        var items = filtered.Skip((page - 1) * size).Take(size).Select(x => x.ToResponse()).ToArray();
+        var items = filtered.Skip((page - 1) * size).Take(size).Select(x => x.ToResponse(
+            plan is null ? "NOT_EVALUATED" : ProductCompatibility(x, targetProductIdentity!,
+                snapshot.CatalogCommodityId, snapshot.Compatibilities!.Value))).ToArray();
         var eligibleMass = eligible.Sum(x => x.AvailableKg);
+        var matchingMass = plan is null ? (decimal?)null : eligible
+            .Where(x => ProductCompatibility(x, targetProductIdentity!, snapshot.CatalogCommodityId,
+                snapshot.Compatibilities!.Value) == "DIRECT_MATCH")
+            .Sum(x => x.AvailableKg);
         return Results.Ok(new
         {
-            containerId = id, facilityId, snapshot.OrderVersion, snapshot.ContainerVersion,
+            containerId = id, facilityId, planId, targetProductIdentity,
+            snapshot.OrderVersion, snapshot.ContainerVersion,
             snapshot.CatalogCommodityId, targetMassKg = ExportRules.Text(snapshot.TargetMassKg),
-            snapshot.ObservedAt, snapshot.ScopeRevision, scopeComplete = true,
+            snapshot.ObservedAt, scopeRevision = revision, scopeComplete = true,
             summary = new { inventoryEligibleCount = eligible.Length,
                 excludedCount = snapshot.Candidates.Count - eligible.Length,
                 inventoryEligibleMassKg = ExportRules.Text(eligibleMass),
-                inventoryShortfallKg = ExportRules.Text(Math.Max(0, snapshot.TargetMassKg - eligibleMass)) },
+                inventoryShortfallKg = ExportRules.Text(Math.Max(0, snapshot.TargetMassKg - eligibleMass)),
+                directProductAvailableMassKg = matchingMass is null ? null : ExportRules.Text(matchingMass.Value) },
             items, page, pageSize = size, totalCount = filtered.Count,
             hasMore = (long)page * size < filtered.Count, canPropose = false
         });

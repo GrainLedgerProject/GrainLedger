@@ -14,6 +14,125 @@ namespace GrainLedger.Api.IntegrationTests;
 public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     [Fact]
+    public async Task Candidate_product_status_uses_draft_target_and_effective_Ledger_blend_sets()
+    {
+        using var scenario = await LedgerScenario.CreateAsync(factory);
+        var receipt = await scenario.ReceiptAsync("30");
+        var raw = LedgerScenario.Lots(receipt)[0];
+        var drying = await scenario.DraftAsync("DRYING", [(raw, "30")], [("DRIED_PADDY", "30")]);
+        await scenario.CommitAsync(drying);
+        var milling = await scenario.DraftAsync("MILLING", [(LedgerScenario.Output(drying), "30")],
+            [("HEAD_RICE", "12"), ("BROKEN_RICE", "18")]);
+        await scenario.CommitAsync(milling);
+        var head = LedgerScenario.Output(milling, 0);
+        var broken = LedgerScenario.Output(milling, 1);
+        var (staff, session) = await factory.SeedUserAsync(Roles.ExportStaff, scenario.OwnerId);
+        using var writer = factory.CreateRealCookieClient(staff, session);
+        writer.DefaultRequestHeaders.Add("X-CSRF-TOKEN", (await writer.GetFromJsonAsync<JsonElement>("/api/auth/csrf"))
+            .GetProperty("token").GetString());
+        var (market, otherCommodity, attribute) = await CatalogAsync();
+        var created = await writer.PostAsJsonAsync("/api/export-orders", new
+        {
+            operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
+            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
+            containers = new[] { new { targetMass = "10", unit = "KG" } }
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var order = (await created.Content.ReadFromJsonAsync<ExportOrderDto>())!;
+        var container = Assert.Single((await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>(
+            $"/api/export-orders/{order.Id}/containers"))!.Items);
+        var draftRoute = $"/api/export-containers/{container.Id}/blend-plans/drafts";
+        async Task<BlendPlanDraftDto> Draft(string target)
+        {
+            var response = await writer.PostAsJsonAsync(draftRoute,
+                new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1, target));
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
+        }
+        var headDraft = await Draft("HEAD_RICE");
+        var route = $"/api/export-containers/{container.Id}/candidates?facilityId={scenario.FacilityId}";
+        var baseList = await writer.GetFromJsonAsync<JsonElement>(route);
+        Assert.False(baseList.TryGetProperty("physicalSelection", out _));
+        Assert.All(baseList.GetProperty("items").EnumerateArray().ToArray(),
+            item => Assert.Equal("NOT_EVALUATED", item.GetProperty("productCompatibility").GetString()));
+        var otherOrderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
+        {
+            operationId = Guid.NewGuid(), marketId = market, commodityId = otherCommodity,
+            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
+            containers = new[] { new { targetMass = "10", unit = "KG" } }
+        });
+        Assert.Equal(HttpStatusCode.Created, otherOrderResponse.StatusCode);
+        var otherOrder = (await otherOrderResponse.Content.ReadFromJsonAsync<ExportOrderDto>())!;
+        var otherContainer = Assert.Single((await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>(
+            $"/api/export-orders/{otherOrder.Id}/containers"))!.Items);
+        var otherList = await writer.GetFromJsonAsync<JsonElement>(
+            $"/api/export-containers/{otherContainer.Id}/candidates?facilityId={scenario.FacilityId}");
+        Assert.Contains(otherList.GetProperty("items").EnumerateArray().ToArray(), x =>
+            x.GetProperty("lotId").GetGuid() == head);
+        var otherDraftResponse = await writer.PostAsJsonAsync(
+            $"/api/export-containers/{otherContainer.Id}/blend-plans/drafts",
+            new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1, "HEAD_RICE"));
+        Assert.Equal(HttpStatusCode.Created, otherDraftResponse.StatusCode);
+        var otherDraft = (await otherDraftResponse.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
+        var otherHints = await writer.GetFromJsonAsync<JsonElement>(
+            $"/api/export-containers/{otherContainer.Id}/candidates?facilityId={scenario.FacilityId}&planId={otherDraft.Id}");
+        Assert.Equal("PRODUCT_MISMATCH", Assert.Single(otherHints.GetProperty("items").EnumerateArray().ToArray(),
+            x => x.GetProperty("lotId").GetGuid() == head).GetProperty("productCompatibility").GetString());
+        Assert.Equal("0", otherHints.GetProperty("summary").GetProperty("directProductAvailableMassKg").GetString());
+        var direct = await writer.GetFromJsonAsync<JsonElement>(route + $"&planId={headDraft.Id}");
+        var directItems = direct.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal("HEAD_RICE", direct.GetProperty("targetProductIdentity").GetString());
+        Assert.Equal("DIRECT_MATCH", Assert.Single(directItems, x => x.GetProperty("lotId").GetGuid() == head)
+            .GetProperty("productCompatibility").GetString());
+        Assert.Equal("PRODUCT_MISMATCH", Assert.Single(directItems, x => x.GetProperty("lotId").GetGuid() == broken)
+            .GetProperty("productCompatibility").GetString());
+        Assert.False(direct.TryGetProperty("physicalSelection", out _));
+        Assert.True(decimal.Parse(direct.GetProperty("summary").GetProperty("directProductAvailableMassKg")
+            .GetString()!, System.Globalization.CultureInfo.InvariantCulture) >= 12m);
+        Assert.Equal(HttpStatusCode.NotFound, (await scenario.ForeignCustomer.GetAsync(
+            route + $"&planId={headDraft.Id}")).StatusCode);
+
+        var unavailableDraft = await Draft("HUSK");
+        var unavailable = await writer.GetFromJsonAsync<JsonElement>(route + $"&planId={unavailableDraft.Id}");
+        Assert.Equal("0", unavailable.GetProperty("summary").GetProperty("directProductAvailableMassKg").GetString());
+
+        var blendedDraft = await Draft("BLENDED_RICE");
+        var blendedRoute = route + $"&planId={blendedDraft.Id}";
+        var before = await writer.GetFromJsonAsync<JsonElement>(blendedRoute);
+        Assert.False(before.TryGetProperty("physicalSelection", out _));
+        Assert.All(before.GetProperty("items").EnumerateArray().ToArray(),
+            item => Assert.Equal("BLEND_POLICY_MISSING", item.GetProperty("productCompatibility").GetString()));
+        await LedgerScenario.SendAsync(scenario.Admin, HttpMethod.Post, "/api/ledger/compatibilities", new
+        {
+            id = Guid.NewGuid(), facilityId = scenario.FacilityId,
+            inputProducts = new[] { $"{scenario.CommodityId}:HEAD_RICE", $"{scenario.CommodityId}:BROKEN_RICE",
+                $"{scenario.CommodityId}:BLENDED_RICE" },
+            outputCommodityId = scenario.CommodityId,
+            effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1), evidenceId = scenario.EvidenceId
+        });
+        var missingThirdInput = await writer.GetFromJsonAsync<JsonElement>(blendedRoute);
+        Assert.All(missingThirdInput.GetProperty("items").EnumerateArray().ToArray(), item =>
+            Assert.Equal("POSSIBLE_BLEND_INPUT", item.GetProperty("productCompatibility").GetString()));
+        Assert.False(missingThirdInput.TryGetProperty("physicalSelection", out _));
+        await LedgerScenario.SendAsync(scenario.Admin, HttpMethod.Post, "/api/ledger/compatibilities", new
+        {
+            id = Guid.NewGuid(), facilityId = scenario.FacilityId,
+            inputProducts = new[] { $"{scenario.CommodityId}:HEAD_RICE", $"{scenario.CommodityId}:BROKEN_RICE" },
+            outputCommodityId = scenario.CommodityId,
+            effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1), evidenceId = scenario.EvidenceId
+        });
+        Assert.Equal(HttpStatusCode.Conflict, (await writer.GetAsync(blendedRoute + "&scopeRevision=" +
+            before.GetProperty("scopeRevision").GetString())).StatusCode);
+        var after = await writer.GetFromJsonAsync<JsonElement>(blendedRoute);
+        Assert.All(after.GetProperty("items").EnumerateArray().ToArray(), item =>
+            Assert.Equal("POSSIBLE_BLEND_INPUT", item.GetProperty("productCompatibility").GetString()));
+        Assert.False(after.TryGetProperty("physicalSelection", out _));
+        Assert.False(after.GetProperty("canPropose").GetBoolean());
+    }
+
+    [Fact]
     public async Task Candidate_lineage_includes_processing_operation_and_source()
     {
         using var scenario = await LedgerScenario.CreateAsync(factory);
@@ -246,19 +365,26 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.True(context.StorageReady); Assert.True(context.CanCreateDraft);
         Assert.True(context.CandidateReadReady); Assert.False(context.CanPropose);
         Assert.Contains(context.MissingDependencies, x => x.Code == "COMPLIANCE_NOT_IMPLEMENTED");
-        var body = new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1);
+        var body = new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1, "HEAD_RICE");
         var route = $"/api/export-containers/{target.Id}/blend-plans";
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await writer.PostAsJsonAsync(route + "/drafts", body with { TargetProductIdentity = null })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await writer.PostAsJsonAsync(route + "/drafts", body with { TargetProductIdentity = "BAGGED_RICE" })).StatusCode);
         var created = await writer.PostAsJsonAsync(route + "/drafts", body);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var draft = (await created.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
         Assert.Equal("DRAFT", draft.Status); Assert.Equal(1, draft.VersionNo); Assert.Equal("24000", draft.TargetMassKg);
+        Assert.Equal("HEAD_RICE", draft.TargetProductIdentity);
         Assert.True(draft.DemandCurrent);
         Assert.Equal("14", JsonDocument.Parse(draft.DemandSnapshot).RootElement.GetProperty("limits")[0].GetProperty("maxValue").GetString());
+        Assert.Equal("HEAD_RICE", JsonDocument.Parse(draft.DemandSnapshot).RootElement.GetProperty("targetProductIdentity").GetString());
         var replay = await writer.PostAsJsonAsync(route + "/drafts", body);
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
         Assert.Equal(created.Headers.Location, replay.Headers.Location);
         Assert.Equal(draft.Id, (await replay.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!.Id);
         Assert.Equal(HttpStatusCode.Conflict, (await writer.PostAsJsonAsync(route + "/drafts", body with { OrderVersion = 2 })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await writer.PostAsJsonAsync(route + "/drafts", body with { TargetProductIdentity = "BROKEN_RICE" })).StatusCode);
         Assert.True((await writer.GetFromJsonAsync<ExportOrderDto>($"/api/export-orders/{order.Id}"))!.CanEdit);
         var update = await PatchAsync(writer, $"/api/export-orders/{order.Id}", 1, new UpdateExportOrderRequest(
             Guid.NewGuid(), market, commodity, "49", "T", order.ShippingFrom, order.ShippingTo));
@@ -271,6 +397,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(HttpStatusCode.OK, (await writer.SendAsync(spec)).StatusCode);
         var oldDraft = (await writer.GetFromJsonAsync<BlendPlanDraftDto>($"/api/blend-plans/{draft.Id}"))!;
         Assert.Equal("24000", oldDraft.TargetMassKg);
+        Assert.Equal("HEAD_RICE", oldDraft.TargetProductIdentity);
         Assert.False(oldDraft.DemandCurrent);
         var cancelBody = new CancelBlendPlanDraftRequest(Guid.NewGuid());
         async Task<HttpResponseMessage> Cancel(int version)
@@ -287,9 +414,11 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.True((await writer.GetFromJsonAsync<ExportOrderDto>($"/api/export-orders/{order.Id}"))!.CanEdit);
         Assert.Equal(2, (await writer.GetFromJsonAsync<ExportPage<ExportEventDto>>($"/api/blend-plans/{draft.Id}/history"))!.TotalCount);
         Assert.Equal(HttpStatusCode.PreconditionFailed, (await writer.PostAsJsonAsync(route + "/drafts", body with { OperationId = Guid.NewGuid() })).StatusCode);
-        var refreshed = await writer.PostAsJsonAsync(route + "/drafts", body with { OperationId = Guid.NewGuid(), OrderVersion = 4, ContainerVersion = 2 });
+        var refreshed = await writer.PostAsJsonAsync(route + "/drafts", body with { OperationId = Guid.NewGuid(), OrderVersion = 4, ContainerVersion = 2, TargetProductIdentity = "BROKEN_RICE" });
         Assert.Equal(HttpStatusCode.Created, refreshed.StatusCode);
-        Assert.True((await refreshed.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!.DemandCurrent);
+        var refreshedDraft = (await refreshed.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
+        Assert.True(refreshedDraft.DemandCurrent);
+        Assert.Equal("BROKEN_RICE", refreshedDraft.TargetProductIdentity);
         var page = (await writer.GetFromJsonAsync<ExportPage<BlendPlanDraftDto>>(route + "?pageSize=1"))!;
         Assert.Equal(2, page.TotalCount); Assert.True(page.HasMore); Assert.Equal(2, Assert.Single(page.Items).VersionNo);
         Assert.Equal(before, await StockSnapshotAsync());
@@ -312,7 +441,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
             c.DefaultRequestHeaders.Add("X-CSRF-TOKEN", (await c.GetFromJsonAsync<JsonElement>("/api/auth/csrf")).GetProperty("token").GetString());
         var target = Assert.Single((await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>($"/api/export-orders/{order.Id}/containers"))!.Items);
         var route = $"/api/export-containers/{target.Id}/blend-plans";
-        var body = new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1);
+        var body = new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1, "HEAD_RICE");
         var draft = (await (await writer.PostAsJsonAsync(route + "/drafts", body)).Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
         Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync($"/api/blend-plans/{draft.Id}")).StatusCode);
         Assert.False((await reader.GetFromJsonAsync<BlendPlanDraftDto>($"/api/blend-plans/{draft.Id}"))!.CanCancel);
@@ -331,13 +460,13 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         using var writer = client;
         var target = Assert.Single((await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>($"/api/export-orders/{order.Id}/containers"))!.Items);
         var route = $"/api/export-containers/{target.Id}/blend-plans/drafts";
-        var create = writer.PostAsJsonAsync(route, new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1));
+        var create = writer.PostAsJsonAsync(route, new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1, "HEAD_RICE"));
         var edit = PatchAsync(writer, $"/api/export-containers/{target.Id}", 1, new UpdateExportContainerRequest(Guid.NewGuid(), "25", "T"));
         var outcomes = await Task.WhenAll(create, edit);
         Assert.True(outcomes[0].StatusCode == HttpStatusCode.Created && outcomes[1].StatusCode == HttpStatusCode.OK ||
             outcomes[0].StatusCode == HttpStatusCode.PreconditionFailed && outcomes[1].StatusCode == HttpStatusCode.OK);
         var response = outcomes[0].StatusCode == HttpStatusCode.Created ? outcomes[0] :
-            await writer.PostAsJsonAsync(route, new CreateBlendPlanDraftRequest(Guid.NewGuid(), 2, 2));
+            await writer.PostAsJsonAsync(route, new CreateBlendPlanDraftRequest(Guid.NewGuid(), 2, 2, "HEAD_RICE"));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var draft = (await response.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
         await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);

@@ -76,12 +76,13 @@ internal static class BlendPlanModel
     }
 }
 
-public sealed record CreateBlendPlanDraftRequest(Guid OperationId, int OrderVersion, int ContainerVersion);
+public sealed record CreateBlendPlanDraftRequest(Guid OperationId, int OrderVersion, int ContainerVersion,
+    string? TargetProductIdentity);
 public sealed record CancelBlendPlanDraftRequest(Guid OperationId);
 public sealed record BlendPlanDraftDto(Guid Id, Guid OrderId, Guid ContainerId, Guid SpecificationId,
-    int VersionNo, int Version, string Status, string TargetMassKg, string DemandSnapshot,
+    int VersionNo, int Version, string Status, string TargetMassKg, string? TargetProductIdentity, string DemandSnapshot,
     DateTimeOffset CreatedAt, DateTimeOffset? CancelledAt, bool DemandCurrent, bool CanCancel);
 public sealed record PlanningDependency(string Code, string Description);
 public sealed record BlendPlanningContextDto(Guid ContainerId, int OrderVersion, int ContainerVersion,
-    bool StorageReady, bool CanCreateDraft, bool CandidateReadReady, bool CanPropose,
+    bool StorageReady, bool CanCreateDraft, bool CandidateReadReady, bool CompatibilityReadReady, bool CanPropose,
     IReadOnlyList<PlanningDependency> MissingDependencies);

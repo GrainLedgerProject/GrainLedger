@@ -17,6 +17,7 @@ public static class CatalogModule
             if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("ConnectionStrings:GrainLedger is required.");
             options.UseNpgsql(connection, n => n.MigrationsAssembly(typeof(CatalogDbContext).Assembly.FullName));
         });
+        services.AddScoped<ApplicableMrlRead>();
         return services;
     }
 

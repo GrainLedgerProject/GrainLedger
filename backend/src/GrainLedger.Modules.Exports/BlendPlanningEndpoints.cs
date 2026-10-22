@@ -12,7 +12,7 @@ public static partial class ExportModule
     private static readonly PlanningDependency[] PendingPlanningDependencies =
     [
         new("COMPLIANCE_NOT_IMPLEMENTED", "Residue bounds, quality evidence and market assessment are not available yet."),
-        new("PLANNER_NOT_IMPLEMENTED", "Feasible allocation search is not available yet.")
+        new("PLANNER_NOT_IMPLEMENTED", "Deterministic greedy stock selection is available; compliance-aware feasibility and proposal are not yet available.")
     ];
 
     private sealed class PlanningReadyFilter(ExportDbContext db) : IEndpointFilter
@@ -44,7 +44,7 @@ public static partial class ExportModule
         endpoints.MapGet("/api/export-containers/{id:guid}/candidates", CandidatesAsync)
             .RequireAuthorization(Permissions.ExportOrdersRead).AddEndpointFilter<NoStoreFilter>()
             .AddEndpointFilter<ReadyFilter>().WithTags("Blend planning")
-            .WithDescription("Requires facilityId; optional includeExcluded, page, pageSize and scopeRevision. Inventory eligibility is not product or compliance approval.");
+            .WithDescription("Requires facilityId; optional includeExcluded, page, pageSize, scopeRevision and planId. A current draft's planId adds product-match hints. Physical inventory and hints do not assess compliance or authorize a proposal.");
         endpoints.MapGet("/api/export-containers/{id:guid}/candidates/{lotId:guid}/lineage", CandidateLineageAsync)
             .RequireAuthorization(Permissions.ExportOrdersRead).AddEndpointFilter<NoStoreFilter>()
             .AddEndpointFilter<ReadyFilter>().WithTags("Blend planning")
@@ -63,9 +63,21 @@ public static partial class ExportModule
         plans.MapPost("/cancel", CancelPlanDraftAsync).RequireAuthorization(Permissions.BlendPropose);
     }
 
+    private static string? TargetProductFromSnapshot(string snapshot)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(snapshot);
+            return document.RootElement.TryGetProperty("targetProductIdentity", out var target) &&
+                target.ValueKind == JsonValueKind.String ? target.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
     private static BlendPlanDraftDto PlanDto(BlendPlanDraft p, bool canWrite, bool demandCurrent) => new(p.Id, p.OrderId,
         p.ContainerId, p.SpecificationId, p.VersionNo, p.Version, p.Status, ExportRules.Text(p.TargetMassKg),
-        p.DemandSnapshot, p.CreatedAt, p.CancelledAt, demandCurrent, canWrite && p.Status == "DRAFT");
+        TargetProductFromSnapshot(p.DemandSnapshot), p.DemandSnapshot, p.CreatedAt, p.CancelledAt,
+        demandCurrent, canWrite && p.Status == "DRAFT");
 
     private static bool DemandIsCurrent(BlendPlanDraft plan, ExportOrder order, ExportContainer container)
     {
@@ -97,16 +109,22 @@ public static partial class ExportModule
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
         var ready = await PlanningReadyAsync(db, ct);
         var candidateReady = await db.Database.SqlQueryRaw<bool>("""
-            SELECT CASE WHEN to_regprocedure('ledger.planning_candidates(uuid,uuid,uuid)') IS NULL THEN false
-                ELSE has_function_privilege(current_user,
-                    to_regprocedure('ledger.planning_candidates(uuid,uuid,uuid)'), 'EXECUTE') END AS "Value"
+            SELECT COALESCE(has_function_privilege(current_user,
+                to_regprocedure('ledger.planning_candidates(uuid,uuid,uuid)'), 'EXECUTE'), false) AS "Value"
             """).SingleAsync(ct);
-        var dependencies = candidateReady ? PendingPlanningDependencies :
-            [new PlanningDependency("CANDIDATE_READ_NOT_READY", "Apply the reviewed Ledger candidate migration and restricted runtime grant."),
-                .. PendingPlanningDependencies];
+        var compatibilityReady = await db.Database.SqlQueryRaw<bool>("""
+            SELECT COALESCE(has_function_privilege(current_user,
+                to_regprocedure('ledger.planning_compatibilities(uuid,uuid,uuid)'), 'EXECUTE'), false) AS "Value"
+            """).SingleAsync(ct);
+        var dependencies = new List<PlanningDependency>();
+        if (!candidateReady) dependencies.Add(new("CANDIDATE_READ_NOT_READY",
+            "Apply the reviewed Ledger candidate migration and restricted runtime grant."));
+        if (!compatibilityReady) dependencies.Add(new("COMPATIBILITY_READ_NOT_READY",
+            "Apply the reviewed Ledger compatibility migration and restricted runtime grant."));
+        dependencies.AddRange(PendingPlanningDependencies);
         return Results.Ok(new BlendPlanningContextDto(id, order.Version, container.Version, ready,
             ready && container.Status == "PLANNED" && await access.HasPermissionAsync(Permissions.BlendPropose, ct),
-            candidateReady, false, dependencies));
+            candidateReady, compatibilityReady, false, dependencies));
     }
 
     private static async Task<IResult> CreatePlanDraftAsync(Guid id, CreateBlendPlanDraftRequest request,
@@ -115,8 +133,13 @@ public static partial class ExportModule
     {
         var scope = await ScopeAsync(http, identity, access, Permissions.BlendPropose, ct);
         if (scope is null) return Results.Forbid();
+        var errors = new Dictionary<string, string[]>();
         if (request.OperationId == Guid.Empty || request.OrderVersion <= 0 || request.ContainerVersion <= 0)
-            return Invalid(new() { ["request"] = ["Provide an operation ID and positive order/container versions."] });
+            errors["request"] = ["Provide an operation ID and positive order/container versions."];
+        if (request.TargetProductIdentity is not ("RAW_PADDY" or "DRIED_PADDY" or "HEAD_RICE" or
+            "BROKEN_RICE" or "BRAN" or "HUSK" or "BLENDED_RICE"))
+            errors["targetProductIdentity"] = ["Choose a supported Ledger product identity."];
+        if (errors.Count > 0) return Invalid(errors);
         var hash = ExportRules.Hash("plan-draft:" + id, request);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await LockAsync(db, scope.Value.Company, ct);
@@ -145,6 +168,7 @@ public static partial class ExportModule
                 orderId = order.Id, orderVersion = order.Version, marketId = order.MarketId, commodityId = order.CommodityId,
                 shippingFrom = order.ShippingFrom, shippingTo = order.ShippingTo, containerId = id,
                 containerVersion = container.Version, targetMassKg = ExportRules.Text(container.TargetMassKg),
+                targetProductIdentity = request.TargetProductIdentity,
                 specificationId = spec.Id, specificationVersion = spec.VersionNo, limits = limits.Select(ToDto).ToArray()
             }, new JsonSerializerOptions(JsonSerializerDefaults.Web))
         };

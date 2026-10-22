@@ -34,6 +34,7 @@ public static class CaptureModule
             if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("ConnectionStrings:GrainLedger is required.");
             options.UseNpgsql(connection, n => n.MigrationsAssembly(typeof(CaptureDbContext).Assembly.FullName));
         });
+        services.AddScoped<ConfirmedLabEvidenceRead>();
         return services;
     }
 

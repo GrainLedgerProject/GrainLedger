@@ -29,6 +29,13 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         var id = EntityId(request);
         await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", request, HttpStatusCode.Created);
         var detail = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        using (var beforeScope = factory.Services.CreateScope())
+        {
+            var before = await beforeScope.ServiceProvider.GetRequiredService<ConfirmedLabEvidenceRead>()
+                .ReadAsync(s.OwnerId, [sample.SourceLotId]);
+            Assert.Empty(before.Rows);
+            Assert.Equal([sample.SourceLotId], before.SourcesWithoutConfirmedEvidence);
+        }
         var confirmation = ConfirmRequest(detail, sample);
         confirmation["payload"]!["matches"]![0]!["identityBasis"] = "LAB_REFERENCE";
         confirmation["payload"]!["matches"]![0]!["evidenceRef"] = "dispatch-receipt-42";
@@ -54,6 +61,18 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal(sample.Id, confirmed.GetProperty("resultSets")[0].GetProperty("confirmedSampleId").GetGuid());
         Assert.Equal(sample.SourceLotId, confirmed.GetProperty("resultSets")[0].GetProperty("sourceLotId").GetGuid());
         AssertNotAssessed(confirmed);
+        using var evidenceScope = factory.Services.CreateScope();
+        var evidenceRead = evidenceScope.ServiceProvider.GetRequiredService<ConfirmedLabEvidenceRead>();
+        var evidence = await evidenceRead.ReadAsync(s.OwnerId, [sample.SourceLotId]);
+        Assert.Empty(evidence.SourcesWithoutConfirmedEvidence);
+        Assert.All(evidence.Rows, row =>
+        {
+            Assert.Equal(sample.SourceLotId, row.SourceLotId);
+            Assert.Equal(sample.Id, row.SampleId);
+            Assert.Equal(id, row.ReportId);
+        });
+        Assert.NotEmpty(evidence.Rows);
+        Assert.Equal(evidence.Revision, (await evidenceRead.ReadAsync(s.OwnerId, [sample.SourceLotId])).Revision);
     }
 
     [Fact]
