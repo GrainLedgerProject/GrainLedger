@@ -1,0 +1,105 @@
+using System.Data;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using GrainLedger.Modules.Capture;
+using GrainLedger.Modules.Catalogs;
+using GrainLedger.Modules.Identity;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
+using Npgsql;
+using NpgsqlTypes;
+
+namespace GrainLedger.Modules.Ledger;
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ResidueEvaluationRequest(Guid Id, Guid[] SubstanceIds);
+public sealed record ResidueEvaluation(Guid Id, Guid LotId, Guid CompanyId, DateTimeOffset SnapshotAt,
+    DateTimeOffset? PersistedAt, string EngineVersion, IReadOnlyList<ResidueResult> Results);
+
+public sealed class ResidueEvaluationService(IConfiguration configuration, LedgerService ledger,
+    IResiduePolicyReader policyReader, IResidueEvidenceReader evidenceReader)
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    public async Task<JsonElement> EvaluateAsync(Guid lotId, ResidueEvaluationRequest request, CancellationToken ct)
+    {
+        if (request.Id == Guid.Empty || request.SubstanceIds is null || request.SubstanceIds.Length is < 1 or > 200
+            || request.SubstanceIds.Contains(Guid.Empty) || request.SubstanceIds.Distinct().Count() != request.SubstanceIds.Length)
+            throw new LedgerException(400, "Evaluation requires nonempty ID and 1–200 distinct substance IDs");
+        var substances = request.SubstanceIds.Order().ToArray();
+        var canonical = JsonSerializer.SerializeToElement(new { substanceIds = substances }, Json);
+        var actor = await ledger.ActorAsync(ct);
+        await using var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
+        await connection.OpenAsync(ct);
+        IReadOnlyList<ResidueNode> nodes; IReadOnlyList<ResidueRuleVersion> policies; ResidueEvidenceSnapshot evidence;
+        DateTimeOffset snapshotAt;
+        await using (var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct))
+        {
+            await ExecuteAsync(connection, tx, "SET TRANSACTION READ ONLY", ct);
+            var captured = await ExecuteAsync(connection, tx, "SELECT clock_timestamp()", ct);
+            snapshotAt = new DateTimeOffset((DateTime)captured!);
+            var replay = await ExecuteAsync(connection, tx, "SELECT ledger.residue_replay($1,$2,$3,$4)::text", ct,
+                actor, lotId, request.Id, canonical);
+            if (replay is string old) { await tx.CommitAsync(ct); return Parse(old); }
+            var graph = (string)(await ExecuteAsync(connection, tx, "SELECT ledger.residue_graph($1,$2)::text", ct, actor, lotId))!;
+            nodes = JsonSerializer.Deserialize<ResidueNode[]>(graph, Json)!;
+            var target = nodes.Single(x => x.LotId == lotId);
+            policies = await policyReader.ReadAsync(connection, tx, substances, snapshotAt, ct);
+            evidence = await evidenceReader.ReadAsync(connection, tx, target.CompanyId,
+                nodes.Where(x => x.Kind == "SOURCE").Select(x => x.LotId).ToArray(), substances, snapshotAt, ct);
+            await tx.CommitAsync(ct);
+        }
+        var sources = ResidueEvidenceResolver.Resolve(nodes, substances, evidence, policies, snapshotAt);
+        var results = ResidueCalculator.Calculate(lotId, substances, nodes, sources, ResidueEvidenceResolver.Factors(policies));
+        var snapshot = new ResidueEvaluation(request.Id, lotId, nodes.Single(x => x.LotId == lotId).CompanyId,
+            snapshotAt, null, ResidueCalculator.EngineVersion, results);
+        // Read snapshot is closed. Protected append uses its own READ COMMITTED transaction and current scope.
+        await using var persist = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        var appended = (string)(await ExecuteAsync(connection, persist,
+            "SELECT ledger.residue_append($1,$2,$3,$4,$5)::text", ct, actor, lotId, request.Id,
+            JsonSerializer.SerializeToElement(new { substanceIds = substances }, Json),
+            JsonSerializer.SerializeToElement(snapshot, Json)))!;
+        await persist.CommitAsync(ct);
+        return Parse(appended);
+    }
+
+    public async Task<JsonElement> HistoryAsync(Guid lotId, Guid? evaluationId, CancellationToken ct)
+    {
+        var actor = await ledger.ActorAsync(ct);
+        await using var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
+        await connection.OpenAsync(ct);
+        return Parse((string)(await ExecuteAsync(connection, null, "SELECT ledger.residue_history($1,$2,$3)::text", ct,
+            actor, lotId, evaluationId))!);
+    }
+
+    private static JsonElement Parse(string text) => JsonSerializer.Deserialize<JsonElement>(text);
+    private static async Task<object?> ExecuteAsync(NpgsqlConnection connection, NpgsqlTransaction? tx,
+        string sql, CancellationToken ct, params object?[] values)
+    {
+        await using var command = new NpgsqlCommand(sql, connection, tx);
+        foreach (var value in values)
+            command.Parameters.Add(value is JsonElement element
+                ? new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Jsonb, Value = element.GetRawText() }
+                : value is null ? new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = DBNull.Value }
+                : new NpgsqlParameter { Value = value });
+        try { return await command.ExecuteScalarAsync(ct); }
+        catch (PostgresException ex) when (ex.SqlState is "42501" or "23505" or "23514" or "P0002")
+        { throw new LedgerException(ex.SqlState == "42501" ? 403 : ex.SqlState == "P0002" ? 404 : 409, ex.MessageText); }
+    }
+}
+
+public static class ResidueEvaluationEndpoints
+{
+    public static void MapResidueEvaluationRoutes(RouteGroupBuilder ledger)
+    {
+        var routes = ledger.MapGroup("/lots/{lotId:guid}/residue-evaluations").RequireAuthorization(Permissions.ResidueEvaluate);
+        routes.MapPost("", async (Guid lotId, ResidueEvaluationRequest request, ResidueEvaluationService service, CancellationToken ct) =>
+            Results.Ok(await service.EvaluateAsync(lotId, request, ct)));
+        routes.MapGet("", async (Guid lotId, ResidueEvaluationService service, CancellationToken ct) =>
+            Results.Ok(await service.HistoryAsync(lotId, null, ct)));
+        routes.MapGet("/{evaluationId:guid}", async (Guid lotId, Guid evaluationId, ResidueEvaluationService service, CancellationToken ct) =>
+            Results.Ok(await service.HistoryAsync(lotId, evaluationId, ct)));
+    }
+}

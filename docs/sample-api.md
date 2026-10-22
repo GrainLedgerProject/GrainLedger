@@ -235,3 +235,10 @@ Confirmation is a transcription/identity check, not PASS or legal compliance. La
 
 Both lab writes reuse Capture's transaction/event/offline operation convention. Successful intake returns 201 plus `Location`; confirmation returns 200. Identical device/operation/content replay returns 200; changed content returns 409 `OPERATION_CONFLICT`. Invalid syntax/decimal strings/attestations return 400; unavailable sample/related report/catalog references return 409 (`SAMPLE_NOT_FOUND`, `RELATED_REPORT_NOT_FOUND`, `SUBSTANCE_NOT_FOUND`); scoped GET/file/confirmation for absent/foreign report returns 404 `LAB_REPORT_NOT_FOUND`. Unauthorized roles receive 403. No report evidence can be obtained through an unscoped URL.
 
+## F12 derived lot bounds
+
+F11 report originals, rows and confirmed procurement associations remain immutable facts. F12 separately records reviewed result selection/normalization and explicit company-scoped source-group fallback; it does not modify these lab routes or inherit the VN comparator's threshold choices. Missing scientific interpretation, uncertainty, method/material/unit applicability, coverage or process factor produces `UNRESOLVED`, never ND=0 or PASS.
+
+Customer Manager uses **Laboratory reports → F12 fallback and report evidence** for explicit source-group membership; no report is required for reviewed external fallback evidence. Confirmed-report detail additionally supports selecting a confirmed result, recording reviewed basis/uncertainty/threshold, and explicitly naming superseded result IDs. Capture source IDs differ from Ledger lot IDs. A report relationship alone does not select evidence or resolve conflicts.
+
+`residue.evidence.manage` controls own-company evidence publication. `residue.evaluate` permits appropriately scoped customer/facility users to calculate or inspect derived Ledger snapshots; it does not grant original laboratory downloads. New rule/group/selection versions and late reports affect a new calculation only; old snapshots and stock/HOLDs remain unchanged. Full publication and evaluation routes: [F12 delivered API](f12-residue-bounds-plan.md#9-delivered-f12-contracts).

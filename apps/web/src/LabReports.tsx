@@ -3,10 +3,11 @@ import { api, errorMessage } from './api';
 import { newRequest, type Envelope, wasRejected } from './captureWrite';
 import { labCsvHeaders, parseLabCsv, type LabCsvPreview, type LabCsvRow } from './labCsv';
 import type { Page } from './procurementTypes';
+import { ResidueEvidenceControls } from './ResidueEvidenceControls';
 
 type ReportKind = 'PARTIAL' | 'FINAL' | 'SUPPLEMENTARY' | 'AMENDMENT' | 'RETEST';
 type AssessmentStatus = 'NOT_ASSESSED' | 'WITHIN_ASSESSED_LIMITS' | 'EXCEEDS_LIMIT' | 'INSUFFICIENT_EVIDENCE' | 'NO_MRL_IN_VN';
-type ResultSet = { id: string; sampleId: string | null; confirmedSampleId: string | null; sourceLotId: string | null; laboratorySampleReference: string | null; statedSampleCode: string | null; statedSealCode: string | null; sectionReference: string | null; identityStatus?: string; results: LabCsvRow[] };
+type ResultSet = { id: string; sampleId: string | null; confirmedSampleId: string | null; sourceLotId: string | null; laboratorySampleReference: string | null; statedSampleCode: string | null; statedSealCode: string | null; sectionReference: string | null; identityStatus?: string; results: Array<LabCsvRow & { id?: string }> };
 type Report = { id: string; laboratoryName: string; reportNumber: string; issuedOn: string; receivedAt: string; reportKind: ReportKind; status: 'UNRESOLVED' | 'PENDING_REVIEW' | 'CONFIRMED'; fileName: string; contentType: string; fileSize: number; sha256: string; recordedBy: string; capturedAt: string; recordedAt: string; confirmedBy: string | null; confirmedAt: string | null; resultSets: ResultSet[]; laboratoryConclusion?: string | null; statedStandard?: string | null; assessmentStatus: AssessmentStatus; suggestedMarketCode: string; assessmentReasons: string[]; relatedReportId?: string | null; relationshipReason?: string | null; relatedReports?: Array<{ id: string; reportKind: ReportKind; relationshipReason: string | null }> };
 type SampleOption = { id: string; code: string; sealCode: string; sourceLotId: string; materialDescription?: string | null };
 type ConfirmPayload = { identityChecked: true; transcriptionChecked: true; matches: Array<{ resultSetId: string; sampleId: string; identityBasis: 'SAMPLE_CODE' | 'SEAL_CODE' | 'LAB_REFERENCE'; evidenceRef?: string }> };
@@ -63,7 +64,7 @@ function assessmentPillClass(status: AssessmentStatus) {
   return 'lab-pill neutral';
 }
 
-export function LabReports({ canWrite, sampleId, sourceLotId, onOpenSample, onOpenSourceLot }: { canWrite: boolean; sampleId?: string; sourceLotId?: string; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
+export function LabReports({ canWrite, canManageResidueEvidence = false, companyId = '', sampleId, sourceLotId, onOpenSample, onOpenSourceLot }: { canWrite: boolean; canManageResidueEvidence?: boolean; companyId?: string; sampleId?: string; sourceLotId?: string; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
   const [page, setPage] = useState(1), [retry, setRetry] = useState(0), [list, setList] = useState<Page<Report> | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState(''), [selected, setSelected] = useState<string | null>(null), [creating, setCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | Report['status']>('ALL'), [searchQuery, setSearchQuery] = useState('');
   useEffect(() => {
@@ -80,7 +81,7 @@ export function LabReports({ canWrite, sampleId, sourceLotId, onOpenSample, onOp
     return () => { active = false; controller.abort(); };
   }, [page, retry, sampleId, sourceLotId]);
 
-  if (selected) return <ReportDetail key={selected} id={selected} canWrite={canWrite} onBack={() => { setSelected(null); setRetry(value => value + 1); }} onOpenReport={setSelected} onOpenSample={onOpenSample} onOpenSourceLot={onOpenSourceLot} />;
+  if (selected) return <ReportDetail key={selected} id={selected} canWrite={canWrite} canManageResidueEvidence={canManageResidueEvidence} companyId={companyId} onBack={() => { setSelected(null); setRetry(value => value + 1); }} onOpenReport={setSelected} onOpenSample={onOpenSample} onOpenSourceLot={onOpenSourceLot} />;
 
   const items = list?.items ?? [];
   const confirmedCount = items.filter(r => r.status === 'CONFIRMED').length;
@@ -104,6 +105,7 @@ export function LabReports({ canWrite, sampleId, sourceLotId, onOpenSample, onOp
         {canWrite && <button type="button" onClick={() => setCreating(true)}>+ Receive report</button>}
       </div>
     </header>
+    {canManageResidueEvidence && companyId && <ResidueEvidenceControls active allowed companyId={companyId} />}
 
     <div className="lab-kpi-strip" aria-label="Laboratory register summary">
       <div className="lab-kpi-card"><span>Loaded reports</span><strong>{items.length}</strong><small>Page {list?.page ?? 1} register</small></div>
@@ -279,7 +281,7 @@ function ReportIntake({ canWrite, initialSampleId, initialLaboratory, relatedRep
     </form></section></div>;
 }
 
-function ReportDetail({ id, canWrite, onBack, onOpenReport, onOpenSample, onOpenSourceLot }: { id: string; canWrite: boolean; onBack: () => void; onOpenReport: (id: string) => void; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
+function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBack, onOpenReport, onOpenSample, onOpenSourceLot }: { id: string; canWrite: boolean; canManageResidueEvidence: boolean; companyId: string; onBack: () => void; onOpenReport: (id: string) => void; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
   const [report, setReport] = useState<Report | null>(null), [error, setError] = useState(''), [retry, setRetry] = useState(0), [confirmOpen, setConfirmOpen] = useState(false), [identityChecked, setIdentity] = useState(false), [transcriptionChecked, setTranscription] = useState(false), [matches, setMatches] = useState<Record<string, { sampleId: string; identityBasis: string; evidenceRef: string }>>({}), [selectedSamples, setSelectedSamples] = useState<Record<string, SampleOption>>({}), [substances, setSubstances] = useState<Record<string, { code: string; name: string }>>({}), [confirmPending, setConfirmPending] = useState<Envelope<ConfirmPayload> | null>(null), [busy, setBusy] = useState(false), [mutationError, setMutationError] = useState(''), [relationship, setRelationship] = useState<ReportKind | null>(null);
   useEffect(() => {
     let active = true;
@@ -588,5 +590,6 @@ function ReportDetail({ id, canWrite, onBack, onOpenReport, onOpenSample, onOpen
         </div>
       </form>
     </section></div>}
+    {report && canManageResidueEvidence && companyId && <ResidueEvidenceControls key={report.id} active allowed companyId={companyId} report={{ id: report.id, reportNumber: report.reportNumber, status: report.status, resultSets: report.resultSets.map(set => ({ id: set.id, sourceLotId: set.sourceLotId, results: set.results.filter((result): result is typeof result & { id: string } => !!result.id) })) }} />}
   </div>;
 }

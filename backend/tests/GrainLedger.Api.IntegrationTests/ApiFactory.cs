@@ -33,6 +33,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public string OwnerConnectionString => _postgres.GetConnectionString();
     public bool BrowserCookies { get; init; }
     public TimeProvider Clock { get; init; } = TimeProvider.System;
+    public Action<IServiceCollection>? ConfigureTestServices { get; init; }
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -70,6 +71,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             }
             services.RemoveAll<IEmailSender>(); services.AddSingleton<IEmailSender>(Email);
             services.RemoveAll<TimeProvider>(); services.AddSingleton(Clock);
+            ConfigureTestServices?.Invoke(services);
         });
     }
 

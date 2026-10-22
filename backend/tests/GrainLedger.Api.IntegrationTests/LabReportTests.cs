@@ -418,7 +418,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", unknownSubstance, HttpStatusCode.Conflict);
     }
 
-    private static JsonObject ConfirmRequest(JsonElement report, params SampleIdentity[] samples) => Envelope(new
+    internal static JsonObject ConfirmRequest(JsonElement report, params SampleIdentity[] samples) => Envelope(new
     {
         identityChecked = true, transcriptionChecked = true,
         matches = report.GetProperty("resultSets").EnumerateArray().Select((set, index) => new
@@ -591,7 +591,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal("INSUFFICIENT_EVIDENCE", insuffConfirmed.GetProperty("assessmentStatus").GetString());
     }
 
-    private static async Task<SampleIdentity> SampleAsync(LedgerScenario s, JsonElement? receipt = null, HttpClient? purchaser = null)
+    internal static async Task<SampleIdentity> SampleAsync(LedgerScenario s, JsonElement? receipt = null, HttpClient? purchaser = null)
     {
         var procurement = receipt ?? await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), ["100"]));
         var sourceLotId = procurement.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
@@ -625,14 +625,14 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         method = "Laboratory method A", uncertainty = "±0.000000000001", reference = "page 2, row 1"
     };
 
-    private static object ResultSet(SampleIdentity? sample, object[]? results = null, string? statedCode = null) => new
+    internal static object ResultSet(SampleIdentity? sample, object[]? results = null, string? statedCode = null) => new
     {
         entityId = Guid.NewGuid(), sampleId = sample?.Id, laboratorySampleReference = (string?)null,
         statedSampleCode = statedCode ?? sample?.Code, statedSealCode = sample?.Seal,
         sectionReference = "page 2", results = results ?? [Result()]
     };
 
-    private static JsonObject ReportRequest(object[] sets, string kind = "FINAL", Guid? relatedReportId = null,
+    internal static JsonObject ReportRequest(object[] sets, string kind = "FINAL", Guid? relatedReportId = null,
         string? reason = null, byte[]? bytes = null) => Envelope(new
     {
         entityId = Guid.NewGuid(), laboratoryName = "External Test Laboratory", reportNumber = $"LAB-{Guid.NewGuid():N}",
@@ -649,7 +649,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         payloadSchemaVersion = 1, payload
     })!.AsObject();
 
-    private static Guid EntityId(JsonObject envelope) => envelope["payload"]!["entityId"]!.GetValue<Guid>();
+    internal static Guid EntityId(JsonObject envelope) => envelope["payload"]!["entityId"]!.GetValue<Guid>();
 
     private static async Task ExpectAsync(HttpClient client, HttpMethod method, string route, object body, HttpStatusCode expected)
     {
@@ -668,5 +668,5 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Contains("nosniff", response.Headers.GetValues("X-Content-Type-Options"));
     }
 
-    private sealed record SampleIdentity(Guid Id, Guid SourceLotId, Guid LotId, string Code, string Seal, JsonElement Receipt);
+    internal sealed record SampleIdentity(Guid Id, Guid SourceLotId, Guid LotId, string Code, string Seal, JsonElement Receipt);
 }

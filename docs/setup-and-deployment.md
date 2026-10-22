@@ -145,6 +145,14 @@ Follow with Capture migration `20261020120000_TrimLegacyLabIdentityComparisons` 
 
 Original files are stored durably in PostgreSQL, limited to 10 MiB per report, and served only through scoped authenticated downloads. Include Capture laboratory tables in database backup/restore procedures. No facility or external laboratory account is required. Applying migrations to shared Supabase requires explicit approval; use disposable test containers for write-based verification unless separately approved. See [laboratory API](sample-api.md#laboratory-report-routes).
 
+### F12 residue bounds
+
+F12 is implemented locally, not installed on shared Supabase. Apply Catalog `20261022000000_ReviewedResidueRules`, Capture `20261022000000_ReviewedResidueEvidence`, and Ledger `20261022030000_ResidueBounds` in the existing module migration order through an explicitly approved migration-owner job. Restart with the matching API/web build and restricted runtime grant/validation setup. Normal startup must not migrate. No seed, reset, stock backfill or automatic publication of bundled scientific coefficients is required or authorized.
+
+New reviewed rule/source-group/report-selection payloads and evaluation snapshots are append-only. Include them in backup/restore. Runtime access remains protected: no direct Ledger snapshot writes or private-table reads; Catalog/Capture publication uses narrowly granted protected commands. Existing runtime grants must be updated with the migration-owner deployment procedure, not owner credentials in normal application startup.
+
+Operational numeric use requires actual reviewed interpretation, material/method/residue-definition applicability, source representation, precision and process/fraction factors. Until present, evaluations return explicit `UNRESOLVED` with null endpoints. Synthetic rules used by isolated tests/browser harness must never be auto-published to shared or production data. F12 is not legal PASS, HOLD release or export certification. Routes, permission matrix and UI steps: [F12 delivered contracts](f12-residue-bounds-plan.md#9-delivered-f12-contracts).
+
 ### Dependency patch pins
 
 Backend projects using Npgsql `10.0.3` pin `Microsoft.EntityFrameworkCore.Relational` to `10.0.13`; keep EF Core runtime packages aligned at `10.0.13` across API and transitive project graphs. Identity pins `System.Security.Cryptography.Pkcs` to `10.0.13` for the MailKit/MimeKit dependency chain. Preserve these explicit patch pins when updating dependencies unless a reviewed dependency change supersedes them.

@@ -30,6 +30,9 @@ public static class Permissions
     public const string ContainersWrite = "containers.write";
     public const string FarmsWrite = "farms.write";
     public const string PurchasesWrite = "purchases.write";
+    public const string ResiduePolicyManage = "residue.policy.manage";
+    public const string ResidueEvidenceManage = "residue.evidence.manage";
+    public const string ResidueEvaluate = "residue.evaluate";
 
     public static IReadOnlyList<string> All { get; } = Array.AsReadOnly<string>(
     [
@@ -38,16 +41,16 @@ public static class Permissions
         HoldsProcess, ReconciliationRead, HistoryRead, LotsReadFacility, LotsReceive,
         ConversionsWrite, ContainersOperate, FarmsRead, LotsReadTenant, LabWrite,
         BlendApprove, HoldsManage, TraceReadTenant, MrlRead, LabRead, BlendPropose,
-        ContainersWrite, FarmsWrite, PurchasesWrite
+        ContainersWrite, FarmsWrite, PurchasesWrite, ResiduePolicyManage, ResidueEvidenceManage, ResidueEvaluate
     ]);
 
     public static string[] ForRole(string role) => role switch
     {
-        Roles.Administrator => [IdentityManage, PlatformConfigure, TraceReadAll],
-        Roles.MillManager => [PlatformRead, LotsReadAll, ConversionsRead, ConversionsConfirm, CorrectionsReconcile, ReceivingReconcile, HoldsProcess, ReconciliationRead, HistoryRead],
-        Roles.MillOperator => [PlatformRead, LotsReadFacility, LotsReceive, ConversionsWrite, ContainersOperate, HistoryRead],
-        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead],
-        Roles.ExportStaff => [MrlRead, LotsReadTenant, LabRead, BlendPropose, ContainersWrite, TraceReadTenant, HistoryRead],
+        Roles.Administrator => [IdentityManage, PlatformConfigure, TraceReadAll, ResiduePolicyManage],
+        Roles.MillManager => [PlatformRead, LotsReadAll, ConversionsRead, ConversionsConfirm, CorrectionsReconcile, ReceivingReconcile, HoldsProcess, ReconciliationRead, HistoryRead, ResidueEvaluate],
+        Roles.MillOperator => [PlatformRead, LotsReadFacility, LotsReceive, ConversionsWrite, ContainersOperate, HistoryRead, ResidueEvaluate],
+        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead, ResidueEvidenceManage, ResidueEvaluate],
+        Roles.ExportStaff => [MrlRead, LotsReadTenant, LabRead, BlendPropose, ContainersWrite, TraceReadTenant, HistoryRead, ResidueEvaluate],
         Roles.PurchasingStaff => [FarmsWrite, PurchasesWrite, HistoryRead],
         _ => []
     };

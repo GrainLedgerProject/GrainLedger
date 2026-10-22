@@ -35,6 +35,40 @@ public sealed class BrowserWorkflowHost
         scenario.Accounts.Add("export", (exportUser, exportSession, exportClient));
         await scenario.ReceiptAsync("10");
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
+        var residue = await ResidueScenario.CreateAsync(scenario);
+        var first = await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("60"));
+        var second = await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("40"));
+        var firstReport = await residue.ReportAsync(first);
+        var lateReport = await residue.ReportAsync(second, [residue.Result("0.55", "±0.25")], confirm: false);
+        await residue.PublishRuleAsync();
+        await residue.SelectAsync(first, firstReport.Report);
+        foreach (var (kind, input, output, factor) in new[]
+        {
+            ("DRYING", "RAW_PADDY", "DRIED_PADDY", "1"),
+            ("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5"),
+            ("BLENDING", "HEAD_RICE", "BLENDED_RICE", "1"),
+            ("CUSTODY_INGRESS", "BLENDED_RICE", "BLENDED_RICE", "1"),
+            ("CUSTODY_WITHDRAW", "BLENDED_RICE", "BLENDED_RICE", "1")
+        }) await residue.ProcessRuleAsync(kind, input, output, factor, factor);
+        await residue.BlendCompatibilityAsync("HEAD_RICE");
+        var driedFirst = LedgerScenario.Output(await scenario.CommitAsync(await scenario.DraftAsync(
+            "DRYING", [(first.LotId, "60")], [("DRIED_PADDY", "60")])));
+        var driedSecond = LedgerScenario.Output(await scenario.CommitAsync(await scenario.DraftAsync(
+            "DRYING", [(second.LotId, "40")], [("DRIED_PADDY", "40")])));
+        var headFirst = LedgerScenario.Output(await scenario.CommitAsync(await scenario.DraftAsync(
+            "MILLING", [(driedFirst, "60")], [("HEAD_RICE", "60")])));
+        var headSecond = LedgerScenario.Output(await scenario.CommitAsync(await scenario.DraftAsync(
+            "MILLING", [(driedSecond, "40")], [("HEAD_RICE", "40")])));
+        var blended = LedgerScenario.Output(await scenario.CommitAsync(await scenario.DraftAsync(
+            "BLENDING", [(headFirst, "60"), (headSecond, "40")], [("BLENDED_RICE", "100")])));
+        var mixedLocation = await residue.MixedLocationAsync();
+        await scenario.TransferAsync(blended, "100", to: mixedLocation);
+        var (pool, revision) = await residue.PoolAsync(mixedLocation);
+        var aliquot = await residue.WithdrawAsync(mixedLocation, pool, revision, "25");
+        var (remainder, _) = await residue.PoolAsync(mixedLocation);
+        var initialEvaluation = await residue.EvaluateAsync(aliquot);
+        var latePublished = false;
+        using var lateGate = new SemaphoreSlim(1, 1);
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -56,6 +90,46 @@ public sealed class BrowserWorkflowHost
         bridge.Run(async context =>
         {
             // Provisioning belongs only to this loopback test bridge, never production API.
+            if (context.Request.Path == "/__browser/f12")
+            {
+                if (!HttpMethods.IsGet(context.Request.Method)) { context.Response.StatusCode = 405; return; }
+                context.Response.ContentType = "text/html; charset=utf-8";
+                await context.Response.WriteAsync($"""
+                    <!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1">
+                    <title>Synthetic F12 browser scenario</title><main><h1>SYNTHETIC F12 — isolated database only</h1>
+                    <p>Not operational scientific approval or compliance. Source 60 kg [0.1,0.2] + source 40 kg [0.3,0.8],
+                    drying factor 1, milling factor 0.5, blend/pool factors 1. Expected fresh interval [0.09,0.22] mg/kg.</p>
+                    <p>Second report starts pending. Initial snapshot stays unresolved after late evidence.</p>
+                    <ul><li><a href="http://localhost:5173/ledger/lots/{aliquot}">Aliquot {aliquot}</a></li>
+                    <li><a href="http://localhost:5173/ledger/lots/{remainder}">Remainder {remainder}</a></li>
+                    <li><a href="http://localhost:5173/ledger/lots/{blended}">Exhausted blend {blended}</a></li>
+                    <li><a href="http://localhost:5173/ledger/lots/{first.LotId}">Exhausted source {first.LotId}</a></li>
+                    <li>Initial evaluation: {initialEvaluation.GetProperty("id").GetGuid()}</li></ul>
+                    <form method="post" action="/__browser/f12/late-evidence"><button>Confirm late evidence through real API</button></form>
+                    <p><a href="/__browser/session/customer">Open customer workspace</a> ·
+                    <a href="/__browser/session/operator">Open assigned operator</a> ·
+                    <a href="/__browser/session/foreignCustomer">Open foreign customer (denied lot)</a></p></main></html>
+                    """);
+                return;
+            }
+            if (context.Request.Path == "/__browser/f12/late-evidence")
+            {
+                if (!HttpMethods.IsPost(context.Request.Method)) { context.Response.StatusCode = 405; return; }
+                await lateGate.WaitAsync(context.RequestAborted);
+                try
+                {
+                    if (!latePublished)
+                    {
+                        await LedgerScenario.SendAsync(scenario.Customer, HttpMethod.Post,
+                            $"/api/lab-reports/{lateReport.ReportId}/confirm", LabReportTests.ConfirmRequest(lateReport.Report, second));
+                        await residue.SelectAsync(second, lateReport.Report, "0.25");
+                        latePublished = true;
+                    }
+                }
+                finally { lateGate.Release(); }
+                context.Response.Redirect($"http://localhost:5173/ledger/lots/{aliquot}");
+                return;
+            }
             if (context.Request.Path.StartsWithSegments("/__browser/session", out var remaining))
             {
                 if (!HttpMethods.IsGet(context.Request.Method)) { context.Response.StatusCode = 405; return; }
@@ -103,6 +177,21 @@ public sealed class BrowserWorkflowHost
                 isolationLocationId = scenario.IsolationLocationId, foreignLocationId = scenario.ForeignLocationId,
                 equipmentId = scenario.EquipmentId, commodityId = scenario.CommodityId, catalogCommodityId = scenario.CatalogCommodityId,
                 farmerId = scenario.FarmerId, seasonId = scenario.SeasonId, plotSeasonId = scenario.PlotSeasonId,
+                f12 = new
+                {
+                    synthetic = true, substanceId = residue.SubstanceId, uncoveredSubstanceId = residue.OtherSubstanceId,
+                    sourceLotIds = new[] { first.LotId, second.LotId }, sourceIds = new[] { first.SourceLotId, second.SourceLotId },
+                    driedLotIds = new[] { driedFirst, driedSecond }, headLotIds = new[] { headFirst, headSecond },
+                    blendedLotId = blended, poolLotId = pool, aliquotLotId = aliquot, remainderLotId = remainder,
+                    mixedLocationId = mixedLocation, lateReportId = lateReport.ReportId,
+                    initialEvaluationId = initialEvaluation.GetProperty("id").GetGuid(),
+                    aliquotUrl = $"http://localhost:5173/ledger/lots/{aliquot}",
+                    remainderUrl = $"http://localhost:5173/ledger/lots/{remainder}",
+                    exhaustedSourceUrl = $"http://localhost:5173/ledger/lots/{first.LotId}",
+                    actionsUrl = "http://localhost:5080/__browser/f12",
+                    lateEvidenceAction = "POST http://localhost:5080/__browser/f12/late-evidence",
+                    expectedFreshLower = "0.09", expectedFreshUpper = "0.22", unit = "mg/kg", basis = ResidueScenario.Basis
+                },
                 evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(), accounts
             }, new JsonSerializerOptions { WriteIndented = true });
         try { await bridge.StartAsync(); await bridge.WaitForShutdownAsync(); }

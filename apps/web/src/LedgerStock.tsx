@@ -1,3 +1,4 @@
+import { ResidueBounds } from './ResidueBounds';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
 import { Choice, Enum, Evidence, Feedback, hasPositivePhysicalPosition, isUnavailableHistoricalMixedLot, ListControls, Mass, Pagination, Panel, Table, emptyLookup, id, iso, mutate, name, now, positive, stages, useAction, type Lookup, type Lot, type Page, type Row } from './ledger-ui';
@@ -66,6 +67,7 @@ export function LedgerStock({ user, active = true, initialLotId }: { user: User;
       <h3>Stock positions</h3><Table rows={selected.positions.map(p => ({ Location: name(look.locations, p.locationId), Facility: name(look.facilities, p.facilityId), 'Physical quantity (kg)': p.quantityKg, 'Available quantity (kg)': p.availableKg }))} label="stock positions" />
       {selected.isCurrentPool || selected.custodyDerived ? <><h3>Source composition</h3><p>Source quantities describe lineage attribution; they are not separate withdrawable stock.</p>{selected.sourceComposition ? <Table rows={selected.sourceComposition.map(source => ({ 'Source lot': source.sourceLotCode || source.sourceLotId, 'Attributed share (kg)': source.quantityKg }))} label="source composition" /> : <p>Source composition unavailable in current scope.</p>}</> : <><h3>Source contributions</h3>{selected.contributions ? <details><summary>Source contributions</summary><Table rows={selected.contributions} label="source contributions" /></details> : <p>Source contributions unavailable in current scope.</p>}</>}
       <h3>Lot history</h3>{selected.history ? <details><summary>Lot history</summary><LotHistory key={selected.id} lotId={selected.id} initial={selected.history} /></details> : <p>Lot history unavailable in current scope.</p>}
+      <ResidueBounds key={selected.id} lotId={selected.id} allowed={user.permissions.includes('residue.evaluate')} />
     </Panel>}</section>
     <section hidden={task !== 'history'}><div className="ledger-task-intro"><h2>History</h2><p>Chronological events retain original postings and reversal references.</p></div><History active={active && task === 'history'} look={look} /></section>
     <section hidden={task !== 'holds'}><div className="ledger-task-intro"><h2>HOLDs & alerts</h2><p>HOLD stays active after acknowledgement, isolation, response or notification read. No release workflow.</p></div><Holds active={active && task === 'holds'} look={look} user={user} onChanged={refresh} /></section>

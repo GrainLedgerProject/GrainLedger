@@ -225,7 +225,7 @@ This plan does not authorize automatic HOLD placement, unrestricted release, or 
 4. Add Vietnam-default market assessment only when legal data and interpretation/coverage rules are approved. Reuse Catalog MRL version resolution and preserve decision evidence. Until then, intake remains available but compliance assessment is explicitly insufficient/not assessed.
 5. Exercise the complete sample-to-lot path with isolated PostgreSQL and the actual API/browser surface. Do not migrate, seed, or mutate the shared Supabase database for verification without explicit approval.
 
-Steps 1–3 and isolated verification in step 5 are implemented. Step 4 is deliberately gated: the API reports suggested market `VN`, `NOT_ASSESSED`, and the missing legal/interpretation/coverage prerequisites, without creating assessment decisions or claiming compliance.
+Steps 1–3 and isolated verification in step 5 are implemented. Step 4's full decision-time legal assessment remains gated. The existing read-time VN numeric baseline is described in the API guide; it is not a compliance decision. [F12 derived lot intervals](f12-residue-bounds-plan.md#9-delivered-f12-contracts) are implemented separately, with reviewed interpretation/evidence/process inputs and explicit `UNRESOLVED` outcomes when those are missing. F12 does not create market assessments, stock changes or HOLD release.
 The role-by-role [laboratory workflow guide](lab-flow-guide.md) describes the implemented user path; this plan remains the policy/scope record.
 
 Prefer extending existing module features and in-process contracts. Do not add a laboratory integration service or new abstraction layer solely for this workflow. Do not pass EF entities across module boundaries.

@@ -70,11 +70,19 @@ Export Staff can read company-scoped laboratory evidence when granted `lab.read`
 
 Preserve laboratory wording and units. `ND` means not detected under reported method/limits; it is not zero. `<0.01` is not a measured value equal to `0.01`. An omitted substance is not evidence it was tested or passed. Do not map unknown substances or invent conversions, limits, or legal conclusions. A laboratory's own conclusion and stated standard remain its assertions, not GrainLedger assessment.
 
-Report confirmation checks transcription and sample identity. Assessment remains `NOT_ASSESSED`, not `PASS`. No automatic HOLD or release follows report intake, confirmation, amendment, or retest. Existing stock and HOLD decisions remain unchanged.
+Report confirmation checks transcription and sample identity, not PASS. A confirmed report may show the existing numeric VN baseline when published rows exist; that comparison is separate from F12 intervals and is not a legal certificate. No automatic HOLD or release follows report intake, confirmation, amendment, or retest. Existing stock and HOLD decisions remain unchanged.
 
 ## Mixed-bulk source evidence boundary
 
 Pooling does not change sample or report subject: samples remain associated with original procurement source lot. Procurement and Ledger views may link that source to current pool/descendant stock through source-attributed lineage; this is evidence navigation, not a pool-specific laboratory test. A late confirmed report remains source identity `NOT_ASSESSED` and does not adjust pool shares, stock availability or HOLD. Positive custody/processing ancestry propagates explicit HOLDs only to descendants containing that source; a later top-up does not taint an earlier aliquot. Isolation movement preserves HOLD and does not release it. No automatic lab-triggered HOLD or assessment exists.
+
+## F12 calculated lot bounds
+
+Laboratory facts do not automatically become guaranteed intervals. Administrator must publish reviewed interpretation/process rules with actual scientific justification. Customer Manager records reviewed material basis, normalized uncertainty/thresholds, explicit result selection and any superseded results in confirmed-report detail. Missing or conflicting inputs remain `UNRESOLVED`; latest/lowest report never wins by default.
+
+For untested sources, **Laboratory reports → F12 fallback and report evidence** supports explicit own-company source-group membership and externally supported fallback without requiring a report. Record source IDs, material/time scope, interval, reviewed precision, evidence/reviewer and explicit direct/fallback precedence; shared farmer/plot alone does not establish representation.
+
+Open **Ledger → Stock → lot detail → F12 lot residue bounds**. Select substances, then **Calculate bounds**. Results show intervals or unresolved reasons, computation time and policy/evidence/physical-path references. **Recalculate bounds** creates a new snapshot; history remains explicitly historical after later reports/rules. Assigned mill staff may inspect derived bounds without access to private laboratory originals. F12 changes no stock/HOLDs and issues no market PASS. Technical API, deployment and policy boundaries: [F12 contracts](f12-residue-bounds-plan.md#9-delivered-f12-contracts).
 
 ## Fictional example
 

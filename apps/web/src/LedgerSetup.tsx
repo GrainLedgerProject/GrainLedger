@@ -42,7 +42,7 @@ export function LedgerSetup({ user, active = true }: { user: User; active?: bool
   return <><Feedback {...action} /><h2>Setup</h2><p className="ledger-task-intro">{configure ? 'Start with Catalog, then create facilities and assign mill staff. Configure evidence-backed policies only when required.' : 'View facilities, locations, equipment and staff within your assigned scope.'}</p>
     <details className="ledger-disclosure" open>
       <summary>{configure ? 'Step 1 — Catalog and basic facility setup' : 'Facilities and resources'}</summary>
-      {configure && <CatalogScreen active={active} />}
+      {configure && <CatalogScreen active={active} canManageResidueRules={user.permissions.includes('residue.policy.manage')} />}
       <Panel title="Facilities, locations, equipment and staff">
         {configure && <p>Create a facility first. Then add its locations, equipment, and mill staff assignment.</p>}
         {configure && <>

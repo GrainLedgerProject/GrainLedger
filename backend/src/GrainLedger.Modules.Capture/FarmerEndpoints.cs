@@ -34,6 +34,7 @@ public static class CaptureModule
             if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("ConnectionStrings:GrainLedger is required.");
             options.UseNpgsql(connection, n => n.MigrationsAssembly(typeof(CaptureDbContext).Assembly.FullName));
         });
+        services.AddScoped<IResidueEvidenceReader, ResidueEvidenceReader>();
         return services;
     }
 
@@ -41,6 +42,7 @@ public static class CaptureModule
     {
         endpoints.MapSampleEndpoints();
         endpoints.MapLabReportEndpoints();
+        endpoints.MapResidueEvidenceEndpoints();
         var group = endpoints.MapGroup("/api/farmers").RequireAuthorization()
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>();
         group.MapPost("", RegisterAsync).RequireAuthorization("farms.write");

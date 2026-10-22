@@ -74,6 +74,7 @@ public static class LedgerEndpoints
         });
         group.MapGet("/evidence/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => { var evidence = await ledger.ReadEvidenceAsync(id, ct); return Results.File(evidence.Content, evidence.ContentType, evidence.FileName); });
         LedgerManagementEndpoints.MapManagementRoutes(group);
+        ResidueEvaluationEndpoints.MapResidueEvaluationRoutes(group);
         return endpoints;
     }
 }
