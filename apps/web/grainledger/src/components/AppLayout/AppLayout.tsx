@@ -14,7 +14,7 @@ export const AppLayout: React.FC = () => {
   return (
     <div className="min-h-screen bg-surface-base flex flex-row selection:bg-accent-primary/20 selection:text-accent-primary">
       {/* Dynamic Island Floating Notification */}
-      <DynamicIslandNotification />
+      {/* <DynamicIslandNotification /> */}
 
       {/* App Sidebar */}
       <AppSidebar />
@@ -44,8 +44,10 @@ export const AppLayout: React.FC = () => {
             </span>
           </div>
           <div className="flex items-center gap-4 text-[11px] text-ink-tertiary/70">
-            <span>{t('common.isoComplianceFooter', 'ISO 22095:2020 Mass Balance')}</span>
-            <span>{t('common.versionFooter', 'v1.0.0-dev')}</span>
+            <span>
+              {t("common.isoComplianceFooter", "ISO 22095:2020 Mass Balance")}
+            </span>
+            <span>{t("common.versionFooter", "v1.0.0-dev")}</span>
           </div>
         </footer>
       </div>

@@ -7,7 +7,7 @@
  */
 /* eslint-disable react-refresh/only-export-components */
 import { AppLayout } from "@/components/AppLayout/AppLayout";
-import { AppleSuspenseLoader } from "@/components/AppleSuspenseLoader/AppleSuspenseLoader";
+import { SuspenseLoader } from "@/components/SuspenseLoader/SuspenseLoader";
 import React, { Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "./ProtectedRoute";
@@ -19,187 +19,189 @@ import { ProtectedRoute } from "./ProtectedRoute";
 const PlaceholderPage = React.lazy(() =>
   import("@/components/PlaceholderPage/PlaceholderPage").then((m) => ({
     default: m.PlaceholderPage,
-  }))
+  })),
 );
 
 // Auth pages (public, loaded on-demand)
 const SignInPage = React.lazy(() =>
-  import("@/features/auth/pages/SignInPage").then((m) => ({ default: m.SignInPage }))
+  import("@/features/auth/pages/SignInPage").then((m) => ({
+    default: m.SignInPage,
+  })),
 );
 const ForgotPasswordPage = React.lazy(() =>
   import("@/features/auth/pages/ForgotPasswordPage").then((m) => ({
     default: m.ForgotPasswordPage,
-  }))
+  })),
 );
 const AcceptInvitationPage = React.lazy(() =>
   import("@/features/auth/pages/AcceptInvitationPage").then((m) => ({
     default: m.AcceptInvitationPage,
-  }))
+  })),
 );
 const EditProfilePage = React.lazy(() =>
   import("@/features/auth/pages/EditProfilePage").then((m) => ({
     default: m.EditProfilePage,
-  }))
+  })),
 );
 const ChangePasswordPage = React.lazy(() =>
   import("@/features/auth/pages/ChangePasswordPage").then((m) => ({
     default: m.ChangePasswordPage,
-  }))
+  })),
 );
 
 // Landing
 const LandingPage = React.lazy(() =>
   import("@/features/landing/pages/LandingPage").then((m) => ({
     default: m.LandingPage,
-  }))
+  })),
 );
 
 // Dashboard
 const RoleHomePage = React.lazy(() =>
   import("@/features/dashboard/pages/RoleHomePage").then((m) => ({
     default: m.RoleHomePage,
-  }))
+  })),
 );
 
 // Admin pages
 const CustomerOrganizationsPage = React.lazy(() =>
   import("@/features/admin/pages/CustomerOrganizationsPage").then((m) => ({
     default: m.CustomerOrganizationsPage,
-  }))
+  })),
 );
 const UserAccessManagementPage = React.lazy(() =>
   import("@/features/admin/pages/UserAccessManagementPage").then((m) => ({
     default: m.UserAccessManagementPage,
-  }))
+  })),
 );
 const FacilityConfigPage = React.lazy(() =>
   import("@/features/admin/pages/FacilityConfigPage").then((m) => ({
     default: m.FacilityConfigPage,
-  }))
+  })),
 );
 const BalancePolicyPage = React.lazy(() =>
   import("@/features/admin/pages/BalancePolicyPage").then((m) => ({
     default: m.BalancePolicyPage,
-  }))
+  })),
 );
 const ReceivingThresholdsPage = React.lazy(() =>
   import("@/features/admin/pages/ReceivingThresholdsPage").then((m) => ({
     default: m.ReceivingThresholdsPage,
-  }))
+  })),
 );
 
 // Catalogs
 const MasterDataPage = React.lazy(() =>
   import("@/features/catalogs/pages/MasterDataPage").then((m) => ({
     default: m.MasterDataPage,
-  }))
+  })),
 );
 const MrlVersionsPage = React.lazy(() =>
   import("@/features/catalogs/pages/MrlVersionsPage").then((m) => ({
     default: m.MrlVersionsPage,
-  }))
+  })),
 );
 
 // Field pages
 const FarmerRegistrationPage = React.lazy(() =>
   import("@/features/field/pages/FarmerRegistrationPage").then((m) => ({
     default: m.FarmerRegistrationPage,
-  }))
+  })),
 );
 const PlotRegistrationPage = React.lazy(() =>
   import("@/features/field/pages/PlotRegistrationPage").then((m) => ({
     default: m.PlotRegistrationPage,
-  }))
+  })),
 );
 const PesticideDeclarationPage = React.lazy(() =>
   import("@/features/field/pages/PesticideDeclarationPage").then((m) => ({
     default: m.PesticideDeclarationPage,
-  }))
+  })),
 );
 const ProcurementReceiptPage = React.lazy(() =>
   import("@/features/field/pages/ProcurementReceiptPage").then((m) => ({
     default: m.ProcurementReceiptPage,
-  }))
+  })),
 );
 const FieldSampleRegistrationPage = React.lazy(() =>
   import("@/features/field/pages/FieldSampleRegistrationPage").then((m) => ({
     default: m.FieldSampleRegistrationPage,
-  }))
+  })),
 );
 const OfflineSyncQueuePage = React.lazy(() =>
   import("@/features/field/pages/OfflineSyncQueuePage").then((m) => ({
     default: m.OfflineSyncQueuePage,
-  }))
+  })),
 );
 
 // Mill pages
 const ReceivingTasksPage = React.lazy(() =>
   import("@/features/mill/pages/ReceivingTasksPage").then((m) => ({
     default: m.ReceivingTasksPage,
-  }))
+  })),
 );
 const OperationEntryPage = React.lazy(() =>
   import("@/features/mill/pages/OperationEntryPage").then((m) => ({
     default: m.OperationEntryPage,
-  }))
+  })),
 );
 const CorrectionRequestPage = React.lazy(() =>
   import("@/features/mill/pages/CorrectionRequestPage").then((m) => ({
     default: m.CorrectionRequestPage,
-  }))
+  })),
 );
 const PendingCorrectionsPage = React.lazy(() =>
   import("@/features/mill/pages/PendingCorrectionsPage").then((m) => ({
     default: m.PendingCorrectionsPage,
-  }))
+  })),
 );
 const ReconciliationReviewPage = React.lazy(() =>
   import("@/features/mill/pages/ReconciliationReviewPage").then((m) => ({
     default: m.ReconciliationReviewPage,
-  }))
+  })),
 );
 const StockOverviewPage = React.lazy(() =>
   import("@/features/mill/pages/StockOverviewPage").then((m) => ({
     default: m.StockOverviewPage,
-  }))
+  })),
 );
 
 // Compliance pages
 const LabSampleRegistrationPage = React.lazy(() =>
   import("@/features/compliance/pages/LabSampleRegistrationPage").then((m) => ({
     default: m.LabSampleRegistrationPage,
-  }))
+  })),
 );
 const MrlComplianceCheckPage = React.lazy(() =>
   import("@/features/compliance/pages/MrlComplianceCheckPage").then((m) => ({
     default: m.MrlComplianceCheckPage,
-  }))
+  })),
 );
 const SafetyMarginPolicyPage = React.lazy(() =>
   import("@/features/compliance/pages/SafetyMarginPolicyPage").then((m) => ({
     default: m.SafetyMarginPolicyPage,
-  }))
+  })),
 );
 
 // Audit
 const EventHistoryPage = React.lazy(() =>
   import("@/features/audit/pages/EventHistoryPage").then((m) => ({
     default: m.EventHistoryPage,
-  }))
+  })),
 );
 
 // Risk
 const HoldManagementPage = React.lazy(() =>
   import("@/features/risk/pages/HoldManagementPage").then((m) => ({
     default: m.HoldManagementPage,
-  }))
+  })),
 );
 
 // ---------------------------------------------------------------------------
 // Suspense wrapper — wraps every lazy route element with shimmer fallback
 // ---------------------------------------------------------------------------
 function L(props: { children: React.ReactNode }) {
-  return <Suspense fallback={<AppleSuspenseLoader />}>{props.children}</Suspense>;
+  return <Suspense fallback={<SuspenseLoader />}>{props.children}</Suspense>;
 }
 
 // ---------------------------------------------------------------------------

@@ -119,7 +119,7 @@ export const StockOverviewPage: React.FC = () => {
           <p className="text-xs text-ink-secondary mt-0.5">
             {t(
               "mill.stock.pageSubtitle",
-              "Giám sát số lượng tồn kho khả dụng, bảo lưu và cách ly phong tỏa (HOLD) độc lập theo từng Tenant công ty."
+              "Giám sát số lượng tồn kho khả dụng, bảo lưu và cách ly phong tỏa (HOLD) độc lập theo từng Tenant công ty.",
             )}
           </p>
         </div>
@@ -177,7 +177,10 @@ export const StockOverviewPage: React.FC = () => {
             <span className="text-sm font-normal">kg</span>
           </div>
           <span className="text-[10px] text-amber-700/80">
-            {t("mill.stock.kpiReservedDesc", "Đã gán vào kế hoạch đóng container")}
+            {t(
+              "mill.stock.kpiReservedDesc",
+              "Đã gán vào kế hoạch đóng container",
+            )}
           </span>
         </div>
 
@@ -203,10 +206,13 @@ export const StockOverviewPage: React.FC = () => {
           <div className="relative w-full sm:w-64">
             <input
               type="text"
-              placeholder={t("mill.stock.searchPlaceholder", "Tìm theo mã lô...")}
+              placeholder={t(
+                "mill.stock.searchPlaceholder",
+                "Tìm theo mã lô...",
+              )}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-surface-base dark:bg-surface-base border border-ink-tertiary/20 focus:border-accent-primary focus:outline-none"
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-surface-base dark:bg-surface-base border border-ink-tertiary/20 focus:border-accent-primary focus:outline-none focus:rounded-lg"
             />
             <MagnifyingGlass
               size={16}
@@ -217,11 +223,23 @@ export const StockOverviewPage: React.FC = () => {
           <div className="flex items-center gap-1.5 flex-wrap">
             {[
               { id: "", label: t("common.all", "Tất cả") },
-              { id: "PADDY", label: t("mill.stock.stagePaddy", "Lúa tươi / Sấy") },
+              {
+                id: "PADDY",
+                label: t("mill.stock.stagePaddy", "Lúa tươi / Sấy"),
+              },
               { id: "BROWN", label: t("mill.stock.stageBrown", "Gạo lức") },
-              { id: "MILLED", label: t("mill.stock.stageMilled", "Gạo trắng xát") },
-              { id: "BLENDED", label: t("mill.stock.stageBlended", "Gạo phối trộn") },
-              { id: "PACKED", label: t("mill.stock.stagePacked", "Đã đóng bao") },
+              {
+                id: "MILLED",
+                label: t("mill.stock.stageMilled", "Gạo trắng xát"),
+              },
+              {
+                id: "BLENDED",
+                label: t("mill.stock.stageBlended", "Gạo phối trộn"),
+              },
+              {
+                id: "PACKED",
+                label: t("mill.stock.stagePacked", "Đã đóng bao"),
+              },
             ].map((st) => (
               <button
                 key={st.id}
@@ -250,7 +268,12 @@ export const StockOverviewPage: React.FC = () => {
       <div className="rounded-xl border border-ink-tertiary/20 bg-surface-base dark:bg-surface-raised overflow-hidden shadow-xs">
         {loading ? (
           <div className="py-16 flex justify-center">
-            <GrainLoader label={t("mill.stock.loadingLabel", "Đang đối chiếu dữ liệu tồn kho...")} />
+            <GrainLoader
+              label={t(
+                "mill.stock.loadingLabel",
+                "Đang đối chiếu dữ liệu tồn kho...",
+              )}
+            />
           </div>
         ) : lots.length === 0 ? (
           <div className="py-16 text-center space-y-2">
@@ -262,7 +285,10 @@ export const StockOverviewPage: React.FC = () => {
               {t("mill.stock.noLotsFound", "Không tìm thấy lô hàng nào")}
             </p>
             <p className="text-xs text-ink-secondary max-w-sm mx-auto">
-              {t("mill.stock.noLotsFoundDesc", "Chưa có dữ liệu tồn kho phù hợp với bộ lọc hiện tại.")}
+              {t(
+                "mill.stock.noLotsFoundDesc",
+                "Chưa có dữ liệu tồn kho phù hợp với bộ lọc hiện tại.",
+              )}
             </p>
           </div>
         ) : (
@@ -270,13 +296,27 @@ export const StockOverviewPage: React.FC = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-surface-raised dark:bg-surface-overlay border-b border-ink-tertiary/20 text-ink-secondary font-semibold uppercase tracking-wider text-[11px]">
                 <tr>
-                  <th className="py-3 px-4">{t("mill.stock.colLotCode", "Mã Lô")}</th>
-                  <th className="py-3 px-4">{t("mill.stock.colStage", "Phân đoạn")}</th>
-                  <th className="py-3 px-4">{t("mill.stock.colOwner", "Chủ hàng (Tenant)")}</th>
-                  <th className="py-3 px-4">{t("mill.stock.colLocation", "Vị trí lưu trữ")}</th>
-                  <th className="py-3 px-4 text-right">{t("mill.stock.colQuantity", "Khối lượng tồn (kg)")}</th>
-                  <th className="py-3 px-4">{t("common.status", "Trạng thái")}</th>
-                  <th className="py-3 px-4 text-center">{t("mill.stock.colDetail", "Chi tiết")}</th>
+                  <th className="py-3 px-4">
+                    {t("mill.stock.colLotCode", "Mã Lô")}
+                  </th>
+                  <th className="py-3 px-4">
+                    {t("mill.stock.colStage", "Phân đoạn")}
+                  </th>
+                  <th className="py-3 px-4">
+                    {t("mill.stock.colOwner", "Chủ hàng (Tenant)")}
+                  </th>
+                  <th className="py-3 px-4">
+                    {t("mill.stock.colLocation", "Vị trí lưu trữ")}
+                  </th>
+                  <th className="py-3 px-4 text-right">
+                    {t("mill.stock.colQuantity", "Khối lượng tồn (kg)")}
+                  </th>
+                  <th className="py-3 px-4">
+                    {t("common.status", "Trạng thái")}
+                  </th>
+                  <th className="py-3 px-4 text-center">
+                    {t("mill.stock.colDetail", "Chi tiết")}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-tertiary/10">
@@ -294,7 +334,11 @@ export const StockOverviewPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-ink-secondary">
-                      {lot.ownerName || t("mill.stock.defaultOwnerName", "Công ty CP Xuất nhập khẩu Gạo")}
+                      {lot.ownerName ||
+                        t(
+                          "mill.stock.defaultOwnerName",
+                          "Công ty CP Xuất nhập khẩu Gạo",
+                        )}
                     </td>
                     <td className="py-3 px-4 font-mono">
                       <span className="inline-flex items-center gap-1 text-ink-secondary">
@@ -308,7 +352,11 @@ export const StockOverviewPage: React.FC = () => {
                     <td className="py-3 px-4">
                       <StatusBadge
                         status={lot.status === "HOLD" ? "HOLD" : "BALANCED"}
-                        label={lot.status === "HOLD" ? t("mill.stock.statusHold", "Lệnh HOLD") : t("mill.stock.statusAvailable", "Khả dụng")}
+                        label={
+                          lot.status === "HOLD"
+                            ? t("mill.stock.statusHold", "Lệnh HOLD")
+                            : t("mill.stock.statusAvailable", "Khả dụng")
+                        }
                       />
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -335,10 +383,14 @@ export const StockOverviewPage: React.FC = () => {
             <div className="p-5 border-b border-ink-tertiary/15 flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-mono font-bold text-accent-primary uppercase tracking-wider">
-                  {t("mill.stock.modalPretitle", "BẢNG KÊ THÀNH PHẦN NGUỒN GỐC ISO 22095")}
+                  {t(
+                    "mill.stock.modalPretitle",
+                    "BẢNG KÊ THÀNH PHẦN NGUỒN GỐC ISO 22095",
+                  )}
                 </span>
                 <h3 className="font-display font-bold text-lg text-ink-primary">
-                  {t("mill.stock.modalTitle", "Chi tiết Lô:")} {selectedLot.code}
+                  {t("mill.stock.modalTitle", "Chi tiết Lô:")}{" "}
+                  {selectedLot.code}
                 </h3>
               </div>
               <button
@@ -384,7 +436,12 @@ export const StockOverviewPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-xs text-ink-primary flex items-center gap-1.5">
                     <Scales size={15} className="text-accent-primary" />
-                    <span>{t("mill.stock.compositionTitle", "Tỷ lệ đóng góp của từng thửa ruộng vào Silo")}</span>
+                    <span>
+                      {t(
+                        "mill.stock.compositionTitle",
+                        "Tỷ lệ đóng góp của từng thửa ruộng vào Silo",
+                      )}
+                    </span>
                   </h4>
                   <span className="text-[11px] font-mono text-ink-tertiary">
                     {t("mill.stock.compositionTotal", "Tổng cộng: 100%")}
@@ -395,8 +452,15 @@ export const StockOverviewPage: React.FC = () => {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-surface-raised text-ink-secondary text-[11px] font-semibold border-b">
                       <tr>
-                        <th className="py-2 px-3">{t("mill.stock.colFarmerPlot", "Nông hộ / Thửa ruộng")}</th>
-                        <th className="py-2 px-3 text-right">{t("mill.stock.colRatio", "Tỷ lệ %")}</th>
+                        <th className="py-2 px-3">
+                          {t(
+                            "mill.stock.colFarmerPlot",
+                            "Nông hộ / Thửa ruộng",
+                          )}
+                        </th>
+                        <th className="py-2 px-3 text-right">
+                          {t("mill.stock.colRatio", "Tỷ lệ %")}
+                        </th>
                         <th className="py-2 px-3 text-right">
                           {t("mill.stock.colMassKg", "Khối lượng (kg)")}
                         </th>
@@ -465,12 +529,17 @@ export const StockOverviewPage: React.FC = () => {
               <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-500/20 text-xs text-[#2F6B3A] dark:text-emerald-300 space-y-1">
                 <span className="font-bold flex items-center gap-1.5">
                   <ShieldCheck size={16} />
-                  <span>{t("mill.stock.complianceBoxTitle", "Tuân thủ Mass Balance ISO 22095:2020")}</span>
+                  <span>
+                    {t(
+                      "mill.stock.complianceBoxTitle",
+                      "Tuân thủ Mass Balance ISO 22095:2020",
+                    )}
+                  </span>
                 </span>
                 <p className="text-[11px] leading-relaxed opacity-90">
                   {t(
                     "mill.stock.complianceBoxDesc",
-                    "Dữ liệu tỷ lệ nguồn gốc được kế thừa xuyên suốt từ lúc thu mua đến khi đóng container 20ft, phục vụ lập Hồ sơ tuân thủ (Digital Dossier) gửi hải quan."
+                    "Dữ liệu tỷ lệ nguồn gốc được kế thừa xuyên suốt từ lúc thu mua đến khi đóng container 20ft, phục vụ lập Hồ sơ tuân thủ (Digital Dossier) gửi hải quan.",
                   )}
                 </p>
               </div>

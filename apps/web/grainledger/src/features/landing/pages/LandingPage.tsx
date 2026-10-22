@@ -6,21 +6,21 @@
  * Modular architecture with Apple Fluid Motion, Liquid Glass materials,
  * and high-performance code-split sections.
  */
-import React from 'react';
-import { AppleNavbar } from '../components/AppleNavbar';
-import { HeroSection } from '../components/HeroSection';
-import { ProblemSection } from '../components/ProblemSection';
-import { BentoGridFeatures } from '../components/BentoGridFeatures';
-import { ComparisonBento } from '../components/ComparisonBento';
-import { LiveSimulatorSection } from '../components/LiveSimulatorSection';
-import { EcosystemSection } from '../components/EcosystemSection';
-import { LandingCtaFooter } from '../components/LandingCtaFooter';
+import React from "react";
+import { Navbar } from "../components/Navbar";
+import { HeroSection } from "../components/HeroSection";
+import { ProblemSection } from "../components/ProblemSection";
+import { BentoGridFeatures } from "../components/BentoGridFeatures";
+import { ComparisonBento } from "../components/ComparisonBento";
+import { LiveSimulatorSection } from "../components/LiveSimulatorSection";
+import { EcosystemSection } from "../components/EcosystemSection";
+import { LandingCtaFooter } from "../components/LandingCtaFooter";
 
 export const LandingPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-surface-base dark:bg-canvas-dark text-ink-primary dark:text-canvas-light font-sans selection:bg-[#2F6B3A]/20 selection:text-[#2F6B3A] transition-colors duration-300">
       {/* 1. Sticky Apple Liquid Glass Navbar */}
-      <AppleNavbar />
+      <Navbar />
 
       <main>
         {/* 2. Hero Section with Cinematic Glow */}
