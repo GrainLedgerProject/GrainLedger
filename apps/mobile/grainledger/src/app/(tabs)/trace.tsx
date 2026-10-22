@@ -7,6 +7,7 @@ import {
   TextInput,
   TouchableOpacity,
   SafeAreaView,
+  RefreshControl,
 } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { Header } from '../../components/common/Header';
@@ -24,14 +25,16 @@ import {
 } from 'lucide-react-native';
 
 export default function TraceScreen() {
-  const { traceLots, getLotByCode } = useMillStore();
-  const [searchInput, setSearchInput] = useState('GL-ST25-202610-VN');
-  const [currentLot, setCurrentLot] = useState(traceLots[0]);
+  const { traceLots, getLotByCode, isLoading, fetchMillData } = useMillStore();
+  const [searchInput, setSearchInput] = useState('');
+  const [selectedLotId, setSelectedLotId] = useState<string | null>(null);
+
+  const currentLot = (selectedLotId ? traceLots.find((l) => l.id === selectedLotId) : undefined) ?? traceLots[0];
 
   const handleSearch = () => {
     const found = getLotByCode(searchInput);
     if (found) {
-      setCurrentLot(found);
+      setSelectedLotId(found.id);
     }
   };
 
@@ -45,7 +48,7 @@ export default function TraceScreen() {
           <Search size={18} color={Colors.textMuted} />
           <TextInput
             style={styles.input}
-            placeholder="Nhập mã lô hàng (VD: GL-ST25-202610-VN)"
+            placeholder="Nhập mã lô hàng (VD: RAW-...)"
             placeholderTextColor={Colors.textMuted}
             value={searchInput}
             onChangeText={setSearchInput}
@@ -57,24 +60,36 @@ export default function TraceScreen() {
         </View>
 
         {/* Suggestion Chips */}
-        <View style={styles.suggestionRow}>
-          <Text style={styles.suggestLabel}>Mẫu thử:</Text>
-          <TouchableOpacity
-            style={styles.chip}
-            onPress={() => {
-              setSearchInput('GL-ST25-202610-VN');
-              setCurrentLot(traceLots[0]);
-            }}
-          >
-            <Text style={styles.chipText}>Lô Gạo ST25 Xuất khẩu</Text>
-          </TouchableOpacity>
-        </View>
+        {traceLots.length > 0 ? (
+          <View style={styles.suggestionRow}>
+            <Text style={styles.suggestLabel}>Lô hàng thực tế:</Text>
+            {traceLots.slice(0, 3).map((lot) => (
+              <TouchableOpacity
+                key={lot.id}
+                style={[styles.chip, currentLot?.id === lot.id && { borderColor: Colors.primary }]}
+                onPress={() => {
+                  setSearchInput(lot.lotCode);
+                  setSelectedLotId(lot.id);
+                }}
+              >
+                <Text style={styles.chipText}>{lot.lotCode}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isLoading}
+            onRefresh={fetchMillData}
+            colors={[Colors.primary]}
+          />
+        }
       >
         {currentLot ? (
           <View>

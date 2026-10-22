@@ -1,36 +1,36 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  TextInput,
-  Alert,
-} from 'react-native';
 import { useRouter } from 'expo-router';
-import { Colors } from '../../theme/colors';
-import { Header } from '../../components/common/Header';
-import { Card } from '../../components/common/Card';
-import { Button } from '../../components/common/Button';
-import { useAuthStore } from '../../store/authStore';
-import { useOfflineStore } from '../../store/offlineStore';
-import { ROLE_DEFINITIONS, UserRole } from '../../types/roles';
-import { api } from '../../services/api';
 import {
-  Shield,
+  Building,
   Cloud,
+  LogOut,
   RefreshCw,
   Server,
-  LogOut,
-  Building,
-  CheckCircle,
+  Shield,
+  KeyRound,
 } from 'lucide-react-native';
+import { useState } from 'react';
+import {
+  Alert,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { Button } from '../../components/common/Button';
+import { Card } from '../../components/common/Card';
+import { Header } from '../../components/common/Header';
+import { api } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
+import { useOfflineStore } from '../../store/offlineStore';
+import { Colors } from '../../theme/colors';
+import { ROLE_DEFINITIONS } from '../../types/roles';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, activeRole, switchRole, logout } = useAuthStore();
+  const { user, activeRole, logout } = useAuthStore();
   const { queue, isSyncing, lastSyncedAt, syncAll, getPendingCount } = useOfflineStore();
 
   const [apiUrl, setApiUrl] = useState(api.getBaseUrl());
@@ -39,27 +39,42 @@ export default function ProfileScreen() {
 
   const handleSaveApiUrl = async () => {
     await api.setBaseUrl(apiUrl);
-    Alert.alert('Thành công', `Đã lưu địa chỉ máy chủ: ${apiUrl}`);
+    const normalized = api.getBaseUrl();
+    setApiUrl(normalized);
+    Alert.alert('Thành công', `Đã lưu địa chỉ máy chủ: ${normalized}`);
   };
 
   const handleTestConnection = async () => {
     setTestingConnection(true);
-    const res = await api.request('/api/ledger/lookups');
+    // Ping /health endpoint (returns {"status":"ok"})
+    const res = await api.request<{ status?: string }>('/health');
     setTestingConnection(false);
 
     if (res.data && !res.isMock) {
-      Alert.alert('Kết nối thành công', 'Máy chủ GrainLedger backend đang phản hồi tốt!');
+      Alert.alert(
+        'Kết nối thành công',
+        `Máy chủ GrainLedger backend đang phản hồi tốt!\nURL: ${api.getBaseUrl()}\nTrạng thái: ${
+          typeof res.data === 'object' && res.data.status ? res.data.status : 'OK'
+        }`
+      );
     } else {
       Alert.alert(
-        'Chế độ Ngoại tuyến / Demo',
-        `Không thể kết nối trực tiếp đến ${apiUrl}. Hệ thống tự động chuyển sang lưu trữ cục bộ và dữ liệu kiểm thử (Mock mode).`
+        'Không thể kết nối máy chủ',
+        `Không thể kết nối trực tiếp đến ${api.getBaseUrl()}.\n\nChi tiết lỗi: ${
+          res.error || 'Máy chủ không phản hồi'
+        }\n\nVui lòng kiểm tra lại URL máy chủ hoặc trạng thái backend.`
       );
     }
   };
 
+  const roleLabel =
+    (activeRole && ROLE_DEFINITIONS[activeRole]?.labelVi) ||
+    user?.role ||
+    'Chưa gán vai trò';
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Header title="Tài khoản & Cài đặt" subtitle="Thông tin cá nhân, đồng bộ và chuyển vai trò" />
+      <Header title="Tài khoản & Cài đặt" subtitle="Thông tin tài khoản xác thực và kết nối máy chủ" />
 
       <ScrollView
         style={styles.scroll}
@@ -71,17 +86,15 @@ export default function ProfileScreen() {
           <View style={styles.profileTop}>
             <View style={styles.avatarCircle}>
               <Text style={styles.avatarInitial}>
-                {user?.displayName ? user.displayName.charAt(0) : 'U'}
+                {user?.displayName ? user.displayName.charAt(0).toUpperCase() : 'U'}
               </Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.userName}>{user?.displayName}</Text>
-              <Text style={styles.userEmail}>{user?.email}</Text>
+              <Text style={styles.userName}>{user?.displayName || 'Chưa đăng nhập'}</Text>
+              <Text style={styles.userEmail}>{user?.email || 'N/A'}</Text>
               <View style={styles.roleRow}>
                 <View style={styles.roleBadge}>
-                  <Text style={styles.roleBadgeText}>
-                    {ROLE_DEFINITIONS[activeRole]?.labelVi || activeRole}
-                  </Text>
+                  <Text style={styles.roleBadgeText}>{roleLabel}</Text>
                 </View>
               </View>
             </View>
@@ -100,6 +113,22 @@ export default function ProfileScreen() {
               <Text style={styles.infoText}>
                 Phạm vi: {user.assignedFacilities.join(', ')}
               </Text>
+            </View>
+          ) : null}
+
+          {user?.permissions && user.permissions.length > 0 ? (
+            <View style={{ marginTop: 10 }}>
+              <View style={[styles.infoRow, { marginBottom: 6 }]}>
+                <KeyRound size={16} color={Colors.textSecondary} />
+                <Text style={styles.permissionTitle}>Quyền hạn được cấp ({user.permissions.length}):</Text>
+              </View>
+              <View style={styles.permissionList}>
+                {user.permissions.map((p) => (
+                  <View key={p} style={styles.permissionBadge}>
+                    <Text style={styles.permissionBadgeText}>{p}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
           ) : null}
         </Card>
@@ -132,53 +161,16 @@ export default function ProfileScreen() {
           </View>
 
           <Button
-            title={isSyncing ? 'Đang truyền dữ liệu...' : 'Đồng bộ ngay'}
+            title={isSyncing ? 'Đang truyền dữ liệu lên máy chủ...' : 'Đồng bộ ngay'}
             icon={<RefreshCw size={16} color="#FFFFFF" />}
             variant="accent"
             loading={isSyncing}
             style={{ marginTop: 12 }}
             onPress={async () => {
               const res = await syncAll();
-              Alert.alert('Đồng bộ hoàn tất', `Đã đồng bộ ${res.successCount} giao dịch.`);
+              Alert.alert('Đồng bộ hoàn tất', `Thành công: ${res.successCount}, Thất bại: ${res.failCount}`);
             }}
           />
-        </Card>
-
-        {/* Demo Role Switcher */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Chuyển đổi vai trò Demo</Text>
-          <Text style={styles.sectionSub}>7 vai trò kiểm thử</Text>
-        </View>
-
-        <Card style={styles.roleSwitcherCard}>
-          {(Object.keys(ROLE_DEFINITIONS) as UserRole[]).map((r) => {
-            const isCurrent = activeRole === r;
-            const meta = ROLE_DEFINITIONS[r];
-
-            return (
-              <TouchableOpacity
-                key={r}
-                style={[styles.roleItem, isCurrent && styles.roleItemActive]}
-                onPress={() => switchRole(r)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.roleCodeBadge, isCurrent && styles.roleCodeActive]}>
-                  <Text style={[styles.roleCodeText, isCurrent && styles.roleCodeTextActive]}>
-                    {meta.code}
-                  </Text>
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.roleLabel, isCurrent && styles.roleLabelActive]}>
-                    {meta.labelVi}
-                  </Text>
-                  <Text style={styles.roleDesc}>{meta.descriptionVi}</Text>
-                </View>
-
-                {isCurrent ? <CheckCircle size={18} color={Colors.primary} /> : null}
-              </TouchableOpacity>
-            );
-          })}
         </Card>
 
         {/* Server API Endpoint Configuration */}
@@ -195,6 +187,8 @@ export default function ProfileScreen() {
               onChangeText={setApiUrl}
               placeholder="http://10.0.2.2:5080 hoặc IP máy tính"
               placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
             />
           </View>
 
@@ -308,6 +302,29 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     flex: 1,
   },
+  permissionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  permissionList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  permissionBadge: {
+    backgroundColor: Colors.cardSubtle,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  permissionBadgeText: {
+    fontSize: 11,
+    color: Colors.text,
+    fontFamily: 'monospace',
+  },
   syncCard: {
     backgroundColor: '#FFFBEB',
     borderColor: '#FDE68A',
@@ -361,57 +378,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: Colors.text,
-  },
-  sectionSub: {
-    fontSize: 12,
-    color: Colors.textMuted,
-  },
-  roleSwitcherCard: {
-    padding: 8,
-    marginBottom: 16,
-  },
-  roleItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 10,
-    gap: 10,
-    marginBottom: 4,
-  },
-  roleItemActive: {
-    backgroundColor: Colors.primarySurface,
-  },
-  roleCodeBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: Colors.cardSubtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roleCodeActive: {
-    backgroundColor: Colors.primary,
-  },
-  roleCodeText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: Colors.textSecondary,
-  },
-  roleCodeTextActive: {
-    color: '#FFFFFF',
-  },
-  roleLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  roleLabelActive: {
-    color: Colors.primary,
-  },
-  roleDesc: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 2,
   },
   apiCard: {
     marginBottom: 10,

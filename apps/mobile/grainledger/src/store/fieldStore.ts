@@ -1,195 +1,50 @@
 import { create } from 'zustand';
 import { Farmer, Plot, SprayDeclaration, ProcurementReceipt, FieldSample } from '../types/field';
 import { storage } from '../services/storage';
+import { api } from '../services/api';
 import { useOfflineStore } from './offlineStore';
 
 const FIELD_DATA_KEY = 'grainledger_field_data';
 
-const SEED_FARMERS: Farmer[] = [
-  {
-    id: 'farmer-01',
-    code: 'TG-CB-001',
-    name: 'Nguyễn Văn An',
-    contact: '0918 223 344',
-    identityNumber: '082088001234',
-    province: 'Tiền Giang',
-    district: 'Huyện Cái Bè',
-    commune: 'Xã Hậu Mỹ Bắc B',
-    totalAreaHa: 3.5,
-    registeredAt: '2026-09-15',
-    syncStatus: 'SYNCED',
-  },
-  {
-    id: 'farmer-02',
-    code: 'TG-CB-002',
-    name: 'Trần Thị Bé',
-    contact: '0909 334 455',
-    identityNumber: '082190005678',
-    province: 'Tiền Giang',
-    district: 'Huyện Cái Bè',
-    commune: 'Xã Mỹ Hội',
-    totalAreaHa: 2.2,
-    registeredAt: '2026-09-20',
-    syncStatus: 'SYNCED',
-  },
-  {
-    id: 'farmer-03',
-    code: 'DT-TL-003',
-    name: 'Lê Văn Cường',
-    contact: '0977 445 566',
-    identityNumber: '087092003456',
-    province: 'Đồng Tháp',
-    district: 'Huyện Tháp Mười',
-    commune: 'Xã Đốc Binh Kiều',
-    totalAreaHa: 5.0,
-    registeredAt: '2026-10-02',
-    syncStatus: 'SYNCED',
-  },
-  {
-    id: 'farmer-04',
-    code: 'AG-TH-004',
-    name: 'Phạm Hữu Đức',
-    contact: '0988 556 677',
-    identityNumber: '089085007890',
-    province: 'An Giang',
-    district: 'Huyện Thoại Sơn',
-    commune: 'Xã Vọng Thê',
-    totalAreaHa: 4.8,
-    registeredAt: '2026-10-10',
-    syncStatus: 'SYNCED',
-  },
-];
+function generateUuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
-const SEED_PLOTS: Plot[] = [
-  {
-    id: 'plot-01',
-    farmerId: 'farmer-01',
-    farmerName: 'Nguyễn Văn An',
-    code: 'TR-01-ST25',
-    areaHa: 2.0,
-    variety: 'ST25 (Lúa tôm đặc sản)',
-    season: 'Đông Xuân 2026',
-    latitude: 10.3751,
-    longitude: 105.9521,
-    registeredAt: '2026-09-18',
-    syncStatus: 'SYNCED',
-  },
-  {
-    id: 'plot-02',
-    farmerId: 'farmer-01',
-    farmerName: 'Nguyễn Văn An',
-    code: 'TR-02-OM5451',
-    areaHa: 1.5,
-    variety: 'OM 5451',
-    season: 'Đông Xuân 2026',
-    latitude: 10.3765,
-    longitude: 105.9538,
-    registeredAt: '2026-09-18',
-    syncStatus: 'SYNCED',
-  },
-  {
-    id: 'plot-03',
-    farmerId: 'farmer-02',
-    farmerName: 'Trần Thị Bé',
-    code: 'TR-03-JASMINE',
-    areaHa: 2.2,
-    variety: 'Jasmine 85',
-    season: 'Đông Xuân 2026',
-    latitude: 10.3812,
-    longitude: 105.9602,
-    registeredAt: '2026-09-22',
-    syncStatus: 'SYNCED',
-  },
-  {
-    id: 'plot-04',
-    farmerId: 'farmer-03',
-    farmerName: 'Lê Văn Cường',
-    code: 'TR-04-DT8',
-    areaHa: 5.0,
-    variety: 'Đài Thơm 8',
-    season: 'Đông Xuân 2026',
-    latitude: 10.5123,
-    longitude: 105.7891,
-    registeredAt: '2026-10-05',
-    syncStatus: 'SYNCED',
-  },
-];
+interface FarmerApiResponse {
+  items: {
+    id: string;
+    code: string;
+    name: string;
+    contact?: string | null;
+    createdAt?: string;
+  }[];
+}
 
-const SEED_SPRAYS: SprayDeclaration[] = [
-  {
-    id: 'spray-01',
-    plotSeasonId: 'plot-01',
-    plotCode: 'TR-01-ST25',
-    farmerName: 'Nguyễn Văn An',
-    appliedOn: '2026-10-01',
-    productName: 'Amistar Top 325SC',
-    substanceId: 'Azoxystrobin + Difenoconazole',
-    rate: 0.5,
-    rateUnit: 'lít/ha',
-    phiDays: 14,
-    harvestAllowedDate: '2026-10-15',
-    syncStatus: 'SYNCED',
-  },
-  {
-    id: 'spray-02',
-    plotSeasonId: 'plot-03',
-    plotCode: 'TR-03-JASMINE',
-    farmerName: 'Trần Thị Bé',
-    appliedOn: '2026-10-05',
-    productName: 'Beam 75WP',
-    substanceId: 'Tricyclazole',
-    rate: 0.3,
-    rateUnit: 'kg/ha',
-    phiDays: 21,
-    harvestAllowedDate: '2026-10-26',
-    syncStatus: 'SYNCED',
-  },
-];
+interface PlotApiResponse {
+  items: {
+    id: string;
+    farmerId: string;
+    code: string;
+    areaHa: number | string;
+    createdAt?: string;
+  }[];
+}
 
-const SEED_RECEIPTS: ProcurementReceipt[] = [
-  {
-    id: 'rcpt-01',
-    receiptNumber: 'TM-20261020-001',
-    farmerId: 'farmer-01',
-    farmerName: 'Nguyễn Văn An',
-    farmerPhone: '0918 223 344',
-    plotSeasonId: 'plot-01',
-    plotCode: 'TR-01-ST25',
-    commodityName: 'Lúa tươi ST25',
-    measuredGrossKg: '14500.00',
-    moisturePercent: '24.5',
-    pricePerKg: '9800',
-    totalAmount: '142100000',
-    vehiclePlate: '63C-124.89',
-    driverName: 'Trần Văn Bình',
-    receivingLocationId: 'loc-silo-a1',
-    collectionSite: 'Cầu Cái Bè Km12',
-    capturedAt: '2026-10-20 09:30',
-    status: 'COMMITTED',
-    syncStatus: 'SYNCED',
-  },
-  {
-    id: 'rcpt-02',
-    receiptNumber: 'TM-20261021-002',
-    farmerId: 'farmer-03',
-    farmerName: 'Lê Văn Cường',
-    farmerPhone: '0977 445 566',
-    plotSeasonId: 'plot-04',
-    plotCode: 'TR-04-DT8',
-    commodityName: 'Lúa tươi Đài Thơm 8',
-    measuredGrossKg: '22800.00',
-    moisturePercent: '25.2',
-    pricePerKg: '8600',
-    totalAmount: '196080000',
-    vehiclePlate: '66B-089.45',
-    driverName: 'Võ Quốc Tuấn',
-    receivingLocationId: 'loc-silo-b2',
-    collectionSite: 'Bến đò Tháp Mười',
-    capturedAt: '2026-10-21 14:15',
-    status: 'COMMITTED',
-    syncStatus: 'SYNCED',
-  },
-];
+interface ProcurementApiResponse {
+  items: {
+    id: string;
+    code: string;
+    farmerId: string;
+    farmerName: string;
+    receivedAt?: string;
+    status: string;
+    totalNetMassKg: string;
+  }[];
+}
 
 interface FieldState {
   farmers: Farmer[];
@@ -197,8 +52,11 @@ interface FieldState {
   sprays: SprayDeclaration[];
   receipts: ProcurementReceipt[];
   samples: FieldSample[];
+  isLoading: boolean;
+  error: string | null;
 
   initFieldData: () => Promise<void>;
+  fetchFieldData: () => Promise<void>;
   addFarmer: (farmerData: Omit<Farmer, 'id' | 'code' | 'registeredAt' | 'syncStatus'>) => Promise<Farmer>;
   addPlot: (plotData: Omit<Plot, 'id' | 'code' | 'registeredAt' | 'syncStatus'>) => Promise<Plot>;
   addSpray: (sprayData: Omit<SprayDeclaration, 'id' | 'harvestAllowedDate' | 'syncStatus'>) => Promise<SprayDeclaration>;
@@ -207,14 +65,17 @@ interface FieldState {
 }
 
 export const useFieldStore = create<FieldState>((set, get) => ({
-  farmers: SEED_FARMERS,
-  plots: SEED_PLOTS,
-  sprays: SEED_SPRAYS,
-  receipts: SEED_RECEIPTS,
+  farmers: [],
+  plots: [],
+  sprays: [],
+  receipts: [],
   samples: [],
+  isLoading: false,
+  error: null,
 
   initFieldData: async () => {
-    const saved = await storage.get<{
+    // 1. First, load cached data from storage
+    const cached = await storage.get<{
       farmers: Farmer[];
       plots: Plot[];
       sprays: SprayDeclaration[];
@@ -222,33 +83,157 @@ export const useFieldStore = create<FieldState>((set, get) => ({
       samples: FieldSample[];
     }>(FIELD_DATA_KEY);
 
-    if (saved) {
+    if (cached) {
       set({
-        farmers: saved.farmers || SEED_FARMERS,
-        plots: saved.plots || SEED_PLOTS,
-        sprays: saved.sprays || SEED_SPRAYS,
-        receipts: saved.receipts || SEED_RECEIPTS,
-        samples: saved.samples || [],
+        farmers: cached.farmers || [],
+        plots: cached.plots || [],
+        sprays: cached.sprays || [],
+        receipts: cached.receipts || [],
+        samples: cached.samples || [],
+      });
+    }
+
+    // 2. Fetch fresh data from backend APIs
+    await get().fetchFieldData();
+  },
+
+  fetchFieldData: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const [farmersRes, plotsRes, procRes, spraysRes] = await Promise.all([
+        api.request<FarmerApiResponse>('/api/farmers'),
+        api.request<PlotApiResponse>('/api/plots'),
+        api.request<ProcurementApiResponse>('/api/procurements'),
+        api.request<any[]>('/api/spray-declarations'),
+      ]);
+
+      const farmers: Farmer[] = (farmersRes.data?.items || []).map((item) => ({
+        id: item.id,
+        code: item.code,
+        name: item.name,
+        contact: item.contact || '',
+        registeredAt: item.createdAt ? item.createdAt.split('T')[0] : new Date().toISOString().split('T')[0],
+        syncStatus: 'SYNCED',
+      }));
+
+      const plots: Plot[] = (plotsRes.data?.items || []).map((item) => {
+        const farmer = farmers.find((f) => f.id === item.farmerId);
+        return {
+          id: item.id,
+          farmerId: item.farmerId,
+          farmerName: farmer?.name || 'Nông hộ liên kết',
+          code: item.code,
+          areaHa: Number(item.areaHa) || 0,
+          variety: 'Lúa chất lượng cao',
+          season: 'Vụ mùa 2026',
+          registeredAt: new Date().toISOString().split('T')[0],
+          syncStatus: 'SYNCED',
+        };
+      });
+
+      const receipts: ProcurementReceipt[] = (procRes.data?.items || []).map((item) => ({
+        id: item.id,
+        receiptNumber: item.code,
+        farmerId: item.farmerId,
+        farmerName: item.farmerName || 'N/A',
+        farmerPhone: '',
+        plotSeasonId: '',
+        plotCode: 'Thửa ruộng thu mua',
+        commodityName: 'Lúa tươi thu hoạch',
+        measuredGrossKg: item.totalNetMassKg || '0',
+        moisturePercent: '24.0',
+        collectionSite: 'Trạm thu mua Cái Bè',
+        capturedAt: item.receivedAt ? item.receivedAt.replace('T', ' ').slice(0, 16) : new Date().toISOString().slice(0, 16),
+        status: (item.status as any) || 'COMMITTED',
+        syncStatus: 'SYNCED',
+      }));
+
+      const sprays: SprayDeclaration[] = Array.isArray(spraysRes.data)
+        ? spraysRes.data.map((item: any) => ({
+            id: item.id || generateUuid(),
+            plotSeasonId: item.plotSeasonId || '',
+            plotCode: item.plotCode || 'TR-01',
+            farmerName: item.farmerName || '',
+            appliedOn: item.appliedOn || new Date().toISOString().split('T')[0],
+            productName: item.productName || item.substanceId || 'Thuốc BVTV',
+            substanceId: item.substanceId || '',
+            rate: item.rate || 0,
+            rateUnit: item.rateUnit || 'lít/ha',
+            phiDays: item.phiDays || 14,
+            harvestAllowedDate: item.harvestAllowedDate || '',
+            syncStatus: 'SYNCED',
+          }))
+        : get().sprays;
+
+      set({
+        farmers,
+        plots,
+        receipts,
+        sprays,
+        isLoading: false,
+      });
+
+      await storage.set(FIELD_DATA_KEY, {
+        farmers,
+        plots,
+        receipts,
+        sprays,
+        samples: get().samples,
+      });
+    } catch (err: any) {
+      set({
+        isLoading: false,
+        error: err?.message || 'Không thể tải dữ liệu thực địa từ máy chủ',
       });
     }
   },
 
   addFarmer: async (data) => {
-    const id = 'farmer-' + Date.now();
-    const code = `TG-CB-${String(get().farmers.length + 1).padStart(3, '0')}`;
+    const entityId = generateUuid();
+    const clientOpId = generateUuid();
+    const code = `FRM-${Math.floor(1000 + Math.random() * 9000)}`;
+
     const newFarmer: Farmer = {
       ...data,
-      id,
+      id: entityId,
       code,
       registeredAt: new Date().toISOString().split('T')[0],
       syncStatus: 'PENDING',
     };
 
+    // Optimistically update state
     const updated = [newFarmer, ...get().farmers];
     set({ farmers: updated });
     await storage.set(FIELD_DATA_KEY, { ...get(), farmers: updated });
 
-    // Enqueue in offline queue
+    // Attempt real API call
+    try {
+      const res = await api.request('/api/farmers', {
+        method: 'POST',
+        body: JSON.stringify({
+          clientOperationId: clientOpId,
+          capturedAt: new Date().toISOString(),
+          payloadSchemaVersion: 1,
+          payload: {
+            entityId,
+            code,
+            name: data.name,
+            contact: data.contact || '',
+          },
+        }),
+      });
+
+      if (res.data && !res.isMock) {
+        newFarmer.syncStatus = 'SYNCED';
+        set({ farmers: [newFarmer, ...get().farmers.filter((f) => f.id !== entityId)] });
+        await storage.set(FIELD_DATA_KEY, { ...get(), farmers: get().farmers });
+        return newFarmer;
+      }
+    } catch {
+      // Fall through to offline queue
+    }
+
+    // Queue offline if failed or offline
     await useOfflineStore.getState().enqueue({
       actionType: 'REGISTER_FARMER',
       title: `Đăng ký nông hộ: ${newFarmer.name}`,
@@ -260,12 +245,14 @@ export const useFieldStore = create<FieldState>((set, get) => ({
   },
 
   addPlot: async (data) => {
-    const id = 'plot-' + Date.now();
+    const entityId = generateUuid();
+    const clientOpId = generateUuid();
     const farmer = get().farmers.find((f) => f.id === data.farmerId);
-    const code = `TR-${String(get().plots.length + 1).padStart(2, '0')}-${data.variety.split(' ')[0]}`;
+    const code = `PLT-${Math.floor(1000 + Math.random() * 9000)}-01`;
+
     const newPlot: Plot = {
       ...data,
-      id,
+      id: entityId,
       code,
       farmerName: farmer?.name || data.farmerName || 'N/A',
       registeredAt: new Date().toISOString().split('T')[0],
@@ -275,6 +262,36 @@ export const useFieldStore = create<FieldState>((set, get) => ({
     const updated = [newPlot, ...get().plots];
     set({ plots: updated });
     await storage.set(FIELD_DATA_KEY, { ...get(), plots: updated });
+
+    try {
+      const res = await api.request('/api/plots', {
+        method: 'POST',
+        body: JSON.stringify({
+          clientOperationId: clientOpId,
+          capturedAt: new Date().toISOString(),
+          payloadSchemaVersion: 1,
+          payload: {
+            entityId,
+            farmerId: data.farmerId,
+            code,
+            geometry: {
+              type: 'Point',
+              coordinates: [data.longitude || 105.9, data.latitude || 10.3],
+            },
+            areaHa: data.areaHa,
+          },
+        }),
+      });
+
+      if (res.data && !res.isMock) {
+        newPlot.syncStatus = 'SYNCED';
+        set({ plots: [newPlot, ...get().plots.filter((p) => p.id !== entityId)] });
+        await storage.set(FIELD_DATA_KEY, { ...get(), plots: get().plots });
+        return newPlot;
+      }
+    } catch {
+      // Fall through
+    }
 
     await useOfflineStore.getState().enqueue({
       actionType: 'REGISTER_PLOT',
@@ -287,7 +304,7 @@ export const useFieldStore = create<FieldState>((set, get) => ({
   },
 
   addSpray: async (data) => {
-    const id = 'spray-' + Date.now();
+    const id = generateUuid();
     const appDate = new Date(data.appliedOn);
     appDate.setDate(appDate.getDate() + (data.phiDays || 14));
     const harvestAllowedDate = appDate.toISOString().split('T')[0];
@@ -314,10 +331,10 @@ export const useFieldStore = create<FieldState>((set, get) => ({
   },
 
   addReceipt: async (data) => {
-    const id = 'rcpt-' + Date.now();
-    const receiptNumber = `TM-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(
-      get().receipts.length + 1
-    ).padStart(3, '0')}`;
+    const id = generateUuid();
+    const receiptNumber = `PRC-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(
+      1000 + Math.random() * 9000
+    )}`;
 
     const newReceipt: ProcurementReceipt = {
       ...data,
@@ -343,7 +360,7 @@ export const useFieldStore = create<FieldState>((set, get) => ({
   },
 
   addSample: async (data) => {
-    const id = 'sample-' + Date.now();
+    const id = generateUuid();
     const newSample: FieldSample = {
       ...data,
       id,

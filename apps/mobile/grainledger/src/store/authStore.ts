@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { UserRole } from '../types/roles';
+import { UserRole, normalizeUserRole } from '../types/roles';
 import { storage } from '../services/storage';
 import { api } from '../services/api';
 
@@ -16,221 +16,173 @@ export interface UserProfile {
   permissions: string[];
 }
 
-export const DEMO_USERS: Record<UserRole, UserProfile> = {
-  CUSTOMER_PROCUREMENT_OFFICER: {
-    id: 'user-po-01',
-    email: 'purchasing@grainledger.local',
-    displayName: 'Võ Minh Thu Mua',
-    phoneNumber: '0934 567 890',
-    role: 'CUSTOMER_PROCUREMENT_OFFICER',
-    organizationId: 'org-cust-01',
-    organizationName: 'Công ty CP Xuất nhập khẩu Mekong Rice',
-    assignedFacilities: ['Trạm thu mua Cái Bè - Tiền Giang'],
-    isActive: true,
-    permissions: ['farms.write', 'purchases.write', 'history.read'],
-  },
-  MILL_OPERATOR: {
-    id: 'user-mo-01',
-    email: 'mill.operator@grainledger.local',
-    displayName: 'Nguyễn Tấn Vận Hành',
-    phoneNumber: '0923 456 789',
-    role: 'MILL_OPERATOR',
-    organizationId: 'org-mill-01',
-    organizationName: 'Nhà máy Xay xát Lúa gạo Tiền Giang',
-    assignedFacilities: ['Dây chuyền A - Tiền Giang', 'Khu Silo số 2'],
-    isActive: true,
-    permissions: ['platform.read', 'lots.read.facility', 'lots.receive', 'conversions.write'],
-  },
-  MILL_MANAGER: {
-    id: 'user-mm-01',
-    email: 'mill.manager@grainledger.local',
-    displayName: 'Trần Quốc Quản Lý',
-    phoneNumber: '0912 345 678',
-    role: 'MILL_MANAGER',
-    organizationId: 'org-mill-01',
-    organizationName: 'Nhà máy Xay xát Lúa gạo Tiền Giang',
-    assignedFacilities: ['Dây chuyền A - Tiền Giang'],
-    isActive: true,
-    permissions: ['platform.read', 'lots.read.all', 'conversions.confirm', 'corrections.reconcile', 'holds.process'],
-  },
-  CUSTOMER_MANAGER: {
-    id: 'user-cm-01',
-    email: 'customer.manager@grainledger.local',
-    displayName: 'Đặng Hoàng Giám Đốc',
-    phoneNumber: '0945 678 901',
-    role: 'CUSTOMER_MANAGER',
-    organizationId: 'org-cust-01',
-    organizationName: 'Công ty CP Xuất nhập khẩu Mekong Rice',
-    isActive: true,
-    permissions: ['plans.approve', 'lab.write', 'holds.write', 'trace.read.customer'],
-  },
-  CUSTOMER_EXPORT_OFFICER: {
-    id: 'user-eo-01',
-    email: 'export@grainledger.local',
-    displayName: 'Phạm Thanh Xuất Khẩu',
-    phoneNumber: '0956 789 012',
-    role: 'CUSTOMER_EXPORT_OFFICER',
-    organizationId: 'org-cust-01',
-    organizationName: 'Công ty CP Xuất nhập khẩu Mekong Rice',
-    isActive: true,
-    permissions: ['orders.write', 'fulfillments.write', 'containers.seal'],
-  },
-  MILL_ADMIN: {
-    id: 'user-ma-01',
-    email: 'admin@grainledger.local',
-    displayName: 'Lê Văn Quản Trị',
-    phoneNumber: '0901 234 567',
-    role: 'MILL_ADMIN',
-    organizationId: 'org-mill-01',
-    organizationName: 'Nhà máy Xay xát Lúa gạo Tiền Giang',
-    assignedFacilities: ['Dây chuyền A - Tiền Giang', 'Kho Silo Cụm 1'],
-    isActive: true,
-    permissions: ['identity.manage', 'platform.configure', 'trace.read.all'],
-  },
-  AUTHORIZED_STOCK_VIEWER: {
-    id: 'user-sv-01',
-    email: 'stock.viewer@grainledger.local',
-    displayName: 'Bùi Thị Giám Sát Tồn Kho',
-    phoneNumber: '0967 890 123',
-    role: 'AUTHORIZED_STOCK_VIEWER',
-    organizationId: 'org-cust-01',
-    organizationName: 'Công ty CP Xuất nhập khẩu Mekong Rice',
-    isActive: true,
-    permissions: ['stock.read', 'trace.read'],
-  },
-};
+export interface SessionUserDto {
+  id: string;
+  email: string;
+  displayName: string;
+  phoneNumber?: string | null;
+  role?: string | null;
+  organizationId?: string | null;
+  organizationName?: string | null;
+  isActive: boolean;
+  permissions: string[];
+}
+
+export interface IssuedTokens {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+  user: SessionUserDto;
+}
 
 interface AuthState {
   user: UserProfile | null;
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  activeRole: UserRole;
+  activeRole: UserRole | null;
 
   initAuth: () => Promise<void>;
-  loginAsDemo: (role: UserRole) => Promise<void>;
   loginWithCredentials: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
-  switchRole: (role: UserRole) => void;
 }
 
 const AUTH_USER_KEY = 'grainledger_auth_user';
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  user: DEMO_USERS.CUSTOMER_PROCUREMENT_OFFICER,
-  token: 'mock-jwt-token-po-01',
-  isAuthenticated: true,
-  isLoading: false,
-  activeRole: 'CUSTOMER_PROCUREMENT_OFFICER',
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  token: null,
+  isAuthenticated: false,
+  isLoading: true,
+  activeRole: null,
 
   initAuth: async () => {
     try {
       set({ isLoading: true });
-      const savedUser = await storage.get<UserProfile>(AUTH_USER_KEY);
-      if (savedUser) {
-        set({
-          user: savedUser,
-          isAuthenticated: true,
-          activeRole: savedUser.role,
-          isLoading: false,
-        });
-      } else {
-        // Default to field officer for realistic mobile intake flow
-        const defaultUser = DEMO_USERS.CUSTOMER_PROCUREMENT_OFFICER;
-        set({
-          user: defaultUser,
-          isAuthenticated: true,
-          activeRole: defaultUser.role,
-          isLoading: false,
-        });
-        await storage.set(AUTH_USER_KEY, defaultUser);
-      }
-    } catch {
-      set({ isLoading: false });
-    }
-  },
+      const savedToken = await storage.get<string>('grainledger_token');
+      if (savedToken) {
+        api.setToken(savedToken);
+        const res = await api.request<SessionUserDto>('/api/auth/session');
+        if (res.data && !res.isMock) {
+          const role = normalizeUserRole(res.data.role);
+          const user: UserProfile = {
+            id: res.data.id,
+            email: res.data.email,
+            displayName: res.data.displayName,
+            phoneNumber: res.data.phoneNumber || undefined,
+            role,
+            organizationId: res.data.organizationId || undefined,
+            organizationName: res.data.organizationName || undefined,
+            assignedFacilities: [],
+            isActive: res.data.isActive,
+            permissions: res.data.permissions || [],
+          };
+          set({
+            user,
+            token: savedToken,
+            activeRole: role,
+            isAuthenticated: true,
+            isLoading: false,
+          });
+          await storage.set(AUTH_USER_KEY, user);
+          return;
+        }
 
-  loginAsDemo: async (role: UserRole) => {
-    const demo = DEMO_USERS[role] || DEMO_USERS.CUSTOMER_PROCUREMENT_OFFICER;
-    set({
-      user: demo,
-      activeRole: role,
-      isAuthenticated: true,
-      token: `mock-jwt-token-${demo.id}`,
-    });
-    api.setToken(`mock-jwt-token-${demo.id}`);
-    await storage.set(AUTH_USER_KEY, demo);
+        // If offline, check saved user
+        const savedUser = await storage.get<UserProfile>(AUTH_USER_KEY);
+        if (savedUser && !res.error?.includes('401')) {
+          set({
+            user: savedUser,
+            token: savedToken,
+            activeRole: savedUser.role,
+            isAuthenticated: true,
+            isLoading: false,
+          });
+          return;
+        }
+
+        // Token invalid / 401
+        api.setToken(null);
+        await storage.remove(AUTH_USER_KEY);
+      }
+
+      set({
+        user: null,
+        token: null,
+        activeRole: null,
+        isAuthenticated: false,
+        isLoading: false,
+      });
+    } catch {
+      set({
+        user: null,
+        token: null,
+        activeRole: null,
+        isAuthenticated: false,
+        isLoading: false,
+      });
+    }
   },
 
   loginWithCredentials: async (email: string, _pass: string) => {
     set({ isLoading: true });
-    // Attempt actual API call
-    const res = await api.request<{ accessToken: string; user: UserProfile }>('/api/identity/login', {
+
+    const res = await api.request<IssuedTokens>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password: _pass }),
+      body: JSON.stringify({ email: email.trim(), password: _pass }),
     });
 
-    if (res.data && res.data.accessToken) {
-      api.setToken(res.data.accessToken);
+    if (res.data && res.data.accessToken && res.data.user) {
+      const accessToken = res.data.accessToken;
+      api.setToken(accessToken);
+      const role = normalizeUserRole(res.data.user.role);
+      const user: UserProfile = {
+        id: res.data.user.id,
+        email: res.data.user.email,
+        displayName: res.data.user.displayName,
+        phoneNumber: res.data.user.phoneNumber || undefined,
+        role,
+        organizationId: res.data.user.organizationId || undefined,
+        organizationName: res.data.user.organizationName || undefined,
+        assignedFacilities: [],
+        isActive: res.data.user.isActive,
+        permissions: res.data.user.permissions || [],
+      };
+
       set({
-        user: res.data.user,
-        activeRole: res.data.user.role,
+        user,
+        token: accessToken,
+        activeRole: role,
         isAuthenticated: true,
         isLoading: false,
-        token: res.data.accessToken,
       });
-      await storage.set(AUTH_USER_KEY, res.data.user);
+
+      await storage.set(AUTH_USER_KEY, user);
       return { success: true };
     }
 
-    // Match known demo emails if offline
-    const matched = Object.values(DEMO_USERS).find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (matched) {
-      set({
-        user: matched,
-        activeRole: matched.role,
-        isAuthenticated: true,
-        isLoading: false,
-        token: `mock-jwt-token-${matched.id}`,
-      });
-      api.setToken(`mock-jwt-token-${matched.id}`);
-      await storage.set(AUTH_USER_KEY, matched);
-      return { success: true };
-    }
-
-    // Fallback: successful login as procurement officer
-    const fallbackUser: UserProfile = {
-      id: 'user-custom-' + Date.now(),
-      email,
-      displayName: email.split('@')[0],
-      role: 'CUSTOMER_PROCUREMENT_OFFICER',
-      organizationName: 'Mekong Rice Export Co.',
-      isActive: true,
-      permissions: ['farms.write', 'purchases.write'],
+    set({ isLoading: false });
+    return {
+      success: false,
+      error: res.error || 'Đăng nhập không thành công. Vui lòng kiểm tra lại tài khoản và mật khẩu.',
     };
-
-    set({
-      user: fallbackUser,
-      activeRole: 'CUSTOMER_PROCUREMENT_OFFICER',
-      isAuthenticated: true,
-      isLoading: false,
-      token: 'custom-token',
-    });
-    await storage.set(AUTH_USER_KEY, fallbackUser);
-    return { success: true };
   },
 
   logout: async () => {
+    try {
+      await api.request('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Ignore network errors on logout
+    }
     api.setToken(null);
     await storage.remove(AUTH_USER_KEY);
     set({
       user: null,
-      isAuthenticated: false,
       token: null,
+      activeRole: null,
+      isAuthenticated: false,
+      isLoading: false,
     });
-  },
-
-  switchRole: (role: UserRole) => {
-    get().loginAsDemo(role);
   },
 }));

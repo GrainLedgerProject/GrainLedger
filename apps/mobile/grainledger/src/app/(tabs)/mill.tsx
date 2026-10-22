@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   SafeAreaView,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '../../theme/colors';
@@ -20,6 +21,7 @@ import {
   Truck,
   ArrowRight,
   CheckCircle,
+  Inbox,
 } from 'lucide-react-native';
 
 type MillSubTab = 'receiving' | 'operations' | 'silos';
@@ -27,7 +29,7 @@ type MillSubTab = 'receiving' | 'operations' | 'silos';
 export default function MillScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<MillSubTab>('receiving');
-  const { receivingTasks, operations, silos, updateReceivingTaskStatus } = useMillStore();
+  const { receivingTasks, operations, silos, updateReceivingTaskStatus, isLoading, fetchMillData } = useMillStore();
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -88,10 +90,28 @@ export default function MillScreen() {
         style={styles.contentScroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isLoading}
+            onRefresh={fetchMillData}
+            colors={[Colors.primary]}
+          />
+        }
       >
         {/* RECEIVING TAB */}
         {activeTab === 'receiving' && (
           <View>
+            {receivingTasks.length === 0 ? (
+              <Card style={{ alignItems: 'center', padding: 32 }}>
+                <Inbox size={40} color={Colors.textMuted} />
+                <Text style={{ marginTop: 12, fontSize: 14, fontWeight: '700', color: Colors.text }}>
+                  Chưa có phiếu tiếp nhận xe nào
+                </Text>
+                <Text style={{ marginTop: 4, fontSize: 12, color: Colors.textSecondary, textAlign: 'center' }}>
+                  Kéo xuống để tải lại từ máy chủ hoặc cân xe lúa tươi mới.
+                </Text>
+              </Card>
+            ) : null}
             {receivingTasks.map((t) => (
               <Card key={t.id} style={styles.itemCard}>
                 <View style={styles.cardHeader}>

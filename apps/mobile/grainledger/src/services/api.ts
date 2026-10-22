@@ -1,7 +1,10 @@
+import { Platform } from 'react-native';
 import { storage } from './storage';
 
 const API_BASE_URL_KEY = 'grainledger_api_base_url';
-const DEFAULT_API_BASE_URL = 'http://localhost:5080';
+// On Android emulator, 10.0.2.2 points to host machine loopback; on iOS/web it is localhost
+const DEFAULT_API_BASE_URL =
+  Platform.OS === 'android' ? 'http://10.0.2.2:5080' : 'http://localhost:5080';
 
 export class ApiService {
   private static instance: ApiService;
@@ -19,10 +22,19 @@ export class ApiService {
     return ApiService.instance;
   }
 
+  public normalizeUrl(url: string): string {
+    let clean = url.trim();
+    if (!clean) return DEFAULT_API_BASE_URL;
+    if (!/^https?:\/\//i.test(clean)) {
+      clean = `http://${clean}`;
+    }
+    return clean.replace(/\/+$/, '');
+  }
+
   private async init() {
     const saved = await storage.get<string>(API_BASE_URL_KEY);
     if (saved) {
-      this.baseUrl = saved;
+      this.baseUrl = this.normalizeUrl(saved);
     }
     const token = await storage.get<string>('grainledger_token');
     if (token) {
@@ -35,7 +47,7 @@ export class ApiService {
   }
 
   public async setBaseUrl(url: string): Promise<void> {
-    this.baseUrl = url.trim().replace(/\/+$/, '');
+    this.baseUrl = this.normalizeUrl(url);
     await storage.set(API_BASE_URL_KEY, this.baseUrl);
   }
 
@@ -52,11 +64,12 @@ export class ApiService {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<{ data: T | null; error: string | null; isMock: boolean }> {
-    const url = `${this.baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const url = `${this.baseUrl}${normalizedEndpoint}`;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      Accept: 'application/json',
+      Accept: 'application/json, text/plain, */*',
       ...(options.headers as Record<string, string>),
     };
 
@@ -85,7 +98,19 @@ export class ApiService {
         };
       }
 
-      const data = (await response.json()) as T;
+      const contentType = response.headers.get('content-type') || '';
+      let data: any = null;
+      if (contentType.includes('application/json')) {
+        data = (await response.json()) as T;
+      } else {
+        const text = await response.text();
+        try {
+          data = JSON.parse(text) as T;
+        } catch {
+          data = text as unknown as T;
+        }
+      }
+
       return { data, error: null, isMock: false };
     } catch (err: any) {
       return {

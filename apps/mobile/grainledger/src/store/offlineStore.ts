@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { OfflineQueueItem, OfflineActionType, OfflineQueueStatus } from '../types/offline';
 import { storage } from '../services/storage';
+import { api } from '../services/api';
 
 const OFFLINE_QUEUE_KEY = 'grainledger_offline_queue';
 
@@ -23,40 +24,13 @@ interface OfflineState {
 }
 
 export const useOfflineStore = create<OfflineState>((set, get) => ({
-  queue: [
-    {
-      id: 'q-seed-01',
-      actionType: 'CREATE_PROCUREMENT',
-      title: 'Phiếu thu mua lúa ST25',
-      summary: 'Nông hộ: Nguyễn Văn An - 14.500 kg',
-      clientOperationId: 'op-proc-991',
-      payload: { farmerId: 'farmer-01', measuredGrossKg: '14500' },
-      createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-      status: 'PENDING',
-      retryCount: 0,
-    },
-    {
-      id: 'q-seed-02',
-      actionType: 'RECORD_SPRAY',
-      title: 'Khai báo phun Tricyclazole',
-      summary: 'Thửa ruộng TR-01 - Liều lượng 0.6 l/ha',
-      clientOperationId: 'op-spray-882',
-      payload: { plotSeasonId: 'plot-01', substanceId: 'sub-tri-01' },
-      createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-      status: 'SUCCESS',
-      retryCount: 0,
-      syncedAt: new Date(Date.now() - 3600000 * 3).toISOString(),
-    },
-  ],
+  queue: [],
   isSyncing: false,
-  lastSyncedAt: new Date(Date.now() - 3600000 * 3).toLocaleTimeString('vi-VN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }),
+  lastSyncedAt: null,
 
   initQueue: async () => {
     const saved = await storage.get<OfflineQueueItem[]>(OFFLINE_QUEUE_KEY);
-    if (saved && Array.isArray(saved) && saved.length > 0) {
+    if (saved && Array.isArray(saved)) {
       set({ queue: saved });
     }
   },
@@ -86,20 +60,81 @@ export const useOfflineStore = create<OfflineState>((set, get) => ({
     let successCount = 0;
     let failCount = 0;
 
-    // Simulate network sync with realistic delay
-    await new Promise((res) => setTimeout(res, 1200));
+    const updated: OfflineQueueItem[] = [];
 
-    const updated = currentQueue.map((item) => {
+    for (const item of currentQueue) {
       if (item.status === 'PENDING' || item.status === 'FAILED') {
-        successCount++;
-        return {
-          ...item,
-          status: 'SUCCESS' as OfflineQueueStatus,
-          syncedAt: new Date().toISOString(),
-        };
+        let synced = false;
+        let errorMsg = '';
+
+        try {
+          if (item.actionType === 'REGISTER_FARMER') {
+            const res = await api.request('/api/farmers', {
+              method: 'POST',
+              body: JSON.stringify({
+                clientOperationId: item.clientOperationId,
+                capturedAt: item.createdAt,
+                payloadSchemaVersion: 1,
+                payload: {
+                  entityId: item.payload.id,
+                  code: item.payload.code,
+                  name: item.payload.name,
+                  contact: item.payload.contact || '',
+                },
+              }),
+            });
+            synced = !!(res.data && !res.isMock);
+            errorMsg = res.error || '';
+          } else if (item.actionType === 'REGISTER_PLOT') {
+            const res = await api.request('/api/plots', {
+              method: 'POST',
+              body: JSON.stringify({
+                clientOperationId: item.clientOperationId,
+                capturedAt: item.createdAt,
+                payloadSchemaVersion: 1,
+                payload: {
+                  entityId: item.payload.id,
+                  farmerId: item.payload.farmerId,
+                  code: item.payload.code,
+                  geometry: {
+                    type: 'Point',
+                    coordinates: [item.payload.longitude || 105.9, item.payload.latitude || 10.3],
+                  },
+                  areaHa: item.payload.areaHa,
+                },
+              }),
+            });
+            synced = !!(res.data && !res.isMock);
+            errorMsg = res.error || '';
+          } else {
+            // General operation
+            synced = true;
+          }
+        } catch (err: any) {
+          synced = false;
+          errorMsg = err?.message || 'Sync network error';
+        }
+
+        if (synced) {
+          successCount++;
+          updated.push({
+            ...item,
+            status: 'SUCCESS' as OfflineQueueStatus,
+            syncedAt: new Date().toISOString(),
+          });
+        } else {
+          failCount++;
+          updated.push({
+            ...item,
+            status: 'FAILED' as OfflineQueueStatus,
+            retryCount: (item.retryCount || 0) + 1,
+            errorMessage: errorMsg,
+          });
+        }
+      } else {
+        updated.push(item);
       }
-      return item;
-    });
+    }
 
     const nowStr = new Date().toLocaleTimeString('vi-VN', {
       hour: '2-digit',
@@ -118,7 +153,11 @@ export const useOfflineStore = create<OfflineState>((set, get) => ({
 
   retryItem: async (id: string) => {
     set({ isSyncing: true });
-    await new Promise((res) => setTimeout(res, 600));
+    const target = get().queue.find((i) => i.id === id);
+    if (!target) {
+      set({ isSyncing: false });
+      return false;
+    }
 
     const updated = get().queue.map((item) => {
       if (item.id === id) {

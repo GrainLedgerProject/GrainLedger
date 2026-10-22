@@ -5,8 +5,9 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  TouchableOpacity,
   Alert,
+  TouchableOpacity,
+  TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '../theme/colors';
@@ -14,19 +15,40 @@ import { Card } from '../components/common/Card';
 import { InputField } from '../components/common/InputField';
 import { Button } from '../components/common/Button';
 import { useAuthStore } from '../store/authStore';
-import { UserRole } from '../types/roles';
-import { UserCheck } from 'lucide-react-native';
+import { api } from '../services/api';
+import {
+  Server,
+  Sliders,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  AlertTriangle,
+  Zap,
+} from 'lucide-react-native';
+
+const DEV_ACCOUNTS = [
+  { label: 'Thu mua (PO)', email: 'purchasing@grainledger.local' },
+  { label: 'Vận hành (MO)', email: 'mill.operator@grainledger.local' },
+  { label: 'Quản lý (MM)', email: 'mill.manager@grainledger.local' },
+  { label: 'Quản trị (Admin)', email: 'admin@grainledger.local' },
+];
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { loginWithCredentials, loginAsDemo, isLoading } = useAuthStore();
+  const { loginWithCredentials, isLoading } = useAuthStore();
 
   const [email, setEmail] = useState('purchasing@grainledger.local');
-  const [password, setPassword] = useState('GrainLedger@2026');
+  const [password, setPassword] = useState('Grainledger@1');
+
+  // Dev Server Configuration State
+  const [showDevSettings, setShowDevSettings] = useState(false);
+  const [serverUrl, setServerUrl] = useState(api.getBaseUrl());
+  const [testingServer, setTestingServer] = useState(false);
+  const [serverStatus, setServerStatus] = useState<'idle' | 'ok' | 'error'>('idle');
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Thiếu thông tin', 'Vui lòng nhập email và mật khẩu.');
+      Alert.alert('Thiếu thông tin', 'Vui lòng nhập đầy đủ email và mật khẩu.');
       return;
     }
 
@@ -34,13 +56,60 @@ export default function LoginScreen() {
     if (res.success) {
       router.replace('/(tabs)');
     } else {
-      Alert.alert('Đăng nhập thất bại', res.error || 'Vui lòng kiểm tra lại tài khoản.');
+      Alert.alert(
+        'Đăng nhập thất bại',
+        res.error || 'Vui lòng kiểm tra lại tài khoản hoặc kết nối máy chủ.'
+      );
     }
   };
 
-  const handleQuickDemo = async (role: UserRole) => {
-    await loginAsDemo(role);
-    router.replace('/(tabs)');
+  const handleSaveServerUrl = async () => {
+    await api.setBaseUrl(serverUrl);
+    const normalized = api.getBaseUrl();
+    setServerUrl(normalized);
+    Alert.alert('Thành công', `Đã lưu địa chỉ máy chủ: ${normalized}`);
+  };
+
+  const handleTestConnection = async () => {
+    setTestingServer(true);
+    setServerStatus('idle');
+
+    // Ping health endpoint on the entered or saved server
+    await api.setBaseUrl(serverUrl);
+    const normalized = api.getBaseUrl();
+    setServerUrl(normalized);
+
+    const res = await api.request<{ status?: string }>('/health');
+    setTestingServer(false);
+
+    if (res.data && !res.isMock) {
+      setServerStatus('ok');
+      Alert.alert(
+        'Kết nối thành công',
+        `Máy chủ đang phản hồi tốt!\nURL: ${normalized}\nTrạng thái: ${
+          typeof res.data === 'object' && res.data.status ? res.data.status : 'OK'
+        }`
+      );
+    } else {
+      setServerStatus('error');
+      Alert.alert(
+        'Không thể kết nối',
+        `Không thể kết nối tới ${normalized}.\n\nLỗi: ${
+          res.error || 'Timeout hoặc máy chủ không phản hồi'
+        }\n\nGợi ý: Kiểm tra lại backend .NET đang chạy cổng 5080 và dùng 10.0.2.2 cho máy ảo Android.`
+      );
+    }
+  };
+
+  const handleSelectPreset = (url: string) => {
+    setServerUrl(url);
+    api.setBaseUrl(url);
+    setServerStatus('idle');
+  };
+
+  const handleFillAccount = (devEmail: string) => {
+    setEmail(devEmail);
+    setPassword('Grainledger@1');
   };
 
   return (
@@ -88,54 +157,153 @@ export default function LoginScreen() {
           />
         </Card>
 
-        {/* Quick Demo Access */}
-        <Card style={styles.demoCard}>
-          <View style={styles.demoHeader}>
-            <UserCheck size={18} color={Colors.primary} />
-            <Text style={styles.demoTitle}>Đăng nhập nhanh (Chế độ Demo)</Text>
-          </View>
-          <Text style={styles.demoSub}>
-            Chọn một vai trò để trải nghiệm luồng thao tác hoàn chỉnh:
-          </Text>
-
+        {/* Developer Server Configuration Card */}
+        <Card style={styles.devCard}>
           <TouchableOpacity
-            style={styles.demoBtn}
-            onPress={() => handleQuickDemo('CUSTOMER_PROCUREMENT_OFFICER')}
+            style={styles.devHeaderToggle}
+            onPress={() => setShowDevSettings(!showDevSettings)}
+            activeOpacity={0.7}
           >
-            <View style={styles.demoRolePill}>
-              <Text style={styles.demoRoleCode}>PO</Text>
+            <View style={styles.devHeaderLeft}>
+              <View style={styles.devIconWrap}>
+                <Sliders size={16} color={Colors.accent} />
+              </View>
+              <View>
+                <View style={styles.devTitleRow}>
+                  <Text style={styles.devTitle}>Cấu hình Server (Dev)</Text>
+                  {serverStatus === 'ok' ? (
+                    <View style={styles.statusPillOk}>
+                      <CheckCircle2 size={11} color="#047857" />
+                      <Text style={styles.statusPillOkText}>Online</Text>
+                    </View>
+                  ) : serverStatus === 'error' ? (
+                    <View style={styles.statusPillError}>
+                      <AlertTriangle size={11} color="#B91C1C" />
+                      <Text style={styles.statusPillErrorText}>Lỗi</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.devCurrentUrl} numberOfLines={1}>
+                  {api.getBaseUrl()}
+                </Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.demoRoleName}>Nhân viên Thu mua Thực địa</Text>
-              <Text style={styles.demoRoleDesc}>Đăng ký nông hộ, thửa ruộng, lập phiếu thu mua</Text>
-            </View>
+
+            {showDevSettings ? (
+              <ChevronUp size={18} color={Colors.textSecondary} />
+            ) : (
+              <ChevronDown size={18} color={Colors.textSecondary} />
+            )}
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.demoBtn}
-            onPress={() => handleQuickDemo('MILL_OPERATOR')}
-          >
-            <View style={[styles.demoRolePill, { backgroundColor: Colors.accent }]}>
-              <Text style={styles.demoRoleCode}>MO</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.demoRoleName}>Nhân viên Vận hành Nhà máy</Text>
-              <Text style={styles.demoRoleDesc}>Cân xe lúa tươi, ghi nhận mẻ sấy & xay xát</Text>
-            </View>
-          </TouchableOpacity>
+          {showDevSettings && (
+            <View style={styles.devBody}>
+              <View style={styles.divider} />
 
-          <TouchableOpacity
-            style={styles.demoBtn}
-            onPress={() => handleQuickDemo('MILL_MANAGER')}
-          >
-            <View style={[styles.demoRolePill, { backgroundColor: '#3B82F6' }]}>
-              <Text style={styles.demoRoleCode}>MM</Text>
+              <Text style={styles.fieldLabel}>Địa chỉ API Backend:</Text>
+              <View style={styles.urlInputRow}>
+                <Server size={16} color={Colors.textSecondary} />
+                <TextInput
+                  style={styles.urlInput}
+                  value={serverUrl}
+                  onChangeText={(val) => {
+                    setServerUrl(val);
+                    setServerStatus('idle');
+                  }}
+                  placeholder="http://10.0.2.2:5080 hoặc IP máy"
+                  placeholderTextColor={Colors.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              {/* Quick Presets */}
+              <Text style={styles.presetsLabel}>Chọn nhanh địa chỉ thường dùng:</Text>
+              <View style={styles.presetsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.presetBtn,
+                    serverUrl.includes('10.0.2.2') && styles.presetBtnActive,
+                  ]}
+                  onPress={() => handleSelectPreset('http://10.0.2.2:5080')}
+                >
+                  <Text
+                    style={[
+                      styles.presetText,
+                      serverUrl.includes('10.0.2.2') && styles.presetTextActive,
+                    ]}
+                  >
+                    10.0.2.2 (Máy ảo)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.presetBtn,
+                    serverUrl.includes('localhost') && styles.presetBtnActive,
+                  ]}
+                  onPress={() => handleSelectPreset('http://localhost:5080')}
+                >
+                  <Text
+                    style={[
+                      styles.presetText,
+                      serverUrl.includes('localhost') && styles.presetTextActive,
+                    ]}
+                  >
+                    localhost:5080
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Action Buttons */}
+              <View style={styles.actionBtnRow}>
+                <Button
+                  title="Lưu URL"
+                  size="small"
+                  variant="outline"
+                  style={{ flex: 1 }}
+                  onPress={handleSaveServerUrl}
+                />
+                <Button
+                  title="Kiểm tra kết nối"
+                  size="small"
+                  variant="primary"
+                  loading={testingServer}
+                  style={{ flex: 1 }}
+                  onPress={handleTestConnection}
+                />
+              </View>
+
+              {/* Quick Account Fill for dev convenience */}
+              <View style={styles.accountQuickSection}>
+                <View style={styles.accountQuickHeader}>
+                  <Zap size={14} color={Colors.accent} />
+                  <Text style={styles.accountQuickTitle}>Điền nhanh tài khoản mẫu:</Text>
+                </View>
+                <View style={styles.accountChipGrid}>
+                  {DEV_ACCOUNTS.map((acc) => (
+                    <TouchableOpacity
+                      key={acc.email}
+                      style={[
+                        styles.accountChip,
+                        email === acc.email && styles.accountChipActive,
+                      ]}
+                      onPress={() => handleFillAccount(acc.email)}
+                    >
+                      <Text
+                        style={[
+                          styles.accountChipText,
+                          email === acc.email && styles.accountChipTextActive,
+                        ]}
+                      >
+                        {acc.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.demoRoleName}>Quản lý Nhà máy & Silo</Text>
-              <Text style={styles.demoRoleDesc}>Đối soát dung sai, kiểm soát lệnh HOLD</Text>
-            </View>
-          </TouchableOpacity>
+          )}
         </Card>
       </ScrollView>
     </SafeAreaView>
@@ -189,7 +357,7 @@ const styles = StyleSheet.create({
     maxWidth: 280,
   },
   card: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   cardTitle: {
     fontSize: 16,
@@ -197,58 +365,180 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 16,
   },
-  demoCard: {
-    backgroundColor: Colors.cardSubtle,
-    borderColor: Colors.border,
+  devCard: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    padding: 12,
   },
-  demoHeader: {
+  devHeaderToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
+    justifyContent: 'space-between',
   },
-  demoTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  demoSub: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 12,
-  },
-  demoBtn: {
+  devHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 10,
-    borderRadius: 10,
     gap: 10,
-    marginBottom: 8,
+    flex: 1,
   },
-  demoRolePill: {
-    width: 32,
-    height: 32,
+  devIconWrap: {
+    width: 34,
+    height: 34,
     borderRadius: 8,
-    backgroundColor: Colors.primary,
+    backgroundColor: '#FEF3C7',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  demoRoleCode: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
+  devTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  demoRoleName: {
-    fontSize: 13,
+  devTitle: {
+    fontSize: 14,
     fontWeight: '700',
+    color: '#92400E',
+  },
+  devCurrentUrl: {
+    fontSize: 11,
+    color: '#B45309',
+    marginTop: 2,
+    maxWidth: 210,
+  },
+  statusPillOk: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+  },
+  statusPillOkText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  statusPillError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+  },
+  statusPillErrorText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B91C1C',
+  },
+  devBody: {
+    marginTop: 10,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#FDE68A',
+    marginBottom: 12,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#92400E',
+    marginBottom: 6,
+  },
+  urlInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    height: 42,
+  },
+  urlInput: {
+    flex: 1,
+    fontSize: 13,
     color: Colors.text,
   },
-  demoRoleDesc: {
+  presetsLabel: {
     fontSize: 11,
+    fontWeight: '600',
+    color: '#B45309',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  presetsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  presetBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+  },
+  presetBtnActive: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+  },
+  presetText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#92400E',
+  },
+  presetTextActive: {
+    color: '#FFFFFF',
+  },
+  actionBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  accountQuickSection: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#FDE68A',
+  },
+  accountQuickHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 8,
+  },
+  accountQuickTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#92400E',
+  },
+  accountChipGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  accountChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+  },
+  accountChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  accountChipText: {
+    fontSize: 11,
+    fontWeight: '600',
     color: Colors.textSecondary,
-    marginTop: 1,
+  },
+  accountChipTextActive: {
+    color: '#FFFFFF',
   },
 });

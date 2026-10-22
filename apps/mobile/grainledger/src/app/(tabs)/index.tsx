@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   SafeAreaView,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '../../theme/colors';
@@ -35,9 +36,14 @@ import {
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const { farmers, receipts } = useFieldStore();
-  const { receivingTasks, silos } = useMillStore();
+  const { farmers, receipts, fetchFieldData, isLoading: fieldLoading } = useFieldStore();
+  const { receivingTasks, silos, fetchMillData, isLoading: millLoading } = useMillStore();
   const { getPendingCount } = useOfflineStore();
+
+  const isRefreshing = fieldLoading || millLoading;
+  const onRefresh = async () => {
+    await Promise.all([fetchFieldData(), fetchMillData()]);
+  };
 
   const totalProcuredToday = receipts.reduce(
     (acc, r) => acc + (parseFloat(r.measuredGrossKg) || 0),
@@ -54,6 +60,13 @@ export default function HomeScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            colors={[Colors.primary]}
+          />
+        }
       >
         {/* Welcome Section */}
         <View style={styles.welcomeSection}>

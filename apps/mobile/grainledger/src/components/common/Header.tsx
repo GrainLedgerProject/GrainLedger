@@ -18,7 +18,7 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle }) => {
   const { activeRole } = useAuthStore();
   const { getPendingCount, isSyncing } = useOfflineStore();
   const pendingCount = getPendingCount();
-  const roleMeta = ROLE_DEFINITIONS[activeRole];
+  const roleMeta = activeRole ? ROLE_DEFINITIONS[activeRole] : undefined;
 
   return (
     <View style={styles.container}>

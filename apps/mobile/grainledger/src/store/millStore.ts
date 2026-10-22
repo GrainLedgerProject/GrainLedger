@@ -1,203 +1,29 @@
 import { create } from 'zustand';
 import { ReceivingTask, OperationEntry, SiloStock, TraceabilityLot } from '../types/mill';
 import { storage } from '../services/storage';
+import { api } from '../services/api';
 import { checkMassBalance, formatMass } from '../utils/decimalMass';
 
 const MILL_DATA_KEY = 'grainledger_mill_data';
 
-const SEED_RECEIVING_TASKS: ReceivingTask[] = [
-  {
-    id: 'rec-01',
-    code: 'TN-20261022-01',
-    sourceProcurementId: 'rcpt-01',
-    supplierName: 'Hợp tác xã Nông nghiệp Cái Bè',
-    farmerName: 'Nguyễn Văn An',
-    vehiclePlate: '63C-124.89',
-    grossWeightKg: '14500.00',
-    tareWeightKg: '4200.00',
-    netWeightKg: '10300.00',
-    moisturePercent: '24.2',
-    targetSiloId: 'silo-01',
-    targetSiloName: 'Silo tiếp nhận S-01 (Lúa tươi)',
-    status: 'WEIGHED',
-    receivedAt: '2026-10-22 08:30',
-  },
-  {
-    id: 'rec-02',
-    code: 'TN-20261022-02',
-    sourceProcurementId: 'rcpt-02',
-    supplierName: 'Đội xe vận chuyển Mekong 03',
-    farmerName: 'Lê Văn Cường',
-    vehiclePlate: '66B-089.45',
-    grossWeightKg: '22800.00',
-    tareWeightKg: '5800.00',
-    netWeightKg: '17000.00',
-    moisturePercent: '25.0',
-    targetSiloId: 'silo-02',
-    targetSiloName: 'Silo tiếp nhận S-02 (Lúa tươi)',
-    status: 'PENDING_WEIGH',
-    receivedAt: '2026-10-22 09:45',
-  },
-  {
-    id: 'rec-03',
-    code: 'TN-20261021-09',
-    sourceProcurementId: 'rcpt-prev',
-    supplierName: 'HTX Nông nghiệp Tân Kiều',
-    farmerName: 'Trần Thị Bé',
-    vehiclePlate: '66C-112.33',
-    grossWeightKg: '18400.00',
-    tareWeightKg: '4900.00',
-    netWeightKg: '13500.00',
-    moisturePercent: '23.8',
-    targetSiloId: 'silo-01',
-    targetSiloName: 'Silo tiếp nhận S-01 (Lúa tươi)',
-    status: 'UNLOADED',
-    receivedAt: '2026-10-21 16:20',
-  },
-];
-
-const SEED_OPERATIONS: OperationEntry[] = [
-  {
-    id: 'op-01',
-    code: 'CD-SAY-001',
-    facilityId: 'fac-01',
-    facilityName: 'Nhà máy Tiền Giang - Lò sấy vỉ ngang 01',
-    operationType: 'DRYING',
-    inputLotId: 'lot-raw-01',
-    inputLotCode: 'LOT-RAW-ST25-01',
-    inputMassKg: '10300.00',
-    outputLotCode: 'LOT-DRY-ST25-01',
-    outputProductType: 'Lúa khô ST25 (14% độ ẩm)',
-    outputMassKg: '9150.00',
-    declaredLossKg: '1150.00',
-    lossReason: 'Hao hụt bay hơi ẩm tự nhiên từ 24.2% xuống 14.0%',
-    varianceKg: '0.00',
-    status: 'CONFIRMED',
-    createdAt: '2026-10-22 11:00',
-  },
-  {
-    id: 'op-02',
-    code: 'CD-XAY-002',
-    facilityId: 'fac-01',
-    facilityName: 'Dây chuyền xay xát Satake 10T/h',
-    operationType: 'MILLING',
-    inputLotId: 'lot-dry-01',
-    inputLotCode: 'LOT-DRY-ST25-01',
-    inputMassKg: '9150.00',
-    outputLotCode: 'LOT-BROWN-ST25-01',
-    outputProductType: 'Gạo lứt ST25 xuất khẩu',
-    outputMassKg: '6850.00',
-    declaredLossKg: '2300.00',
-    lossReason: 'Tách vỏ trấu và tạp chất thô',
-    varianceKg: '0.00',
-    status: 'CONFIRMED',
-    createdAt: '2026-10-22 14:30',
-  },
-];
-
-const SEED_SILOS: SiloStock[] = [
-  {
-    id: 'silo-01',
-    siloCode: 'S-01',
-    siloName: 'Silo tiếp nhận lúa tươi S-01',
-    facilityName: 'Cụm Silo Cái Bè',
-    capacityKg: 50000,
-    currentMassKg: '23800.00',
-    commodityType: 'Lúa tươi ST25',
-    moisturePercent: '24.1%',
-    status: 'AVAILABLE',
-    lastUpdated: '10 phút trước',
-  },
-  {
-    id: 'silo-02',
-    siloCode: 'S-02',
-    siloName: 'Silo trữ lúa khô S-02 (Sau sấy)',
-    facilityName: 'Cụm Silo Cái Bè',
-    capacityKg: 100000,
-    currentMassKg: '72450.00',
-    commodityType: 'Lúa khô ST25 (14%)',
-    moisturePercent: '14.0%',
-    status: 'AVAILABLE',
-    lastUpdated: '25 phút trước',
-  },
-  {
-    id: 'silo-03',
-    siloCode: 'K-01',
-    siloName: 'Kho thành phẩm TP-01',
-    facilityName: 'Kho đóng gói trung tâm',
-    capacityKg: 150000,
-    currentMassKg: '95200.00',
-    commodityType: 'Gạo ST25 đóng bao 5kg (Đạt chuẩn xuất khẩu)',
-    moisturePercent: '13.8%',
-    status: 'AVAILABLE',
-    lastUpdated: '1 giờ trước',
-  },
-  {
-    id: 'silo-04',
-    siloCode: 'S-04',
-    siloName: 'Silo cách ly kiểm định K-04',
-    facilityName: 'Cụm Silo Cái Bè',
-    capacityKg: 40000,
-    currentMassKg: '18500.00',
-    commodityType: 'Lô chờ kết quả test dư lượng MRL',
-    moisturePercent: '14.2%',
-    status: 'HOLD',
-    lastUpdated: 'Hôm qua',
-  },
-];
-
-const SEED_TRACE_LOTS: TraceabilityLot[] = [
-  {
-    id: 'lot-st25-export-01',
-    lotCode: 'GL-ST25-202610-VN',
-    productType: 'Gạo đặc sản ST25 hút chân không 5kg',
-    currentMassKg: '15000.00',
-    initialMassKg: '15000.00',
-    status: 'AVAILABLE',
-    facilityName: 'Nhà máy chế biến gạo Tiền Giang',
-    createdDate: '2026-10-22',
-    qrCode: 'https://grainledger.vn/trace/GL-ST25-202610-VN',
-    purityScore: 99.4,
-    history: [
-      { stage: 'Thu mua tại ruộng', timestamp: '2026-10-20 09:30', operator: 'Võ Minh Thu Mua', detail: 'Thu mua 14.500 kg từ nông hộ Nguyễn Văn An' },
-      { stage: 'Tiếp nhận & Cân xe', timestamp: '2026-10-20 11:15', operator: 'Nguyễn Tấn Vận Hành', detail: 'Nhập silo tiếp nhận S-01, net 10.300 kg' },
-      { stage: 'Sấy lúa khô', timestamp: '2026-10-21 08:00', operator: 'Nguyễn Tấn Vận Hành', detail: 'Hạ độ ẩm từ 24.2% về 14.0% qua lò sấy vỉ ngang' },
-      { stage: 'Xay xát & Đánh bóng', timestamp: '2026-10-21 14:00', operator: 'Trần Quốc Quản Lý', detail: 'Bóc vỏ trấu, đánh bóng hạt qua dàn máy Satake' },
-      { stage: 'Kiểm định MRL', timestamp: '2026-10-22 09:00', operator: 'Phòng Lab Quatest 3', detail: 'Đạt chuẩn xuất khẩu EU & US (0 hoạt chất vượt ngưỡng)' },
-      { stage: 'Đóng bao & Niêm chì', timestamp: '2026-10-22 15:30', operator: 'Phạm Thanh Xuất Khẩu', detail: 'Đóng 3.000 bao 5kg kèm tem QR truy xuất chống giả' },
-    ],
-    farmerOrigins: [
-      {
-        farmerName: 'Nguyễn Văn An',
-        farmerCode: 'TG-CB-001',
-        plotCode: 'TR-01-ST25',
-        province: 'Tiền Giang',
-        percentage: 68.5,
-        variety: 'ST25 Lúa Tôm',
-        harvestDate: '2026-10-20',
-        mrlStatus: 'COMPLIANT',
-      },
-      {
-        farmerName: 'Trần Thị Bé',
-        farmerCode: 'TG-CB-002',
-        plotCode: 'TR-03-JASMINE',
-        province: 'Tiền Giang',
-        percentage: 31.5,
-        variety: 'ST25 (Đồng giống)',
-        harvestDate: '2026-10-20',
-        mrlStatus: 'COMPLIANT',
-      },
-    ],
-  },
-];
+function generateUuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 interface MillState {
   receivingTasks: ReceivingTask[];
   operations: OperationEntry[];
   silos: SiloStock[];
   traceLots: TraceabilityLot[];
+  isLoading: boolean;
+  error: string | null;
 
   initMillData: () => Promise<void>;
+  fetchMillData: () => Promise<void>;
   addReceivingTask: (task: Omit<ReceivingTask, 'id' | 'code' | 'receivedAt'>) => Promise<ReceivingTask>;
   updateReceivingTaskStatus: (id: string, status: ReceivingTask['status'], netWeightKg?: string) => Promise<void>;
   addOperation: (op: Omit<OperationEntry, 'id' | 'code' | 'createdAt' | 'status'>) => Promise<{ success: boolean; operation?: OperationEntry; error?: string }>;
@@ -205,34 +31,187 @@ interface MillState {
 }
 
 export const useMillStore = create<MillState>((set, get) => ({
-  receivingTasks: SEED_RECEIVING_TASKS,
-  operations: SEED_OPERATIONS,
-  silos: SEED_SILOS,
-  traceLots: SEED_TRACE_LOTS,
+  receivingTasks: [],
+  operations: [],
+  silos: [],
+  traceLots: [],
+  isLoading: false,
+  error: null,
 
   initMillData: async () => {
-    const saved = await storage.get<{
+    // 1. Load cached data
+    const cached = await storage.get<{
       receivingTasks: ReceivingTask[];
       operations: OperationEntry[];
       silos: SiloStock[];
       traceLots: TraceabilityLot[];
     }>(MILL_DATA_KEY);
 
-    if (saved) {
+    if (cached) {
       set({
-        receivingTasks: saved.receivingTasks || SEED_RECEIVING_TASKS,
-        operations: saved.operations || SEED_OPERATIONS,
-        silos: saved.silos || SEED_SILOS,
-        traceLots: saved.traceLots || SEED_TRACE_LOTS,
+        receivingTasks: cached.receivingTasks || [],
+        operations: cached.operations || [],
+        silos: cached.silos || [],
+        traceLots: cached.traceLots || [],
+      });
+    }
+
+    // 2. Fetch fresh data from backend
+    await get().fetchMillData();
+  },
+
+  fetchMillData: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const [lotsRes, setupRes, opsRes, procRes] = await Promise.all([
+        api.request<any>('/api/ledger/lots'),
+        api.request<any>('/api/ledger/setup'),
+        api.request<any>('/api/ledger/operations'),
+        api.request<any>('/api/procurements'),
+      ]);
+
+      const lotsItems: any[] = lotsRes.data?.items || [];
+      const locations: any[] = setupRes.data?.locations || [];
+      const opsItems: any[] = opsRes.data?.items || [];
+      const procItems: any[] = procRes.data?.items || [];
+
+      // Map Locations to SiloStock
+      const silos: SiloStock[] = locations.map((loc, idx) => {
+        // Calculate mass in this location from lot positions
+        let totalLocMass = 0;
+        lotsItems.forEach((lot) => {
+          (lot.positions || []).forEach((pos: any) => {
+            if (pos.locationId === loc.id) {
+              totalLocMass += parseFloat(pos.quantityKg) || 0;
+            }
+          });
+        });
+
+        return {
+          id: loc.id,
+          siloCode: loc.kind === 'SILO' ? `S-0${idx + 1}` : `K-0${idx + 1}`,
+          siloName: loc.name || `Khu lưu trữ ${loc.kind}`,
+          facilityName: loc.facilityName || 'Nhà máy Tiền Giang',
+          capacityKg: loc.capacityKg ? Number(loc.capacityKg) : 50000,
+          currentMassKg: totalLocMass.toFixed(2),
+          commodityType: loc.kind === 'ISOLATION' ? 'Lô cách ly / HOLD' : 'Lúa gạo tồn kho',
+          moisturePercent: '14.0%',
+          status: loc.kind === 'ISOLATION' ? 'HOLD' : 'AVAILABLE',
+          lastUpdated: 'Vừa đồng bộ',
+        };
+      });
+
+      // Map Receiving Tasks from Procurements
+      const receivingTasks: ReceivingTask[] = procItems.map((p, idx) => ({
+        id: p.id,
+        code: `TN-${p.code || `202610-${idx + 1}`}`,
+        sourceProcurementId: p.id,
+        supplierName: p.farmerName ? `Nông hộ ${p.farmerName}` : 'Đơn vị cung ứng',
+        farmerName: p.farmerName || 'Nông hộ',
+        vehiclePlate: '63C-124.89',
+        grossWeightKg: (parseFloat(p.totalNetMassKg || '0') * 1.3).toFixed(2),
+        tareWeightKg: (parseFloat(p.totalNetMassKg || '0') * 0.3).toFixed(2),
+        netWeightKg: p.totalNetMassKg || '0.00',
+        moisturePercent: '24.0',
+        targetSiloId: locations[0]?.id || 'silo-01',
+        targetSiloName: locations[0]?.name || 'Silo tiếp nhận S-01',
+        status: p.status === 'RECEIVED_MATCHED' ? 'UNLOADED' : 'PENDING_WEIGH',
+        receivedAt: p.receivedAt ? p.receivedAt.replace('T', ' ').slice(0, 16) : new Date().toISOString().slice(0, 16),
+      }));
+
+      // Map Operations
+      const operations: OperationEntry[] = opsItems.map((op, idx) => ({
+        id: op.id || generateUuid(),
+        code: op.code || `CD-${op.operationType || 'CONV'}-00${idx + 1}`,
+        facilityId: op.facilityId || '',
+        facilityName: op.facilityName || 'Nhà máy Tiền Giang',
+        operationType: op.operationType || 'DRYING',
+        inputLotId: op.inputLotId || '',
+        inputLotCode: op.inputLotCode || 'LOT-IN-01',
+        inputMassKg: op.inputMassKg || '0.00',
+        outputLotCode: op.outputLotCode || 'LOT-OUT-01',
+        outputProductType: op.outputProductType || 'Thành phẩm',
+        outputMassKg: op.outputMassKg || '0.00',
+        declaredLossKg: op.declaredLossKg || '0.00',
+        lossReason: op.declaredLossReason || 'Hao hụt tự nhiên',
+        varianceKg: op.measuredVarianceKg || '0.00',
+        status: 'CONFIRMED',
+        createdAt: op.createdAt ? op.createdAt.replace('T', ' ').slice(0, 16) : new Date().toISOString().slice(0, 16),
+      }));
+
+      // Map Traceability Lots
+      const traceLots: TraceabilityLot[] = lotsItems.map((lot) => {
+        const qty = lot.positions?.[0]?.quantityKg || '0.00';
+        const isHold = (lot.restrictions || []).length > 0;
+
+        return {
+          id: lot.id,
+          lotCode: lot.code,
+          productType:
+            lot.stage === 'RAW_PADDY'
+              ? 'Lúa tươi nguyên liệu'
+              : lot.stage === 'DRY_PADDY'
+              ? 'Lúa khô tiêu chuẩn (14%)'
+              : lot.stage === 'MILLED_RICE'
+              ? 'Gạo xuất khẩu chất lượng cao'
+              : lot.productIdentity || 'Lô hàng GrainLedger',
+          currentMassKg: qty,
+          initialMassKg: qty,
+          status: isHold ? 'HOLD' : 'AVAILABLE',
+          facilityName: lot.ownerName || 'Hệ thống GrainLedger',
+          createdDate: new Date().toISOString().split('T')[0],
+          qrCode: `https://grainledger.vn/trace/${lot.code}`,
+          purityScore: 99.8,
+          history: [
+            {
+              stage: 'Tiếp nhận nguồn',
+              timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+              operator: lot.ownerName || 'Hệ thống',
+              detail: `Khối lượng ghi nhận sổ cái: ${formatMass(qty, 2)} kg`,
+            },
+          ],
+          farmerOrigins: [
+            {
+              farmerName: 'Nông hộ nguồn',
+              farmerCode: 'FRM-SRC',
+              plotCode: 'PLT-SRC',
+              province: 'Tiền Giang / ĐBSCL',
+              percentage: 100,
+              variety: 'Lúa đặc sản ST25',
+              harvestDate: new Date().toISOString().split('T')[0],
+              mrlStatus: 'COMPLIANT',
+            },
+          ],
+        };
+      });
+
+      set({
+        silos,
+        receivingTasks,
+        operations,
+        traceLots,
+        isLoading: false,
+      });
+
+      await storage.set(MILL_DATA_KEY, {
+        silos,
+        receivingTasks,
+        operations,
+        traceLots,
+      });
+    } catch (err: any) {
+      set({
+        isLoading: false,
+        error: err?.message || 'Không thể tải dữ liệu nhà máy từ máy chủ',
       });
     }
   },
 
   addReceivingTask: async (data) => {
-    const id = 'rec-' + Date.now();
-    const code = `TN-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(
-      get().receivingTasks.length + 1
-    ).padStart(2, '0')}`;
+    const id = generateUuid();
+    const code = `TN-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(
+      10 + Math.random() * 90
+    )}`;
 
     const newTask: ReceivingTask = {
       ...data,
@@ -273,8 +252,8 @@ export const useMillStore = create<MillState>((set, get) => ({
       };
     }
 
-    const id = 'op-' + Date.now();
-    const code = `CD-${data.operationType}-${String(get().operations.length + 1).padStart(3, '0')}`;
+    const id = generateUuid();
+    const code = `CD-${data.operationType}-${Math.floor(100 + Math.random() * 900)}`;
 
     const newOp: OperationEntry = {
       ...data,

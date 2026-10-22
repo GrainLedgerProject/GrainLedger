@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   SafeAreaView,
   TextInput,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '../../theme/colors';
@@ -25,6 +26,7 @@ import {
   ShieldCheck,
   User,
   Trees,
+  Inbox,
 } from 'lucide-react-native';
 
 type SubTab = 'receipts' | 'farmers' | 'plots' | 'sprays';
@@ -34,7 +36,7 @@ export default function FieldScreen() {
   const [activeTab, setActiveTab] = useState<SubTab>('receipts');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { farmers, plots, sprays, receipts } = useFieldStore();
+  const { farmers, plots, sprays, receipts, isLoading, fetchFieldData } = useFieldStore();
 
   const filteredReceipts = receipts.filter(
     (r) =>
@@ -138,10 +140,28 @@ export default function FieldScreen() {
         style={styles.contentScroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isLoading}
+            onRefresh={fetchFieldData}
+            colors={[Colors.primary]}
+          />
+        }
       >
         {/* RECEIPTS TAB */}
         {activeTab === 'receipts' && (
           <View>
+            {filteredReceipts.length === 0 ? (
+              <Card style={{ alignItems: 'center', padding: 32 }}>
+                <Inbox size={40} color={Colors.textMuted} />
+                <Text style={{ marginTop: 12, fontSize: 14, fontWeight: '700', color: Colors.text }}>
+                  Chưa có phiếu thu mua nào
+                </Text>
+                <Text style={{ marginTop: 4, fontSize: 12, color: Colors.textSecondary, textAlign: 'center' }}>
+                  Kéo xuống để tải lại từ máy chủ hoặc nhấn nút Tạo phiếu để thêm mới.
+                </Text>
+              </Card>
+            ) : null}
             {filteredReceipts.map((r) => (
               <Card key={r.id} style={styles.itemCard}>
                 <View style={styles.cardHeader}>
