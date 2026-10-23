@@ -7,9 +7,11 @@ type ReportSelection = { id: string; companyId: string; sourceId: string; substa
 type ReportResult = { id: string; substanceId?: string; testLabel: string; originalResultText: string; resultKind: string; method?: string | null; uncertainty?: string | null };
 type Report = { id: string; reportNumber: string; status: string; resultSets: Array<{ id: string; sourceLotId: string | null; results: ReportResult[] }> };
 type Substance = { id: string; code: string; name: string };
-type PolicyRule = { id: string; code: string; versionNo: number; companyId?: string | null; substanceId: string; supersedesId?: string | null; kind: string; interpretationKind: string | null; analyticalMethod?: string | null; inputStage: string; inputBasis: string; residueDefinition: string; evidenceRef: string; applicabilityStatement: string; unit: string; relativeUncertaintyPercent?: string | null; relativeUncertaintyAtZero?: boolean };
-type PolicySetting = { id: string; companyId?: string; ruleCode: string; versionNo: number; mode: 'SYSTEM_DEFAULT' | 'COMPANY_OVERRIDE'; effectiveFrom: string; effectiveTo: string | null; supersedesId: string | null; evidenceRef: string; applicabilityStatement: string };
 type Preview = { lower: string | null; upper: string | null; unit: string | null; basis: string | null; reasons: string[]; provenance: Array<{ uncertaintyMode?: string | null; relativeUncertaintyPercent?: string | null; absoluteUncertainty?: string | null }>; rules: Array<{ id: string; version: number; kind: string; policyOrigin?: string | null; policySettingId?: string | null; policySettingVersion?: number | null; ruleCode?: string | null; evidenceReference: string }>; decimalPlaces: number };
+type ReviewInput = { id: string; resultId: string; sourceId: string; absoluteUncertainty: string | null; reportingThreshold: string | null; supersededResultIds: string[] | null; supersedesId: string | null; note: string | null; previewFingerprint: string | null };
+type ReviewChoice = { resultId: string; label: string; selectionId: string | null };
+type ReviewRow = { input: ReviewInput; label: string; rawUncertainty: string | null; profile: { code: string; versionNo: number; inputBasis: string; residueDefinition: string; evidenceRef: string; applicabilityStatement: string; reviewedBy: string; reviewAuthority: string; reviewedAt: string; ndThresholdKind: string | null } | null; setting: { mode: string; versionNo: number; reviewedBy: string; reviewAuthority: string; evidenceRef: string } | null; assessment: Preview | null; reasons: string[]; conflictingResults: ReviewChoice[]; existingSelections: ReviewChoice[]; published: boolean };
+type ReviewSummary = { reportId: string; effectiveFrom: string; rows: ReviewRow[] };
 type GroupForm = Omit<SourceGroup, 'publishedBy' | 'publishedAt' | 'decimalPlaces'> & { decimalPlaces: number | null };
 type SelectionForm = Omit<ReportSelection, 'publishedBy' | 'publishedAt'>;
 const blankGroup = (companyId: string): GroupForm => ({ id: crypto.randomUUID(), companyId, code: '', versionNo: 1, substanceId: '', sourceIds: [], productStage: '', productIdentity: '', materialBasis: '', residueDefinition: '', lower: '', upper: '', unit: '', decimalPlaces: null, precedence: '', supportingResultIds: [], effectiveFrom: '', effectiveTo: null, supersedesId: null, evidenceRef: '', applicabilityStatement: '', reviewedBy: '', reviewAuthority: '', reviewedAt: '' });
@@ -18,7 +20,9 @@ const isoDate = (value: string) => new Date(value).toISOString();
 
 export function ResidueEvidenceControls({ active, allowed, companyId, report }: { active: boolean; allowed: boolean; companyId: string; report?: Report }) {
   const [groups, setGroups] = useState<SourceGroup[]>([]), [selections, setSelections] = useState<ReportSelection[]>([]), [substances, setSubstances] = useState<Substance[]>([]);
-  const [rules, setRules] = useState<PolicyRule[]>([]), [settings, setSettings] = useState<PolicySetting[]>([]), [profileId, setProfileId] = useState('');
+  const [summary, setSummary] = useState<ReviewSummary | null>(null), [reviewInputs, setReviewInputs] = useState<ReviewInput[]>([]), [reviewDirty, setReviewDirty] = useState(false);
+  const [reviewError, setReviewError] = useState(''), [reviewBusy, setReviewBusy] = useState(false);
+  const reviewToken = useRef(0);
   const [preview, setPreview] = useState<Preview | null>(null), [previewError, setPreviewError] = useState(''), [previewBusy, setPreviewBusy] = useState(false);
   const previewToken = useRef(0);
   const [group, setGroup] = useState<GroupForm>(() => blankGroup(companyId)), [selection, setSelection] = useState<SelectionForm>(() => blankSelection(companyId));
@@ -26,20 +30,50 @@ export function ResidueEvidenceControls({ active, allowed, companyId, report }: 
   const results = report?.resultSets.flatMap(set => set.results) || [];
   const confirmedReportResults = report?.status === 'CONFIRMED' ? report.resultSets.flatMap(set => set.sourceLotId ? set.results.filter(result => result.id && result.substanceId).map(result => ({ ...result, sourceId: set.sourceLotId! })) : []) : [];
   const action = useAction();
-  const currentSettings = settings.filter(item => item.companyId === companyId && !settings.some(next => next.supersedesId === item.id) && Date.parse(item.effectiveFrom) <= Date.now() && (!item.effectiveTo || Date.parse(item.effectiveTo) > Date.now()));
-  const currentRules = rules.filter(rule => (!rule.companyId || rule.companyId === companyId) && !rules.some(next => next.companyId === rule.companyId && next.code === rule.code && next.supersedesId === rule.id));
+  const exceptionRow = summary?.rows.find(row => row.input.resultId === selection.selectedResultId);
   useEffect(() => {
     if (!active || !allowed) return;
     let current = true;
-    previewToken.current++; setPreview(null); setPreviewError(''); setPreviewBusy(false); setProfileId('');
+    previewToken.current++; setPreview(null); setPreviewError(''); setPreviewBusy(false);
+    reviewToken.current++; setSummary(null); setReviewInputs([]); setReviewDirty(false); setReviewError(''); setReviewBusy(false);
     setSelection(blankSelection(companyId)); setGroup(blankGroup(companyId));
-    setGroups([]); setSelections([]); setRules([]); setSettings([]); setLoading(true); setError('');
-    void Promise.all([api<{ items: SourceGroup[] }>('/api/residue-source-groups'), api<{ items: ReportSelection[] }>('/api/residue-report-selections'), loadAll<Substance>('/api/active-substances'), api<{ items: PolicyRule[] }>('/api/residue-rules'), api<{ items: PolicySetting[] }>('/api/residue-policy-settings')])
-      .then(([groupPage, selectionPage, substanceItems, rulePage, settingPage]) => { if (current) { setGroups(groupPage.items.filter(item => item.companyId === companyId)); setSelections(selectionPage.items.filter(item => item.companyId === companyId)); setSubstances(substanceItems); setRules(rulePage.items.filter(item => !item.companyId || item.companyId === companyId)); setSettings(settingPage.items.filter(item => item.companyId === companyId)); } })
+    setGroups([]); setSelections([]); setLoading(true); setError('');
+    void Promise.all([api<{ items: SourceGroup[] }>('/api/residue-source-groups'), api<{ items: ReportSelection[] }>('/api/residue-report-selections'), loadAll<Substance>('/api/active-substances')])
+      .then(([groupPage, selectionPage, substanceItems]) => { if (current) { setGroups(groupPage.items.filter(item => item.companyId === companyId)); setSelections(selectionPage.items.filter(item => item.companyId === companyId)); setSubstances(substanceItems); } })
       .catch(cause => { if (current) setError(errorMessage(cause)); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [active, allowed, companyId, report?.id]);
+  }, [active, allowed, companyId, report?.id, report?.status]);
+  useEffect(() => {
+    if (!active || !allowed || report?.status !== 'CONFIRMED') return;
+    void prepareReport([]);
+    return () => { reviewToken.current++; };
+  }, [active, allowed, companyId, report?.id, report?.status]);
+  async function prepareReport(inputs = reviewInputs) {
+    if (!report) return;
+    const token = ++reviewToken.current;
+    setReviewBusy(true); setReviewError('');
+    try {
+      const next = await api<ReviewSummary>(`/api/lab-reports/${report.id}/residue-review/preview`, { method: 'POST', body: JSON.stringify({ companyId, effectiveFrom: inputs.length ? summary?.effectiveFrom : null, rows: inputs.filter(row => row.sourceId && row.sourceId !== '00000000-0000-0000-0000-000000000000') }) });
+      if (token !== reviewToken.current) return;
+      setSummary(next); setReviewInputs(next.rows.map(row => row.input)); setReviewDirty(false);
+    } catch (cause) { if (token === reviewToken.current) setReviewError(errorMessage(cause)); }
+    finally { if (token === reviewToken.current) setReviewBusy(false); }
+  }
+  function changeReview(index: number, patch: Partial<ReviewInput>) {
+    reviewToken.current++; setReviewBusy(false); setReviewDirty(true); setReviewError('');
+    setReviewInputs(current => current.map((row, i) => i === index ? { ...row, ...patch, previewFingerprint: null } : row));
+  }
+  async function confirmReport() {
+    if (!report || !summary || reviewDirty) return;
+    const rows = summary.rows.filter(row => !row.published && row.reasons.length === 0).map(row => row.input);
+    if (!rows.length) return;
+    await action.run(async () => {
+      await api(`/api/lab-reports/${report.id}/residue-review/confirm`, { method: 'POST', body: JSON.stringify({ companyId, effectiveFrom: summary.effectiveFrom, rows }) });
+      setSelections((await api<{ items: ReportSelection[] }>('/api/residue-report-selections')).items.filter(item => item.companyId === companyId));
+      await prepareReport([]);
+    }, 'Report bindings confirmed. Scientific profile review and original report unchanged.');
+  }
   async function publishGroup(event: FormEvent) {
     event.preventDefault();
     if (!allowed || group.decimalPlaces == null) return;
@@ -56,7 +90,8 @@ export function ResidueEvidenceControls({ active, allowed, companyId, report }: 
       await api('/api/residue-report-selections', { method: 'POST', body: JSON.stringify({ ...selection, supersededResultIds: selection.supersededResultIds.map(value => value.trim()).filter(Boolean), effectiveFrom: isoDate(selection.effectiveFrom), effectiveTo: selection.effectiveTo ? isoDate(selection.effectiveTo) : null, reviewedAt: isoDate(selection.reviewedAt) }) });
       setSelections((await api<{ items: ReportSelection[] }>('/api/residue-report-selections')).items.filter(item => item.companyId === companyId));
       setSelection(blankSelection(companyId));
-      previewToken.current++; setPreview(null); setPreviewError(''); setPreviewBusy(false); setProfileId('');
+      previewToken.current++; setPreview(null); setPreviewError(''); setPreviewBusy(false);
+      await prepareReport([]);
     }, 'Reviewed report-result selection published.');
   }
   const setGroupValue = <K extends keyof GroupForm>(key: K, value: GroupForm[K]) => setGroup(current => ({ ...current, [key]: value }));
@@ -71,35 +106,52 @@ export function ResidueEvidenceControls({ active, allowed, companyId, report }: 
     finally { if (request === previewToken.current) setPreviewBusy(false); }
   }
   return <section className="panel" aria-labelledby="residue-evidence-title">
-    <h2 id="residue-evidence-title">Residue evidence and fallback records</h2>
-    <p>Reviewed evidence supports residue assessment without changing original laboratory results or the VN comparison.</p>
+    <h2 id="residue-evidence-title">{report ? 'Review report residue evidence' : 'Residue evidence and fallback records'}</h2>
+    <p>Reuse adopted scientific profiles. Confirming a report binding does not make you its original scientific reviewer or alter laboratory results.</p>
     {loading && <p role="status">Loading published residue evidence…</p>}{error && <p role="alert" className="notice error">{error}</p>}<Feedback {...action} />
-    {report && <form onSubmit={publishSelection}><fieldset disabled={!allowed || action.busy}><legend>Record reviewed report-result evidence</legend>
+    {report && <section aria-label="Report residue review">
+      {report.status !== 'CONFIRMED' ? <p role="status">Confirm report identity and transcription before residue review.</p> : <>
+        {reviewBusy && <p role="status">Matching report results…</p>}{reviewError && <p role="alert" className="notice error">{reviewError}</p>}
+        {summary && summary.rows.map((row, index) => {
+          const input = reviewInputs[index] ?? row.input;
+          return <article key={`${row.input.resultId}-${row.input.sourceId}`} className="notice">
+            <h3>{row.label}</h3><p>Reported uncertainty: {row.rawUncertainty || 'Not reported'}</p>
+            {row.profile && <><p><strong>{row.profile.code} v{row.profile.versionNo}</strong> · {row.setting?.mode === 'COMPANY_OVERRIDE' ? 'company override' : 'adopted system profile'} · company setting v{row.setting?.versionNo}</p>
+              <p>{row.profile.inputBasis} · {row.profile.residueDefinition}</p>
+              <details><summary>Scientific review and applicability</summary><p>{row.profile.applicabilityStatement}</p><p>Scientific reviewer: {row.profile.reviewedBy} · {row.profile.reviewAuthority} · {row.profile.reviewedAt}</p><p>Company policy reviewer: {row.setting?.reviewedBy} · {row.setting?.reviewAuthority}</p><p>{row.profile.evidenceRef} · {row.setting?.evidenceRef}</p></details></>}
+            {!reviewDirty && (row.reasons.length > 0 ? <ul aria-label="Unresolved prerequisites">{row.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul> : <p>{row.published ? 'Binding confirmed' : 'Ready for binding confirmation'} · {row.assessment?.lower}–{row.assessment?.upper} {row.assessment?.unit}</p>)}
+            {(row.rawUncertainty || row.profile?.ndThresholdKind === 'REPORTING_THRESHOLD' || row.conflictingResults.length > 0 || row.existingSelections.length > 0) && <details><summary>Review uncertainty, threshold or report conflicts</summary>
+              {row.rawUncertainty && <label>Reviewed absolute uncertainty for {row.label}<input inputMode="decimal" value={input.absoluteUncertainty || ''} onChange={event => changeReview(index, { absoluteUncertainty: event.target.value || null })} /></label>}
+              {row.profile?.ndThresholdKind === 'REPORTING_THRESHOLD' && <label>Reviewed reporting threshold for {row.label}<input inputMode="decimal" value={input.reportingThreshold || ''} onChange={event => changeReview(index, { reportingThreshold: event.target.value || null })} /></label>}
+              {row.conflictingResults.length > 0 && <label>Explicitly superseded reports for {row.label}<select multiple value={input.supersededResultIds ?? []} onChange={event => changeReview(index, { supersededResultIds: Array.from(event.target.selectedOptions, option => option.value) })}>{row.conflictingResults.map(choice => <option key={choice.resultId} value={choice.resultId}>{choice.label}</option>)}</select></label>}
+              {row.existingSelections.length > 0 && <label>Replace existing binding for {row.label}<select value={input.supersedesId || ''} onChange={event => changeReview(index, { supersedesId: event.target.value || null })}><option value="">Do not replace existing binding</option>{row.existingSelections.map(choice => <option key={choice.selectionId} value={choice.selectionId || ''}>{choice.label}</option>)}</select></label>}
+              <label>Binding review note for {row.label}<textarea value={input.note || ''} onChange={event => changeReview(index, { note: event.target.value || null })} /></label>
+              <p>Current actor confirms this normalization or supersession. Original scientific review remains attached to profile. Never substitute a percentage for laboratory-reported uncertainty.</p>
+            </details>}
+          </article>;
+        })}
+        {reviewDirty && <p role="status">Inputs changed. Refresh result matches before confirming.</p>}
+        <div className="admin-form-actions"><button type="button" disabled={!allowed || reviewBusy || action.busy} onClick={() => void prepareReport()}>Refresh result matches</button><button type="button" disabled={!allowed || reviewBusy || action.busy || reviewDirty || !summary?.rows.some(row => !row.published && row.reasons.length === 0)} onClick={() => void confirmReport()}>{action.busy ? 'Confirming…' : 'Review and confirm compatible results'}</button></div>
+      </>}
+    </section>}
+    {report && <details><summary>Expert result evidence and unmatched cases</summary><form onSubmit={publishSelection}><fieldset disabled={!allowed || action.busy}><legend>Record reviewed report-result evidence</legend>
       {report.status !== 'CONFIRMED' && <p role="status">Report is {report.status}. Only confirmed reports can provide a selectable result.</p>}
       <label>Confirmed report result<select required value={selection.selectedResultId} onChange={e => {
         const result = confirmedReportResults.find(item => item.id === e.target.value);
-        previewToken.current++; setPreview(null); setPreviewError(''); setPreviewBusy(false); setProfileId('');
+        previewToken.current++; setPreview(null); setPreviewError(''); setPreviewBusy(false);
         setSelection(current => ({ ...current, selectedResultId: result?.id || '', sourceId: result?.sourceId || '', substanceId: result?.substanceId || '' }));
       }}><option value="">Choose confirmed result</option>{confirmedReportResults.map(result => <option key={result.id} value={result.id}>{result.testLabel} · {result.originalResultText} · {result.resultKind} · {result.sourceId} · {result.substanceId} · {result.id}</option>)}</select></label>
       {selection.selectedResultId && <p role="status">Bound to source {selection.sourceId} and substance {selection.substanceId}.</p>}
-      <label>Adopted residue profile<select value={profileId} onChange={event => {
-        setProfileId(event.target.value); previewToken.current++; setPreview(null); setPreviewError(''); setPreviewBusy(false);
-        const chosen = currentRules.find(rule => rule.id === event.target.value);
-        const setting = chosen && currentSettings.filter(item => item.ruleCode === chosen.code && item.mode === (chosen.companyId ? 'COMPANY_OVERRIDE' : 'SYSTEM_DEFAULT')).sort((a, b) => b.versionNo - a.versionNo)[0];
-        if (!chosen || !setting) return;
-        setSelection(current => ({ ...current, materialBasis: chosen.inputBasis, residueDefinition: chosen.residueDefinition, evidenceRef: `${chosen.evidenceRef}; policy setting ${setting.evidenceRef}`, applicabilityStatement: `Profile ${chosen.code} v${setting.versionNo}: ${chosen.applicabilityStatement}; setting applicability: ${setting.applicabilityStatement}` }));
-      }}><option value="">Choose adopted profile</option>{currentRules.filter(rule => rule.kind === 'INTERPRETATION' && rule.substanceId === selection.substanceId && currentSettings.some(setting => setting.ruleCode === rule.code && setting.mode === (rule.companyId ? 'COMPANY_OVERRIDE' : 'SYSTEM_DEFAULT'))).map(rule => <option key={rule.id} value={rule.id}>{rule.code} v{rule.versionNo} · {rule.companyId ? 'company override' : 'system default'} · {rule.inputStage} · {rule.inputBasis} · {rule.residueDefinition}</option>)}</select></label>
-      <p className="muted">Profile selection pre-fills reviewed basis, definition and evidence references only. Reviewer and review date remain explicit; server preview decides matching and conflicts.</p>
       {selection.selectedResultId && <p>Reported uncertainty: {confirmedReportResults.find(result => result.id === selection.selectedResultId)?.uncertainty || 'Not reported'}. Normalize laboratory uncertainty explicitly; percentage profiles cannot silently replace it.</p>}
-      <label>Superseded result IDs (comma-separated)<textarea value={selection.supersededResultIds.join(',')} onChange={e => setSelectionValue('supersededResultIds', e.target.value.split(','))} /></label>
+      <label>Explicitly superseded report results<select multiple value={selection.supersededResultIds} onChange={e => setSelectionValue('supersededResultIds', Array.from(e.target.selectedOptions, option => option.value))}>{exceptionRow?.conflictingResults.map(choice => <option key={choice.resultId} value={choice.resultId}>{choice.label}</option>)}</select></label>
       <label>Material basis<input required value={selection.materialBasis} onChange={e => setSelectionValue('materialBasis', e.target.value)} /></label><label>Residue definition<input required value={selection.residueDefinition} onChange={e => setSelectionValue('residueDefinition', e.target.value)} /></label>
       <label>Reviewed absolute uncertainty (optional exact decimal; authoritative when supplied)<input inputMode="decimal" value={selection.absoluteUncertainty || ''} onChange={e => setSelectionValue('absoluteUncertainty', e.target.value || null)} /></label><label>Reviewed reporting threshold (optional exact decimal)<input inputMode="decimal" value={selection.reportingThreshold || ''} onChange={e => setSelectionValue('reportingThreshold', e.target.value || null)} /></label>
-      <label>Effective from<input required type="datetime-local" value={selection.effectiveFrom} onChange={e => setSelectionValue('effectiveFrom', e.target.value)} /></label><label>Effective until<input type="datetime-local" value={selection.effectiveTo || ''} onChange={e => setSelectionValue('effectiveTo', e.target.value || null)} /></label><label>Supersedes selection ID<input value={selection.supersedesId || ''} onChange={e => setSelectionValue('supersedesId', e.target.value || null)} /></label>
+      <label>Effective from<input required type="datetime-local" value={selection.effectiveFrom} onChange={e => setSelectionValue('effectiveFrom', e.target.value)} /></label><label>Effective until<input type="datetime-local" value={selection.effectiveTo || ''} onChange={e => setSelectionValue('effectiveTo', e.target.value || null)} /></label><label>Supersedes reviewed selection<select value={selection.supersedesId || ''} onChange={e => setSelectionValue('supersedesId', e.target.value || null)}><option value="">No selection supersession</option>{exceptionRow?.existingSelections.map(choice => <option key={choice.selectionId} value={choice.selectionId || ''}>{choice.label}</option>)}</select></label>
       <label>Evidence reference<input required value={selection.evidenceRef} onChange={e => setSelectionValue('evidenceRef', e.target.value)} /></label><label>Applicability statement<textarea required value={selection.applicabilityStatement} onChange={e => setSelectionValue('applicabilityStatement', e.target.value)} /></label><label>Scientific reviewer<input required value={selection.reviewedBy} onChange={e => setSelectionValue('reviewedBy', e.target.value)} /></label><label>Review authority<input required value={selection.reviewAuthority} onChange={e => setSelectionValue('reviewAuthority', e.target.value)} /></label><label>Reviewed at<input required type="datetime-local" value={selection.reviewedAt} onChange={e => setSelectionValue('reviewedAt', e.target.value)} /></label>
       <div className="admin-form-actions"><button type="button" disabled={previewBusy || report.status !== 'CONFIRMED' || !selection.selectedResultId || !selection.effectiveFrom} onClick={() => void previewSelection()}>Preview server assessment</button><button disabled={action.busy || report.status !== 'CONFIRMED' || !selection.selectedResultId}>{action.busy ? 'Publishing…' : 'Publish reviewed selection'}</button></div>
       {previewBusy && <p role="status">Requesting non-mutating server preview…</p>}{previewError && <p role="alert" className="notice error">{previewError}</p>}{preview && <section className="notice" aria-label="Server residue preview"><h3>Server preview · no selection published</h3><p>Lab-reported result/uncertainty text: {confirmedReportResults.find(result => result.id === selection.selectedResultId)?.originalResultText || 'unavailable'} · reviewer-normalized absolute uncertainty: {selection.absoluteUncertainty || 'not supplied'} · server interval {preview.lower ?? '—'}–{preview.upper ?? '—'} {preview.unit || 'unit unavailable'} · {preview.basis || 'basis not specified'}</p>{preview.reasons.length > 0 && <ul>{preview.reasons.map((reason, i) => <li key={`${i}-${reason}`}>{reason}</li>)}</ul>}{preview.rules.length > 0 && <ul>{preview.rules.map((rule, i) => <li key={`${rule.id}-${i}`}>{rule.policyOrigin || 'origin unavailable'} · {rule.ruleCode || rule.id} v{rule.version}{rule.policySettingVersion ? ` · setting v${rule.policySettingVersion}` : ''} · {rule.evidenceReference}</li>)}</ul>}</section>}
       {preview?.provenance.filter(item => item.uncertaintyMode).map((item, index) => <p key={index}>Applied uncertainty: {item.uncertaintyMode}{item.relativeUncertaintyPercent != null ? ` · ±${item.relativeUncertaintyPercent}% of reported value` : ''} · absolute uncertainty {item.absoluteUncertainty ?? 'unavailable'} {preview.unit}</p>)}
-    </fieldset></form>}
+    </fieldset></form></details>}
     <details><summary>Fallback evidence maintenance</summary>{fallbackContent()}</details>
     {selections.length > 0 && <details><summary>Published reviewed report-result evidence ({selections.length})</summary><ul>{selections.map(item => <li key={item.id}>{item.sourceId} · {item.substanceId} · result {item.selectedResultId} · {item.reviewAuthority}</li>)}</ul></details>}
   </section>;

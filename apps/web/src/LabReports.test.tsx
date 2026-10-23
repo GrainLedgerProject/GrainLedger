@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { LabReports } from './LabReports';
+import { LabReports, parseReportedResult } from './LabReports';
 import { clearLocalSession } from './api';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -14,8 +14,17 @@ beforeEach(() => {
     headers: { 'Content-Type': 'application/json' },
   }));
 });
+it.each([
+  ['0.15', { resultKind: 'NUMERIC', numericValue: '0.15' }],
+  ['<0.01', { resultKind: 'BELOW_LIMIT', numericValue: '0.01' }],
+  ['ND', { resultKind: 'NOT_DETECTED', numericValue: undefined }],
+  ['1e-3', null],
+  ['<LOD', null],
+])('parses only supported reported-result notation: %s', (text, expected) => {
+  expect(parseReportedResult(text)).toEqual(expected);
+});
 
-it.each(['testLabel', 'originalResultText'] as const)('validates a cleared required %s before uploading report evidence', async field => {
+it.each(['Test parameter', 'Reported result'] as const)('validates a cleared required %s before uploading report evidence', async field => {
   render(<LabReports canWrite />);
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: '+ Receive report' }));
@@ -24,13 +33,13 @@ it.each(['testLabel', 'originalResultText'] as const)('validates a cleared requi
   await user.type(screen.getByLabelText('Issue date'), '2026-10-20');
   await user.upload(screen.getByLabelText('Original report file'), new File(['Original evidence'], 'report.txt', { type: 'text/plain' }));
   await user.click(screen.getByRole('checkbox', { name: /this original file contains this company/ }));
-  await user.type(screen.getByLabelText('testLabel section 1 row 1'), 'Reported test');
-  await user.type(screen.getByLabelText('originalResultText section 1 row 1'), 'ND');
+  await user.type(screen.getByLabelText('Test parameter section 1 row 1'), 'Reported test');
+  await user.type(screen.getByLabelText('Reported result section 1 row 1'), 'ND');
   await user.clear(screen.getByLabelText(`${field} section 1 row 1`));
   // jsdom misreports uploaded file validity; exercise the application's submit validation.
   fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
 
-  expect(await screen.findByRole('alert')).toHaveTextContent(/test labels and original text/);
+  expect(await screen.findByRole('alert')).toHaveTextContent(/result rows with test labels and original text/);
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 it('requires related report choice before file encoding for linked report kind', async () => {
@@ -67,8 +76,8 @@ it('selects readable report label and submits selected report ID', async () => {
   await user.type(screen.getByLabelText('Issue date'), '2026-10-20');
   await user.upload(screen.getByLabelText('Original report file'), new File(['Original evidence'], 'report.txt', { type: 'text/plain' }));
   await user.click(screen.getByRole('checkbox', { name: /this original file contains this company/ }));
-  await user.type(screen.getByLabelText('testLabel section 1 row 1'), 'Reported test');
-  await user.type(screen.getByLabelText('originalResultText section 1 row 1'), 'ND');
+  await user.type(screen.getByLabelText('Test parameter section 1 row 1'), 'Reported test');
+  await user.type(screen.getByLabelText('Reported result section 1 row 1'), 'ND');
   fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
   await waitFor(() => expect(submitted?.payload.relatedReportId).toBe('report-a'));
   expect(submitted?.payload.relationshipReason).toBe('Corrected transcription');
@@ -118,8 +127,8 @@ it('keeps selected sample visible and submits it when search excludes it', async
   await user.type(screen.getByLabelText('Issue date'), '2026-10-20');
   await user.upload(screen.getByLabelText('Original report file'), new File(['Original evidence'], 'report.txt', { type: 'text/plain' }));
   await user.click(screen.getByRole('checkbox', { name: /this original file contains this company/ }));
-  await user.type(screen.getByLabelText('testLabel section 1 row 1'), 'Reported test');
-  await user.type(screen.getByLabelText('originalResultText section 1 row 1'), 'ND');
+  await user.type(screen.getByLabelText('Test parameter section 1 row 1'), 'Reported test');
+  await user.type(screen.getByLabelText('Reported result section 1 row 1'), 'ND');
   // jsdom misreports uploaded file validity; exercise the application's submit validation.
   fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
 
@@ -206,4 +215,22 @@ it('shows rejected confirmation inside dialog, allows correction and retry, and 
   await waitFor(() => expect(correctedConfirmation?.payload.matches[0].identityBasis).toBe('SEAL_CODE'));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Review report transcription' })).not.toBeInTheDocument());
   expect(screen.getByText('NOT_ASSESSED')).toBeVisible();
+});
+it('preserves imported row details over section defaults and gates contradictory interpretation', async () => {
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '+ Receive report' }));
+  await user.type(screen.getByLabelText('Default unit section 1'), 'mg/kg');
+  await user.click(screen.getByRole('button', { name: 'Import CSV / paste TSV' }));
+  fireEvent.change(screen.getByLabelText('Paste laboratory result CSV or TSV'), { target: { value: [
+    'testLabel\tsubstanceId\toriginalResultText\tresultKind\tnumericValue\tunit\tlod\tloq\tmethod\tuncertainty\treference',
+    'Residue\t\t<0.010\tNUMERIC\t0.01\tmg/100g\t0.002\t\tLC-MS\t\tCertificate p. 2',
+    'Appearance\t\tTrace\tQUALITATIVE\t\tmg/kg\t\t\tVisual\t\tCertificate p. 3',
+  ].join('\n') } });
+  await user.click(screen.getByRole('button', { name: 'Preview rows' }));
+  await user.click(await screen.findByRole('button', { name: 'Add previewed rows' }));
+  expect(screen.getByLabelText('Unit section 1 row 1')).toHaveValue('mg/100g');
+  await user.click(screen.getAllByText(/Additional lab details/)[0]);
+  expect(screen.getByLabelText('Confirm structured interpretation section 1 row 1')).not.toBeChecked();
+  expect(screen.getByLabelText('Confirm structured interpretation section 1 row 2')).toBeChecked();
 });

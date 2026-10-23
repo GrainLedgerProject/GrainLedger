@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Console;
 using Xunit;
 
 namespace GrainLedger.Api.IntegrationTests;
@@ -22,7 +24,13 @@ public sealed class BrowserWorkflowHost
             throw new InvalidOperationException("Browser test origins must be loopback HTTP origins.");
         var apiUrl = apiOrigin.GetLeftPart(UriPartial.Authority);
         var uiUrl = uiOrigin.GetLeftPart(UriPartial.Authority);
-        var factory = new ApiFactory { BrowserCookies = true };
+        // Long-running test output can fill runner pipes; console overflow must not block HTTP requests.
+        var factory = new ApiFactory
+        {
+            BrowserCookies = true,
+            ConfigureTestServices = services => services.PostConfigure<ConsoleLoggerOptions>(
+                options => options.QueueFullMode = ConsoleLoggerQueueFullMode.DropWrite)
+        };
         await factory.InitializeAsync();
         // Synthetic password account only in the disposable browser-test database.
         using (var client = factory.CreateClient())
@@ -82,6 +90,18 @@ public sealed class BrowserWorkflowHost
         var relativeRuleId = await companyPolicy.PublishRuleAsync(relativeRule, adopt: false);
         await companyPolicy.SelectAsync(policySample, policyReport.Report, uncertainty: null);
         var beforeAdoption = await companyPolicy.EvaluateAsync(policySample.LotId);
+        var reviewSamples = new[]
+        {
+            await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("10")),
+            await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("10"))
+        };
+        var reviewRequest = LabReportTests.ReportRequest(reviewSamples.Select(sample =>
+            LabReportTests.ResultSet(sample, [companyPolicy.Result(uncertainty: null)])).ToArray());
+        var reviewReportId = LabReportTests.EntityId(reviewRequest);
+        await LedgerScenario.SendAsync(scenario.Customer, HttpMethod.Post, "/api/lab-reports", reviewRequest);
+        var reviewReport = await LedgerScenario.GetAsync(scenario.Customer, $"/api/lab-reports/{reviewReportId}");
+        await LedgerScenario.SendAsync(scenario.Customer, HttpMethod.Post, $"/api/lab-reports/{reviewReportId}/confirm",
+            LabReportTests.ConfirmRequest(reviewReport, reviewSamples));
         var latePublished = false;
         using var lateGate = new SemaphoreSlim(1, 1);
         var accounts = new Dictionary<string, object>();
@@ -97,6 +117,8 @@ public sealed class BrowserWorkflowHost
         }
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseUrls(apiUrl);
+        builder.Services.PostConfigure<ConsoleLoggerOptions>(
+            options => options.QueueFullMode = ConsoleLoggerQueueFullMode.DropWrite);
         await using var bridge = builder.Build();
         using var upstream = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
@@ -216,7 +238,10 @@ public sealed class BrowserWorkflowHost
                     initialEvaluationId = beforeAdoption.GetProperty("id").GetGuid(),
                     lotUrl = $"{uiUrl}/ledger/lots/{policySample.LotId}",
                     expectedDefaultLower = "0.135", expectedDefaultUpper = "0.165",
-                    expectedOverrideLower = "0.12", expectedOverrideUpper = "0.18"
+                    expectedOverrideLower = "0.12", expectedOverrideUpper = "0.18",
+                    reviewReportId,
+                    reviewLotIds = reviewSamples.Select(sample => sample.LotId).ToArray(),
+                    reviewSampleIds = reviewSamples.Select(sample => sample.Id).ToArray()
                 },
                 evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(), accounts
             }, new JsonSerializerOptions { WriteIndented = true });

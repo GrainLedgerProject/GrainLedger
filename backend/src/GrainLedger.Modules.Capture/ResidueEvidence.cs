@@ -21,7 +21,9 @@ public sealed record ResidueReportSelection(Guid Id, Guid CompanyId, Guid Source
     string? AbsoluteUncertainty, string? ReportingThreshold, DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveTo, Guid? SupersedesId, string EvidenceRef, string ApplicabilityStatement,
     string ReviewedBy, string ReviewAuthority, DateTimeOffset ReviewedAt,
-    Guid? PublishedBy = null, DateTimeOffset? PublishedAt = null);
+    Guid? PublishedBy = null, DateTimeOffset? PublishedAt = null,
+    Guid? BindingReportId = null, Guid? ProfileRuleId = null, Guid? ProfileSettingId = null,
+    string? BindingRequest = null, string? BindingFingerprint = null, string? BindingNote = null);
 public sealed record ResidueEvidenceSnapshot(IReadOnlyList<ResidueSource> Sources,
     IReadOnlyList<ResidueLabEvidence> Results, IReadOnlyList<ResidueSourceGroupVersion> Groups,
     IReadOnlyList<ResidueReportSelection> Selections);

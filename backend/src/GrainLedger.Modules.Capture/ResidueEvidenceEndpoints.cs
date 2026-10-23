@@ -140,7 +140,9 @@ public static class ResidueEvidenceEndpoints
                 x.SourceId == request.SourceId && x.SubstanceId == request.SubstanceId) ||
             request.SupersedesId is not null && history.Any(x => x.SupersedesId == request.SupersedesId))
             return Conflict("Selection ID or reviewed supersession conflicts with history.");
-        var item = request with { PublishedBy = actor, PublishedAt = now, SupersededResultIds = request.SupersededResultIds.Order().ToArray() };
+        var item = request with { PublishedBy = actor, PublishedAt = now, SupersededResultIds = request.SupersededResultIds.Order().ToArray(),
+            BindingReportId = null, ProfileRuleId = null, ProfileSettingId = null,
+            BindingRequest = null, BindingFingerprint = null, BindingNote = null };
         try
         {
             await PublishAsync(connection, transaction, "publish_residue_selection", actor, item, ct);

@@ -10,13 +10,15 @@ Companion documents: [residue-bounds plan](residue-bounds-plan.md) and [end-to-e
 
 | Need | Workflow |
 | --- | --- |
-| Adopt reviewed system policy | As Customer Manager, open **Residue profiles**, choose the matching profile, select **Adopt / return to system default**, complete setting evidence/applicability/reviewer/authority/date, then publish. |
-| Return from override to inheritance | Publish a new setting for that profile with mode **Adopt / return to system default** and reviewed effective date/evidence. This is versioned, not deletion. |
-| Use company-specific scientific policy | Open the selected system profile's history under company rules and choose **Clone as company rule**. Complete fresh scientific/review fields; clone retains same Code. Then publish setting **Use reviewed company override** for that Code. Override never falls back to system if absent/inapplicable. |
-| Add system policy | Administrator publishes a reviewed system rule through **Administration → Catalogs → Commodities**. Rule publication alone does not adopt it for any company. |
-| Review calculation | Report-result selection may choose an already adopted profile, prefill evidence/applicability references, and request **Preview server assessment**. Reviewer/date remain explicit. Server preview is authoritative; selection publication/evaluation remains explicit. |
+| Adopt reviewed system policy | As Customer Manager, open **Residue profiles**, select the applicable profiles, inspect their scientific summaries, and publish one explicit reviewed adoption with a shared effective period and review. Each profile keeps its own immutable setting/version. |
+| Return from override to inheritance | Select the profile series and system-default mode, then publish a reviewed return. This is versioned, not deletion. |
+| Use company-specific scientific policy | Clone an eligible system profile as a company rule. Inherited applicability appears as a summary; change the reviewed percentage or factor, use advanced applicability only for real exceptions, and complete fresh scientific review. Then explicitly select the reviewed company override. |
+| Add system policy | Administrator opens expert scientific-profile setup through **Administration → Catalogs → Commodities**. Full applicability and actual scientific review remain required; no numerical defaults are invented. Rule publication alone does not adopt it for any company. |
+| Review calculation | Confirm report identity/transcription first. Report residue review asks the server to match adopted profiles and show intervals or exceptions. Review and explicitly confirm eligible results together; use expert review only for unsupported or conflicting cases. |
 
 No company setting means no adopted profile and finite calculation stays `UNRESOLVED`. Settings and rules are append-only/versioned; supersession stays within the same scope. An active override that does not match blocks corresponding inherited system applicability. Distinct matching series or same-scope ambiguity fail closed. Never assume default profile, coefficient, scientific rule, or successful calculation.
+
+Normal report work does not require entering scientific rules again. A uniquely compatible adopted profile supplies its reviewed basis, residue definition and supporting policy review. Report binding confirmation is recorded separately from that scientific review. An applicable profile is not permission to replace laboratory-provided uncertainty, ignore a missing ND threshold, or choose between conflicting reports.
 
 ## 2. Which records do you need?
 
@@ -141,7 +143,7 @@ Also fill every shared field from section 3 and the two review text fields in th
 | Reviewed selection: reporting threshold | Leave blank | Leave blank |
 | Expected source interval | `[0.10, 0.20] mg/kg` | `[0.30, 0.80] mg/kg` |
 
-Each reviewed selection needs its own evidence/applicability/reviewer/date fields and selected confirmed result. See [manual test report flow](residue-bounds-manual-test-guide.md#4-confirm-source-as-report-leave-b-pending).
+Report review can bind multiple compatible results with one explicit confirmation while retaining separate immutable selections. When reported uncertainty needs normalization, record its reviewed absolute amount and supporting scientific review in the exception workflow; raw uncertainty text is never normalized automatically.
 
 Absolute uncertainty is a concentration amount, **not a percentage**. Missing normalized uncertainty stays unresolved. The original laboratory text remains evidence; the application does not automatically parse it into an approved uncertainty convention. A synthetic value `0.03` with uncertainty `0.05` gives `[0, 0.08]`, not a negative lower endpoint.
 
@@ -169,7 +171,7 @@ Use a separate synthetic report/source for this example:
 - Confirm report and publish reviewed selection with matching basis/definition; leave absolute uncertainty and reporting threshold blank.
 - Expected interval: **`[0, 0.02] mg/kg`**.
 
-Do not enter `<0.02` in a field expecting a plain numeric value. Preserve the comparison sign in original result text/qualifier. This interpretation uses the below-limit result's numeric threshold, not an automatic choice of LOD or LOQ.
+In compact manual report entry, type `<0.02` in **Reported result**; the app preserves that text and derives its below-limit qualifier and exact threshold. Expert structured fields and API `numericValue` still require plain decimals without the comparison sign. This interpretation uses the below-limit result's numeric threshold, not an automatic choice of LOD or LOQ.
 
 ### I3. ND using an explicit reporting threshold
 

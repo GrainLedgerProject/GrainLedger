@@ -43,9 +43,7 @@ public static class ResidueEvidenceResolver
             if (direct.Length == 0)
             { output.Add(Unknown(node.LotId, substance, "No confirmed substance evidence or approved fallback")); continue; }
             var selectionVersions = selections.GetValueOrDefault((source.SourceId, substance)) ?? [];
-            var activeSelections = selectionVersions.Where(x => Effective(x.EffectiveFrom, x.EffectiveTo, snapshotAt)).ToArray();
-            var removedSelections = Superseded(activeSelections.Select(x => x.Id), selectionVersions.ToDictionary(x => x.Id, x => x.SupersedesId));
-            activeSelections = activeSelections.Where(x => !removedSelections.Contains(x.Id)).ToArray();
+            var activeSelections = ActiveSelections(selectionVersions, snapshotAt);
             if (activeSelections.Length != 1)
             { output.Add(Unknown(node.LotId, substance, activeSelections.Length == 0 ? "Missing reviewed material basis and report selection" : "Conflicting reviewed report selections", direct)); continue; }
             var selection = activeSelections[0];
@@ -142,6 +140,12 @@ public static class ResidueEvidenceResolver
             x.EffectiveFrom, x.EffectiveTo, x.SupersedesId)).ToArray();
 
     private static bool Effective(DateTimeOffset from, DateTimeOffset? to, DateTimeOffset at) => at >= from && (to is null || at < to);
+    internal static ResidueReportSelection[] ActiveSelections(IReadOnlyList<ResidueReportSelection> history, DateTimeOffset at)
+    {
+        var active = history.Where(x => Effective(x.EffectiveFrom, x.EffectiveTo, at)).ToArray();
+        var removed = Superseded(active.Select(x => x.Id), history.ToDictionary(x => x.Id, x => x.SupersedesId));
+        return active.Where(x => !removed.Contains(x.Id)).ToArray();
+    }
     private static ResidueRuleReference Reference(ResidueRuleVersion rule) => new(rule.Id, rule.VersionNo, rule.Kind, rule.EvidenceRef);
 
     internal static ResidueRuleReference Reference(ResidueRuleVersion rule, ResiduePolicySettingVersion setting) =>

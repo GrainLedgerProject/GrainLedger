@@ -18,7 +18,7 @@ public sealed record ResidueEvaluationRequest(Guid Id, Guid[] SubstanceIds);
 public sealed record ResidueEvaluation(Guid Id, Guid LotId, Guid CompanyId, DateTimeOffset SnapshotAt,
     DateTimeOffset? PersistedAt, string EngineVersion, IReadOnlyList<ResidueResult> Results);
 
-public sealed class ResidueEvaluationService(IConfiguration configuration, LedgerService ledger,
+public sealed partial class ResidueEvaluationService(IConfiguration configuration, LedgerService ledger,
     IResiduePolicyReader policyReader, IResidueEvidenceReader evidenceReader)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -148,6 +148,16 @@ public static class ResidueEvaluationEndpoints
             .AddEndpointFilter<LedgerErrorFilter>()
             .MapPost("/preview", async (ResidueReportSelection request, ResidueEvaluationService service, CancellationToken ct) =>
                 Results.Ok(await service.PreviewAsync(request, ct)));
+        var reportReview = endpoints.MapGroup("/api/lab-reports/{reportId:guid}/residue-review")
+            .RequireAuthorization("residue.evidence.manage")
+            .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>()
+            .AddEndpointFilter<LedgerErrorFilter>();
+        reportReview.MapPost("/preview", async (Guid reportId, ResidueReportReviewRequest request,
+            ResidueEvaluationService service, CancellationToken ct) =>
+            Results.Ok(await service.ReviewReportAsync(reportId, request, false, ct)));
+        reportReview.MapPost("/confirm", async (Guid reportId, ResidueReportReviewRequest request,
+            ResidueEvaluationService service, CancellationToken ct) =>
+            Results.Ok(await service.ReviewReportAsync(reportId, request, true, ct)));
     }
 
     public static void MapResidueEvaluationRoutes(RouteGroupBuilder ledger)

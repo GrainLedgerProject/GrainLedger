@@ -31,7 +31,7 @@ As **Administrator**, open **Administration → Catalogs → Commodities** and c
 | Mixed-storage ingress, if tested | BLENDED_RICE → BLENDED_RICE | 1 |
 | Mixed-storage withdrawal, if tested | BLENDED_RICE → BLENDED_RICE | 1 |
 
-Then, as **Customer Manager**, open **Residue profiles**. For interpretation Code and each process Code in use, publish a separate reviewed setting with mode **Adopt / return to system default**, effective interval covering test events, and explicit evidence/applicability/reviewer/authority/reviewed-at fields. System rule publication is not adoption; no seed or automatic adoption exists. Record setting IDs/versions for audit.
+Then, as **Customer Manager**, open **Residue profiles**. Select the interpretation profile and every process profile used here, choose system-default adoption, and publish with one shared reviewed effective period covering test events. Check each inherited evidence/applicability summary and record the actual setting reviewer/authority/review time once for the batch. Separate setting IDs/versions remain available for audit. System rule publication is not adoption; no seed or automatic adoption exists.
 
 Also required:
 
@@ -101,17 +101,16 @@ As **Customer Manager**:
 1. Open **Samples → sample A → + Receive report**.
 2. Upload a clearly labelled synthetic report belonging only to the test company.
 3. Enter matching printed sample and seal identifiers.
-4. Record the numeric result **0.15 mg/kg**, laboratory method and original uncertainty text.
+4. Type **0.15** in **Reported result**, set unit **mg/kg** and laboratory method, and retain original uncertainty text under **Additional lab details**. Do not duplicate the numeric value in expert fields.
 5. Save report evidence.
 6. Open **Review and confirm**.
 7. Verify sample identity and transcription against the synthetic original.
 8. Confirm the checked record.
-9. In the reviewed report-selection form:
-   - Select source A, the substance and confirmed result.
-   - Choose its explicitly adopted interpretation profile; profile pre-fills reviewed basis/definition/references only.
-   - Enter matching material basis and residue definition; complete reviewer/date and other review metadata.
-   - Enter reviewed normalized absolute uncertainty **0.05**. It is authoritative; it is not inferred from original lab uncertainty text.
-   - Click **Preview server assessment** and inspect result/reasons. This does not publish selection. Publish only after explicit review.
+9. Open report residue review and preview:
+   - Server matches the explicitly adopted profile against confirmed source, substance, commodity, method, stage, unit and policy applicability.
+   - Original uncertainty text requires reviewed normalization: enter absolute uncertainty **0.05** with actual supporting review in the exception workflow. It is authoritative and is not inferred from raw lab text.
+   - Review server interval/reasons and explicitly publish the reviewed selection. Existing expert selection remains available for this scientific exception.
+   - For the separate relative-uncertainty rehearsal with no reported uncertainty and a compatible adopted profile, use the report summary's single binding confirmation instead of repeating scientific review metadata.
 
 ### Report B
 
@@ -241,4 +240,4 @@ Use separate test records for conflicting-evidence scenarios so they do not cont
 
 Baseline pass criteria: late evidence updates only new calculations, history stays immutable, missing scientific inputs never become guessed bounds or PASS, and residue evaluation does not alter stock, original laboratory evidence or HOLD state. Extension acceptance additionally requires explicit profile adoption, fail-closed override behavior, correct uncertainty handling/provenance and real UI/API verification.
 
-The numeric baseline and historical outcomes above describe the prior synthetic flow only. They are expected test data, not evidence that this policy-profile extension or documentation change has been verified. Parent must reconcile actual UI labels and API/browser verification before marking extension verified.
+Numeric examples above are expected synthetic test data, not operational scientific policy. Observed checks and isolated API/browser scenarios are recorded separately in the [residue-bounds verification log](residue-bounds-plan.md#14-profile-first-setup-and-compact-report-review); that log, rather than this walkthrough, identifies which flows were exercised.

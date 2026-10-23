@@ -153,6 +153,8 @@ At least one result set and one result row per set are required; limits are 1000
 
 Nonnegative, 1–12 integer digits, optionally 1–12 fractional digits; no whitespace, signs, exponent, floating-point parsing or rounding. `"000.0100"` remains `"000.0100"`; original result text such as `"ND"` or `"<0.01"` is retained independently. Units, method, uncertainty and row reference are preserved, not converted. ND is not zero, below-limit is not a measured value equal to threshold, and omitted substances are not tested/passed.
 
+Compact web intake has one **Reported result** input. Supported numeric text, `<threshold` and `ND` populate existing qualifier/value fields without floating-point conversion; original text remains unchanged. Unsupported notation uses explicit structured overrides under **Additional lab details**, not a guessed interpretation. Optional section unit/method are entry conveniences expanded into each row before upload; supplied row values take precedence. API payload and CSV/TSV headers below are unchanged.
+
 Web CSV import and pasted TSV use this exact header:
 
 ```csv
@@ -239,16 +241,20 @@ Both lab writes reuse Capture's transaction/event/offline operation convention. 
 
 F11 report originals, rows and confirmed procurement associations remain immutable facts. Residue bounds use reviewed result selection/normalization plus explicit company-scoped source-group fallback; they do not modify lab routes or inherit the VN comparator's threshold choices. Missing scientific interpretation, uncertainty, method/material/unit applicability, coverage or process factor produces `UNRESOLVED`, never ND=0 or PASS.
 
-Customer Manager uses **Laboratory reports → Residue fallback and report evidence** for explicit source-group membership; no report is required for reviewed external fallback evidence. Confirmed-report detail supports selecting a confirmed result, recording reviewed basis/uncertainty/threshold, and explicitly naming superseded result IDs. Capture source IDs differ from Ledger lot IDs. A report relationship alone does not select evidence or resolve conflicts. The selected rule reference records policy origin, setting ID/version and rule code alongside rule ID/version.
+Customer Manager uses **Laboratory reports → Residue fallback and report evidence** for explicit source-group membership; no report is required for reviewed external fallback evidence. Confirmed-report detail first offers server-matched residue review and one explicit confirmation for compatible rows. Expert review remains available for normalized uncertainty/thresholds, unmatched applicability and named report/result supersession choices. Capture source IDs differ from Ledger lot IDs. A report relationship alone does not select evidence or resolve conflicts. The selected rule reference records policy origin, setting ID/version and rule code alongside rule ID/version.
 
 | Method | Path | Purpose / access |
+| --- | --- | --- |
 | GET | `/api/residue-rules` | Return shared system rules plus caller's own company rules; Administrator sees system rules only. |
 | GET | `/api/residue-rules/{id}` | Read a visible system or own-company rule; foreign company rules are not exposed. |
 | POST | `/api/residue-rules` | Publish reviewed system rule (`residue.policy.manage`, Administrator) or own-company rule (`residue.company-policy.manage`, CustomerManager). Cookie mutations require CSRF. |
 | GET | `/api/residue-policy-settings` | Return `{ "items": [...] }` for authenticated caller's own company only. No setting means no adopted profile. |
 | GET | `/api/residue-policy-settings/{id}` | Read own-company setting; out-of-scope IDs return not found. |
 | POST | `/api/residue-policy-settings` | Publish immutable, reviewed own-company profile setting (`residue.company-policy.manage`, CustomerManager); cookie mutations require CSRF. |
+| POST | `/api/residue-policy-settings/batch` | `{ "items": [ResiduePolicySettingVersion, ...] }`; atomically publish reviewed own-company settings with the same permissions/CSRF and scientific gates as individual publication. |
 | POST | `/api/residue-report-selections/preview` | Non-mutating, server-side `ResidueSourceBound` preview for confirmed own-company source/result; requires `residue.evidence.manage`. |
+| POST | `/api/lab-reports/{reportId}/residue-review/preview` | Non-mutating report-level profile matching and interval preview; confirmed own-company evidence only, `residue.evidence.manage`. |
+| POST | `/api/lab-reports/{reportId}/residue-review/confirm` | Explicitly bind reviewed compatible report rows to adopted profiles; revalidate and publish individual selections atomically, without changing originals, stock, HOLDs or saved evaluations. |
 
 Reusable profile is an existing rule Code series. A Customer Manager explicitly publishes `SYSTEM_DEFAULT` to adopt the system series or return to inheritance, or `COMPANY_OVERRIDE` to select a company rule with the same Code and compatible substance/kind/commodity identity. Company rule versions supersede only within their own scope; settings are versioned independently. `COMPANY_OVERRIDE` never falls back to system rule if company rule is missing or inapplicable. There is no automatic adoption, setting seed, cross-company read, or Administrator wildcard for company settings. Setting/rule effective time, review evidence, applicability and supersession are retained; selected policy origin/setting and normalized uncertainty are recorded in calculation provenance.
 
@@ -259,3 +265,25 @@ Rule JSON retains existing fields and adds optional trailing `companyId` (`null`
 
 Preview accepts proposed existing `ResidueReportSelection` JSON, but does not persist selection/evaluation or trust supplied review/published metadata. It requires confirmed own-company source/result and valid superseded-result references, and returns `ResidueSourceBound` (no `status` field). Finite result requires empty reasons plus non-null lower/upper; otherwise preserve `UNRESOLVED`. Provenance adds `uncertaintyMode`, applied relative percent and exact derived/normalized `absoluteUncertainty`. Raw uncertainty text is never automatically normalized.
 `residue.evidence.manage` controls own-company evidence publication. `residue.evaluate` permits appropriately scoped customer/facility users to calculate or inspect derived Ledger snapshots; it does not grant original laboratory downloads. New rule/group/selection/settings versions and late reports affect a new calculation only; old snapshots and stock/HOLDs remain unchanged. Rule/settings record shapes and full behavior: [residue bounds delivered API](residue-bounds-plan.md#9-delivered-residue-bounds-contracts).
+
+### Report-level residue review
+
+Start with `POST /api/lab-reports/{reportId}/residue-review/preview`:
+
+```json
+{
+  "companyId": "OWNING-COMPANY-UUID",
+  "effectiveFrom": null,
+  "rows": []
+}
+```
+
+Response contains `reportId`, server-chosen `effectiveFrom` and `rows`. Each row includes `input` (immutable selection UUID, result/source binding, optional normalization/threshold/supersession/note, server preview fingerprint), human-readable report/result `label`, `rawUncertainty`, matched `profile`/`setting`, `assessment`, unresolved `reasons`, named `conflictingResults`/`existingSelections`, and `published`.
+
+To edit an exception, preserve its row UUID and source/result binding, change only the explicit normalization, threshold, supersession or review note, then preview again. Raw laboratory uncertainty is never parsed automatically. Matching uses source receipt time, exact method/unit/material identity and the company's adopted whole-rule policy; multiple matches and missing intended overrides fail closed. Any normalization, threshold or supersession requires a binding review note.
+
+Confirm with the same `companyId`, returned `effectiveFrom` and reviewed eligible row `input` objects at `POST /api/lab-reports/{reportId}/residue-review/confirm`. Every submitted row must still be compatible and carry its current preview fingerprint; stale or invalid rows reject the entire batch. Replaying an identical successful row set with the same UUIDs/current actor returns the original binding without appending duplicates. Do not mix new and already-published row UUIDs in one batch.
+
+Selections retain `bindingReportId`, `profileRuleId`, `profileSettingId`, canonical `bindingRequest`, `bindingFingerprint` and optional `bindingNote`. Profile `reviewedBy`/`reviewAuthority`/`reviewedAt` identify the retained scientific review; persisted current `publishedBy`/`publishedAt` identify the report binding confirmer and time. A report-specific normalization note belongs to that confirmer, not to the profile's earlier scientific reviewer. No report-level review rewrites originals or earlier evaluations.
+
+Report review supports up to 10,000 input rows, matching report intake's total panel limit. Prearrival confirmed source rows whose reserved Ledger lot has not been posted remain unresolved without blocking preview of other rows. Atomic confirmation applies to the explicitly submitted compatible rows, not to every row in the original report; omitted unresolved rows remain unbound.
