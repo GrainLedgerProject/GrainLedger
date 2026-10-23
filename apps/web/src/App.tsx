@@ -14,10 +14,12 @@ import { googleLoginError } from './auth-errors';
 import { LocalAuth } from './LocalAuth';
 import { MrlLookup } from './MrlLookup';
 
-type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'lab' | 'mrl' | 'sprays';
+import { CompanyResiduePolicies } from './CompanyResiduePolicies';
+type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'lab' | 'mrl' | 'sprays' | 'residue-policies';
 function tabForPath(path: string): Tab {
   if (path.startsWith('/mrl')) return 'mrl';
   if (path.startsWith('/lab-reports')) return 'lab';
+  if (path.startsWith('/residue-policies')) return 'residue-policies';
   if (path === '/capture/spray-declarations' || path === '/capture/spray-declarations/') return 'sprays';
   if (path.startsWith('/capture/spray-declarations/') && window.history.state?.fromSprayList) return 'sprays';
   if (path.startsWith('/admin')) return 'administration';
@@ -59,7 +61,7 @@ export function App() {
   }, []);
 
   function openTab(next: Tab) {
-    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'lab' ? '/lab-reports' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : '/';
+    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'lab' ? '/lab-reports' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : next === 'residue-policies' ? '/residue-policies' : '/';
     window.history.pushState({}, '', nextPath);
     setPath(nextPath);
     setTab(next);
@@ -162,18 +164,19 @@ export function App() {
         {canReadPurchases && <button aria-current={tab === 'procurements' ? 'page' : undefined} onClick={() => openTab('procurements')}><span aria-hidden="true">▣</span> Paddy intake</button>}
         {canReadSamples && <button aria-current={tab === 'samples' ? 'page' : undefined} onClick={() => openTab('samples')}><span aria-hidden="true">◇</span> Samples</button>}
         {(user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) && <button aria-current={tab === 'lab' ? 'page' : undefined} onClick={() => openTab('lab')}><span aria-hidden="true">▤</span> Laboratory reports</button>}
-        {user.permissions.includes('mrl.read') && user.role !== 'Administrator' && <button aria-current={tab === 'mrl' ? 'page' : undefined} onClick={() => openTab('mrl')}><span aria-hidden="true">▤</span> Applicable MRL</button>}
+        {user.role === 'CustomerManager' && user.permissions.includes('residue.company-policy.manage') && <button aria-current={tab === 'residue-policies' ? 'page' : undefined} onClick={() => openTab('residue-policies')}><span aria-hidden="true">▧</span> Residue profiles</button>}
       </nav>
       <div className="sidebar-bottom"><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span>{roleLabel(user.role)}</span></div></div>
     </aside>
     <div className="workspace-body">
-      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : tab === 'lab' ? 'Laboratory reports' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
+      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : tab === 'lab' ? 'Laboratory reports' : tab === 'residue-policies' ? 'Residue profiles' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
       <main className="content">
         {error && <div className="notice error" role="alert">{error}</div>}
         {tab === 'mrl' && user.permissions.includes('mrl.read') ? <MrlLookup />
           : tab === 'administration' && user.role === 'Administrator' ? <AdminWorkspace user={user} section={adminSection} onSelect={openAdminSection} />
           : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} initialLotId={path.match(/^\/ledger\/lots\/([^/]+)$/)?.[1]} />
-          : tab === 'lab' && (user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) ? <LabReports canWrite={user.permissions.includes('lab.write')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={canReadPurchases ? id => openCapturePath(`/capture/source-lots/${id}`, 'procurements') : undefined} />
+          : tab === 'residue-policies' && user.role === 'CustomerManager' && user.permissions.includes('residue.company-policy.manage') ? <CompanyResiduePolicies active allowed companyId={user.organizationId || ''} />
+          : tab === 'lab' && (user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) ? <LabReports canWrite={user.permissions.includes('lab.write')} canManageResidueEvidence={user.permissions.includes('residue.evidence.manage')} companyId={user.organizationId || ''} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={canReadPurchases ? id => openCapturePath(`/capture/source-lots/${id}`, 'procurements') : undefined} />
           : tab === 'procurements' && selectedSourceLotId ? (canReadPurchases
             ? <SourceLotDetail id={selectedSourceLotId} canWriteSamples={canWritePurchases} canReadLab={user.permissions.includes('lab.read') || user.permissions.includes('lab.write')} userId={user.id} companyId={user.organizationId || ''} onBack={id => id ? openCapturePath(`/capture/procurements/${id}`, 'procurements') : openTab('procurements')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={id => openCapturePath(`/capture/source-lots/${id}`, 'procurements')} onOpenLedgerLot={canReadLedgerStock ? id => openCapturePath(`/ledger/lots/${encodeURIComponent(id)}`, 'ledger') : undefined} onOpenFarmer={canReadFarmers ? id => selectFarmer(id) : undefined} onOpenPlot={canReadFarmers ? selectPlot : undefined} onOpenPlotSeason={canReadFarmers ? selectPlotSeason : undefined} />
             : <div className="notice error" role="alert">Your account cannot view source lots.</div>)

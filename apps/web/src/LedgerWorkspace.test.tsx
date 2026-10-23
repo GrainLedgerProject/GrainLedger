@@ -154,6 +154,23 @@ it('disables shortage approval whenever any received line has surplus', async ()
  expect(screen.getByRole('option', { name: /Approve shortage and post actual stock/ })).toBeDisabled();
  expect(screen.getByRole('option', { name: /Request remeasurement/ })).toBeEnabled();
 });
+it.each([false, true])('shows historical equipment labels without adding retired equipment to new processing choices (retired=%s)', async retired => {
+ const equipmentName = retired ? 'Old dryer (retired)' : 'Dryer';
+ routes['/api/ledger/operations'] = page([{ ...draft, id: 'committed', status: 'COMMITTED', equipmentId: retired ? 'old-dryer' : 'dryer', equipmentName, canEdit: false, canDelete: false }]);
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByRole('button', { name: 'Process & correct' }));
+ await browser.click(screen.getByRole('button', { name: 'Committed list' }));
+ const summary = await screen.findByText(new RegExp(`DRYING:.*${retired ? 'Old dryer \\(retired\\)' : 'Dryer'}.*COMMITTED`), { selector: 'summary' });
+ await browser.click(summary);
+ expect(within(summary.closest('details')!).getByText(equipmentName, { selector: 'dd' })).toBeInTheDocument();
+ await browser.click(screen.getByText('Create processing draft', { selector: 'summary' }));
+ const form = within(screen.getByRole('heading', { name: 'New processing draft' }).closest('section')!);
+ await browser.selectOptions(form.getByLabelText('Processing facility'), 'facility');
+ const choices = within(form.getByLabelText('Equipment'));
+ expect(choices.getByRole('option', { name: 'Dryer' })).toHaveValue('dryer');
+ expect(choices.queryByRole('option', { name: /Old dryer|\(retired\)/ })).not.toBeInTheDocument();
+});
 it('edits processing draft with decimal strings and supports multiple actual output rows', async () => {
  render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
  const browser = userEvent.setup();

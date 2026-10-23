@@ -526,6 +526,258 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         }
     }
 
+    [Fact]
+    public async Task Equipment_retirement_requires_persisted_administrator_creator_and_current_version()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var equipment = await SetupRowAsync(s, "equipment", s.EquipmentId);
+        var version = equipment.GetProperty("version").GetString();
+        var route = $"/api/ledger/equipment/{s.EquipmentId}/retire";
+        using var anonymous = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        await RejectedAsync(anonymous, HttpMethod.Post, route, new { version }, HttpStatusCode.Unauthorized);
+        await RejectedAsync(s.Operator, HttpMethod.Post, route, new { version }, HttpStatusCode.Forbidden);
+        var (other, session) = await factory.SeedUserAsync(Roles.Administrator, s.Accounts["admin"].User.OrganizationId);
+        using var otherAdmin = factory.CreateRealCookieClient(other, session);
+        await CsrfAsync(otherAdmin);
+        await RejectedAsync(otherAdmin, HttpMethod.Post, route, new { version }, HttpStatusCode.Forbidden);
+        await RejectedAsync(s.Admin, HttpMethod.Post, route, new { }, HttpStatusCode.BadRequest);
+        await RejectedAsync(s.Admin, HttpMethod.Post, route, new { version = 42 }, HttpStatusCode.BadRequest);
+        await RejectedAsync(s.Admin, HttpMethod.Post, route, new { version = Guid.NewGuid() }, HttpStatusCode.Conflict);
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
+            (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(other.Id, "equipment_retire", new { id = s.EquipmentId, version }))).SqlState);
+        var actor = s.Accounts["admin"].User.Id;
+        await OwnerSqlAsync("UPDATE identity.users SET \"Role\"='MillOperator' WHERE \"Id\"=$1", actor);
+        try
+        {
+            await RejectedAsync(s.Admin, HttpMethod.Post, route, new { version }, HttpStatusCode.Forbidden);
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
+                (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(actor, "equipment_retire", new { id = s.EquipmentId, version }))).SqlState);
+        }
+        finally
+        {
+            await OwnerSqlAsync("UPDATE identity.users SET \"Role\"='Administrator' WHERE \"Id\"=$1", actor);
+        }
+        await OwnerSqlAsync("UPDATE identity.users SET \"IsActive\"=false WHERE \"Id\"=$1", other.Id);
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
+            (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(other.Id, "equipment_retire", new { id = s.EquipmentId, version }))).SqlState);
+        await SendAsync(s.Admin, HttpMethod.Post, route, new { version });
+        await AssertRetainedAsync("equipment", s.EquipmentId, version, actor);
+        await RejectedAsync(s.Admin, HttpMethod.Post, route, new { version }, HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Equipment_retirement_preserves_committed_history_and_rejects_new_draft_use()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var original = await s.CommitAsync(await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]));
+        var operationId = original.GetProperty("id").GetGuid();
+        var before = await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}");
+        var storedOperation = await OwnerScalarAsync("SELECT to_jsonb(op)::text FROM ledger.operations op WHERE id=$1", operationId);
+        async Task AssertDisplayAsync(string expected)
+        {
+            foreach (var reader in new[] { s.Operator, s.Customer })
+            {
+                Assert.Equal(expected, (await GetAsync(reader, $"/api/ledger/operations/{operationId}")).GetProperty("equipmentName").GetString());
+                var listed = (await GetAsync(reader, $"/api/ledger/operations?ids={operationId}")).GetProperty("items").EnumerateArray().Single();
+                Assert.Equal(expected, listed.GetProperty("equipmentName").GetString());
+                foreach (var history in new[]
+                {
+                    await GetAsync(reader, $"/api/ledger/history?facilityId={s.FacilityId}&pageSize=100"),
+                    await GetAsync(reader, $"/api/ledger/history?lotId={source}&pageSize=100"),
+                    (await GetAsync(reader, $"/api/ledger/lots/{Output(original)}")).GetProperty("history")
+                })
+                {
+                    var rows = history.GetProperty("items").EnumerateArray().ToArray();
+                    var operationRows = rows.Where(row => row.GetProperty("operationId").ValueKind == JsonValueKind.String
+                        && row.GetProperty("operationId").GetGuid() == operationId).ToArray();
+                    Assert.NotEmpty(operationRows);
+                    Assert.All(operationRows, row => Assert.Equal(expected, row.GetProperty("equipmentName").GetString()));
+                    Assert.All(rows.Where(row => row.GetProperty("operationId").ValueKind == JsonValueKind.Null),
+                        row => Assert.False(row.TryGetProperty("equipmentName", out _)));
+                }
+            }
+        }
+        await AssertDisplayAsync("Synthetic equipment");
+        var events = await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id)::text FROM ledger.events e WHERE operation_id=$1", operationId);
+        var postings = await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)::text FROM ledger.postings p JOIN ledger.events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId);
+        var equipment = await SetupRowAsync(s, "equipment", s.EquipmentId);
+        Assert.False(equipment.GetProperty("canDelete").GetBoolean());
+        Assert.True(equipment.GetProperty("canRetire").GetBoolean());
+        var version = equipment.GetProperty("version").GetString();
+        await RejectedAsync(s.Admin, HttpMethod.Delete, $"/api/ledger/equipment/{s.EquipmentId}", new { version }, HttpStatusCode.Conflict);
+        var result = await SendAsync(s.Admin, HttpMethod.Post, $"/api/ledger/equipment/{s.EquipmentId}/retire", new { version });
+        Assert.Equal(s.EquipmentId, result.GetProperty("id").GetGuid());
+        await AssertRetainedAsync("equipment", s.EquipmentId, version, s.Accounts["admin"].User.Id);
+        foreach (var reader in new[] { s.Admin, s.Operator, s.Customer })
+            Assert.DoesNotContain((await GetAsync(reader, "/api/ledger/lookups")).GetProperty("equipment").EnumerateArray(), row => row.GetProperty("id").GetGuid() == s.EquipmentId);
+        Assert.DoesNotContain((await GetAsync(s.Admin, "/api/ledger/setup")).GetProperty("equipment").EnumerateArray(), row => row.GetProperty("id").GetGuid() == s.EquipmentId);
+        await AssertDisplayAsync("Synthetic equipment (retired)");
+        var after = await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}");
+        var beforeFields = JsonNode.Parse(before.GetRawText())!.AsObject();
+        var afterFields = JsonNode.Parse(after.GetRawText())!.AsObject();
+        beforeFields.Remove("equipmentName");
+        afterFields.Remove("equipmentName");
+        Assert.True(JsonNode.DeepEquals(beforeFields, afterFields));
+        Assert.Equal("Synthetic equipment", await OwnerScalarAsync("SELECT name FROM ledger.equipment WHERE id=$1", s.EquipmentId));
+        Assert.Equal(storedOperation, await OwnerScalarAsync("SELECT to_jsonb(op)::text FROM ledger.operations op WHERE id=$1", operationId));
+        using var deniedOperation = await s.ForeignCustomer.GetAsync($"/api/ledger/operations/{operationId}");
+        Assert.Equal(HttpStatusCode.Forbidden, deniedOperation.StatusCode);
+        Assert.Empty((await GetAsync(s.ForeignCustomer, $"/api/ledger/operations?ids={operationId}")).GetProperty("items").EnumerateArray());
+        Assert.Empty((await GetAsync(s.ForeignCustomer, $"/api/ledger/history?facilityId={s.FacilityId}")).GetProperty("items").EnumerateArray());
+        Assert.Equal(events, await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id)::text FROM ledger.events e WHERE operation_id=$1", operationId));
+        Assert.Equal(postings, await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)::text FROM ledger.postings p JOIN ledger.events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId));
+        Assert.Equal(10m, Quantity(await s.LotAsync(Output(original))));
+        var body = s.OperationBody(Guid.NewGuid(), "DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
+        await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", body, HttpStatusCode.Forbidden);
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
+            (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(s.Accounts["operator"].User.Id, "draft", body))).SqlState);
+        await RejectedAsync(s.Admin, HttpMethod.Put, $"/api/ledger/equipment/{s.EquipmentId}", new { version, name = "Restore denied" }, HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Equipment_retirement_blocks_active_drafts_and_pending_corrections_until_resolved()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var draft = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
+        var equipment = await SetupRowAsync(s, "equipment", s.EquipmentId);
+        var version = equipment.GetProperty("version").GetString();
+        var route = $"/api/ledger/equipment/{s.EquipmentId}/retire";
+        Assert.False(equipment.GetProperty("canDelete").GetBoolean());
+        Assert.False(equipment.GetProperty("canRetire").GetBoolean());
+        using (var blocked = await RawAsync(s.Admin, HttpMethod.Post, route, new { version }))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+            Assert.Contains("Equipment has active drafts or pending corrections; resolve them before retirement", await blocked.Content.ReadAsStringAsync());
+        }
+        Assert.Equal(version, (await SetupRowAsync(s, "equipment", s.EquipmentId)).GetProperty("version").GetString());
+        var committed = await s.CommitAsync(draft);
+        var correctionId = Guid.NewGuid();
+        await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/corrections", new
+        { id = correctionId, operationId = committed.GetProperty("id").GetGuid(), reason = "Check equipment retirement safety" });
+        Assert.False((await SetupRowAsync(s, "equipment", s.EquipmentId)).GetProperty("canRetire").GetBoolean());
+        await RejectedAsync(s.Admin, HttpMethod.Post, route, new { version }, HttpStatusCode.Conflict);
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/corrections/{correctionId}/cancel", new
+        { evidenceId = s.EvidenceId, reason = "Verified original correct" });
+        Assert.True((await SetupRowAsync(s, "equipment", s.EquipmentId)).GetProperty("canRetire").GetBoolean());
+        await SendAsync(s.Admin, HttpMethod.Post, route, new { version });
+    }
+
+    [Fact]
+    public async Task Equipment_retirement_keeps_reviewed_equipment_snapshots_after_draft_switch()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var draft = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "9.9")]);
+        var operationId = draft.GetProperty("id").GetGuid();
+        var draftVersion = draft.GetProperty("version").GetString();
+        await SendAsync(s.Manager, HttpMethod.Post, $"/api/ledger/operations/{operationId}/confirm", new { version = draftVersion, evidenceId = s.EvidenceId });
+        var alternateId = Guid.NewGuid();
+        await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/equipment", new { id = alternateId, facilityId = s.FacilityId, name = "Active replacement equipment" });
+        var edit = JsonSerializer.SerializeToNode(s.OperationBody(operationId, "DRYING", [(source, "10")], [("DRIED_PADDY", "9.9")]))!.AsObject();
+        edit["version"] = draftVersion;
+        edit["outputs"] = JsonNode.Parse(draft.GetProperty("outputs").GetRawText());
+        edit["equipmentId"] = alternateId.ToString();
+        await SendAsync(s.Operator, HttpMethod.Put, $"/api/ledger/operations/{operationId}", edit);
+        var snapshot = await OwnerScalarAsync("SELECT details::text FROM ledger.events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", operationId);
+        var equipment = await SetupRowAsync(s, "equipment", s.EquipmentId);
+        Assert.False(equipment.GetProperty("canDelete").GetBoolean());
+        Assert.True(equipment.GetProperty("canRetire").GetBoolean());
+        var reviewedBefore = (await GetAsync(s.Manager, $"/api/ledger/history?facilityId={s.FacilityId}&kind=VARIANCE_CONFIRMATION"))
+            .GetProperty("items").EnumerateArray().Single();
+        Assert.Equal("Synthetic equipment", reviewedBefore.GetProperty("equipmentName").GetString());
+        Assert.Equal(s.EquipmentId, reviewedBefore.GetProperty("details").GetProperty("reviewedContent").GetProperty("equipmentId").GetGuid());
+        await SendAsync(s.Admin, HttpMethod.Post, $"/api/ledger/equipment/{s.EquipmentId}/retire", new { version = equipment.GetProperty("version").GetString() });
+        Assert.Equal(snapshot, await OwnerScalarAsync("SELECT details::text FROM ledger.events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", operationId));
+        var current = await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}");
+        Assert.Equal("Active replacement equipment", current.GetProperty("equipmentName").GetString());
+        var listed = (await GetAsync(s.Operator, $"/api/ledger/operations?ids={operationId}")).GetProperty("items").EnumerateArray().Single();
+        Assert.Equal("Active replacement equipment", listed.GetProperty("equipmentName").GetString());
+        foreach (var reader in new[] { s.Manager, s.Operator })
+        {
+            var reviewedAfter = (await GetAsync(reader, $"/api/ledger/history?facilityId={s.FacilityId}&kind=VARIANCE_CONFIRMATION"))
+                .GetProperty("items").EnumerateArray().Single();
+            Assert.Equal("Synthetic equipment (retired)", reviewedAfter.GetProperty("equipmentName").GetString());
+            if (reader == s.Manager)
+                Assert.Equal(reviewedBefore.GetProperty("details").GetRawText(), reviewedAfter.GetProperty("details").GetRawText());
+            else
+                Assert.False(reviewedAfter.GetProperty("details").TryGetProperty("reviewedContent", out _));
+        }
+        var selectable = (await GetAsync(s.Operator, "/api/ledger/lookups")).GetProperty("equipment").EnumerateArray().ToArray();
+        Assert.DoesNotContain(selectable, row => row.GetProperty("id").GetGuid() == s.EquipmentId);
+        Assert.Equal("Active replacement equipment", selectable.Single(row => row.GetProperty("id").GetGuid() == alternateId).GetProperty("name").GetString());
+        edit["version"] = current.GetProperty("version").GetString();
+        edit["equipmentId"] = s.EquipmentId.ToString();
+        await RejectedAsync(s.Operator, HttpMethod.Put, $"/api/ledger/operations/{operationId}", edit, HttpStatusCode.Forbidden);
+        Assert.Equal(alternateId, (await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}")).GetProperty("equipmentId").GetGuid());
+    }
+
+    [Fact]
+    public async Task Equipment_retirement_serializes_with_new_drafts_without_inactive_references()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var equipment = await SetupRowAsync(s, "equipment", s.EquipmentId);
+        var version = equipment.GetProperty("version").GetString();
+        var operationId = Guid.NewGuid();
+        var responses = await Task.WhenAll(
+            RawAsync(s.Admin, HttpMethod.Post, $"/api/ledger/equipment/{s.EquipmentId}/retire", new { version }),
+            RawAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations",
+                s.OperationBody(operationId, "DRYING", [(source, "10")], [("DRIED_PADDY", "10")])));
+        using var retirement = responses[0];
+        using var draft = responses[1];
+        Assert.Single(responses, response => response.StatusCode == HttpStatusCode.OK);
+        if (retirement.StatusCode == HttpStatusCode.OK)
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, draft.StatusCode);
+            Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM ledger.operations WHERE id=$1", operationId));
+            Assert.Equal(true, await OwnerScalarAsync("SELECT is_deleted FROM ledger.equipment WHERE id=$1", s.EquipmentId));
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.Conflict, retirement.StatusCode);
+            Assert.Equal(false, await OwnerScalarAsync("SELECT is_deleted FROM ledger.equipment WHERE id=$1", s.EquipmentId));
+            Assert.Equal(s.EquipmentId, (await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}")).GetProperty("equipmentId").GetGuid());
+        }
+    }
+
+    [Fact]
+    public async Task Equipment_retirement_guards_commits_and_keeps_private_helpers_ungranted()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var draft = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
+        var operationId = draft.GetProperty("id").GetGuid();
+        // Simulate a pre-existing inactive reference; API retirement itself rejects active drafts.
+        await OwnerSqlAsync("UPDATE ledger.equipment SET is_deleted=true WHERE id=$1", s.EquipmentId);
+        await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{operationId}/commit", new { }, HttpStatusCode.Conflict);
+        Assert.Equal("DRAFT", (await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}")).GetProperty("status").GetString());
+        Assert.Equal(10m, Quantity(await s.LotAsync(source)));
+        Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM ledger.postings p JOIN ledger.events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId));
+        await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
+        await runtime.OpenAsync();
+        foreach (var sql in new[]
+        {
+            "SELECT ledger.equipment_has_pending_work(gen_random_uuid())",
+            "SELECT ledger.command_before_equipment_retirement(NULL,'equipment_retire','{}')",
+            "SELECT ledger.read_before_equipment_retirement(NULL,'setup','{}')"
+        })
+        {
+            await using var denied = new NpgsqlCommand(sql, runtime);
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
+                (await Assert.ThrowsAsync<PostgresException>(() => denied.ExecuteNonQueryAsync())).SqlState);
+        }
+        await using var transaction = await runtime.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+        await using var retirement = new NpgsqlCommand("SELECT ledger.command($1,'equipment_retire',$2::jsonb)", runtime, transaction);
+        retirement.Parameters.AddWithValue(s.Accounts["admin"].User.Id);
+        retirement.Parameters.AddWithValue(JsonSerializer.Serialize(new { id = s.EquipmentId, version = Guid.NewGuid() }));
+        var isolationError = await Assert.ThrowsAsync<PostgresException>(() => retirement.ExecuteNonQueryAsync());
+        Assert.Equal(PostgresErrorCodes.CheckViolation, isolationError.SqlState);
+        Assert.Equal("Protected stock writes require READ COMMITTED isolation", isolationError.MessageText);
+    }
+
     private static object SetupBody(string resource, Guid id, Guid facilityId) => resource switch
     {
         "facilities" => new { id, name = "Unused setup fixture" },

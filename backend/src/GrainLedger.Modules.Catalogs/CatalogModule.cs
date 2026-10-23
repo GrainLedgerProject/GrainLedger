@@ -17,6 +17,7 @@ public static class CatalogModule
             if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("ConnectionStrings:GrainLedger is required.");
             options.UseNpgsql(connection, n => n.MigrationsAssembly(typeof(CatalogDbContext).Assembly.FullName));
         });
+        services.AddScoped<IResiduePolicyReader, ResiduePolicyReader>();
         return services;
     }
 
@@ -29,6 +30,8 @@ public static class CatalogModule
         endpoints.MapRiceVarietyEndpoints();
         endpoints.MapMeasurementUnitEndpoints();
         endpoints.MapMrlVersionEndpoints();
+        endpoints.MapResidueRuleEndpoints();
+        endpoints.MapResiduePolicySettingEndpoints();
         return endpoints;
     }
 }
