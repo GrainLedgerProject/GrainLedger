@@ -138,6 +138,7 @@ it('blocks checked adoption after embedded scientific revision until refreshed s
   await user.type(editor.getByLabelText('Review authority'), 'Scientific QA');
   fireEvent.change(editor.getByLabelText('Effective from'), { target: { value: '2026-10-23T00:00' } });
   fireEvent.change(editor.getByLabelText('Reviewed at'), { target: { value: '2026-10-22T00:00' } });
+  await user.click(editor.getByLabelText('I reviewed the complete scientific profile, evidence and effective period.'));
   await user.click(editor.getByRole('button', { name: 'Publish reviewed company rule' }));
 
   await screen.findByRole('button', { name: 'Review updated profile sources' });

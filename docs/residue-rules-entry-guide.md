@@ -12,8 +12,8 @@ Companion documents: [residue-bounds plan](residue-bounds-plan.md) and [end-to-e
 | --- | --- |
 | Adopt reviewed system policy | As Customer Manager, open **Residue profiles**, select the applicable profiles, inspect their scientific summaries, and publish one explicit reviewed adoption with a shared effective period and review. Each profile keeps its own immutable setting/version. |
 | Return from override to inheritance | Select the profile series and system-default mode, then publish a reviewed return. This is versioned, not deletion. |
-| Use company-specific scientific policy | Clone an eligible system profile as a company rule. Inherited applicability appears as a summary; change the reviewed percentage or factor, use advanced applicability only for real exceptions, and complete fresh scientific review. Then explicitly select the reviewed company override. |
-| Add system policy | Administrator opens expert scientific-profile setup through **Administration → Catalogs → Commodities**. Full applicability and actual scientific review remain required; no numerical defaults are invented. Rule publication alone does not adopt it for any company. |
+| Use company-specific scientific policy | Under **Start with a reviewed profile**, explicitly choose **Reviewed profile** and **Use reviewed profile**, or use **Clone as company rule** on an eligible system row. Substance, commodity and complete applicability are inherited, not guessed. Change the reviewed percentage or factor, complete fresh **Review & publish**, then explicitly select the reviewed company override. |
+| Add system policy | Administrator opens **Administration → Catalogs → Commodities**. Use **Reviewed profile → Use reviewed profile** to revise an existing series without retyping applicability. Use **Create new scientific profile** only when an expert needs genuinely new applicability. No numerical defaults are invented; publication alone does not adopt a profile. |
 | Review calculation | Confirm sample identity/transcription once with **Confirm identity and bind compatible results**. Compatible adopted profiles bind automatically; returned exceptions stay unbound. Open exception review only for missing policy, normalization or conflicting evidence. |
 
 No company setting means no adopted profile and finite calculation stays `UNRESOLVED`. Settings and rules are append-only/versioned; supersession stays within the same scope. An active override that does not match blocks corresponding inherited system applicability. Distinct matching series or same-scope ambiguity fail closed. Never assume default profile, coefficient, scientific rule, or successful calculation.
@@ -22,7 +22,7 @@ Normal report work does not require entering scientific rules again or a second 
 
 ### Matrix editing and live bounds
 
-The substance matrix summarizes existing reviewed profiles, not one universal policy per substance. Inspect each profile's commodity, method, stage/basis, fraction, conditions and effective dates before editing. Change reviewed uncertainty/ND settings or processing factors, retain explicit factor ranges where needed, then publish changed rules with one actual scientific review. Unchanged profiles are not rewritten; stale publication retains the draft and requires explicit refreshed review. Missing profiles use expert setup; blank cells never imply factor 1.
+The substance matrix summarizes existing reviewed profiles, not one universal policy per substance. Inspect each profile's commodity, method, stage/basis, fraction, conditions and effective dates before editing. Change reviewed uncertainty/ND settings or processing factors, retain explicit factor ranges where needed, then publish changed rules with one actual scientific review. Unchanged profiles are not rewritten; stale publication retains the draft and requires explicit refreshed review. For a single profile, **Reviewed profile → Use reviewed profile** opens its compact revision or company-clone form. Missing applicability uses **Create new scientific profile**; blank cells never imply factor 1.
 
 Company default/override choice remains explicit and independently versioned. Publication of a system rule does not adopt it. No method wildcard or automatic scientific approval exists.
 
@@ -47,10 +47,11 @@ Lower sections retain detailed rule-entry examples for exceptional scientific-ru
 ### Before entering rule values
 
 1. Confirm approved scientific source, applicability and review authority; do not use this guide's synthetic values operationally.
-2. For system policy, sign in as **Administrator** and open **Administration → Catalogs → Commodities**. For own-company override, use **Residue profiles** as Customer Manager; select matching system rule and **Clone as company rule** to retain its Code and applicable series identity.
-3. Select actual existing Catalog **Substance** and **Commodity**. A display name does not replace persisted identity.
-4. Record exact method, residue definition, analytical basis, material stages and output product identity applicable to actual evidence.
-5. Complete every scientific and review field. Publish the reviewed rule, then explicitly publish relevant company profile setting before expecting it to apply.
+2. For system policy, sign in as **Administrator** and open **Administration → Catalogs → Commodities**. For own-company policy, use **Residue profiles** as Customer Manager.
+3. Prefer **Reviewed profile → Use reviewed profile**. This starts a revision in the same scope or an eligible company clone of the same Code, never a duplicate system series. Source substance and commodity stay locked. Inspect inherited applicability; source choice is explicit and no profile is selected automatically.
+4. If no suitable profile exists, open **Create new scientific profile**. Select actual Catalog **Substance** and **Commodity**, then enter reviewed scientific applicability. For processing, choose **Factor semantics** and **Operation**; per-step stage/product combinations are derived from the supported **Operation material path**. Drying has one structural path and needs no separate stage/product inputs. Cumulative rules retain explicit reviewed anchor and output-material choices.
+5. Enter the reviewed factor or uncertainty. **Use range** reveals a separate upper factor; ND threshold controls appear only for ND interpretation. For process conditions, explicitly choose **No additional conditions**, or enter exact **Applicable conditions**.
+6. Complete **Review & publish** with evidence, applicability, effective period and actual scientific reviewer/authority/time. Inspect **Full scientific profile** and confirm the review before publishing. Company adoption remains a separate explicit action.
 
 The UI generates rule UUID/version data. For company override, Code must match selected system series; full rule remains separate company scope and version history. A matching profile name or rule publication is not adoption.
 
@@ -67,17 +68,18 @@ Published rules appear in a table; use each row's **Details** disclosure to insp
 | Residue definition | Reviewed meaning of the analyte: for example, parent substance only versus a specified sum including metabolites. Must match reviewed evidence and compatible process rules exactly. |
 | Material stage | Interpretation only: source material stage, such as `RAW_PADDY`. Choose from the supported stage dropdown; UI uses this as both input and output stage. |
 | Analytical basis | Interpretation only: reviewed material/moisture basis of reported concentration. UI uses this as both input and output basis. Not a unit or stage. |
-| Input / output stage | Processing only: choose physical stages before and after this transformation from the supported stage dropdowns. |
+| Operation material path | Per-step processing only: choose the supported input material and output fraction together. UI derives canonical input/output stages and output product identity. Drying automatically uses `RAW_PADDY → DRIED_PADDY`, with product `DRIED_PADDY`. |
 | Input / output analytical basis | Processing only: input must match parent interval basis; output becomes resulting interval basis and must match the next rule's input basis. |
-| Concentration unit | Scientific profiles use `mg/kg`. Supported report units `µg/kg`, `μg/kg` and `ug/kg` normalize exactly by `0.001`; values, LOD, LOQ and reviewed concentration-valued selection fields scale together. Bare `ppb` remains unresolved without explicit mass-fraction semantics. |
+| Concentration unit | Fixed `mg/kg`, displayed rather than entered. Supported report units `µg/kg`, `μg/kg` and `ug/kg` normalize exactly by `0.001`; values, LOD, LOQ and reviewed concentration-valued selection fields scale together. Bare `ppb` remains unresolved without explicit mass-fraction semantics. |
 | Relative uncertainty percent | Only for `NUMERIC_RELATIVE_UNCERTAINTY`; exact nonnegative decimal percentage, not fraction (`10` = 10%). |
 | Reviewed relative uncertainty at numeric zero | Explicit opt-in required to use relative uncertainty at zero; otherwise numeric zero remains unresolved under relative policy. |
 | Analytical method | Interpretation only: exact text recorded in laboratory result. No automatic method-name equivalence. |
-| Output fraction / product identity | Processing only: exact output lot product identity, not its display name. Product identity can differ from stage, especially after bagging. |
-| Process | Exact physical kind, such as `BLENDING`, not `BLEND`. Process stays free text with suggestions; mixed-storage kinds may need typing. |
-| Conditions or UNCONDITIONAL applicability | Exact matching process-condition value, or `UNCONDITIONAL` only when review explicitly covers condition-independent applicability. Conditions stay free text with suggestions. This is not a free-form review note. |
+| Output material / product identity | Derived from the selected per-step material path, or explicitly selected as **Cumulative output material**. Bagging uses stage `BAGGED_RICE` while retaining product `HEAD_RICE`, `BROKEN_RICE` or `BLENDED_RICE`; it never stores a placeholder product identity. |
+| Operation | Choose supported physical operation: drying, milling, blending, bagging, merge, custody ingress or custody withdrawal. Invalid aliases and unsupported material paths cannot be published from this form. |
+| Conditions / Applicable conditions | Explicit **No additional conditions** stores exact `UNCONDITIONAL`, only when scientific review supports it. Otherwise select conditional applicability and enter the exact matching process-condition value. This is not a free-form review note. |
 | Factor lower / upper bound (decimal) | Nonnegative concentration-factor interval with lower ≤ upper. Enter plain decimals such as `0.5`, not `50%`, `0,5`, `±0.5` or scientific notation. Factor is dimensionless; result concentration remains `mg/kg`. |
 | Factor semantics | **Per-step concentration factor** for one transformation; **Cumulative concentration factor** for a supported longer path anchored at its stated input stage. |
+| Cumulative input-stage anchor | Cumulative factors only: explicitly reviewed ancestor stage. It is not automatically replaced by the immediate parent stage; cumulative milling may remain anchored at `RAW_PADDY`. |
 | Reviewed homogeneous mixing applicability | Check only when reviewed model authorizes homogeneous mass-weighted mixing. Required for multi-input processing, including relevant pool ingress. Not an automatic property of every process. |
 
 No automatic conversion between moisture bases or residue definitions exists. Matching identifiers and text does not itself establish scientific validity.
@@ -99,6 +101,8 @@ Rules must also have been published by the evaluation snapshot. Publishing a rul
 ## 3. Shared setup for the complete examples
 
 Each example is complete when its example-specific table is combined with **all shared fields in this section**. Fields hidden for the chosen task are not filled.
+
+Stage/product columns below describe the stored scientific profile, not separate free-text inputs. Choose the operation/material path to derive them. Unit is fixed; inherited applicability needs no retyping.
 
 Use a deliberately synthetic test substance and one existing test commodity. For the baseline, both sources and all output lots use that same selected commodity; real blending may use a different output commodity and therefore needs a rule selecting that actual output commodity.
 
@@ -232,12 +236,12 @@ Choose **Define processing factors**. For every P1–P8 example, fill all shared
 | --- | --- |
 | Input analytical basis | `SYNTHETIC_AS_RECEIVED` |
 | Output analytical basis | `SYNTHETIC_AS_RECEIVED` |
-| Conditions or UNCONDITIONAL applicability | `UNCONDITIONAL` |
+| Conditions | **No additional conditions** (`UNCONDITIONAL`) |
 | Factor semantics | **Per-step concentration factor** |
 
 `UNCONDITIONAL` here is an explicitly synthetic assumption: it does not approve real factory conditions. For operational conditional rules, enter the exact condition value carried by the physical processing record; explain the scientific scope in the separate applicability statement.
 
-Each row completes a separate form. Checkbox **checked** means this synthetic example explicitly authorizes homogeneous mixing; unchecked means it does not authorize a multi-input variant.
+Each row completes a separate form: choose its **Operation** and matching **Operation material path**; drying derives its sole path automatically. Use one concentration-factor input when endpoints match, or **Use range** when they differ. Checkbox **checked** means this synthetic example explicitly authorizes homogeneous mixing; unchecked means it does not authorize a multi-input variant.
 
 | Example | Process | Input stage | Output stage | Output fraction / product identity | Lower | Upper | Reviewed homogeneous mixing applicability |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -293,15 +297,13 @@ Choose **Define processing factors**, fill every shared field from section 3, th
 
 | Field | Value |
 | --- | --- |
-| Input stage | `RAW_PADDY` |
-| Output stage | `HEAD_RICE` |
+| Cumulative input-stage anchor | `RAW_PADDY` |
+| Cumulative output material | `HEAD_RICE · HEAD_RICE` |
 | Input analytical basis | `SYNTHETIC_AS_RECEIVED` |
 | Output analytical basis | `SYNTHETIC_AS_RECEIVED` |
-| Output fraction / product identity | `HEAD_RICE` |
-| Process | `MILLING` |
-| Conditions or UNCONDITIONAL applicability | `UNCONDITIONAL` |
-| Factor lower bound (decimal) | `0.5` |
-| Factor upper bound (decimal) | `0.5` |
+| Operation | `MILLING` |
+| Conditions | **No additional conditions** (`UNCONDITIONAL`) |
+| Concentration factor (decimal) | `0.5` (both interval endpoints) |
 | Factor semantics | **Cumulative concentration factor** |
 | Reviewed homogeneous mixing applicability | Unchecked; single input and unbranched anchor path |
 | Evidence reference | `SYNTHETIC TEST ONLY — P9 cumulative paddy-to-head-rice` |

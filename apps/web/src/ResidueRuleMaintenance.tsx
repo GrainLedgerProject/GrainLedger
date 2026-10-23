@@ -17,20 +17,43 @@ type Substance = { id: string; code: string; name: string };
 type Commodity = { id: string; code: string; name: string };
 const blank = (kind = '', companyId: string | null = null): RuleForm => {
   const id = crypto.randomUUID();
-  return { id, code: `RES-${id}`, versionNo: 1, companyId, kind, substanceId: '', commodityId: '', residueDefinition: '', inputStage: '', outputStage: '', inputBasis: '', outputBasis: '', outputFraction: '', process: '', conditions: '', analyticalMethod: null, unit: '', decimalPlaces: null, interpretationKind: null, ndThresholdKind: null, factorLower: null, factorUpper: null, factorSemantics: null, homogeneousMixing: false, relativeUncertaintyPercent: null, relativeUncertaintyAtZero: false, effectiveFrom: '', effectiveTo: null, supersedesId: null, evidenceRef: '', applicabilityStatement: '', reviewedBy: '', reviewAuthority: '', reviewedAt: '' };
+  return { id, code: `RES-${id}`, versionNo: 1, companyId, kind, substanceId: '', commodityId: '', residueDefinition: '', inputStage: '', outputStage: '', inputBasis: '', outputBasis: '', outputFraction: '', process: '', conditions: '', analyticalMethod: null, unit: 'mg/kg', decimalPlaces: null, interpretationKind: null, ndThresholdKind: null, factorLower: null, factorUpper: null, factorSemantics: null, homogeneousMixing: false, relativeUncertaintyPercent: null, relativeUncertaintyAtZero: false, effectiveFrom: '', effectiveTo: null, supersedesId: null, evidenceRef: '', applicabilityStatement: '', reviewedBy: '', reviewAuthority: '', reviewedAt: '' };
 };
 const dateValue = (value: string) => value ? new Date(value).toISOString() : '';
 const taskNames: Record<string, string> = { INTERPRETATION: 'Interpret laboratory results', PROCESS: 'Define processing factors' };
+const operations = [...kinds, 'CUSTODY_INGRESS', 'CUSTODY_WITHDRAW'];
+const materials = [
+  ...['RAW_PADDY', 'DRIED_PADDY', 'HEAD_RICE', 'BROKEN_RICE', 'BRAN', 'HUSK', 'BLENDED_RICE'].map(stage => ({ stage, product: stage })),
+  ...['HEAD_RICE', 'BROKEN_RICE', 'BLENDED_RICE'].map(product => ({ stage: 'BAGGED_RICE', product })),
+];
+type ProcessPath = { inputStage: string; outputStage: string; outputFraction: string };
+// Structural paths follow Ledger operations; analytical bases and factors still need scientific review.
+function processPaths(operation: string): ProcessPath[] {
+  switch (operation) {
+    case 'DRYING': return [{ inputStage: 'RAW_PADDY', outputStage: 'DRIED_PADDY', outputFraction: 'DRIED_PADDY' }];
+    case 'MILLING': return ['HEAD_RICE', 'BROKEN_RICE', 'BRAN', 'HUSK'].map(product => ({ inputStage: 'DRIED_PADDY', outputStage: product, outputFraction: product }));
+    case 'BLENDING': return ['HEAD_RICE', 'BROKEN_RICE', 'BLENDED_RICE'].map(stage => ({ inputStage: stage, outputStage: 'BLENDED_RICE', outputFraction: 'BLENDED_RICE' }));
+    case 'BAGGING': return ['HEAD_RICE', 'BROKEN_RICE', 'BLENDED_RICE'].map(stage => ({ inputStage: stage, outputStage: 'BAGGED_RICE', outputFraction: stage }));
+    case 'MERGE':
+    case 'CUSTODY_INGRESS':
+    case 'CUSTODY_WITHDRAW': return materials.map(material => ({ inputStage: material.stage, outputStage: material.stage, outputFraction: material.product }));
+    default: return [];
+  }
+}
+const pathKey = (path: ProcessPath) => `${path.inputStage}:${path.outputStage}:${path.outputFraction}`;
+const decimal = (value: string | null | undefined) => typeof value === 'string' && /^[0-9]{1,24}(\.[0-9]{1,18})?$/.test(value);
 
 export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPublished, policySettings = [] }: { active: boolean; allowed: boolean; companyId?: string | null; onPublished?: () => void; policySettings?: MatrixSetting[] }) {
   const [rules, setRules] = useState<Rule[]>([]), [substances, setSubstances] = useState<Substance[]>([]), [commodities, setCommodities] = useState<Commodity[]>([]);
   const [form, setForm] = useState<RuleForm>(() => blank('', companyId)), [error, setError] = useState(''), [loading, setLoading] = useState(false), [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
   const [sourceRule, setSourceRule] = useState<Rule | null>(null), [advanced, setAdvanced] = useState(false), [factorRange, setFactorRange] = useState(false);
+  const [confirmed, setConfirmed] = useState(false), [conditional, setConditional] = useState(false);
+  const [reuseId, setReuseId] = useState('');
   const action = useAction();
   const [reload, setReload] = useState(0);
   const [loadedScope, setLoadedScope] = useState<string | null | undefined>(undefined);
   useEffect(() => {
-    setForm(blank('', companyId)); setSourceRule(null); setAdvanced(false); setFactorRange(false);
+    setForm(blank('', companyId)); setSourceRule(null); setAdvanced(false); setFactorRange(false); setConfirmed(false); setConditional(false); setReuseId('');
   }, [companyId]);
   useEffect(() => {
     if (!active || !allowed) return;
@@ -45,13 +68,43 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
 
   async function publish(event: FormEvent) {
     event.preventDefault();
-    if (!allowed) return;
+    if (!allowed || loading || error || loadedScope !== companyId) return;
     await action.run(async () => {
-      if (!stages.includes(form.inputStage) || !stages.includes(form.outputStage)) throw new Error('Choose supported input and output stages before publishing.');
-      if (form.decimalPlaces === null) throw new Error('Set reviewed outward precision before publishing.');
+      if (!confirmed) throw new Error('Review and confirm the complete profile before publishing.');
+      if (!stages.includes(form.inputStage) || !stages.includes(form.outputStage)) {
+        setAdvanced(true);
+        throw new Error('Choose supported input and output stages before publishing.');
+      }
+      if (form.decimalPlaces === null) {
+        setAdvanced(true);
+        throw new Error('Set reviewed outward precision before publishing.');
+      }
       const interpretation = form.kind === 'INTERPRETATION';
       const isNd = interpretation && form.interpretationKind === 'ND';
       const process = form.kind === 'PROCESS';
+      const missingApplicability = ![form.substanceId, form.commodityId, form.residueDefinition, form.inputBasis, form.outputBasis].every(value => value.trim()) ||
+        form.unit !== 'mg/kg' || !Number.isInteger(form.decimalPlaces) || form.decimalPlaces < 0 || form.decimalPlaces > 18 ||
+        (interpretation && (!form.analyticalMethod?.trim() || form.inputStage !== form.outputStage || form.inputBasis !== form.outputBasis ||
+          !['NUMERIC_ABSOLUTE_UNCERTAINTY', 'NUMERIC_RELATIVE_UNCERTAINTY', 'BELOW_LIMIT', 'ND'].includes(form.interpretationKind || '') ||
+          (isNd && !['REPORTING_THRESHOLD', 'LOD', 'LOQ'].includes(form.ndThresholdKind || '')) ||
+          (form.interpretationKind === 'NUMERIC_RELATIVE_UNCERTAINTY' && !decimal(form.relativeUncertaintyPercent)))) ||
+        (process && (!form.conditions.trim() || !form.outputFraction.trim() || !operations.includes(form.process) ||
+          !['STEP_CONCENTRATION', 'CUMULATIVE_CONCENTRATION'].includes(form.factorSemantics || '') ||
+          !decimal(form.factorLower) || (factorRange && !decimal(form.factorUpper))));
+      if (missingApplicability) {
+        setAdvanced(true);
+        throw new Error('Complete the expert scientific applicability fields before publishing. No scientific defaults are supplied.');
+      }
+      if (process && form.factorSemantics === 'STEP_CONCENTRATION' && !processPaths(form.process).some(path => pathKey(path) === pathKey(form))) {
+        setAdvanced(true);
+        throw new Error('Choose a supported operation and material path. Historical values are unchanged; unsupported paths cannot be published.');
+      }
+      if (process && !materials.some(material => material.stage === form.outputStage && material.product === form.outputFraction)) {
+        setAdvanced(true);
+        throw new Error('Choose a supported output material and product identity. Historical values are unchanged.');
+      }
+      if (![form.effectiveFrom, form.evidenceRef, form.applicabilityStatement, form.reviewedBy, form.reviewAuthority, form.reviewedAt].every(value => value.trim()))
+        throw new Error('Complete scientific review, evidence and effective period before publishing.');
       const body = {
         ...form,
         analyticalMethod: interpretation ? form.analyticalMethod || '' : null,
@@ -74,18 +127,19 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
           } catch (refreshCause) {
             throw new Error(`Published rule history changed. Your draft is unchanged, but latest history could not be loaded: ${errorMessage(refreshCause)}`);
           }
-          throw new Error('Published rule history changed. Your draft is unchanged. Review the latest published rule in history and explicitly choose Revise rule to start a fresh version.');
+          throw new Error('Published rule history changed. Your draft is unchanged. Cancel revision when ready to discard this draft, then review the latest published rule in history and explicitly choose Revise rule to start a fresh version.');
         }
         throw cause;
       }
       setRules((await api<{ items: Rule[] }>('/api/residue-rules')).items);
       setForm(blank('', companyId));
-      setSourceRule(null); setAdvanced(false); setFactorRange(false);
+      setSourceRule(null); setAdvanced(false); setFactorRange(false); setConfirmed(false); setConditional(false); setReuseId('');
       onPublished?.();
     }, 'Reviewed residue rule published.');
   }
-  function set<K extends keyof RuleForm>(key: K, value: RuleForm[K]) { setForm(current => ({ ...current, [key]: value })); }
+  function set<K extends keyof RuleForm>(key: K, value: RuleForm[K]) { setConfirmed(false); setForm(current => ({ ...current, [key]: value })); }
   function invalidateScientificReview() {
+    setConfirmed(false);
     setForm(current => ({ ...current, reviewedBy: '', reviewedAt: '' }));
   }
   function changeInterpretation(kind: string) {
@@ -97,12 +151,14 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
     action.setError('');
     action.setStatus('');
     setSourceRule(rule); setAdvanced(false); setFactorRange(rule.factorLower !== rule.factorUpper);
+    setConfirmed(false); setConditional(!!rule.conditions && rule.conditions !== 'UNCONDITIONAL');
     setForm({ ...rule, id: crypto.randomUUID(), companyId, versionNo: nextVersion, supersedesId: rule.id, effectiveFrom: '', effectiveTo: null, reviewedBy: '', reviewAuthority: '', reviewedAt: '' });
   }
   function cloneSystemRule(rule: Rule) {
     action.setError('');
     action.setStatus('');
     setSourceRule(rule); setAdvanced(false); setFactorRange(rule.factorLower !== rule.factorUpper);
+    setConfirmed(false); setConditional(!!rule.conditions && rule.conditions !== 'UNCONDITIONAL');
     setForm({ ...rule, id: crypto.randomUUID(), companyId, versionNo: 1, supersedesId: null, effectiveFrom: '', effectiveTo: null, reviewedBy: '', reviewAuthority: '', reviewedAt: '' });
   }
   const substanceName = (id: string) => { const item = substances.find(value => value.id === id); return item ? `${item.code} · ${item.name}` : id; };
@@ -112,11 +168,36 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
   const visibleRules = rules.filter(rule => rule.companyId === (companyId || null) || (companyId && !rule.companyId));
   const successors = new Map(rules.filter(rule => rule.supersedesId).map(rule => [`${rule.companyId || ''}:${rule.supersedesId}`, rule] as const));
   const companyCodes = new Set(rules.filter(rule => rule.companyId === companyId).map(rule => rule.code));
-  return <section className="panel" aria-labelledby="residue-rules-title">
+  const reusableRules = visibleRules.filter(rule => !successors.has(`${rule.companyId || ''}:${rule.id}`) &&
+    (rule.companyId === (companyId || null) || !companyCodes.has(rule.code)));
+  const paths = processPaths(form.process);
+  const selectedPath = paths.some(path => pathKey(path) === pathKey(form)) ? pathKey(form) : '';
+  function changeOperation(operation: string) {
+    const options = processPaths(operation);
+    setForm(current => ({ ...current, process: operation,
+      ...(current.factorSemantics === 'STEP_CONCENTRATION' ? options.length === 1 ? options[0] : { inputStage: '', outputStage: '', outputFraction: '' } : {}) }));
+  }
+  return <section className="panel residue-rule-maintenance" aria-labelledby="residue-rules-title">
     <h2 id="residue-rules-title">{companyId ? 'Company residue rules' : 'System residue rules'}</h2>
     <p>{companyId ? 'Company rules use same-Code system series, retain company scope and require fresh review.' : 'Versioned, reviewed interpretation and process rules. Numeric values have no defaults; publishing does not certify scientific validity.'}</p>
     {loading && <p role="status">Loading published residue rules…</p>}
     {error && <p className="notice error" role="alert">{error}</p>}
+    <Feedback {...action} />
+    {!form.kind && <section aria-label="Reuse a reviewed profile">
+      <h3>Start with a reviewed profile</h3>
+      <p>Choose the complete profile for the same substance, commodity and scientific applicability. Reuse starts a revision or company clone, never a duplicate rule. For routine policy edits, use the matrix below.</p>
+      <label>Reviewed profile<select value={reuseId} disabled={loading || !!error || !allowed || loadedScope !== companyId} onChange={event => setReuseId(event.target.value)}>
+        <option value="">Choose a complete reviewed profile</option>
+        {reusableRules.map(rule => <option key={rule.id} value={rule.id}>{rule.code} v{rule.versionNo} · {rule.companyId ? 'Company' : 'System'} · {substanceName(rule.substanceId)} · {commodityName(rule.commodityId)} · {rule.kind === 'PROCESS' ? `${rule.process} · ${rule.outputFraction} · ${rule.factorSemantics}` : `${rule.interpretationKind} · ${rule.analyticalMethod}`} · {rule.inputStage}/{rule.inputBasis} → {rule.outputStage}/{rule.outputBasis}</option>)}
+      </select></label>
+      <button type="button" disabled={!reuseId || loading || !!error || !allowed || loadedScope !== companyId} onClick={() => {
+        const source = reusableRules.find(rule => rule.id === reuseId);
+        if (!source) return;
+        if (companyId && !source.companyId) cloneSystemRule(source); else startRevision(source);
+      }}>Use reviewed profile</button>
+      {!loading && !reusableRules.length && <p>No reusable profile. Ask an expert to create the missing applicability below.</p>}
+    </section>}
+    <div role="region" aria-label="Residue rule overview" hidden={!!form.kind}>
     {allowed && loadedScope === companyId && <ResidueMatrix rules={rules} substances={substances} commodities={commodities} companyId={companyId} settings={policySettings} disabled={loading || !!error} onPublished={() => { setReload(value => value + 1); onPublished?.(); }} />}
     {visibleRules.length > 0 && <div className="table-scroll residue-rule-table-scroll" role="region" aria-label="Published residue rules" tabIndex={0}>
       <table className="residue-rule-table">
@@ -198,21 +279,19 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
       </table>
     </div>}
     {!loading && !error && visibleRules.length === 0 && <p className="empty">No reviewed scientific profiles available. Residue bounds remain unresolved until an expert publishes applicable rules.</p>}
-    <Feedback {...action} />
+    </div>
     {!form.kind ? <details aria-label="Choose residue rule task">
       <summary>Create new scientific profile</summary>
       <p>Expert setup only. Reuse a reviewed profile above where possible; no scientific values are supplied by default.</p>
       <div className="ledger-actions">
-        <button type="button" onClick={() => { setSourceRule(null); setAdvanced(true); setFactorRange(false); setForm(blank('INTERPRETATION', companyId)); }}>Interpret laboratory results</button>
-        <button type="button" onClick={() => { setSourceRule(null); setAdvanced(true); setFactorRange(false); setForm(blank('PROCESS', companyId)); }}>Define processing factors</button>
+        <button type="button" disabled={loading || !!error || !allowed || loadedScope !== companyId} onClick={() => { setSourceRule(null); setAdvanced(true); setFactorRange(false); setConfirmed(false); setConditional(false); setForm(blank('INTERPRETATION', companyId)); }}>Interpret laboratory results</button>
+        <button type="button" disabled={loading || !!error || !allowed || loadedScope !== companyId} onClick={() => { setSourceRule(null); setAdvanced(true); setFactorRange(false); setConfirmed(false); setConditional(false); setForm(blank('PROCESS', companyId)); }}>Define processing factors</button>
       </div>
     </details> : <>
       {revising && <p role="status">Revising {taskNames[form.kind]} for {substanceName(form.substanceId)} · {commodityName(form.commodityId)}. Previous publication remains unchanged until new rule is reviewed and published.</p>}
-      <button type="button" onClick={() => { action.setError(''); action.setStatus(''); setSourceRule(null); setAdvanced(false); setFactorRange(false); setForm(blank('', companyId)); }}>{revising ? 'Cancel revision' : 'Cancel profile draft'}</button>
+      <button type="button" onClick={() => { action.setError(''); action.setStatus(''); setSourceRule(null); setAdvanced(false); setFactorRange(false); setConfirmed(false); setConditional(false); setForm(blank('', companyId)); }}>{revising ? 'Cancel revision' : 'Cancel profile draft'}</button>
       <form onSubmit={publish}>
-        <datalist id="residue-rule-processes">{kinds.map(kind => <option key={kind} value={kind} />)}</datalist>
-        <datalist id="residue-rule-conditions"><option value="UNCONDITIONAL" label="Always applies; no additional conditions" /></datalist>
-        <fieldset disabled={action.busy}><legend>{taskNames[form.kind]}</legend>
+        <fieldset disabled={action.busy || loading || !!error || !allowed || loadedScope !== companyId}><legend>{taskNames[form.kind]}</legend>
           {sourceRule && <>
             <h3>Reuse reviewed applicability</h3>
             <dl className="residue-rule-detail-grid" aria-label="Profile applicability">
@@ -222,13 +301,13 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
               <div><dt>Unit / outward precision</dt><dd>{form.unit} · {form.decimalPlaces ?? 'Unspecified'} decimal places</dd></div>
               <div><dt>Scientific policy</dt><dd>{interpretation ? `${form.interpretationKind} · ${form.ndThresholdKind || 'No ND threshold'}` : `${form.process} · ${form.outputFraction} · ${form.conditions} · ${form.factorSemantics} · homogeneous mixing: ${form.homogeneousMixing ? 'reviewed' : 'not reviewed'}`}</dd></div>
             </dl>
-            <label><input type="checkbox" checked={advanced} onChange={event => setAdvanced(event.target.checked)} /> Edit scientific applicability (expert)</label>
+            <label className="checkbox-label"><input type="checkbox" checked={advanced} onChange={event => setAdvanced(event.target.checked)} /> Edit scientific applicability (expert)</label>
             <p>Changing scientific values requires fresh review below. Original publication and review remain unchanged.</p>
           </>}
           {advanced && <>
           <fieldset onChange={invalidateScientificReview}><legend>Applicability</legend>
             <div className="ledger-form-grid">
-            {revising ? <p>Series: {taskNames[form.kind]} · {substanceName(form.substanceId)} · {commodityName(form.commodityId)}. Create new rule to change series identity.</p> : <>
+            {sourceRule ? <p>Series: {taskNames[form.kind]} · {substanceName(form.substanceId)} · {commodityName(form.commodityId)}. Create a new expert profile to change substance or commodity.</p> : <>
               <label>Substance<select required value={form.substanceId} onChange={e => set('substanceId', e.target.value)}><option value="">Choose substance</option>{substances.map(s => <option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}</select></label>
               <label>Commodity<select required value={form.commodityId} onChange={e => set('commodityId', e.target.value)}><option value="">Choose commodity</option>{commodities.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</select></label>
             </>}
@@ -237,43 +316,66 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
               <label>Material stage<select required value={stages.includes(form.inputStage) && form.inputStage === form.outputStage ? form.inputStage : ''} onChange={e => setForm(current => ({ ...current, inputStage: e.target.value, outputStage: e.target.value }))}><option value="">Choose material stage</option>{stages.map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></label>
               <label>Analytical basis<input required value={form.inputBasis} onChange={e => setForm(current => ({ ...current, inputBasis: e.target.value, outputBasis: e.target.value }))} /></label>
             </> : <>
-              <label>Input stage<select required value={stages.includes(form.inputStage) ? form.inputStage : ''} onChange={e => set('inputStage', e.target.value)}><option value="">Choose input stage</option>{stages.map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></label><label>Output stage<select required value={stages.includes(form.outputStage) ? form.outputStage : ''} onChange={e => set('outputStage', e.target.value)}><option value="">Choose output stage</option>{stages.map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></label>
+              <label>Factor semantics<select required value={form.factorSemantics || ''} onChange={e => {
+                const semantics = e.target.value || null;
+                setForm(current => ({ ...current, factorSemantics: semantics,
+                  ...(semantics === 'STEP_CONCENTRATION' && paths.length === 1 ? paths[0] : {}) }));
+              }}><option value="">Choose factor semantics</option><option value="STEP_CONCENTRATION">Per-step concentration factor</option><option value="CUMULATIVE_CONCENTRATION">Cumulative concentration factor</option></select></label>
+              <label>Operation<select required value={operations.includes(form.process) ? form.process : ''} onChange={e => changeOperation(e.target.value)}><option value="">Choose operation</option>{operations.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label>
+              {form.factorSemantics === 'STEP_CONCENTRATION' && (paths.length === 1 ? <>
+                <p aria-label="Derived material path">{paths[0].inputStage} → {paths[0].outputStage} · {paths[0].outputFraction}</p>
+                {!selectedPath && <button type="button" onClick={() => { setForm(current => ({ ...current, ...paths[0] })); invalidateScientificReview(); }}>Use supported drying material path</button>}
+              </> :
+                <label>Operation material path<select required value={selectedPath} onChange={e => {
+                  const path = paths.find(option => pathKey(option) === e.target.value);
+                  if (path) setForm(current => ({ ...current, ...path }));
+                }}><option value="">Choose input material and output</option>{paths.map(path => <option key={pathKey(path)} value={pathKey(path)}>{path.inputStage} → {path.outputStage} · {path.outputFraction}</option>)}</select></label>)}
+              {form.factorSemantics === 'STEP_CONCENTRATION' && paths.length > 1 && selectedPath && <p aria-label="Selected material path">{form.inputStage} → {form.outputStage} · product {form.outputFraction}</p>}
+              {form.factorSemantics === 'CUMULATIVE_CONCENTRATION' && <>
+                <p>Cumulative factors retain their reviewed input-stage anchor and analytical bases. They are not per-step factors.</p>
+                <label>Cumulative input-stage anchor<select required value={stages.includes(form.inputStage) ? form.inputStage : ''} onChange={e => set('inputStage', e.target.value)}><option value="">Choose reviewed anchor</option>{stages.map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></label>
+                <label>Cumulative output material<select required value={materials.some(material => material.stage === form.outputStage && material.product === form.outputFraction) ? `${form.outputStage}:${form.outputFraction}` : ''} onChange={e => {
+                  const material = materials.find(option => `${option.stage}:${option.product}` === e.target.value);
+                  if (material) setForm(current => ({ ...current, outputStage: material.stage, outputFraction: material.product }));
+                }}><option value="">Choose reviewed output</option>{materials.map(material => <option key={`${material.stage}:${material.product}`} value={`${material.stage}:${material.product}`}>{material.stage} · {material.product}</option>)}</select></label>
+              </>}
               <label>Input analytical basis<input required value={form.inputBasis} onChange={e => set('inputBasis', e.target.value)} /></label><label>Output analytical basis<input required value={form.outputBasis} onChange={e => set('outputBasis', e.target.value)} /></label>
             </>}
             </div>
           </fieldset>
           <fieldset onChange={invalidateScientificReview}><legend>Scientific rule</legend>
             <div className="ledger-form-grid">
-            <label>Concentration unit<select required value={form.unit} onChange={e => set('unit', e.target.value)}><option value="">Choose concentration unit</option><option>mg/kg</option></select></label>
+            <p>Concentration unit: mg/kg</p>
             <label>Reviewed outward precision (decimal places)<input required type="number" min="0" max="18" step="1" value={form.decimalPlaces ?? ''} onChange={e => set('decimalPlaces', e.target.value === '' ? null : Number(e.target.value))} /></label>
             {interpretation ? <>
               <label>Interpretation<select required value={form.interpretationKind || ''} onChange={e => changeInterpretation(e.target.value)}><option value="">Choose interpretation</option><option value="NUMERIC_ABSOLUTE_UNCERTAINTY">Numeric result with absolute uncertainty</option><option value="NUMERIC_RELATIVE_UNCERTAINTY">Numeric result with relative uncertainty (%)</option><option value="BELOW_LIMIT">Below analytical limit</option><option value="ND">Not detected (ND)</option></select></label>
               <label>Analytical method<input required value={form.analyticalMethod || ''} onChange={e => set('analyticalMethod', e.target.value || null)} /></label>
               {form.interpretationKind === 'ND' && <label>ND threshold policy<select required value={form.ndThresholdKind || ''} onChange={e => set('ndThresholdKind', e.target.value || null)}><option value="">Choose reviewed threshold policy</option><option value="REPORTING_THRESHOLD">Reporting threshold</option><option value="LOD">Limit of detection (LOD)</option><option value="LOQ">Limit of quantification (LOQ)</option></select></label>}
             </> : <>
-              <label>Output fraction / product identity<input required value={form.outputFraction} onChange={e => set('outputFraction', e.target.value)} /></label>
-              <label>Process<input required list="residue-rule-processes" value={form.process} onChange={e => set('process', e.target.value)} /></label>
-              <label>Conditions or UNCONDITIONAL applicability<input required list="residue-rule-conditions" value={form.conditions} onChange={e => set('conditions', e.target.value)} /></label>
-              <label>Factor semantics<select required value={form.factorSemantics || ''} onChange={e => set('factorSemantics', e.target.value || null)}><option value="">Choose factor semantics</option><option value="STEP_CONCENTRATION">Per-step concentration factor</option><option value="CUMULATIVE_CONCENTRATION">Cumulative concentration factor</option></select></label>
-              <label><input type="checkbox" checked={form.homogeneousMixing} onChange={e => set('homogeneousMixing', e.target.checked)} /> Reviewed homogeneous mixing applicability</label>
+              <label>Conditions<select required value={form.conditions === 'UNCONDITIONAL' ? 'UNCONDITIONAL' : conditional ? 'CONDITIONAL' : ''} onChange={e => {
+                const conditional = e.target.value === 'CONDITIONAL';
+                setConditional(conditional); set('conditions', e.target.value === 'UNCONDITIONAL' ? 'UNCONDITIONAL' : '');
+              }}><option value="">Choose reviewed applicability</option><option value="UNCONDITIONAL">No additional conditions</option><option value="CONDITIONAL">Applies only under specified conditions</option></select></label>
+              {conditional && <label>Applicable conditions<input required value={form.conditions} onChange={e => set('conditions', e.target.value)} /></label>}
+              <label className="checkbox-label"><input type="checkbox" checked={form.homogeneousMixing} onChange={e => set('homogeneousMixing', e.target.checked)} /> Reviewed homogeneous mixing applicability</label>
             </>}
             </div>
           </fieldset>
           </>}
           {interpretation && form.interpretationKind === 'NUMERIC_RELATIVE_UNCERTAINTY' && <div className="ledger-form-grid" onChange={invalidateScientificReview}>
             <label>Relative uncertainty (%)<input required inputMode="decimal" value={form.relativeUncertaintyPercent || ''} onChange={e => set('relativeUncertaintyPercent', e.target.value || null)} /></label>
-            <label><input type="checkbox" checked={form.relativeUncertaintyAtZero || false} onChange={e => set('relativeUncertaintyAtZero', e.target.checked)} /> Reviewed relative uncertainty at numeric zero</label>
+            <label className="checkbox-label"><input type="checkbox" checked={form.relativeUncertaintyAtZero || false} onChange={e => set('relativeUncertaintyAtZero', e.target.checked)} /> Reviewed relative uncertainty at numeric zero</label>
           </div>}
           {process && <div className="ledger-form-grid" onChange={invalidateScientificReview}>
-            <label><input type="checkbox" checked={factorRange} onChange={event => setFactorRange(event.target.checked)} /> Use range</label>
+            <label className="checkbox-label"><input type="checkbox" checked={factorRange} onChange={event => setFactorRange(event.target.checked)} /> Use range</label>
             <label>{factorRange ? 'Factor lower bound (decimal)' : 'Concentration factor (decimal)'}<input required inputMode="decimal" value={form.factorLower || ''} onChange={e => set('factorLower', e.target.value || null)} /></label>
             {factorRange && <label>Factor upper bound (decimal)<input required inputMode="decimal" value={form.factorUpper || ''} onChange={e => set('factorUpper', e.target.value || null)} /></label>}
           </div>}
+          <fieldset><legend>Review &amp; publish</legend>
           <details>
-            <summary>Review full scientific values before publishing</summary>
+            <summary>Full scientific profile</summary>
             <dl className="residue-rule-detail-grid">{Object.entries(form).filter(([key]) => !['id', 'publishedBy', 'publishedAt', 'reviewedBy', 'reviewAuthority', 'reviewedAt'].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{key === 'factorUpper' && process && !factorRange ? form.factorLower || 'Not specified' : value === null || value === '' ? 'Not specified' : String(value)}</dd></div>)}</dl>
           </details>
-          <fieldset><legend>Review</legend>
             <div className="ledger-form-grid">
             <label>Effective from<input required type="datetime-local" value={form.effectiveFrom} onChange={e => set('effectiveFrom', e.target.value)} /></label>
             <label>Effective until (optional)<input type="datetime-local" value={form.effectiveTo || ''} onChange={e => set('effectiveTo', e.target.value || null)} /></label>
@@ -283,8 +385,9 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
             <label>Review authority<input required value={form.reviewAuthority} onChange={e => set('reviewAuthority', e.target.value)} /></label>
             <label>Reviewed at<input required type="datetime-local" value={form.reviewedAt} onChange={e => set('reviewedAt', e.target.value)} /></label>
             </div>
+            <label className="checkbox-label"><input required type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> I reviewed the complete scientific profile, evidence and effective period.</label>
+            <button disabled={action.busy}>{action.busy ? 'Publishing…' : companyId ? 'Publish reviewed company rule' : 'Publish reviewed rule'}</button>
           </fieldset>
-          <button disabled={action.busy}>{action.busy ? 'Publishing…' : companyId ? 'Publish reviewed company rule' : 'Publish reviewed rule'}</button>
         </fieldset>
       </form>
     </>}
