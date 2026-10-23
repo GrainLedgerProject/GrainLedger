@@ -1,6 +1,6 @@
 # Residue bounds: readiness assessment and implementation plan
 
-Status: residue bounds and extensions through section 15 implemented locally on 2026-10-23. Earlier delivery/verification remains in sections 9–14; section 15 records matrix setup, single-action binding, exact unit normalization, live previews and their isolated verification. Separately approved configured-database cleanup removed 12 unreferenced mock rule versions while retaining three evaluations; see section 15. No shared feature deployment, migration, backfill, scientific approval, commit or push. Sections 2–8 retain the pre-implementation assessment and original design rationale.
+Status: residue bounds and extensions through section 16 implemented locally on 2026-10-23. Earlier delivery/verification remains in sections 9–15; section 16 records focused profile management, the read-only rule-volume audit and isolated equipment/setup verification. Separately approved configured-database cleanup removed 12 unreferenced mock rule versions while retaining three evaluations; see section 15. No shared feature deployment, migration, backfill, scientific approval, commit or push. Sections 2–8 retain the pre-implementation assessment and original design rationale.
 
 Planning history, 2026-10-23: the original section 12 recorded an agreed direction and was planning-only at that time. Its design rationale and acceptance scenarios remain below; implementation status is now recorded separately from verification and from deployment/scientific approval.
 
@@ -541,3 +541,70 @@ Final checks on 2026-10-23:
 Initial verification exposed a reserved ASP.NET `BindAsync` method-name collision, JSON fixture node reuse, timezone/closed-disclosure test assumptions, a stale preview busy-state reference, missing provenance typing, discarded adoption-only changes, and matrix feedback/mobile sizing issues. These were fixed before final checks. Earlier concurrent frontend runs also hit existing five-second test limits; serialized final run passed without raising timeouts or weakening assertions.
 
 All smoke scientific values/review identities were synthetic. No operational policy publication, shared feature migration/seed/business-data write or feature deployment occurred. The separately approved 12-row cleanup above is the only configured-database mutation. Temporary browser/API/Vite services, private session metadata, proxy configuration and disposable smoke container were removed after verification. Final relative-link validation checked 72 links across affected documentation with no missing files.
+
+## 16. Focused profile management and rule-volume audit
+
+### Read-only inventory, 2026-10-23
+
+The configured database was inspected through the restricted runtime role in an explicit read-only transaction. This inspection changed no rules, settings, evidence, evaluations or stock.
+
+| Measure | Observed count |
+| --- | ---: |
+| Rule versions for the inspected substance | 137 |
+| Scoped Code series / unsuperseded tips | 55 |
+| System series | 54 |
+| Own-company override series | 1 |
+| Superseded historical versions | 82 |
+| Same-scope exact-applicability current pairs with overlapping effective periods | 0 |
+| Equal-science duplicates after ignoring interpretation mode / ND policy in the applicability key | 0 |
+| Overlapping interpretation pairs sharing base applicability but differing in scientific settings | 3 |
+
+The 55 tips include 46 system processing rules, eight system interpretation rules and one company interpretation override. Processing covers drying, milling, blending, bagging, merge, custody ingress and custody withdrawal, with separate stage/product paths. The interpretation records also distinguish analytical methods and interpretation modes. System and company rules sharing a Code are intentional default/override scopes, not duplicate versions of one global rule.
+
+Historical volume is not current setup volume. Conversely, grouping 137 versions into 55 scoped series does **not** reduce the number of scientific applicability requirements. The strict duplicate comparison includes interpretation mode and ND policy in applicability, and compares precision, units, factor semantics/values, relative-uncertainty settings and mixing assumptions as scientific values. Different reviewed interpretation alternatives are not identical records. Equal factor values alone do not authorize combining different stages, products, methods, commodities, residue definitions, bases, conditions or factor semantics. No rules were deleted or broadened, and no policy was adopted by this audit.
+
+A second read-only comparison omitted interpretation mode and ND policy from the base applicability key. It found three overlapping interpretation pairs with different scientific settings, zero equal-science duplicates and no processing pairs. These are not evidence for merging scientific rules: qualifier/uncertainty alternatives must retain their reviewed behavior, and any simultaneously applicable ambiguity must continue to fail closed. This audit does not certify scientific validity or operational approval.
+
+Reduce human entry through explicit reuse of an existing complete reviewed profile and selected-profile batch publication/review. Each selected profile must keep its exact applicability, complete scientific record, fresh required review and immutable version/predecessor chain. Company adoption remains an explicit, separately versioned decision; absent or ambiguous policy remains `UNRESOLVED`.
+
+### Delivered profile and setup changes
+
+- Replaced inline matrix editing with a focused **Edit selected profiles** dialog while retaining the existing atomic changed-only API. **Create rule**, company cloning and single-rule revision use an expert dialog; no scientific inputs are guessed.
+- Published-rule browsing groups independent system/company Code series, shows all unsuperseded tips, keeps earlier versions collapsed and offers search, task/scope/effective-status filters and sorting. Historical-only matches reveal the earlier record with latest tips retained for context. Exact duplicate candidates are separate from history; nothing is merged automatically.
+- Company adoption selection retains explicit per-series choices and shared completed review. Adoption/override history is grouped, searchable, filterable and sortable; earlier decisions remain immutable and collapsed unless explicitly opened or uniquely matched by a history filter.
+- Ledger setup separates Catalog, facilities, resources, evidence-backed policies and everyday maintenance. Equipment inventory is visible; compartment clearance chooses its own evidence owner rather than depending on hidden policy-panel state.
+- Forward Ledger migration `20261023000000_RetireEquipment` adds protected referenced-equipment retirement using the existing tombstone/version state, shared write lock and private function boundary. Unused-only deletion remains distinct; pending drafts/corrections block retirement, historical references remain readable and inactive equipment cannot enter new work. The user explicitly approved migration creation and application to disposable verification PostgreSQL only. Deployment contract: [Ledger setup](ledger-implementation-plan.md#setup-and-permissions).
+
+### Isolated API and browser evidence
+
+Verified against disposable PostgreSQL through the existing loopback browser host and real cookie/CSRF API, using explicitly synthetic scientific values and review identities:
+
+- Created a new system ND/LOD profile through **Create rule**, producing version 1 with no predecessor; no implicit company adoption occurred.
+- Explicit company adoption changed a previously unresolved synthetic source to `[0.135, 0.165] mg/kg` under reviewed 10% uncertainty. The focused editor published a complete 20% company override plus explicitly selected setting; fresh preview became `[0.12, 0.18]`. Expert revision retained exact inherited applicability, published company version 2 with 25%, and kept version 1 readable.
+- Explicit return to system default produced setting history `v1 SYSTEM_DEFAULT → v2 COMPANY_OVERRIDE → v3 SYSTEM_DEFAULT` and restored `[0.135, 0.165]`. The original pre-adoption saved evaluation stayed JSON-equivalent throughout.
+- A real concurrent API publication advanced an ND source while the focused dialog held another threshold draft. Browser publication returned 409, retained entered `LOQ`, and displayed the stale-history error without retrying or rebasing.
+- Code/scope filters kept rule and adoption history collapsed; historical-only search revealed old metadata without replacing the latest tip. Company-override history filter found the earlier override after return to default.
+- Referenced-equipment DELETE returned 409. Actual **Retire** browser action removed equipment from active setup; five scoped operation responses and four lot-history records stayed JSON-equivalent. Browser-created unused equipment was removed through DELETE. New draft use of retired equipment and an operator retirement attempt returned 403.
+- Desktop 1440px and mobile 375px setup/profile/dialog surfaces were inspected; mobile document width stayed 375px and dialogs stayed within viewport. Keyboard Tab/Shift+Tab containment, Escape and return focus were exercised. Task-selection focus loss was found and fixed; the task chooser now remounts the expert dialog with internal focus. Close target measured 44×44px, with 4.98:1 contrast against its white dialog.
+
+No shared Supabase writes, migrations, grants or seeds occurred. The configured database audit above was read-only; all publication, equipment and calculation scenarios used disposable test data. No operational scientific approval, commit or push is implied.
+
+### Final checks
+
+- `dotnet build GrainLedger.slnx --no-restore`: passed; existing unread `LedgerService.access` parameter warning remains.
+- `GRAINLEDGER_TEST_HOST_NETWORK=true TESTCONTAINERS_RYUK_DISABLED=true dotnet test backend/tests/GrainLedger.Api.IntegrationTests/GrainLedger.Api.IntegrationTests.csproj --no-build --filter 'FullyQualifiedName~LedgerManagementTests|FullyQualifiedName~LedgerListTests|FullyQualifiedName~Residue|FullyQualifiedName~Permission|FullyQualifiedName~OpenApi' --logger 'console;verbosity=minimal'`: **179 passed, zero failed/skipped**, using isolated PostgreSQL. Full backend suite was not run.
+- `npm run test --workspace @grainledger/web -- --maxWorkers=1`: final consolidated run **181 passed across 25 files**. Earlier setup-test mock/selector failures were corrected without weakening behavior assertions.
+- `npm run build`: TypeScript and production Vite build passed after final source/style changes. Existing main-chunk warning remains, approximately 703.69 kB minified.
+- Independent backend review found no concrete authorization, concurrency, grant or historical-retention defect. This static review supplements, rather than replaces, executed tests and runtime evidence.
+- Affected documentation file-link check: **76 relative links across six documents**, no missing targets. Browser tab, loopback services, private session metadata, proxy configuration and disposable browser database/container were removed after verification.
+
+### Follow-up: retired equipment display labels
+
+Operation detail/list and chronological/lot-history read projections now expose live `equipmentName`, displaying **Name (retired)** for inactive equipment. Stored equipment names, operation content, reviewed snapshots and event details are unchanged. A variance-confirmation history row resolves equipment from its immutable reviewed snapshot when present, not a later draft's equipment. Active-only lookups remain unchanged. Consequently, display metadata may change after retirement even though the historical records remain immutable; the earlier JSON-equivalence observation above predates this additive display field.
+
+Verified with disposable PostgreSQL and real cookie/CSRF API/browser: active `Synthetic equipment` became `Synthetic equipment (retired)` in committed processing summaries/details, chronological history and an output lot's history. Retired equipment remained absent from active lookups. Desktop 1440px history was inspected; mobile document width remained 375px.
+
+- `dotnet build GrainLedger.slnx --no-restore`: passed, existing unread-parameter warning remains.
+- Isolated backend filter `FullyQualifiedName~LedgerManagementTests|FullyQualifiedName~LedgerListTests`: **52 passed**, zero failed/skipped; includes stored-name/content/history immutability, reviewed-equipment snapshots and scope checks.
+- Frontend `LedgerWorkspace.test.tsx` and `LedgerStock.test.tsx`: **39 passed**. `npm run build`: passed after correcting unsupported test-query options; existing large-chunk warning remains.
+- Extended only the existing, uncommitted retirement migration SQL; no historical migration edit or shared database change. Full suites were not rerun for this follow-up.

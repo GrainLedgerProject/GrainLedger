@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
 import { Feedback, useAction } from './ledger-ui';
 import { ResidueRuleMaintenance, type Rule } from './ResidueRuleMaintenance';
+import { effectiveWindowLabel } from './residueProfiles';
 
 type Setting = { id: string; companyId: string; ruleCode: string; versionNo: number; mode: 'SYSTEM_DEFAULT' | 'COMPANY_OVERRIDE'; effectiveFrom: string; effectiveTo: string | null; supersedesId: string | null; evidenceRef: string; applicabilityStatement: string; reviewedBy: string; reviewAuthority: string; reviewedAt: string; publishedBy?: string; publishedAt?: string };
 type Draft = Pick<Setting, 'id' | 'ruleCode' | 'versionNo' | 'supersedesId' | 'evidenceRef' | 'applicabilityStatement'> & { sourceRuleId: string | null };
@@ -16,6 +17,8 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
   const [review, setReview] = useState(blankReview), [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(false), [error, setError] = useState(''), [reload, setReload] = useState(0);
   const action = useAction();
+  const [profileSearch, setProfileSearch] = useState(''), [profileTask, setProfileTask] = useState(''), [profileStatus, setProfileStatus] = useState('');
+  const [historySearch, setHistorySearch] = useState(''), [historyMode, setHistoryMode] = useState(''), [historyStatus, setHistoryStatus] = useState(''), [historySort, setHistorySort] = useState('code');
   useEffect(() => { setDrafts([]); setReview(blankReview()); setConfirmed(false); }, [companyId]);
   useEffect(() => {
     if (!active || !allowed || !companyId) return;
@@ -39,8 +42,29 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
   const label = (code: string) => {
     const rule = source(code) || eligible.find(item => item.code === code);
     if (!rule) return code;
-    return `${name(substances, rule.substanceId)} · ${name(commodities, rule.commodityId)} · ${rule.kind === 'INTERPRETATION' ? rule.interpretationKind : rule.process} · ${rule.inputStage}${rule.inputStage === rule.outputStage ? '' : ` → ${rule.outputStage}`} · ${rule.analyticalMethod || rule.inputBasis} · ${code}`;
+    return `${name(substances, rule.substanceId)} · ${name(commodities, rule.commodityId)} · ${rule.kind === 'INTERPRETATION' ? rule.interpretationKind : rule.process} · ${rule.residueDefinition} · ${rule.inputStage}/${rule.inputBasis} → ${rule.outputStage}/${rule.outputBasis} · ${rule.outputFraction || 'No output fraction'} · ${rule.analyticalMethod || 'No analytical method'} · ${rule.conditions || 'No conditions'} · ${rule.factorSemantics || ''} · ${code}`;
   };
+  const filteredCodes = codes.filter(code => {
+    const rule = source(code) || eligible.find(item => item.code === code)!;
+    const tips = settings.filter(item => item.ruleCode === code && !settings.some(next => next.supersedesId === item.id));
+    return (!profileSearch.trim() || label(code).toLowerCase().includes(profileSearch.trim().toLowerCase())) &&
+      (!profileTask || (profileTask === 'INTERPRETATION' ? rule.kind === profileTask : rule.process === profileTask)) &&
+      (!profileStatus || (profileStatus === 'selected' ? drafts.some(item => item.ruleCode === code) : profileStatus === 'unavailable' ? !source(code) : profileStatus === 'unadopted' ? tips.length === 0 : tips.some(item => item.mode === profileStatus)));
+  }).sort((a, b) => label(a).localeCompare(label(b)));
+  const settingGroups = Array.from(new Set(settings.map(item => item.ruleCode))).map(code => {
+    const versions = settings.filter(item => item.ruleCode === code).sort((a, b) => b.versionNo - a.versionNo);
+    const predecessors = new Set(versions.map(item => item.supersedesId));
+    return { code, tips: versions.filter(item => !predecessors.has(item.id)), history: versions.filter(item => predecessors.has(item.id)) };
+  });
+  const historyMatches = (item: Setting) => (!historyMode || item.mode === historyMode) &&
+    (!historyStatus || effectiveWindowLabel(item) === historyStatus) &&
+    `${label(item.ruleCode)} ${Object.values(item).join(' ')}`.toLowerCase().includes(historySearch.trim().toLowerCase());
+  const filteredHistory = settingGroups.filter(group => [...group.tips, ...group.history].some(historyMatches)).sort((a, b) => historySort === 'effective'
+    ? Math.max(...b.tips.map(item => Date.parse(item.effectiveFrom))) - Math.max(...a.tips.map(item => Date.parse(item.effectiveFrom)))
+    : a.code.localeCompare(b.code));
+  function settingRecord(item: Setting) {
+    return <li key={item.id}><strong>v{item.versionNo} · {item.mode === 'SYSTEM_DEFAULT' ? 'System default' : 'Company override'}</strong> · {effectiveWindowLabel(item)} · effective {item.effectiveFrom}{item.effectiveTo ? ` to ${item.effectiveTo}` : ' onward'} · adoption reviewed by {item.reviewedBy} · {item.reviewAuthority} · {item.reviewedAt} · {item.evidenceRef} · {item.applicabilityStatement}{item.publishedAt && <> · published {item.publishedAt} by {item.publishedBy}</>}</li>;
+  }
   function draftFor(code: string, selectedMode = mode): Draft {
     const previous = settings.filter(item => item.ruleCode === code).sort((a, b) => b.versionNo - a.versionNo)[0];
     const rule = source(code, selectedMode);
@@ -85,15 +109,23 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
   if (!allowed) return <div className="notice error" role="alert">Your account cannot manage company residue policies.</div>;
   return <div className="residue-company-policies">
     <header className="page-heading"><span className="eyebrow">COMPANY RESIDUE POLICY</span><h1>Residue profiles</h1><p className="muted">Reuse reviewed scientific profiles. Review company adoption once for selected profiles; no implicit adoption or partial publication.</p></header>
+    <ResidueRuleMaintenance active={active} allowed={allowed} companyId={companyId} policySettings={settings} onPublished={() => setReload(value => value + 1)} />
     <section className="panel" aria-labelledby="policy-settings-title">
       <h2 id="policy-settings-title">Use reviewed profiles</h2>
-      {loading && <p role="status">Loading residue profiles…</p>}{error && <p className="notice error" role="alert">{error}</p>}
+      {loading && <p role="status">Loading residue profiles…</p>}{error && <div className="notice error" role="alert">{error}<button type="button" className="secondary" disabled={loading} onClick={() => setReload(value => value + 1)}>Retry loading adoption settings</button></div>}
       {!settings.length && !loading && <p className="empty">No policy settings published. System profiles are not implicitly adopted.</p>}
-      {!codes.length && !loading && !error && <p className="notice pending">No reviewed profile available. Expert setup below is required; missing policy leaves bounds unresolved.</p>}
+      {!codes.length && !loading && !error && <p className="notice pending">No reviewed profile available. Use Create rule for expert setup; missing policy leaves bounds unresolved.</p>}
       {codes.length > 0 && <form onSubmit={publish} onChange={() => setConfirmed(false)}>
         <fieldset disabled={action.busy || loading || !!error}><legend>Choose reusable profiles</legend>
           <label>Setting mode<select value={mode} onChange={event => changeMode(event.target.value as Setting['mode'])}><option value="SYSTEM_DEFAULT">Adopt / return to system default</option><option value="COMPANY_OVERRIDE">Use reviewed company override</option></select></label>
-          <fieldset aria-label="Residue profiles"><legend>Residue profiles</legend><div className="residue-profile-choices">{codes.map(code => {
+          <div className="residue-toolbar">
+            <label>Find profiles to adopt<input type="search" value={profileSearch} onChange={event => setProfileSearch(event.target.value)} /></label>
+            <label>Adoption task<select value={profileTask} onChange={event => setProfileTask(event.target.value)}><option value="">All tasks</option><option value="INTERPRETATION">Interpretation</option>{Array.from(new Set(eligible.filter(rule => rule.kind === 'PROCESS').map(rule => rule.process))).sort().map(task => <option key={task}>{task}</option>)}</select></label>
+            <label>Adoption status<select value={profileStatus} onChange={event => setProfileStatus(event.target.value)}><option value="">All statuses</option><option value="selected">Selected for review</option><option value="unadopted">No adoption setting</option><option value="SYSTEM_DEFAULT">System default setting</option><option value="COMPANY_OVERRIDE">Company override setting</option><option value="unavailable">Unavailable / conflicting source</option></select></label>
+          </div>
+          <p>{filteredCodes.length} of {codes.length} profile series shown · {drafts.length} explicitly selected (including selections outside filters). Filters never select or discard profiles.</p>
+          {!filteredCodes.length && <p className="empty">No profiles match these filters. Clear search or change task/status.</p>}
+          <fieldset aria-label="Residue profiles"><legend>Residue profiles</legend><div className="residue-profile-choices">{filteredCodes.map(code => {
             const selectedSource = source(code), rule = selectedSource || eligible.find(item => item.code === code)!;
             const substance = substances.find(item => item.id === rule.substanceId), commodity = commodities.find(item => item.id === rule.commodityId);
             const stage = (rule.inputStage === rule.outputStage ? [rule.inputStage] : [rule.inputStage, rule.outputStage]).map(value => value.replaceAll('_', ' ').toLowerCase()).join(' → ');
@@ -114,11 +146,12 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
               <input type="checkbox" checked={drafts.some(item => item.ruleCode === code)} disabled={!selectedSource} onChange={event => chooseCodes(event.target.checked ? [...drafts.map(item => item.ruleCode), code] : drafts.filter(item => item.ruleCode !== code).map(item => item.ruleCode))} />
               <span className="residue-profile-choice-text">
                 <strong className="residue-profile-choice-primary">{substance?.name || rule.substanceId} · {stage} · {approach}</strong>{' '}
-                <small className="muted residue-profile-choice-secondary">{commodity?.name || rule.commodityId} · {rule.analyticalMethod || 'No analytical method'} · {rule.inputBasis}{rule.outputBasis !== rule.inputBasis ? ` → ${rule.outputBasis}` : ''} · {code} · v{rule.versionNo}{!selectedSource ? ' · Reviewed profile unavailable in this mode' : ''}</small>
+                <small className="muted residue-profile-choice-secondary">{commodity?.name || rule.commodityId} · {rule.residueDefinition} · {rule.analyticalMethod || 'No analytical method'} · {rule.inputBasis} → {rule.outputBasis} · product {rule.outputFraction || 'not applicable'} · {rule.conditions || 'No conditions'} · {rule.factorSemantics || 'Interpretation'} · {code} · {selectedSource ? `latest published tip v${rule.versionNo} · ${effectiveWindowLabel(rule)}` : 'Reviewed profile unavailable in this mode; metadata is not a selected source'}</small>
               </span>
             </label>;
           })}</div></fieldset>
           <p>Select one or more profiles. Adoption applies to each whole series, not a copied or pinned scientific rule.</p>
+          {codes.filter(code => !source(code)).length > 0 && <details><summary>Unavailable or conflicting profile sources</summary>{codes.filter(code => !source(code)).map(code => <section key={code}><h3>{code}</h3>{eligible.filter(rule => rule.code === code && (mode === 'SYSTEM_DEFAULT' ? !rule.companyId : rule.companyId === companyId) && !eligible.some(next => next.supersedesId === rule.id && (next.companyId || null) === (rule.companyId || null))).map(rule => <p key={rule.id}>Conflicting applicability / unavailable unique source · {rule.code} v{rule.versionNo} · {rule.inputStage}/{rule.inputBasis} → {rule.outputStage}/{rule.outputBasis} · {rule.outputFraction || rule.analyticalMethod} · {rule.evidenceRef}</p>)}</section>)}</details>}
           {drafts.length > 0 && <>
             <button type="button" className="secondary" disabled={sourceChanged} onClick={() => { setDrafts(drafts.map(item => draftFor(item.ruleCode))); setReview(blankReview()); setConfirmed(false); }}>Start new setting revisions</button>
             {sourceChanged && <div className="notice pending" role="status">
@@ -161,9 +194,24 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
         </fieldset>
       </form>}
       <Feedback {...action} />
-      {settings.length > 0 && <details><summary>Adoption and override history ({settings.length})</summary><ul>{settings.map(item => <li key={item.id}>{label(item.ruleCode)} · {item.mode === 'SYSTEM_DEFAULT' ? 'System default' : 'Company override'} · v{item.versionNo} · effective {item.effectiveFrom}{item.effectiveTo ? ` to ${item.effectiveTo}` : ' onward'} · adoption reviewed by {item.reviewedBy} · {item.reviewAuthority} · {item.reviewedAt} · {item.evidenceRef} · {item.applicabilityStatement}</li>)}</ul></details>}
+      {settings.length > 0 && <section aria-labelledby="adoption-history-title">
+        <h3 id="adoption-history-title">Adoption and override history</h3>
+        <p className="residue-counts">{settingGroups.length} current setting series · {settingGroups.reduce((sum, group) => sum + group.tips.length, 0)} unsuperseded settings · {settingGroups.reduce((sum, group) => sum + group.history.length, 0)} earlier versions. Latest published setting is not necessarily effective now.</p>
+        <div className="residue-toolbar">
+          <label>Search adoption history<input type="search" value={historySearch} onChange={event => setHistorySearch(event.target.value)} /></label>
+          <label>History setting mode<select value={historyMode} onChange={event => setHistoryMode(event.target.value)}><option value="">All modes</option><option value="SYSTEM_DEFAULT">System default</option><option value="COMPANY_OVERRIDE">Company override</option></select></label>
+          <label>History effective status<select value={historyStatus} onChange={event => setHistoryStatus(event.target.value)}><option value="">All statuses</option>{['Within effective window now', 'Scheduled', 'Outside effective window'].map(status => <option key={status}>{status}</option>)}</select></label>
+          <label>Sort adoption history<select value={historySort} onChange={event => setHistorySort(event.target.value)}><option value="code">Series code</option><option value="effective">Latest effective start</option></select></label>
+        </div>
+        {!filteredHistory.length && <p className="empty">No adoption history matches these filters.</p>}
+        {filteredHistory.map(group => <section className="residue-history-series" key={group.code} aria-label={`Adoption history ${group.code}`}>
+          <h4>{label(group.code)}</h4>
+          {group.tips.length > 1 && <p className="notice pending">Conflicting published setting tips — no automatic selection.</p>}
+          <p>Latest published settings</p><ul>{group.tips.map(settingRecord)}</ul>
+          {group.history.length > 0 && <details open={group.history.some(historyMatches) && !group.tips.some(historyMatches) ? true : undefined}><summary>Earlier adoption versions · {group.code} · {group.history.length}</summary><ul>{group.history.map(settingRecord)}</ul></details>}
+        </section>)}
+      </section>}
     </section>
-    <ResidueRuleMaintenance active={active} allowed={allowed} companyId={companyId} policySettings={settings} onPublished={() => setReload(value => value + 1)} />
   </div>;
 }
 async function loadCatalog(path: string): Promise<CatalogItem[]> {

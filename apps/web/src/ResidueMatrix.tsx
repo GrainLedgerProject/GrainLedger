@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError } from './api';
 import { Feedback, stages, useAction } from './ledger-ui';
 import type { Rule } from './ResidueRuleMaintenance';
+import { ResidueDialog } from './ResidueDialog';
+import { effectiveWindowLabel, groupRuleSeries } from './residueProfiles';
 
 export type MatrixSetting = { id: string; ruleCode: string; mode: string; supersedesId: string | null; effectiveFrom: string; effectiveTo: string | null };
 type Item = { id: string; code: string; name: string };
@@ -24,8 +26,13 @@ export function ResidueMatrix({ rules, substances, commodities, companyId, setti
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [review, setReview] = useState(blankReview), [confirmed, setConfirmed] = useState(false), [stale, setStale] = useState(false);
   const action = useAction();
+  const [open, setOpen] = useState(false), [search, setSearch] = useState(''), [task, setTask] = useState('');
   useEffect(() => { setDrafts({}); setReview(blankReview()); setConfirmed(false); setStale(false); }, [companyId]);
-  const current = rules.filter(rule => !rules.some(next => next.supersedesId === rule.id && sameScope(next, rule.companyId || null)));
+  const current = groupRuleSeries(rules.filter(rule => !rule.companyId || rule.companyId === companyId)).flatMap(group => group.tips);
+  const codes = Array.from(new Set(current.map(rule => rule.code))).sort();
+  const filteredCodes = codes.filter(code => drafts[code] || current.some(rule => rule.code === code &&
+    (!task || (task === 'INTERPRETATION' ? rule.kind === task : rule.process === task)) &&
+    `${Object.values(rule).join(' ')} ${substances.find(item => item.id === rule.substanceId)?.name} ${commodities.find(item => item.id === rule.commodityId)?.name}`.toLowerCase().includes(search.trim().toLowerCase())));
   const changed = Object.values(drafts).filter(draft => draft.baseId === null || JSON.stringify(draft.rule) !== JSON.stringify(draft.source));
   const adoptions = Object.values(drafts).filter(draft => draft.adopt);
   const publicationRules = [...changed, ...adoptions.filter(draft => !changed.includes(draft))];
@@ -62,21 +69,17 @@ export function ResidueMatrix({ rules, substances, commodities, companyId, setti
       setDrafts({}); setReview(blankReview()); setConfirmed(false); onPublished();
     }, 'Matrix rules and explicitly selected adoption settings published together; unchanged scientific versions retained.');
   }
-  function cell(substance: Item, kind: string) {
-    const matching = current.filter(rule => rule.substanceId === substance.id && (kind === 'INTERPRETATION' ? rule.kind === kind : rule.kind === 'PROCESS' && (kind === 'DRYING' ? rule.process === kind : rule.process !== 'DRYING')));
-    const codes = Array.from(new Set(matching.map(rule => rule.code)));
-    if (!codes.length) return <p className="muted">Missing profile — expert setup required</p>;
-    return codes.map(code => {
-      const series = matching.filter(rule => rule.code === code), own = series.filter(rule => sameScope(rule, companyId));
+  function profile(code: string) {
+      const series = current.filter(rule => rule.code === code), own = series.filter(rule => sameScope(rule, companyId));
       const system = series.filter(rule => !rule.companyId);
       const candidates = own.length ? own : system;
       const source = candidates.length === 1 ? candidates[0] : null;
       const draft = drafts[code];
-      const conflict = series.some(rule => matching.some(other => other.id !== rule.id && sameScope(other, rule.companyId || null) && applicabilityKey(other) === applicabilityKey(rule) && overlaps(rule, other)));
+      const conflict = series.some(rule => current.some(other => other.id !== rule.id && sameScope(other, rule.companyId || null) && applicabilityKey(other) === applicabilityKey(rule) && overlaps(rule, other)));
       const settingTips = settings.filter(item => item.ruleCode === code && !settings.some(next => next.supersedesId === item.id));
       return <section key={code} aria-label={`Matrix profile ${code}`}>
         <strong>{code}</strong>
-        {series.map(rule => <p key={rule.id}><span className="badge">{rule.companyId ? 'Company override' : 'System default'} · v{rule.versionNo}</span> {policy(rule)}</p>)}
+        {series.map(rule => <p key={rule.id}><span className="badge">{rule.companyId ? 'Company override' : 'System default'} · latest published tip v{rule.versionNo}</span> {substances.find(item => item.id === rule.substanceId)?.name || rule.substanceId} · {policy(rule)} · {effectiveWindowLabel(rule)}</p>)}
         {companyId && <p>{settingTips.length > 1 ? 'Conflicting adoption settings — review history' : settingTips.length ? `Explicit setting: ${settingTips[0].mode}` : 'Not adopted — bounds unresolved'}</p>}
         {(conflict || candidates.length > 1) && <p className="notice pending" role="status">Conflicting applicability — no rule chosen automatically. Review each complete profile.</p>}
         <details><summary>Applicability and evidence · {code}</summary>{series.map(rule => <dl key={rule.id}>
@@ -87,7 +90,7 @@ export function ResidueMatrix({ rules, substances, commodities, companyId, setti
           <dt>Review</dt><dd>{rule.reviewedBy} · {rule.reviewAuthority} · {rule.reviewedAt}</dd>
           <dt>Evidence and applicability</dt><dd>{rule.evidenceRef} · {rule.applicabilityStatement}</dd>
         </dl>)}</details>
-        {!draft && <button type="button" className="secondary" disabled={!source || stale || action.busy} onClick={() => source && edit(source)}>
+        {!draft && <button type="button" className="secondary" disabled={!source || stale || action.busy || disabled} onClick={() => source && edit(source)}>
           {companyId ? `Edit company policy · ${code}` : `Edit system policy · ${code}`}
         </button>}
         {draft && <fieldset><legend>Draft · {code}</legend>
@@ -111,7 +114,7 @@ export function ResidueMatrix({ rules, substances, commodities, companyId, setti
             {draft.range && <label>Factor upper · {code}<input required inputMode="decimal" value={draft.rule.factorUpper ?? ''} onChange={event => change(code, { factorUpper: event.target.value || null })} /></label>}
           </>}
           <details><summary>Advanced applicability · {code}</summary>
-            <p>Complete series retained. New substance, commodity or rule kind requires expert setup below.</p>
+            <p>Complete series retained. New substance, commodity or rule kind requires Create rule outside this dialog.</p>
             <label>Residue definition · {code}<input required value={draft.rule.residueDefinition} onChange={event => change(code, { residueDefinition: event.target.value })} /></label>
             <label>Input stage · {code}<select required value={draft.rule.inputStage} onChange={event => change(code, { inputStage: event.target.value, ...(draft.rule.kind === 'INTERPRETATION' ? { outputStage: event.target.value } : {}) })}>{!stages.includes(draft.rule.inputStage) && <option value={draft.rule.inputStage}>{draft.rule.inputStage || 'Choose input stage'}</option>}{stages.map(stage => <option key={stage}>{stage}</option>)}</select></label>
             <label>Input basis · {code}<input required value={draft.rule.inputBasis} onChange={event => change(code, { inputBasis: event.target.value, ...(draft.rule.kind === 'INTERPRETATION' ? { outputBasis: event.target.value } : {}) })} /></label>
@@ -131,19 +134,21 @@ export function ResidueMatrix({ rules, substances, commodities, companyId, setti
           <button type="button" className="secondary" onClick={() => { setDrafts(value => Object.fromEntries(Object.entries(value).filter(([key]) => key !== code))); setConfirmed(false); }}>Cancel matrix edit · {code}</button>
         </fieldset>}
       </section>;
-    });
   }
-  return <section aria-labelledby="residue-matrix-title">
-    <h3 id="residue-matrix-title">Substance policy matrix</h3>
-    <p>All Catalog substances; each complete applicability remains separate. No coefficients or identity factors are supplied. Company adoption is explicit and independent of scientific publication.</p>
+  return <section aria-label="Focused scientific policy editor">
+    <button type="button" className="secondary" disabled={disabled || action.busy} onClick={() => setOpen(true)}>{Object.keys(drafts).length ? `Resume selected profile edits (${Object.keys(drafts).length})` : 'Edit selected profiles'}</button>
+    {!open && <Feedback {...action} />}
+    {open && <ResidueDialog title="Edit selected profiles" busy={action.busy} onClose={() => setOpen(false)}>
+    <p>Select exact existing profiles, edit only reviewed values, then publish changed profiles together under one review. No coefficients, new identities or adoption inferred.</p>
+    <div className="residue-toolbar">
+      <label>Find profile to edit<input type="search" value={search} onChange={event => setSearch(event.target.value)} /></label>
+      <label>Editor task<select value={task} onChange={event => setTask(event.target.value)}><option value="">All tasks</option><option value="INTERPRETATION">Interpretation</option>{Array.from(new Set(current.filter(rule => rule.kind === 'PROCESS').map(rule => rule.process))).sort().map(process => <option key={process}>{process}</option>)}</select></label>
+    </div>
     <form onSubmit={publish}>
       <fieldset disabled={action.busy || stale || disabled}><legend>{companyId ? 'Own-company scientific policy' : 'Administrator system scientific policy'}</legend>
-        <div className="table-scroll residue-matrix-scroll" role="region" aria-label="Scrollable substance policy matrix" tabIndex={0}>
-          <table className="residue-matrix-table"><thead><tr><th scope="col">Substance</th><th scope="col">Uncertainty / ND</th><th scope="col">Drying factors</th><th scope="col">Fraction / other processing factors</th></tr></thead>
-            <tbody>{substances.map(substance => <tr key={substance.id}><th scope="row">{substance.code} · {substance.name}</th>{['INTERPRETATION', 'DRYING', 'FRACTION'].map(kind => <td key={kind}>{cell(substance, kind)}</td>)}</tr>)}</tbody>
-          </table>
-        </div>
-        {!substances.length && <p className="empty">No Catalog substances loaded. Create Catalog substances before scientific setup.</p>}
+        <div className="residue-profile-list">{filteredCodes.map(profile)}</div>
+        {!codes.length && <p className="empty">No reviewed profiles available. Use Create rule for unmatched scientific applicability.</p>}
+        {!!codes.length && !filteredCodes.length && <p className="empty">No profiles match. Change filters or use Create rule for unmatched applicability.</p>}
         {pending && <fieldset><legend>One completed review · {changed.length} changed complete rules · {adoptions.length} explicit adoption settings</legend>
           <p>Unedited scientific profiles stay unchanged, including profiles selected only for adoption. Review complete applicability and evidence for every changed or explicitly adopted profile; publication does not establish operational scientific validity.</p>
           <div className="ledger-form-grid">
@@ -160,5 +165,6 @@ export function ResidueMatrix({ rules, substances, commodities, companyId, setti
     </form>
     {stale && <button type="button" className="secondary" onClick={discard}>Discard matrix draft and load current rules</button>}
     <Feedback {...action} />
+    </ResidueDialog>}
   </section>;
 }

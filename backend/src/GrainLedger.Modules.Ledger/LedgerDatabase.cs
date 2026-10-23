@@ -230,6 +230,9 @@ public static class LedgerDatabase
                       ('ledger.mixed_bulk_custody_derived(uuid)'),('ledger.effective_hold_ids(uuid)'),
                       ('ledger.mixed_bulk_independent_blocked(uuid,uuid)'),('ledger.blocked(uuid,uuid)'),
                       ('ledger.require_mixed_correction_safe(text,jsonb)'),('ledger.residue_authorized(uuid,uuid)'),
+                      ('ledger.equipment_has_pending_work(uuid)'),
+                      ('ledger.command_before_equipment_retirement(uuid,text,jsonb)'),
+                      ('ledger.read_before_equipment_retirement(uuid,text,jsonb)'),
                       ('catalog.validate_residue_policy_review(jsonb)')
                   ) private_function(signature)
                   WHERE has_function_privilege($1,private_function.signature,'EXECUTE')
@@ -350,6 +353,9 @@ public static class LedgerDatabase
                        ('ledger.mixed_bulk_custody_derived(uuid)'),('ledger.effective_hold_ids(uuid)'),
                        ('ledger.mixed_bulk_independent_blocked(uuid,uuid)'),('ledger.blocked(uuid,uuid)'),
                        ('ledger.require_mixed_correction_safe(text,jsonb)'),('ledger.residue_authorized(uuid,uuid)'),
+                       ('ledger.equipment_has_pending_work(uuid)'),
+                       ('ledger.command_before_equipment_retirement(uuid,text,jsonb)'),
+                       ('ledger.read_before_equipment_retirement(uuid,text,jsonb)'),
                        ('catalog.validate_residue_policy_review(jsonb)')
                    ) private_function(signature)
                    WHERE has_function_privilege(current_user,private_function.signature,'EXECUTE')

@@ -33,7 +33,7 @@ async function review(user: UserEvent) {
   if (!(confirmation as HTMLInputElement).checked) await user.click(confirmation);
 }
 async function startNew(user: UserEvent, task: string) {
-  await user.click(screen.getByText('Create new scientific profile'));
+  await user.click(screen.getByRole('button', { name: 'Create rule' }));
   await user.click(screen.getByRole('button', { name: task }));
 }
 async function fillNew(user: UserEvent, process = false) {
@@ -78,7 +78,7 @@ beforeEach(() => {
 });
 it('keeps expert creation closed and supplies no scientific defaults when opened', async () => {
   const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
-  await screen.findByText('Create new scientific profile');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create rule' })).toBeEnabled());
   expect(screen.queryByLabelText('Residue definition')).not.toBeInTheDocument();
   await startNew(user, 'Interpret laboratory results');
   for (const label of ['Substance', 'Commodity', 'Material stage', 'Analytical basis', 'Analytical method', 'Reviewed outward precision (decimal places)', 'Scientific reviewer', 'Reviewed at']) expect(screen.getByLabelText(label)).toHaveValue(label.includes('decimal places') ? null : '');
@@ -87,12 +87,24 @@ it('keeps expert creation closed and supplies no scientific defaults when opened
   expect((screen.getByRole('button', { name: 'Publish reviewed rule' }).closest('form') as HTMLFormElement).checkValidity()).toBe(false);
   expect(posts()).toHaveLength(0);
 });
+
+it('keeps keyboard focus inside expert form after choosing a task and closes with Escape', async () => {
+  const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
+  const trigger = screen.getByRole('button', { name: 'Create rule' });
+  await waitFor(() => expect(trigger).toBeEnabled());
+  await startNew(user, 'Interpret laboratory results');
+  expect(screen.getByRole('dialog', { name: 'Create rule' })).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+  expect(posts()).toHaveLength(0);
+});
 it('publishes independent identities and duplicates a single exact factor only on submission', async () => {
   const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
-  await screen.findByText('Create new scientific profile'); await fillNew(user);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create rule' })).toBeEnabled()); await fillNew(user);
   await user.click(screen.getByRole('button', { name: 'Publish reviewed rule' }));
   await waitFor(() => expect(posts()).toHaveLength(1));
-  await screen.findByText('Create new scientific profile'); await fillNew(user, true);
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument()); await fillNew(user, true);
   expect(screen.queryByLabelText('Factor upper bound (decimal)')).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Publish reviewed rule' }));
   await waitFor(() => expect(posts()).toHaveLength(2));
@@ -141,9 +153,10 @@ it('retains UUID on retry and refreshes stale history without overwriting local 
   expect(screen.getByLabelText('Scientific reviewer')).toHaveValue('Dr Current');
   expect(screen.queryByRole('region', { name: 'Published residue rules' })).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Cancel revision' }));
+  await user.click(screen.getByRole('button', { name: /Show earlier versions/ }));
   const buttons = screen.getAllByRole('button', { name: /^Revise rule/ });
-  expect(buttons[0]).toBeDisabled(); expect(buttons[1]).toBeEnabled();
-  await user.click(buttons[1]); expect(screen.getByLabelText('Scientific reviewer')).toHaveValue('');
+  expect(buttons[0]).toBeEnabled(); expect(buttons[1]).toBeDisabled();
+  await user.click(buttons[0]); expect(screen.getByLabelText('Scientific reviewer')).toHaveValue('');
   await review(user); await user.click(screen.getByRole('button', { name: 'Publish reviewed rule' }));
   await waitFor(() => expect(posts()).toHaveLength(3));
   expect(JSON.parse(String(posts()[2][1]?.body))).toMatchObject({ versionNo: 3, supersedesId: rules[1].id });
@@ -160,7 +173,7 @@ it('does not normalize unsupported historical stages silently', async () => {
 });
 it('requires explicit reviewed ND threshold and clears numeric-only settings on publish', async () => {
   const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
-  await screen.findByText('Create new scientific profile'); await fillNew(user);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create rule' })).toBeEnabled()); await fillNew(user);
   await user.selectOptions(screen.getByLabelText('Interpretation'), 'NUMERIC_RELATIVE_UNCERTAINTY');
   await user.type(screen.getByLabelText('Relative uncertainty (%)'), '12.500');
   await user.selectOptions(screen.getByLabelText('Interpretation'), 'ND');
@@ -211,7 +224,8 @@ it('retains matrix publication feedback while refreshed Catalog data is loading 
     return originalFetch(url, init);
   });
   render(<ResidueRuleMaintenance active allowed />);
-  await user.click(await screen.findByRole('button', { name: 'Edit system policy · RICE-RES' }));
+  await user.click(await screen.findByRole('button', { name: 'Edit selected profiles' }));
+  await user.click(screen.getByRole('button', { name: 'Edit system policy · RICE-RES' }));
   fireEvent.change(screen.getByLabelText('Relative uncertainty (%) · RICE-RES'), { target: { value: '20' } });
   fireEvent.change(screen.getByLabelText('Matrix effective from'), { target: { value: '2026-10-01T00:00' } });
   fireEvent.change(screen.getByLabelText('Matrix reviewed at'), { target: { value: '2026-09-01T00:00' } });
@@ -288,7 +302,7 @@ it.each([
   ['CUSTODY_WITHDRAW', 'BAGGED_RICE:BAGGED_RICE:HEAD_RICE', 'BAGGED_RICE', 'BAGGED_RICE', 'HEAD_RICE'],
 ])('publishes canonical %s material path %s without asking for structural strings', async (operation, path, inputStage, outputStage, outputFraction) => {
   const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
-  await screen.findByText('Create new scientific profile'); await fillNew(user, true);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create rule' })).toBeEnabled()); await fillNew(user, true);
   await user.selectOptions(screen.getByLabelText('Operation'), operation);
   if (path) await user.selectOptions(screen.getByLabelText('Operation material path'), path);
   else expect(screen.getByLabelText('Derived material path')).toHaveTextContent('RAW_PADDY → DRIED_PADDY · DRIED_PADDY');
@@ -302,7 +316,7 @@ it.each([
 
 it('does not invent scientific values when structural drying stages can be derived', async () => {
   const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
-  await screen.findByText('Create new scientific profile'); await startNew(user, 'Define processing factors');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create rule' })).toBeEnabled()); await startNew(user, 'Define processing factors');
   for (const label of ['Factor semantics', 'Operation', 'Conditions', 'Input analytical basis', 'Output analytical basis', 'Concentration factor (decimal)'])
     expect(screen.getByLabelText(label)).toHaveValue('');
   expect(screen.getByLabelText('Reviewed outward precision (decimal places)')).toHaveValue(null);
@@ -320,7 +334,7 @@ it('does not invent scientific values when structural drying stages can be deriv
 
 it('stores an explicit no-additional-conditions choice and hides only the unnecessary text field', async () => {
   const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
-  await screen.findByText('Create new scientific profile'); await fillNew(user, true);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create rule' })).toBeEnabled()); await fillNew(user, true);
   await user.selectOptions(screen.getByLabelText('Conditions'), 'UNCONDITIONAL');
   expect(screen.queryByLabelText('Applicable conditions')).not.toBeInTheDocument();
   expect(screen.getByLabelText('Scientific reviewer')).toHaveValue('');
@@ -395,22 +409,41 @@ it('creates a company clone through the profile-first flow without moving applic
     inputBasis: oldRule.inputBasis, outputBasis: oldRule.outputBasis, relativeUncertaintyPercent: '10', reviewedBy: 'Dr Current', reviewAuthority: 'Current QA' });
 });
 
-it('brings profile editing to the top while preserving hidden matrix drafts until cancellation', async () => {
+it('preserves selected matrix drafts when dialog closes and restores focus to its trigger', async () => {
   const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
-  await user.click(await screen.findByRole('button', { name: 'Edit system policy · RICE-RES' }));
+  const trigger = await screen.findByRole('button', { name: 'Edit selected profiles' });
+  await user.click(trigger);
+  await user.click(screen.getByRole('button', { name: 'Edit system policy · RICE-RES' }));
   await user.clear(screen.getByLabelText('Relative uncertainty (%) · RICE-RES'));
   await user.type(screen.getByLabelText('Relative uncertainty (%) · RICE-RES'), '17');
-  await user.selectOptions(screen.getByLabelText('Reviewed profile'), ruleId);
-  await user.click(screen.getByRole('button', { name: 'Use reviewed profile' }));
-  expect(screen.queryByRole('region', { name: 'Residue rule overview' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('heading', { name: 'Substance policy matrix' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('region', { name: 'Published residue rules' })).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Profile applicability')).toBeVisible();
-  expect(screen.getByLabelText('Scientific reviewer')).toBeVisible();
-  await user.click(screen.getByRole('button', { name: 'Cancel revision' }));
-  expect(screen.getByRole('region', { name: 'Residue rule overview' })).toBeVisible();
-  expect(screen.getByRole('heading', { name: 'Substance policy matrix' })).toBeVisible();
-  expect(screen.getByRole('region', { name: 'Published residue rules' })).toBeVisible();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'Resume selected profile edits (1)' }));
   expect(screen.getByLabelText('Relative uncertainty (%) · RICE-RES')).toHaveValue('17');
   expect(posts()).toHaveLength(0);
+});
+
+it('keeps latest scoped heads and conflicting tips visible while historical search reveals earlier metadata', async () => {
+  rules = [oldRule, { ...oldRule, id: 'new-head', versionNo: 2, supersedesId: ruleId, evidenceRef: 'new-study', analyticalMethod: 'NEW-METHOD', effectiveFrom: '2099-01-01T00:00:00Z' },
+    { ...oldRule, id: 'conflict-one', code: 'CONFLICT' }, { ...oldRule, id: 'conflict-two', code: 'CONFLICT', versionNo: 2 }];
+  const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
+  await screen.findByText(/2 current scoped series/);
+  expect(screen.getAllByText('Latest published tip')).toHaveLength(3);
+  expect(screen.queryByText('Superseded history')).not.toBeInTheDocument();
+  expect(screen.getByText('Scheduled · not an adoption decision')).toBeInTheDocument();
+  expect(screen.getByText(/Conflicting published tips — every tip retained/)).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText('Rule scope'), 'system');
+  await user.selectOptions(screen.getByLabelText('Rule task'), 'INTERPRETATION');
+  expect(screen.queryByText('Superseded history')).not.toBeInTheDocument();
+  await user.type(screen.getByLabelText('Search rules and history'), 'RICE-RES');
+  expect(screen.queryByText('Superseded history')).not.toBeInTheDocument();
+  await user.clear(screen.getByLabelText('Search rules and history'));
+  await user.type(screen.getByLabelText('Search rules and history'), 'study-1');
+  expect(screen.getByText('Superseded history')).toBeInTheDocument();
+  expect(screen.getAllByText('Latest published tip')).toHaveLength(3);
+  expect(screen.getByRole('button', { name: 'Details for RICE-RES v1 · System' })).toBeInTheDocument();
+  await user.clear(screen.getByLabelText('Search rules and history'));
+  await user.type(screen.getByLabelText('Search rules and history'), 'no-such-profile');
+  expect(screen.getByText(/No series match these filters/)).toBeInTheDocument();
 });

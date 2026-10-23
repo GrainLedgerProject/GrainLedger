@@ -173,6 +173,15 @@ This test-only option does not use configured connection strings or an existing 
 
 The opt-in browser host configures console logger queue overflow as `DropWrite` for both its upstream TestHost and loopback bridge. Long-running `dotnet test` output capture can fill console pipes; this test-only policy keeps console backpressure from blocking HTTP request handling. Overflow console messages may be dropped. Application logging configuration is unchanged.
 
+### Equipment retirement
+
+Ledger migration `20261023000000_RetireEquipment` adds protected referenced-equipment retirement without adding a second lifecycle flag or rewriting historical operations. Apply through the approved migration-owner deployment job and refresh restricted runtime grants before using the matching API build. Runtime validation requires the new private helpers and predecessor command/read routines to remain ungranted. Normal startup does not migrate.
+
+Unused equipment still uses versioned `DELETE`; referenced equipment uses versioned `POST /api/ledger/equipment/{id}/retire`. Both retain stored rows; retirement blocks new use and conflicts while active drafts or pending corrections remain. See [Ledger setup and permissions](ledger-implementation-plan.md#setup-and-permissions).
+
+For this overhaul, the user approved creating the forward migration and applying it only to disposable verification PostgreSQL. No shared Supabase migration, grant, seed or business-data mutation is authorized or performed by that approval.
+
+
 ### Dependency patch pins
 
 Backend projects using Npgsql `10.0.3` pin `Microsoft.EntityFrameworkCore.Relational` to `10.0.13`; keep EF Core runtime packages aligned at `10.0.13` across API and transitive project graphs. Identity pins `System.Security.Cryptography.Pkcs` to `10.0.13` for the MailKit/MimeKit dependency chain. Preserve these explicit patch pins when updating dependencies unless a reviewed dependency change supersedes them.

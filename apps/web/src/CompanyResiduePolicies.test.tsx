@@ -162,9 +162,37 @@ it('blocks checked adoption after embedded scientific revision until refreshed s
 
 it('does not silently choose a same-code profile when published series has conflicting roots', async () => {
   rules = [systemRule, { ...systemRule, id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', versionNo: 2 }];
-  render(<CompanyResiduePolicies active allowed companyId={companyId} />);
+  const user = userEvent.setup(); render(<CompanyResiduePolicies active allowed companyId={companyId} />);
   expect(await screen.findByRole('checkbox', { name: /RICE-RES/ })).toBeDisabled();
+  await user.click(await screen.findByRole('button', { name: 'Edit selected profiles' }));
   expect(await screen.findByRole('button', { name: 'Edit company policy · RICE-RES' })).toBeDisabled();
   expect(screen.getAllByText(/Conflicting applicability/).length).toBeGreaterThan(0);
+  expect(posted).toHaveLength(0);
+});
+
+it('searches earlier adoption evidence without replacing latest setting and preserves selections across filters', async () => {
+  rules = [systemRule, otherRule];
+  settings = [
+    { id: 'earlier', companyId, ruleCode: 'RICE-RES', versionNo: 1, mode: 'COMPANY_OVERRIDE', supersedesId: null, effectiveFrom: '2026-01-01T00:00:00Z', effectiveTo: null, evidenceRef: 'old-evidence', applicabilityStatement: 'Prior reviewed scope' },
+    { id: 'head', companyId, ruleCode: 'RICE-RES', versionNo: 2, mode: 'SYSTEM_DEFAULT', supersedesId: 'earlier', effectiveFrom: '2099-01-01T00:00:00Z', effectiveTo: null, evidenceRef: 'new-evidence', applicabilityStatement: 'Current reviewed scope' },
+  ];
+  const user = userEvent.setup(); render(<CompanyResiduePolicies active allowed companyId={companyId} />);
+  await user.click(await screen.findByRole('checkbox', { name: /RICE-RES/ }));
+  await user.type(screen.getByLabelText('Find profiles to adopt'), 'RICE-PROCESS');
+  expect(screen.queryByRole('checkbox', { name: /RICE-RES/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Selected profile RICE-RES' })).toBeInTheDocument();
+  await user.clear(screen.getByLabelText('Find profiles to adopt'));
+  expect(screen.getByRole('checkbox', { name: /RICE-RES/ })).toBeChecked();
+  const history = within(screen.getByRole('region', { name: 'Adoption history RICE-RES' }));
+  expect(history.getByText('Earlier adoption versions · RICE-RES · 1').closest('details')).not.toHaveAttribute('open');
+  await user.type(screen.getByLabelText('Search adoption history'), 'RICE-RES');
+  expect(history.getByText('Earlier adoption versions · RICE-RES · 1').closest('details')).not.toHaveAttribute('open');
+  await user.clear(screen.getByLabelText('Search adoption history'));
+  await user.type(screen.getByLabelText('Search adoption history'), 'old-evidence');
+  expect(history.getByText('Earlier adoption versions · RICE-RES · 1').closest('details')).toHaveAttribute('open');
+  expect(history.getByText('v2 · System default')).toBeInTheDocument();
+  expect(history.getByText('v1 · Company override')).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText('History setting mode'), 'COMPANY_OVERRIDE');
+  expect(history.getByText('v2 · System default')).toBeInTheDocument();
   expect(posted).toHaveLength(0);
 });

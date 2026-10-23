@@ -38,11 +38,11 @@ async function completeReview(user: UserEvent) {
   await user.type(screen.getByLabelText('Matrix review authority'), 'QA');
   await user.click(screen.getByLabelText(/I reviewed all changed complete profiles/));
 }
-it('shows dynamic substance rows and publishes only changed complete scientific rules under one review', async () => {
+it('publishes only explicitly changed complete scientific rules under one review', async () => {
   const user = userEvent.setup();
   render(<ResidueMatrix rules={[rule, process]} substances={substances} commodities={[{ id: commodityId, code: 'RICE', name: 'Rice' }]} companyId={null} settings={[]} onPublished={onPublished} />);
-  expect(screen.getByRole('rowheader', { name: 'NEW · New Catalog substance' })).toBeInTheDocument();
-  expect(within(screen.getByRole('row', { name: /NEW · New Catalog substance/ })).getAllByText(/Missing profile/)).toHaveLength(3);
+  expect(screen.queryByLabelText('Relative uncertainty (%) · NUMERIC-RICE')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Edit selected profiles' }));
   await user.click(screen.getByRole('button', { name: 'Edit system policy · NUMERIC-RICE' }));
   const uncertainty = screen.getByLabelText('Relative uncertainty (%) · NUMERIC-RICE');
   await user.clear(uncertainty); await user.type(uncertainty, '12.500');
@@ -58,6 +58,7 @@ it('shows dynamic substance rows and publishes only changed complete scientific 
 it('retains factor ranges, permits explicit scalar and requires explicit override adoption', async () => {
   const user = userEvent.setup();
   render(<ResidueMatrix rules={[process]} substances={substances} commodities={[]} companyId={companyId} settings={[]} onPublished={onPublished} />);
+  await user.click(screen.getByRole('button', { name: 'Edit selected profiles' }));
   await user.click(screen.getByRole('button', { name: 'Edit company policy · RICE-DRYING' }));
   expect(screen.getByLabelText('Factor range · RICE-DRYING')).toBeChecked();
   expect(screen.getByLabelText('Factor lower · RICE-DRYING')).toHaveValue('0.40');
@@ -76,6 +77,7 @@ it('retains factor ranges, permits explicit scalar and requires explicit overrid
 it('preserves stale draft without silently rebasing and clears scientific review on further edits', async () => {
   const user = userEvent.setup(); failure = 409;
   render(<ResidueMatrix rules={[rule]} substances={substances} commodities={[]} companyId={null} settings={[]} onPublished={onPublished} />);
+  await user.click(screen.getByRole('button', { name: 'Edit selected profiles' }));
   await user.click(screen.getByRole('button', { name: 'Edit system policy · NUMERIC-RICE' }));
   const uncertainty = screen.getByLabelText('Relative uncertainty (%) · NUMERIC-RICE');
   await user.clear(uncertainty); await user.type(uncertainty, '15'); await completeReview(user);
@@ -89,11 +91,13 @@ it('preserves stale draft without silently rebasing and clears scientific review
   await user.click(screen.getByRole('button', { name: 'Discard matrix draft and load current rules' }));
   expect(onPublished).toHaveBeenCalledOnce();
 });
-it('exposes overlapping applicability rather than flattening profiles', () => {
+it('exposes overlapping applicability rather than flattening profiles', async () => {
   const conflict = { ...rule, id: '55555555-5555-4555-8555-555555555555', code: 'OTHER-NUMERIC-RICE' };
+  const user = userEvent.setup();
   render(<ResidueMatrix rules={[rule, conflict]} substances={substances} commodities={[]} companyId={null} settings={[]} onPublished={onPublished} />);
+  await user.click(screen.getByRole('button', { name: 'Edit selected profiles' }));
   expect(screen.getAllByText(/Conflicting applicability/)).toHaveLength(2);
-  expect(screen.getByRole('region', { name: 'Scrollable substance policy matrix' })).toHaveTextContent('OTHER-NUMERIC-RICE');
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Edit system policy · OTHER-NUMERIC-RICE' })).toBeInTheDocument();
 });
 
 it.each([false, true])('publishes explicit unchanged-profile adoption independently of scientific changes (changed=%s)', async scienceChanged => {
@@ -102,6 +106,7 @@ it.each([false, true])('publishes explicit unchanged-profile adoption independen
   const ownProcess = { ...process, companyId };
   render(<ResidueMatrix rules={[ownNumeric, ownProcess]} substances={substances} commodities={[]} companyId={companyId}
     settings={[{ id: 'prior-adoption', ruleCode: process.code, mode: 'SYSTEM_DEFAULT', supersedesId: null, effectiveFrom: rule.effectiveFrom, effectiveTo: null }]} onPublished={onPublished} />);
+  await user.click(screen.getByRole('button', { name: 'Edit selected profiles' }));
   if (scienceChanged) {
     await user.click(screen.getByRole('button', { name: 'Edit company policy · NUMERIC-RICE' }));
     const uncertainty = screen.getByLabelText('Relative uncertainty (%) · NUMERIC-RICE');

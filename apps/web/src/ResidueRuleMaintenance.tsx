@@ -2,6 +2,8 @@ import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
 import { Feedback, kinds, stages, useAction } from './ledger-ui';
 import { ResidueMatrix, type MatrixSetting } from './ResidueMatrix';
+import { ResidueDialog } from './ResidueDialog';
+import { effectiveWindowLabel, exactDuplicateCandidates, groupRuleSeries } from './residueProfiles';
 
 export type Rule = {
   id: string; code: string; versionNo: number; companyId?: string | null; kind: string; substanceId: string; commodityId: string; residueDefinition: string;
@@ -49,11 +51,15 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
   const [sourceRule, setSourceRule] = useState<Rule | null>(null), [advanced, setAdvanced] = useState(false), [factorRange, setFactorRange] = useState(false);
   const [confirmed, setConfirmed] = useState(false), [conditional, setConditional] = useState(false);
   const [reuseId, setReuseId] = useState('');
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [search, setSearch] = useState(''), [taskFilter, setTaskFilter] = useState(''), [scopeFilter, setScopeFilter] = useState(''), [statusFilter, setStatusFilter] = useState(''), [sort, setSort] = useState('code');
+  const [historyOpen, setHistoryOpen] = useState<Record<string, boolean>>({});
   const action = useAction();
   const [reload, setReload] = useState(0);
   const [loadedScope, setLoadedScope] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     setForm(blank('', companyId)); setSourceRule(null); setAdvanced(false); setFactorRange(false); setConfirmed(false); setConditional(false); setReuseId('');
+    setEditorOpen(false);
   }, [companyId]);
   useEffect(() => {
     if (!active || !allowed) return;
@@ -134,6 +140,7 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
       setRules((await api<{ items: Rule[] }>('/api/residue-rules')).items);
       setForm(blank('', companyId));
       setSourceRule(null); setAdvanced(false); setFactorRange(false); setConfirmed(false); setConditional(false); setReuseId('');
+      setEditorOpen(false);
       onPublished?.();
     }, 'Reviewed residue rule published.');
   }
@@ -151,6 +158,7 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
     action.setError('');
     action.setStatus('');
     setSourceRule(rule); setAdvanced(false); setFactorRange(rule.factorLower !== rule.factorUpper);
+    setEditorOpen(true);
     setConfirmed(false); setConditional(!!rule.conditions && rule.conditions !== 'UNCONDITIONAL');
     setForm({ ...rule, id: crypto.randomUUID(), companyId, versionNo: nextVersion, supersedesId: rule.id, effectiveFrom: '', effectiveTo: null, reviewedBy: '', reviewAuthority: '', reviewedAt: '' });
   }
@@ -158,6 +166,7 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
     action.setError('');
     action.setStatus('');
     setSourceRule(rule); setAdvanced(false); setFactorRange(rule.factorLower !== rule.factorUpper);
+    setEditorOpen(true);
     setConfirmed(false); setConditional(!!rule.conditions && rule.conditions !== 'UNCONDITIONAL');
     setForm({ ...rule, id: crypto.randomUUID(), companyId, versionNo: 1, supersedesId: null, effectiveFrom: '', effectiveTo: null, reviewedBy: '', reviewAuthority: '', reviewedAt: '' });
   }
@@ -168,8 +177,25 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
   const visibleRules = rules.filter(rule => rule.companyId === (companyId || null) || (companyId && !rule.companyId));
   const successors = new Map(rules.filter(rule => rule.supersedesId).map(rule => [`${rule.companyId || ''}:${rule.supersedesId}`, rule] as const));
   const companyCodes = new Set(rules.filter(rule => rule.companyId === companyId).map(rule => rule.code));
+  const groups = groupRuleSeries(visibleRules);
   const reusableRules = visibleRules.filter(rule => !successors.has(`${rule.companyId || ''}:${rule.id}`) &&
+    groups.some(group => group.tips.length === 1 && group.tips[0].id === rule.id) &&
     (rule.companyId === (companyId || null) || !companyCodes.has(rule.code)));
+  const duplicatePairs = exactDuplicateCandidates(groups.flatMap(group => group.tips));
+  const query = search.trim().toLowerCase();
+  const matches = (rule: Rule) => (!taskFilter || (taskFilter === 'INTERPRETATION' ? rule.kind === taskFilter : rule.process === taskFilter)) &&
+    (!scopeFilter || (scopeFilter === 'company' ? !!rule.companyId : !rule.companyId)) &&
+    (!statusFilter || (statusFilter === 'conflict' ? groups.some(group => group.tips.length > 1 && group.tips.some(tip => tip.id === rule.id)) : effectiveWindowLabel(rule) === statusFilter)) &&
+    (!query || `${Object.values(rule).join(' ')} ${substanceName(rule.substanceId)} ${commodityName(rule.commodityId)}`.toLowerCase().includes(query));
+  const filteredGroups = groups.filter(group => group.versions.some(matches)).sort((a, b) => sort === 'substance'
+    ? substanceName(a.tips[0].substanceId).localeCompare(substanceName(b.tips[0].substanceId)) || a.key.localeCompare(b.key)
+    : sort === 'published' ? Math.max(...b.versions.map(rule => Date.parse(rule.publishedAt))) - Math.max(...a.versions.map(rule => Date.parse(rule.publishedAt)))
+      : a.tips[0].code.localeCompare(b.tips[0].code) || a.key.localeCompare(b.key));
+  const historicalOnlyMatches = new Set(filteredGroups.filter(group => group.history.some(matches) && !group.tips.some(matches)).map(group => group.key));
+  const displayedRules = filteredGroups.flatMap(group => [...group.tips, ...(historyOpen[group.key] || historicalOnlyMatches.has(group.key) ? group.history : [])]);
+  function closeEditor() {
+    action.setError(''); action.setStatus(''); setSourceRule(null); setAdvanced(false); setFactorRange(false); setConfirmed(false); setConditional(false); setForm(blank('', companyId)); setEditorOpen(false);
+  }
   const paths = processPaths(form.process);
   const selectedPath = paths.some(path => pathKey(path) === pathKey(form)) ? pathKey(form) : '';
   function changeOperation(operation: string) {
@@ -180,12 +206,13 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
   return <section className="panel residue-rule-maintenance" aria-labelledby="residue-rules-title">
     <h2 id="residue-rules-title">{companyId ? 'Company residue rules' : 'System residue rules'}</h2>
     <p>{companyId ? 'Company rules use same-Code system series, retain company scope and require fresh review.' : 'Versioned, reviewed interpretation and process rules. Numeric values have no defaults; publishing does not certify scientific validity.'}</p>
+    <button type="button" disabled={loading || !!error || !allowed || loadedScope !== companyId || action.busy} onClick={() => { closeEditor(); setEditorOpen(true); }}>Create rule</button>
     {loading && <p role="status">Loading published residue rules…</p>}
-    {error && <p className="notice error" role="alert">{error}</p>}
-    <Feedback {...action} />
-    {!form.kind && <section aria-label="Reuse a reviewed profile">
-      <h3>Start with a reviewed profile</h3>
-      <p>Choose the complete profile for the same substance, commodity and scientific applicability. Reuse starts a revision or company clone, never a duplicate rule. For routine policy edits, use the matrix below.</p>
+    {error && <div className="notice error" role="alert">{error}<button type="button" className="secondary" disabled={loading} onClick={() => setReload(value => value + 1)}>Retry loading rules</button></div>}
+    {!editorOpen && <Feedback {...action} />}
+    <section aria-label="Reuse a reviewed profile" hidden={editorOpen}>
+      <h3>Reuse exact reviewed applicability</h3>
+      <p>Choose the complete profile for the same substance, commodity, stage, product, method and scientific applicability. Reuse starts a revision or company override, never copies assumptions to another identity. Batch editing shares review work, not scientific requirements.</p>
       <label>Reviewed profile<select value={reuseId} disabled={loading || !!error || !allowed || loadedScope !== companyId} onChange={event => setReuseId(event.target.value)}>
         <option value="">Choose a complete reviewed profile</option>
         {reusableRules.map(rule => <option key={rule.id} value={rule.id}>{rule.code} v{rule.versionNo} · {rule.companyId ? 'Company' : 'System'} · {substanceName(rule.substanceId)} · {commodityName(rule.commodityId)} · {rule.kind === 'PROCESS' ? `${rule.process} · ${rule.outputFraction} · ${rule.factorSemantics}` : `${rule.interpretationKind} · ${rule.analyticalMethod}`} · {rule.inputStage}/{rule.inputBasis} → {rule.outputStage}/{rule.outputBasis}</option>)}
@@ -196,14 +223,24 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
         if (companyId && !source.companyId) cloneSystemRule(source); else startRevision(source);
       }}>Use reviewed profile</button>
       {!loading && !reusableRules.length && <p>No reusable profile. Ask an expert to create the missing applicability below.</p>}
-    </section>}
-    <div role="region" aria-label="Residue rule overview" hidden={!!form.kind}>
+    </section>
+    <div role="region" aria-label="Residue rule overview" hidden={editorOpen}>
     {allowed && loadedScope === companyId && <ResidueMatrix rules={rules} substances={substances} commodities={commodities} companyId={companyId} settings={policySettings} disabled={loading || !!error} onPublished={() => { setReload(value => value + 1); onPublished?.(); }} />}
+    <p className="residue-counts">{groups.length} current scoped series · {groups.reduce((sum, group) => sum + group.tips.length, 0)} unsuperseded published tips · {groups.reduce((sum, group) => sum + group.history.length, 0)} historical versions · {duplicatePairs.length} exact duplicate candidate pairs (not history). Latest publication is not necessarily effective now; company adoption remains separate.</p>
+    {duplicatePairs.length > 0 && <details><summary>Exact duplicate candidates ({duplicatePairs.length}) — not version history</summary><p>Same scope, complete applicability and policy values, overlapping effective windows, different codes. Expert evidence review required; nothing merged or adopted automatically.</p><ul>{duplicatePairs.map(([left, right]) => <li key={`${left.id}:${right.id}`}>{left.companyId ? 'Company' : 'System'} · {left.code} v{left.versionNo} / {right.code} v{right.versionNo} · {substanceName(left.substanceId)} · {commodityName(left.commodityId)} · {left.inputStage} → {left.outputStage} · {left.outputFraction || left.analyticalMethod}</li>)}</ul></details>}
+    <div className="residue-toolbar">
+      <label>Search rules and history<input type="search" value={search} onChange={event => setSearch(event.target.value)} /></label>
+      <label>Rule task<select value={taskFilter} onChange={event => setTaskFilter(event.target.value)}><option value="">All tasks</option><option value="INTERPRETATION">Interpretation</option>{Array.from(new Set(visibleRules.filter(rule => rule.kind === 'PROCESS').map(rule => rule.process))).sort().map(task => <option key={task}>{task}</option>)}</select></label>
+      <label>Rule scope<select value={scopeFilter} onChange={event => setScopeFilter(event.target.value)}><option value="">All scopes</option><option value="system">System</option><option value="company">Company</option></select></label>
+      <label>Rule status<select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="">All statuses</option>{['Within effective window now', 'Scheduled', 'Outside effective window'].map(status => <option key={status}>{status}</option>)}<option value="conflict">Conflicting published tips</option></select></label>
+      <label>Sort rules<select value={sort} onChange={event => setSort(event.target.value)}><option value="code">Series code</option><option value="substance">Substance</option><option value="published">Recently published</option></select></label>
+    </div>
+    {!loading && !error && visibleRules.length > 0 && !filteredGroups.length && <p className="empty">No series match these filters. Clear search or change filters to see published profiles.</p>}
     {visibleRules.length > 0 && <div className="table-scroll residue-rule-table-scroll" role="region" aria-label="Published residue rules" tabIndex={0}>
       <table className="residue-rule-table">
-        <caption>Published rules ({visibleRules.length})</caption>
+        <caption>{filteredGroups.length} matching scoped series · {displayedRules.length} displayed versions</caption>
         <thead><tr><th scope="col">Rule</th><th scope="col">Applies to</th><th scope="col">Policy</th><th scope="col">Effective period</th><th scope="col">Version status</th><th scope="col">Actions</th></tr></thead>
-        <tbody>{visibleRules.map(rule => {
+        <tbody>{displayedRules.map(rule => {
           const successor = successors.get(`${rule.companyId || ''}:${rule.id}`);
           const summary = rule.kind === 'INTERPRETATION' ? `${rule.interpretationKind || 'Interpretation'} · ${rule.inputStage} · ${rule.inputBasis} · ${rule.analyticalMethod || 'no method'} · ${rule.ndThresholdKind || 'no ND threshold'}` : `${rule.process} · ${rule.inputStage} → ${rule.outputStage} · ${rule.outputFraction}`;
           let policy: string, policyDetail: string;
@@ -234,19 +271,21 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
             policy = `${rule.process} · ${rule.factorLower ?? '—'}–${rule.factorUpper ?? '—'}×`;
             policyDetail = semantics;
           }
-          const status = successor ? 'Superseded' : 'Latest version';
+          const status = successor ? 'Superseded history' : 'Latest published tip';
+          const group = groups.find(item => item.versions.some(version => version.id === rule.id))!;
           const detailId = `residue-rule-details-${rule.id}`;
           return <Fragment key={rule.id}>
+            {rule.id === group.tips[0]?.id && <tr className="residue-rule-history-heading"><td colSpan={6}><strong>{rule.code} · {rule.companyId ? 'Company' : 'System'}</strong>{group.tips.length > 1 && <span className="notice pending"> Conflicting published tips — every tip retained; no automatic selection.</span>}{group.history.length > 0 && <button type="button" className="secondary" disabled={historicalOnlyMatches.has(group.key)} aria-expanded={!!historyOpen[group.key] || historicalOnlyMatches.has(group.key)} onClick={() => setHistoryOpen(current => ({ ...current, [group.key]: !current[group.key] }))}>{historyOpen[group.key] || historicalOnlyMatches.has(group.key) ? 'Collapse' : 'Show'} earlier versions · {rule.code} · {group.history.length}</button>}{historicalOnlyMatches.has(group.key) && <span> Historical filter matches included below; latest tips retained. Clear filters to collapse history.</span>}</td></tr>}
             <tr>
               <td><div className="residue-rule-badges"><span className="badge">{rule.companyId ? 'Company' : 'System'}</span><span className="badge">v{rule.versionNo}</span></div><strong className="residue-rule-kind">{rule.kind === 'INTERPRETATION' ? 'Interpretation' : 'Processing'}</strong><span className="table-subtitle residue-rule-code">{rule.code}</span></td>
-              <td className="residue-rule-applies">{substanceName(rule.substanceId)}<span className="table-subtitle">{commodityName(rule.commodityId)} · {rule.inputStage}{rule.outputStage !== rule.inputStage ? ` → ${rule.outputStage}` : ''}</span></td>
+              <td className="residue-rule-applies">{substanceName(rule.substanceId)}<span className="table-subtitle">{commodityName(rule.commodityId)} · {rule.inputStage} / {rule.inputBasis} → {rule.outputStage} / {rule.outputBasis} · {rule.outputFraction || rule.analyticalMethod} · {rule.residueDefinition}</span></td>
               <td>{policy}<span className="table-subtitle">{policyDetail}</span></td>
               <td><time dateTime={rule.effectiveFrom}>{new Date(rule.effectiveFrom).toLocaleDateString(undefined, { timeZone: 'UTC', dateStyle: 'medium' })}</time><span className="table-subtitle">{rule.effectiveTo ? <>Until <time dateTime={rule.effectiveTo}>{new Date(rule.effectiveTo).toLocaleDateString(undefined, { timeZone: 'UTC', dateStyle: 'medium' })}</time></> : 'No stated end'}</span></td>
-              <td><span className={`badge${successor ? ' inactive' : ''}`}>{status}</span>{successor && <span id={`superseded-${rule.id}`} className="table-subtitle">Already superseded by {successor.code} v{successor.versionNo}; revise latest version instead.</span>}</td>
+              <td><span className={`badge${successor ? ' inactive' : ''}`}>{status}</span><span className="table-subtitle">{effectiveWindowLabel(rule)} · not an adoption decision</span>{successor && <span id={`superseded-${rule.id}`} className="table-subtitle">Already superseded by {successor.code} v{successor.versionNo}; revise latest version instead.</span>}</td>
               <td className="admin-row-actions"><div className="residue-rule-actions">
                 <button type="button" className="secondary" aria-expanded={expandedRuleId === rule.id} aria-controls={detailId} aria-label={`Details for ${rule.code} v${rule.versionNo} · ${rule.companyId ? 'Company' : 'System'}`} onClick={() => setExpandedRuleId(current => current === rule.id ? null : rule.id)}>Details</button>
-                {companyId && !rule.companyId && !companyCodes.has(rule.code) && <button type="button" className="secondary" disabled={action.busy} aria-label={`Clone as company rule · ${substanceName(rule.substanceId)} · ${commodityName(rule.commodityId)} · ${rule.code} v${rule.versionNo}`} onClick={() => cloneSystemRule(rule)}>Clone as company rule</button>}
-                {rule.companyId === (companyId || null) && <button type="button" className="secondary" disabled={action.busy || successor !== undefined} aria-label={`Revise rule · ${taskNames[rule.kind]} · ${substanceName(rule.substanceId)} · ${commodityName(rule.commodityId)} · ${summary} · v${rule.versionNo}`} aria-describedby={successor ? `superseded-${rule.id}` : undefined} onClick={() => startRevision(rule)}>Revise rule</button>}
+                {companyId && !rule.companyId && !successor && !companyCodes.has(rule.code) && <button type="button" className="secondary" disabled={action.busy || group.tips.length !== 1} aria-label={`Clone as company rule · ${substanceName(rule.substanceId)} · ${commodityName(rule.commodityId)} · ${rule.code} v${rule.versionNo}`} onClick={() => cloneSystemRule(rule)}>Clone as company rule</button>}
+                {rule.companyId === (companyId || null) && <button type="button" className="secondary" disabled={action.busy || successor !== undefined || group.tips.length !== 1} aria-label={`Revise rule · ${taskNames[rule.kind]} · ${substanceName(rule.substanceId)} · ${commodityName(rule.commodityId)} · ${summary} · v${rule.versionNo}`} aria-describedby={successor ? `superseded-${rule.id}` : undefined} onClick={() => startRevision(rule)}>Revise rule</button>}
               </div></td>
             </tr>
             <tr className="residue-rule-details-row" hidden={expandedRuleId !== rule.id}><td colSpan={6}><div id={detailId} className="residue-rule-details-panel">
@@ -280,16 +319,17 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
     </div>}
     {!loading && !error && visibleRules.length === 0 && <p className="empty">No reviewed scientific profiles available. Residue bounds remain unresolved until an expert publishes applicable rules.</p>}
     </div>
-    {!form.kind ? <details aria-label="Choose residue rule task">
-      <summary>Create new scientific profile</summary>
-      <p>Expert setup only. Reuse a reviewed profile above where possible; no scientific values are supplied by default.</p>
-      <div className="ledger-actions">
-        <button type="button" disabled={loading || !!error || !allowed || loadedScope !== companyId} onClick={() => { setSourceRule(null); setAdvanced(true); setFactorRange(false); setConfirmed(false); setConditional(false); setForm(blank('INTERPRETATION', companyId)); }}>Interpret laboratory results</button>
-        <button type="button" disabled={loading || !!error || !allowed || loadedScope !== companyId} onClick={() => { setSourceRule(null); setAdvanced(true); setFactorRange(false); setConfirmed(false); setConditional(false); setForm(blank('PROCESS', companyId)); }}>Define processing factors</button>
-      </div>
-    </details> : <>
+    {editorOpen && <ResidueDialog key={form.kind} title={form.kind ? revising ? 'Revise rule' : sourceRule ? 'Create company override' : 'Create rule' : 'Create rule'} busy={action.busy} onClose={closeEditor}>
+      <Feedback {...action} />
+      {!form.kind ? <section aria-label="Choose residue rule task">
+        <p>Expert setup only. Reuse exact reviewed applicability where possible; no scientific values supplied by default.</p>
+        <div className="ledger-actions">
+          <button type="button" onClick={() => { setAdvanced(true); setForm(blank('INTERPRETATION', companyId)); }}>Interpret laboratory results</button>
+          <button type="button" onClick={() => { setAdvanced(true); setForm(blank('PROCESS', companyId)); }}>Define processing factors</button>
+        </div>
+      </section> : <>
       {revising && <p role="status">Revising {taskNames[form.kind]} for {substanceName(form.substanceId)} · {commodityName(form.commodityId)}. Previous publication remains unchanged until new rule is reviewed and published.</p>}
-      <button type="button" onClick={() => { action.setError(''); action.setStatus(''); setSourceRule(null); setAdvanced(false); setFactorRange(false); setConfirmed(false); setConditional(false); setForm(blank('', companyId)); }}>{revising ? 'Cancel revision' : 'Cancel profile draft'}</button>
+      <button type="button" disabled={action.busy} onClick={closeEditor}>{revising ? 'Cancel revision' : 'Cancel profile draft'}</button>
       <form onSubmit={publish}>
         <fieldset disabled={action.busy || loading || !!error || !allowed || loadedScope !== companyId}><legend>{taskNames[form.kind]}</legend>
           {sourceRule && <>
@@ -391,6 +431,7 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
         </fieldset>
       </form>
     </>}
+    </ResidueDialog>}
   </section>;
 }
 async function loadAll<T>(path: string): Promise<T[]> {

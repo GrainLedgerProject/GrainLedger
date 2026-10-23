@@ -46,7 +46,7 @@ async function linkedRecords<T>(path: 'operations' | 'lots', ids: string[], sign
 }
 
 function operationLabel(operation: Operation, look: Lookup) {
-  return `${look.owners.find(owner => owner.id === operation.ownerId)?.name || 'Owner name unavailable in current scope'} — ${operation.kind}: ${operation.outputs.map(row => row.code).join(', ') || 'No recorded outputs'} — ${operation.occurredAt} — ${operation.status}`;
+  return `${look.owners.find(owner => owner.id === operation.ownerId)?.name || 'Owner name unavailable in current scope'} — ${operation.kind}: ${operation.outputs.map(row => row.code).join(', ') || 'No recorded outputs'}${operation.equipmentName ? ` — ${operation.equipmentName}` : ''} — ${operation.occurredAt} — ${operation.status}`;
 }
 
 export function LedgerOperations({ user, active = true }: { user: User; active?: boolean }) {
@@ -248,6 +248,7 @@ function OperationDetail({ operation, lots, look, user, command, onEdit }: { ope
     <dl>
       <dt>Owner</dt><dd>{look.owners.find(row => row.id === operation.ownerId)?.name || 'Owner name unavailable in current scope'}</dd>
       <dt>Facility</dt><dd>{name(look.facilities, operation.facilityId)}</dd>
+      <dt>Equipment</dt><dd>{operation.equipmentName || 'Equipment name unavailable in current scope'}</dd>
       <dt>Occurred at</dt><dd>{operation.occurredAt}</dd>
       <dt>Status</dt><dd>{operation.status}</dd>
       <dt>Input quantities</dt><dd>{inputSummary || 'No recorded inputs'}</dd>

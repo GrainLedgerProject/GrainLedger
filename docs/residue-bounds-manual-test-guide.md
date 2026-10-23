@@ -33,6 +33,8 @@ As **Administrator**, open **Administration → Catalogs → Commodities** and c
 
 Then, as **Customer Manager**, open **Residue profiles**. Select the interpretation profile and every process profile used here, choose system-default adoption, and publish with one shared reviewed effective period covering test events. Check each inherited evidence/applicability summary and record the actual setting reviewer/authority/review time once for the batch. Separate setting IDs/versions remain available for audit. System rule publication is not adoption; no seed or automatic adoption exists.
 
+Profile management checks: **Create rule** opens an expert dialog with no scientific values supplied. **Edit selected profiles** opens the batch dialog; explicitly select exact profiles and complete shared review. Check rule search/task/scope/status filters and sorting; current scoped series and historical-version counts must remain distinct. Earlier versions stay collapsed for broad filters; a historical-only match reveals history while retaining the latest tip. Confirm adoption/override history search and mode/effective-status filters can find earlier decisions without changing them. Neither grouping nor batch review authorizes fewer scientific applicability requirements.
+
 Also required:
 
 - Reviewed numeric interpretation matching method, substance, commodity and material basis.
@@ -239,10 +241,13 @@ Use separate test records for conflicting-evidence scenarios so they do not cont
 | Confirm a supported `150 µg/kg` result under adopted synthetic relative 10% profile, without reported uncertainty | Same `[0.135, 0.165] mg/kg` source interval as `0.15 mg/kg`; original unit/value and scale retained |
 | Confirm a report containing one compatible row and one missing-policy substance | Identity remains confirmed; compatible row binds, missing-policy row remains an explicit exception |
 | Open or refresh live preview repeatedly | No evaluation history rows appended |
-| Publish matrix change against stale predecessor | 409; no partial rule/settings publication, draft retained |
+| Publish focused batch-editor change against stale predecessor | 409; no partial rule/settings publication, draft retained |
+| Filter a scoped series or search its Code when both current and earlier versions match | Earlier versions remain collapsed until explicitly opened |
+| Search metadata found only in a historical version | Matching history opens, latest published tip remains visible, no automatic revision |
+| Open Create rule / close either editor by keyboard | Required scientific inputs remain blank; focus stays inside dialog and returns to its trigger on close |
 
 ## Pass condition
 
 Baseline pass criteria: late evidence updates only new calculations, history stays immutable, missing scientific inputs never become guessed bounds or PASS, and residue evaluation does not alter stock, original laboratory evidence or HOLD state. Extension acceptance additionally requires explicit profile adoption, fail-closed override behavior, correct uncertainty handling/provenance and real UI/API verification.
 
-Numeric examples above are expected synthetic test data, not operational scientific policy. Observed checks and isolated API/browser scenarios are recorded separately in the [residue-bounds verification log](residue-bounds-plan.md#15-substance-matrix-single-action-report-confirmation-and-live-bounds); that log, rather than this walkthrough, identifies which flows were exercised.
+Numeric examples above are expected synthetic test data, not operational scientific policy. Observed checks and isolated API/browser scenarios are recorded separately in the [focused-profile verification log](residue-bounds-plan.md#16-focused-profile-management-and-rule-volume-audit); that log, rather than this walkthrough, identifies which flows were exercised.
