@@ -1,6 +1,13 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using GrainLedger.Modules.Capture;
+using GrainLedger.Modules.Identity;
+using GrainLedger.Modules.Ledger;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 using Xunit;
 using static GrainLedger.Api.IntegrationTests.LabReportTests;
 using static GrainLedger.Api.IntegrationTests.LedgerScenario;
@@ -77,7 +84,7 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
         var sample = await SampleAsync(s, await s.ReceiptAsync("10"));
         var (reportId, _) = await f.ReportAsync(sample,
             [f.Result(uncertainty: mismatch == "reported-uncertainty" ? "±0.05 laboratory expanded uncertainty" : null,
-                unit: mismatch == "wrong-unit" ? "µg/kg" : "mg/kg")], confirm: mismatch != "pending-report");
+                unit: mismatch == "wrong-unit" ? "ppb" : "mg/kg")], confirm: mismatch != "pending-report");
         var rule = Relative(f);
         if (mismatch == "wrong-method") rule["analyticalMethod"] = "OTHER_METHOD";
         await f.PublishRuleAsync(rule, adopt: false);
@@ -260,6 +267,158 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
         await SendAsync(s.Customer, HttpMethod.Post, Route(id, "confirm"), confirmation);
         Complete(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId), 0.135m, 0.165m);
         Assert.Single((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Single_confirmation_binds_compatible_micrograms_and_returns_policy_and_mapping_exceptions_with_stable_replay()
+    {
+        using var s = await CreateAsync(factory);
+        var f = await ResidueScenario.CreateAsync(s);
+        var first = await SampleAsync(s, await s.ReceiptAsync("10"));
+        var second = await SampleAsync(s, await s.ReceiptAsync("10"));
+        var third = await SampleAsync(s, await s.ReceiptAsync("10"));
+        await f.PublishRuleAsync(Relative(f));
+        var unmapped = JsonSerializer.SerializeToNode(f.Result(uncertainty: null))!.AsObject();
+        unmapped["substanceId"] = null;
+        var body = ReportRequest([
+            ResultSet(first, [f.Result("150", uncertainty: null, unit: "µg/kg", lod: "10", loq: "20"),
+                f.Result(uncertainty: null, substanceId: f.OtherSubstanceId), unmapped]),
+            ResultSet(second, [f.Result(uncertainty: "±0.05 raw laboratory uncertainty")]),
+            ResultSet(third, [f.Result(uncertainty: null), f.Result("0.2", uncertainty: null)])
+        ]);
+        var id = EntityId(body);
+        await SendAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", body);
+        var draft = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        var request = ConfirmRequest(draft, first, second, third);
+        var confirmed = await SendAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request);
+        Assert.Equal("CONFIRMED", confirmed.GetProperty("status").GetString());
+        var rows = confirmed.GetProperty("residueBindings").EnumerateArray().ToArray();
+        Assert.Equal(6, rows.Length);
+        Assert.Single(rows, row => row.GetProperty("published").GetBoolean());
+        Assert.All(rows.Where(row => !row.GetProperty("published").GetBoolean()),
+            row => Assert.NotEmpty(row.GetProperty("reasons").EnumerateArray()));
+        Assert.Single((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
+        Complete(ResultOf(await f.EvaluateAsync(first.LotId), f.SubstanceId), 0.135m, 0.165m);
+        var result = ResultOf(await f.EvaluateAsync(first.LotId), f.SubstanceId);
+        Assert.Equal("150", result.GetProperty("provenance")[0].GetProperty("originalNumericValue").GetString());
+        Assert.Equal("µg/kg", result.GetProperty("provenance")[0].GetProperty("originalUnit").GetString());
+        var raw = (await GetAsync(s.Customer, $"/api/lab-reports/{id}")).GetProperty("resultSets")[0].GetProperty("results")[0];
+        Assert.Equal("150", raw.GetProperty("numericValue").GetString());
+        Assert.Equal("10", raw.GetProperty("lod").GetString());
+        Assert.Equal("20", raw.GetProperty("loq").GetString());
+        var replay = await SendAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request);
+        Assert.Equal(confirmed.GetRawText(), replay.GetRawText());
+        Assert.Single((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
+        await RejectedAsync(s.ForeignCustomer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request, HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Concurrent_retests_confirm_identity_without_replacing_existing_selection()
+    {
+        using var s = await CreateAsync(factory);
+        var f = await ResidueScenario.CreateAsync(s);
+        var sample = await SampleAsync(s, await s.ReceiptAsync("10"));
+        await f.PublishRuleAsync(Relative(f));
+        var (originalId, _) = await f.ReportAsync(sample, [f.Result(uncertainty: null)]);
+        var selectedBefore = await GetAsync(s.Customer, "/api/residue-report-selections");
+        Assert.Single(selectedBefore.GetProperty("items").EnumerateArray());
+        var drafts = await Task.WhenAll(Enumerable.Range(0, 2).Select(async i =>
+            await f.ReportAsync(sample, [f.Result(i == 0 ? "0.2" : "0.3", uncertainty: null)],
+                confirm: false, kind: "RETEST", relatedReportId: originalId)));
+        var results = await Task.WhenAll(drafts.Select(draft => SendAsync(s.Customer, HttpMethod.Post,
+            $"/api/lab-reports/{draft.ReportId}/confirm", ConfirmRequest(draft.Report, sample))));
+        Assert.All(results, result =>
+        {
+            Assert.Equal("CONFIRMED", result.GetProperty("status").GetString());
+            var row = Assert.Single(result.GetProperty("residueBindings").EnumerateArray());
+            Assert.False(row.GetProperty("published").GetBoolean());
+            Assert.Contains(row.GetProperty("reasons").EnumerateArray(),
+                reason => reason.GetString()!.Contains("explicit reviewed supersession", StringComparison.Ordinal));
+        });
+        Assert.Equal(selectedBefore.GetRawText(), (await GetAsync(s.Customer, "/api/residue-report-selections")).GetRawText());
+        Unresolved(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId));
+    }
+
+    [Theory]
+    [InlineData("NUMERIC_ABSOLUTE_UNCERTAINTY", null)]
+    [InlineData("ND", "REPORTING_THRESHOLD")]
+    public async Task Exception_review_and_single_selection_preview_use_original_unit_exactly_once(string kind, string? threshold)
+    {
+        using var s = await CreateAsync(factory);
+        var f = await ResidueScenario.CreateAsync(s);
+        var sample = await SampleAsync(s, await s.ReceiptAsync("10"));
+        await f.PublishRuleAsync(f.RuleBody(kind, threshold));
+        var (id, report) = await f.ReportAsync(sample,
+            [f.Result(kind == "ND" ? null : "150", kind == "ND" ? null : "±50 µg/kg raw", kind == "ND" ? "NOT_DETECTED" : "NUMERIC",
+                unit: "μg/kg", lod: "10", loq: "20")]);
+        var initial = await Preview(s, id);
+        Assert.NotEmpty(initial.GetProperty("rows")[0].GetProperty("reasons").EnumerateArray());
+        var request = Confirmation(s, initial);
+        request["rows"]![0]![kind == "ND" ? "reportingThreshold" : "absoluteUncertainty"] = kind == "ND" ? "30" : "50";
+        request["rows"]![0]!["note"] = Review;
+        var prepared = await SendAsync(s.Customer, HttpMethod.Post, Route(id, "preview"), request);
+        var bound = prepared.GetProperty("rows")[0].GetProperty("assessment");
+        Assert.Empty(bound.GetProperty("reasons").EnumerateArray());
+        var expert = f.SelectionBody(sample, report, uncertainty: kind == "ND" ? null : "50", threshold: kind == "ND" ? "30" : null);
+        var single = await SendAsync(s.Customer, HttpMethod.Post, "/api/residue-report-selections/preview", expert);
+        Assert.Equal(bound.GetProperty("lower").GetString(), single.GetProperty("lower").GetString());
+        Assert.Equal(bound.GetProperty("upper").GetString(), single.GetProperty("upper").GetString());
+        await SendAsync(s.Customer, HttpMethod.Post, Route(id, "confirm"), Confirmation(s, prepared));
+        Complete(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId), kind == "ND" ? 0m : 0.1m, kind == "ND" ? 0.03m : 0.2m);
+    }
+
+    [Fact]
+    public async Task Binding_failure_rolls_back_capture_confirmation_and_selections_then_same_envelope_can_retry()
+    {
+        var gate = new BindingFailureGate();
+        await using var isolated = new ApiFactory
+        {
+            ConfigureTestServices = services =>
+            {
+                services.RemoveAll<IConfirmedLabReportResidueBinder>();
+                services.AddScoped<IConfirmedLabReportResidueBinder>(sp =>
+                    new FailAfterBinding(sp.GetRequiredService<ResidueEvaluationService>(), gate));
+            }
+        };
+        await isolated.InitializeAsync();
+        using var s = await CreateAsync(isolated);
+        var f = await ResidueScenario.CreateAsync(s);
+        var sample = await SampleAsync(s, await s.ReceiptAsync("10"));
+        await f.PublishRuleAsync(Relative(f));
+        var (id, report) = await f.ReportAsync(sample, [f.Result(uncertainty: null)], confirm: false);
+        var request = ConfirmRequest(report, sample);
+        await RejectedAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request, HttpStatusCode.InternalServerError);
+        var pending = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        Assert.Equal("PENDING_REVIEW", pending.GetProperty("status").GetString());
+        Assert.Empty((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
+        gate.Enabled = false;
+        var confirmed = await SendAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request);
+        Assert.True(Assert.Single(confirmed.GetProperty("residueBindings").EnumerateArray()).GetProperty("published").GetBoolean());
+        using var scope = isolated.Services.CreateScope();
+        var identity = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var user = await identity.Users.SingleAsync(x => x.Id == s.Accounts["customer"].User.Id);
+        user.IsActive = false;
+        await identity.SaveChangesAsync();
+        await RejectedAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request, HttpStatusCode.Unauthorized);
+    }
+
+    private sealed class BindingFailureGate
+    {
+        public bool Enabled { get; set; } = true;
+    }
+
+    private sealed class FailAfterBinding(ResidueEvaluationService inner, BindingFailureGate gate) : IConfirmedLabReportResidueBinder
+    {
+        public async Task<IReadOnlyList<LabReportResidueBinding>> BindConfirmedReportAsync(NpgsqlConnection connection,
+            NpgsqlTransaction transaction, Guid actorId, Guid companyId, Guid reportId, DateTimeOffset confirmedAt,
+            CancellationToken ct)
+        {
+            Assert.Same(connection, transaction.Connection);
+            var rows = await inner.BindConfirmedReportAsync(connection, transaction, actorId, companyId, reportId, confirmedAt, ct);
+            Assert.True(Assert.Single(rows).Published);
+            if (gate.Enabled) throw new InvalidOperationException("Synthetic failure after binding, before caller commit");
+            return rows;
+        }
     }
 
     private static JsonObject Relative(ResidueScenario f)

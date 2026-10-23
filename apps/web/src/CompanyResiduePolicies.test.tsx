@@ -158,3 +158,12 @@ it('blocks checked adoption after embedded scientific revision until refreshed s
   expect(posted[0].items[0]).toMatchObject({ evidenceRef: 'Company-specific adoption evidence', applicabilityStatement: 'New reviewed rice applicability', reviewedBy: 'Actual adoption reviewer' });
   expect(posted[0].items[0]).not.toHaveProperty('sourceRuleId');
 });
+
+it('does not silently choose a same-code profile when published series has conflicting roots', async () => {
+  rules = [systemRule, { ...systemRule, id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', versionNo: 2 }];
+  render(<CompanyResiduePolicies active allowed companyId={companyId} />);
+  expect(await screen.findByRole('checkbox', { name: /RICE-RES/ })).toBeDisabled();
+  expect(await screen.findByRole('button', { name: 'Edit company policy · RICE-RES' })).toBeDisabled();
+  expect(screen.getAllByText(/Conflicting applicability/).length).toBeGreaterThan(0);
+  expect(posted).toHaveLength(0);
+});

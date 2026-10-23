@@ -26,7 +26,7 @@ public sealed record ResidueReportReviewItem(ResidueReportReviewRow Input, strin
 public sealed record ResidueReportReviewResponse(Guid ReportId, DateTimeOffset EffectiveFrom,
     IReadOnlyList<ResidueReportReviewItem> Rows);
 
-public sealed partial class ResidueEvaluationService
+public sealed partial class ResidueEvaluationService : IConfirmedLabReportResidueBinder
 {
     private sealed record ReportRow(Guid ResultId, Guid? SubstanceId, Guid SourceId, Guid LotId, string Label,
         string? Uncertainty);
@@ -44,7 +44,6 @@ public sealed partial class ResidueEvaluationService
             || request.Rows.Select(x => x.Id).Distinct().Count() != request.Rows.Length
             || request.Rows.Select(x => (x.ResultId, x.SourceId)).Distinct().Count() != request.Rows.Length)
             throw new LedgerException(400, "Report review requires distinct valid row UUIDs, source/result bindings and exact decimal inputs");
-        var requestedByKey = request.Rows.ToDictionary(x => (x.ResultId, x.SourceId));
         var actor = await ledger.ActorAsync(ct);
         await using var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
         await connection.OpenAsync(ct);
@@ -53,6 +52,28 @@ public sealed partial class ResidueEvaluationService
         else await ExecuteAsync(connection, tx, "SET TRANSACTION READ ONLY", ct);
         if (!await ResidueReview.AuthorizeAsync(connection, tx, actor, "residue.evidence.manage", request.CompanyId, ct))
             throw new LedgerException(403, "Residue evidence company access denied");
+        var response = await ReviewReportInTransactionAsync(connection, tx, actor, reportId, request, publish, false, true, ct);
+        await tx.CommitAsync(ct);
+        return response;
+    }
+
+    public async Task<IReadOnlyList<LabReportResidueBinding>> BindConfirmedReportAsync(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Guid actorId, Guid companyId, Guid reportId, DateTimeOffset confirmedAt,
+        CancellationToken ct)
+    {
+        var authorized = await ResidueReview.AuthorizeAsync(connection, transaction, actorId,
+            "residue.evidence.manage", companyId, ct);
+        var response = await ReviewReportInTransactionAsync(connection, transaction, actorId, reportId,
+            new(companyId, confirmedAt, []), true, true, authorized, ct);
+        return response.Rows.Select(row => new LabReportResidueBinding(row.Input.ResultId, row.Input.SourceId,
+            row.Published, row.Reasons)).ToArray();
+    }
+
+    private async Task<ResidueReportReviewResponse> ReviewReportInTransactionAsync(NpgsqlConnection connection,
+        NpgsqlTransaction tx, Guid actor, Guid reportId, ResidueReportReviewRequest request, bool publish,
+        bool automatic, bool authorized, CancellationToken ct)
+    {
+        var requestedByKey = request.Rows.ToDictionary(x => (x.ResultId, x.SourceId));
         var now = new DateTimeOffset((DateTime)(await ExecuteAsync(connection, tx, "SELECT clock_timestamp()", ct))!);
         var effectiveFrom = request.EffectiveFrom ?? now;
         if (effectiveFrom > now) throw new LedgerException(400, "Report binding cannot become effective in the future");
@@ -80,6 +101,10 @@ public sealed partial class ResidueEvaluationService
             while (await reader.ReadAsync(ct)) reportRows.Add(new(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetGuid(1),
                 reader.GetGuid(2), reader.GetGuid(3), reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5)));
         }
+        if (!authorized)
+            return new(reportId, effectiveFrom, reportRows.Select(row => new ResidueReportReviewItem(
+                new(Guid.NewGuid(), row.ResultId, row.SourceId), row.Label, row.Uncertainty, null, null, null,
+                ["Residue evidence permission required; identity and transcription remain confirmed"], [], [])).ToArray());
         var reportByKey = reportRows.ToDictionary(x => (x.ResultId, x.SourceId));
         if (requestedByKey.Keys.Any(key => !reportByKey.ContainsKey(key)))
             throw new LedgerException(400, "Every requested row must belong to this report and its confirmed source association");
@@ -134,7 +159,7 @@ public sealed partial class ResidueEvaluationService
         var output = new List<ResidueReportReviewItem>();
         var append = new List<ResidueReportSelection>();
         var replayCount = 0;
-        foreach (var row in reportRows.Where(row => !publish || requestedByKey.ContainsKey((row.ResultId, row.SourceId))))
+        foreach (var row in reportRows.Where(row => automatic || !publish || requestedByKey.ContainsKey((row.ResultId, row.SourceId))))
         {
             var requestedInput = requestedByKey.GetValueOrDefault((row.ResultId, row.SourceId));
             var input = requestedInput ?? new ResidueReportReviewRow(Guid.NewGuid(), row.ResultId, row.SourceId);
@@ -158,8 +183,8 @@ public sealed partial class ResidueEvaluationService
                 reasons.Add("Confirmed source association and mapped substance required");
             else
             {
-                var source = sourcesById[row.SourceId];
-                if (!nodes.TryGetValue(row.LotId, out var node) || node.CompanyId != request.CompanyId)
+                if (!sourcesById.TryGetValue(row.SourceId, out var source)
+                    || !nodes.TryGetValue(row.LotId, out var node) || node.CompanyId != request.CompanyId)
                 {
                     output.Add(new(input, row.Label, row.Uncertainty, null, null, null,
                         ["Original owned source lot required"], [], []));
@@ -179,7 +204,7 @@ public sealed partial class ResidueEvaluationService
                     var resolution = ResidueEvidenceResolver.SelectPolicy(scopedPolicy, request.CompanyId, source.ReceivedAt, x =>
                         x.Kind == "INTERPRETATION" && x.SubstanceId == row.SubstanceId && x.CommodityId == node.CommodityId
                         && x.InputStage == source.ProductStage && x.OutputStage == source.ProductStage
-                        && x.InputBasis == x.OutputBasis && x.Unit == selected.Unit && x.AnalyticalMethod == selected.Method
+                        && x.InputBasis == x.OutputBasis && x.Unit == ResidueConcentration.CanonicalUnit(selected.Unit) && x.AnalyticalMethod == selected.Method
                         && (selected.ResultKind == "NUMERIC" ? x.InterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY"
                             : x.InterpretationKind == (selected.ResultKind == "BELOW_LIMIT" ? "BELOW_LIMIT" : selected.ResultKind == "NOT_DETECTED" ? "ND" : "UNSUPPORTED")));
                     if (resolution.Reason is not null || resolution.Rules.Count != 1)
@@ -234,7 +259,7 @@ public sealed partial class ResidueEvaluationService
                             canonical, rule, setting, selected, candidates, history, groups = scopedGroups,
                             assessment
                         }, Json))));
-                        if (publish && input.PreviewFingerprint != fingerprint)
+                        if (publish && !automatic && input.PreviewFingerprint != fingerprint)
                             throw new LedgerException(409, "Report review changed since preview; prepare and review again");
                         input = input with { PreviewFingerprint = fingerprint };
                         if (reasons.Count == 0) append.Add(selection with { BindingFingerprint = fingerprint });
@@ -245,15 +270,15 @@ public sealed partial class ResidueEvaluationService
         }
         if (publish)
         {
-            if (output.Count != request.Rows.Length || output.Any(x => x.Reasons.Count != 0) || replayCount != 0 && replayCount != output.Count
-                || request.Rows.GroupBy(x => (x.SourceId, Substance: reportByKey[(x.ResultId, x.SourceId)].SubstanceId)).Any(x => x.Count() != 1))
+            if (!automatic && (output.Count != request.Rows.Length || output.Any(x => x.Reasons.Count != 0) || replayCount != 0 && replayCount != output.Count
+                || request.Rows.GroupBy(x => (x.SourceId, Substance: reportByKey[(x.ResultId, x.SourceId)].SubstanceId)).Any(x => x.Count() != 1)))
                 throw new LedgerException(409, "Every requested row must be compatible and explicitly reviewed; no selections published");
             foreach (var selection in append)
                 await ExecuteAsync(connection, tx, "SELECT capture.publish_residue_selection($1,$2)", ct, actor,
                     JsonSerializer.SerializeToElement(selection));
-            output = output.Select(x => x with { Published = true }).ToList();
+            var appendedIds = append.Select(x => x.Id).ToHashSet();
+            output = output.Select(x => x with { Published = x.Published || appendedIds.Contains(x.Input.Id) }).ToList();
         }
-        await tx.CommitAsync(ct);
         return new(reportId, effectiveFrom, output);
     }
 }

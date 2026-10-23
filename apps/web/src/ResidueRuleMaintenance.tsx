@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
 import { Feedback, kinds, stages, useAction } from './ledger-ui';
+import { ResidueMatrix, type MatrixSetting } from './ResidueMatrix';
 
-type Rule = {
+export type Rule = {
   id: string; code: string; versionNo: number; companyId?: string | null; kind: string; substanceId: string; commodityId: string; residueDefinition: string;
   inputStage: string; outputStage: string; inputBasis: string; outputBasis: string; outputFraction: string; process: string; conditions: string;
   analyticalMethod?: string | null; unit: string; decimalPlaces: number; interpretationKind: string | null; ndThresholdKind: string | null;
@@ -21,11 +22,13 @@ const blank = (kind = '', companyId: string | null = null): RuleForm => {
 const dateValue = (value: string) => value ? new Date(value).toISOString() : '';
 const taskNames: Record<string, string> = { INTERPRETATION: 'Interpret laboratory results', PROCESS: 'Define processing factors' };
 
-export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPublished }: { active: boolean; allowed: boolean; companyId?: string | null; onPublished?: () => void }) {
+export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPublished, policySettings = [] }: { active: boolean; allowed: boolean; companyId?: string | null; onPublished?: () => void; policySettings?: MatrixSetting[] }) {
   const [rules, setRules] = useState<Rule[]>([]), [substances, setSubstances] = useState<Substance[]>([]), [commodities, setCommodities] = useState<Commodity[]>([]);
   const [form, setForm] = useState<RuleForm>(() => blank('', companyId)), [error, setError] = useState(''), [loading, setLoading] = useState(false), [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
   const [sourceRule, setSourceRule] = useState<Rule | null>(null), [advanced, setAdvanced] = useState(false), [factorRange, setFactorRange] = useState(false);
   const action = useAction();
+  const [reload, setReload] = useState(0);
+  const [loadedScope, setLoadedScope] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     setForm(blank('', companyId)); setSourceRule(null); setAdvanced(false); setFactorRange(false);
   }, [companyId]);
@@ -34,11 +37,11 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
     let current = true;
     setLoading(true); setError('');
     void Promise.all([api<{ items: Rule[] }>('/api/residue-rules'), loadAll<Substance>('/api/active-substances'), loadAll<Commodity>('/api/commodities')])
-      .then(([rulePage, substanceItems, commodityItems]) => { if (current) { setRules(rulePage.items); setSubstances(substanceItems); setCommodities(commodityItems); } })
+      .then(([rulePage, substanceItems, commodityItems]) => { if (current) { setRules(rulePage.items); setSubstances(substanceItems); setCommodities(commodityItems); setLoadedScope(companyId); } })
       .catch(cause => { if (current) setError(errorMessage(cause)); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [active, allowed, companyId]);
+  }, [active, allowed, companyId, reload]);
 
   async function publish(event: FormEvent) {
     event.preventDefault();
@@ -114,6 +117,7 @@ export function ResidueRuleMaintenance({ active, allowed, companyId = null, onPu
     <p>{companyId ? 'Company rules use same-Code system series, retain company scope and require fresh review.' : 'Versioned, reviewed interpretation and process rules. Numeric values have no defaults; publishing does not certify scientific validity.'}</p>
     {loading && <p role="status">Loading published residue rules…</p>}
     {error && <p className="notice error" role="alert">{error}</p>}
+    {allowed && loadedScope === companyId && <ResidueMatrix rules={rules} substances={substances} commodities={commodities} companyId={companyId} settings={policySettings} disabled={loading || !!error} onPublished={() => { setReload(value => value + 1); onPublished?.(); }} />}
     {visibleRules.length > 0 && <div className="table-scroll residue-rule-table-scroll" role="region" aria-label="Published residue rules" tabIndex={0}>
       <table className="residue-rule-table">
         <caption>Published rules ({visibleRules.length})</caption>

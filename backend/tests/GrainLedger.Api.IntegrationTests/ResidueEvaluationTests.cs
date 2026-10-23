@@ -78,6 +78,43 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
     }
 
     [Fact]
+    public async Task Lot_preview_is_fresh_scoped_and_does_not_append_history()
+    {
+        using var s = await CreateAsync(factory);
+        var f = await ResidueScenario.CreateAsync(s);
+        var sample = await SampleAsync(s, await s.ReceiptAsync("100"));
+        await f.PublishRuleAsync(); // No report selection: expected result remains explicitly unresolved.
+        var route = $"/api/ledger/lots/{sample.LotId}/residue-preview?substanceIds={f.SubstanceId}";
+
+        using var firstResponse = await s.Customer.GetAsync(route);
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        var first = await firstResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(first.TryGetProperty("id", out _));
+        Assert.False(first.TryGetProperty("persistedAt", out _));
+        Assert.Equal(sample.LotId, first.GetProperty("lotId").GetGuid());
+        Assert.Equal("UNRESOLVED", ResultOf(first, f.SubstanceId).GetProperty("status").GetString());
+
+        var firstTime = first.GetProperty("snapshotAt").GetDateTimeOffset();
+        var (_, report) = await f.ReportAsync(sample);
+        await f.SelectAsync(sample, report);
+        var beforeFreshPreview = await f.BusinessStateAsync();
+        using var secondResponse = await s.Customer.GetAsync(route);
+        var second = await secondResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(second.GetProperty("snapshotAt").GetDateTimeOffset() >= firstTime);
+        Complete(ResultOf(second, f.SubstanceId), 0.1m, 0.2m);
+        Assert.Equal(beforeFreshPreview, await f.BusinessStateAsync());
+        Assert.Empty((await GetAsync(s.Customer, $"/api/ledger/lots/{sample.LotId}/residue-evaluations"))
+            .GetProperty("items").EnumerateArray());
+
+        using var denied = await s.ForeignCustomer.GetAsync(route);
+        Assert.Contains(denied.StatusCode, new[] { HttpStatusCode.Forbidden, HttpStatusCode.NotFound });
+        var tooMany = string.Join(',', Enumerable.Range(0, 201).Select(_ => Guid.NewGuid()));
+        using var invalid = await s.Customer.GetAsync(
+            $"/api/ledger/lots/{sample.LotId}/residue-preview?substanceIds={tooMany}");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
     public async Task Explicit_group_fallback_only_covers_members_and_never_infers_shared_farmer_or_missing_panel()
     {
         using var s = await CreateAsync(factory);

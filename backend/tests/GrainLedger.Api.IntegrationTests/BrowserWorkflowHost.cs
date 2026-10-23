@@ -102,6 +102,10 @@ public sealed class BrowserWorkflowHost
         var reviewReport = await LedgerScenario.GetAsync(scenario.Customer, $"/api/lab-reports/{reviewReportId}");
         await LedgerScenario.SendAsync(scenario.Customer, HttpMethod.Post, $"/api/lab-reports/{reviewReportId}/confirm",
             LabReportTests.ConfirmRequest(reviewReport, reviewSamples));
+        var normalizedSample = await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("10"));
+        var normalizedReport = await companyPolicy.ReportAsync(normalizedSample,
+            [companyPolicy.Result("150", uncertainty: null, unit: "µg/kg", lod: "10", loq: "20"),
+             companyPolicy.Result("0.2", uncertainty: null, substanceId: companyPolicy.OtherSubstanceId)], confirm: false);
         var latePublished = false;
         using var lateGate = new SemaphoreSlim(1, 1);
         var accounts = new Dictionary<string, object>();
@@ -241,7 +245,11 @@ public sealed class BrowserWorkflowHost
                     expectedOverrideLower = "0.12", expectedOverrideUpper = "0.18",
                     reviewReportId,
                     reviewLotIds = reviewSamples.Select(sample => sample.LotId).ToArray(),
-                    reviewSampleIds = reviewSamples.Select(sample => sample.Id).ToArray()
+                    reviewSampleIds = reviewSamples.Select(sample => sample.Id).ToArray(),
+                    normalizedReportId = normalizedReport.ReportId,
+                    normalizedLotId = normalizedSample.LotId,
+                    normalizedSampleId = normalizedSample.Id,
+                    uncoveredSubstanceId = companyPolicy.OtherSubstanceId
                 },
                 evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(), accounts
             }, new JsonSerializerOptions { WriteIndented = true });

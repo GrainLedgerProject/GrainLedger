@@ -11,7 +11,10 @@ public sealed record ResidueNode(Guid LotId, Guid CompanyId, Guid CommodityId, s
 public sealed record ResidueProvenance(string Kind, Guid SourceLotId, Guid? ReportId = null, Guid? ResultId = null,
     Guid? GroupVersionId = null, Guid? SelectionId = null, Guid? RuleId = null,
     Guid? SourceId = null, Guid? AssociationId = null, Guid? ResultSetId = null,
-    string? UncertaintyMode = null, string? RelativeUncertaintyPercent = null, string? AbsoluteUncertainty = null);
+    string? UncertaintyMode = null, string? RelativeUncertaintyPercent = null, string? AbsoluteUncertainty = null,
+    string? OriginalUnit = null, string? CanonicalUnit = null, string? ConcentrationScale = null,
+    string? OriginalNumericValue = null, string? OriginalLod = null, string? OriginalLoq = null,
+    string? OriginalAbsoluteUncertainty = null, string? OriginalReportingThreshold = null);
 public sealed record ResidueRuleReference(Guid Id, int Version, string Kind, string EvidenceReference,
     string? PolicyOrigin = null, Guid? PolicySettingId = null, int? PolicySettingVersion = null, string? RuleCode = null);
 public sealed record ResidueDependency(Guid LotId, Guid? ParentLotId, Guid? EventId, Guid? OperationId, string Kind, string? QuantityKg);

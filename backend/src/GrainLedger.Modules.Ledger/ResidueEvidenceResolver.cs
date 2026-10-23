@@ -50,7 +50,13 @@ public static class ResidueEvidenceResolver
             var remaining = direct.Where(x => !selection.SupersededResultIds.Contains(x.ResultId)).DistinctBy(x => x.ResultId).ToArray();
             if (remaining.Length != 1 || remaining[0].ResultId != selection.SelectedResultId)
             { output.Add(Unknown(node.LotId, substance, "Conflicting confirmed reports require reviewed supersession", direct)); continue; }
-            var result = remaining[0];
+            var raw = remaining[0];
+            var rawSelection = selection;
+            var normalization = ResidueConcentration.Normalize(raw, selection);
+            if (normalization.Reason is { } normalizationReason)
+            { output.Add(Unknown(node.LotId, substance, normalizationReason, [raw])); continue; }
+            var result = normalization.Evidence;
+            selection = normalization.Selection;
             var numeric = result.ResultKind == "NUMERIC";
             var kind = result.ResultKind switch { "BELOW_LIMIT" => "BELOW_LIMIT", "NOT_DETECTED" => "ND", _ => "UNSUPPORTED" };
             var resolved = SelectPolicy(policy, source.CompanyId, source.ReceivedAt, x =>
@@ -63,7 +69,10 @@ public static class ResidueEvidenceResolver
             var applicable = resolved.Rules;
             var provenance = new[] { new ResidueProvenance("DIRECT", node.LotId, result.ReportId, result.ResultId, SelectionId: selection.Id,
                 RuleId: applicable.Count == 1 ? applicable[0].Rule.Id : null, SourceId: source.SourceId,
-                AssociationId: result.AssociationId, ResultSetId: result.ResultSetId) };
+                AssociationId: result.AssociationId, ResultSetId: result.ResultSetId,
+                OriginalUnit: raw.Unit, CanonicalUnit: result.Unit, ConcentrationScale: raw.Unit == "mg/kg" ? "1" : "0.001",
+                OriginalNumericValue: raw.NumericValue, OriginalLod: raw.Lod, OriginalLoq: raw.Loq,
+                OriginalAbsoluteUncertainty: rawSelection.AbsoluteUncertainty, OriginalReportingThreshold: rawSelection.ReportingThreshold) };
             var references = new List<ResidueRuleReference> { new(selection.Id, 1, "REPORT_SELECTION", "Company-scoped reviewed evidence") };
             references.AddRange(applicable.Select(x => Reference(x.Rule, x.Setting)));
             if (resolved.Reason is not null || applicable.Count != 1)

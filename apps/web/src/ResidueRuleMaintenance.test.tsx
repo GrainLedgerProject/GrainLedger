@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { clearLocalSession } from './api';
@@ -187,4 +187,38 @@ it('requires fresh reviewer and date after editing scientific values in an alrea
   expect(screen.getByLabelText('Reviewed at')).toHaveValue('');
   expect((screen.getByRole('button', { name: 'Publish reviewed rule' }).closest('form') as HTMLFormElement).checkValidity()).toBe(false);
   expect(posts()).toHaveLength(0);
+});
+
+it('retains matrix publication feedback while refreshed Catalog data is loading and after it arrives', async () => {
+  const user = userEvent.setup();
+  const originalFetch = fetchMock.getMockImplementation()!;
+  let matrixPublished = false;
+  let releaseRefresh!: (value: Response) => void;
+  const refresh = new Promise<Response>(resolve => { releaseRefresh = resolve; });
+  fetchMock.mockImplementation(async (url, init) => {
+    const path = String(url).split('?')[0];
+    if (path === '/api/residue-matrix/publish' && init?.method === 'POST') {
+      matrixPublished = true;
+      return response({ rules: [], settings: [] });
+    }
+    if (path === '/api/residue-rules' && !init?.method && matrixPublished) return refresh;
+    return originalFetch(url, init);
+  });
+  render(<ResidueRuleMaintenance active allowed />);
+  await user.click(await screen.findByRole('button', { name: 'Edit system policy · RICE-RES' }));
+  fireEvent.change(screen.getByLabelText('Relative uncertainty (%) · RICE-RES'), { target: { value: '20' } });
+  fireEvent.change(screen.getByLabelText('Matrix effective from'), { target: { value: '2026-10-01T00:00' } });
+  fireEvent.change(screen.getByLabelText('Matrix reviewed at'), { target: { value: '2026-09-01T00:00' } });
+  fireEvent.change(screen.getByLabelText('Matrix scientific reviewer'), { target: { value: 'Reviewed scientist' } });
+  fireEvent.change(screen.getByLabelText('Matrix review authority'), { target: { value: 'QA' } });
+  await user.click(screen.getByLabelText(/I reviewed all changed complete profiles/));
+  await user.click(screen.getByRole('button', { name: 'Publish changed matrix rules' }));
+  const success = 'Matrix rules and explicitly selected adoption settings published together; unchanged scientific versions retained.';
+  expect(await screen.findByText(success)).toBeInTheDocument();
+  expect(screen.getByText('Loading published residue rules…')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Edit system policy · RICE-RES' })).toBeDisabled();
+  await act(async () => { releaseRefresh(response({ items: rules })); });
+  await waitFor(() => expect(screen.queryByText('Loading published residue rules…')).not.toBeInTheDocument());
+  expect(screen.getByText(success)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Edit system policy · RICE-RES' })).toBeEnabled();
 });

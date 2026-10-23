@@ -14,11 +14,21 @@ Companion documents: [residue-bounds plan](residue-bounds-plan.md) and [end-to-e
 | Return from override to inheritance | Select the profile series and system-default mode, then publish a reviewed return. This is versioned, not deletion. |
 | Use company-specific scientific policy | Clone an eligible system profile as a company rule. Inherited applicability appears as a summary; change the reviewed percentage or factor, use advanced applicability only for real exceptions, and complete fresh scientific review. Then explicitly select the reviewed company override. |
 | Add system policy | Administrator opens expert scientific-profile setup through **Administration → Catalogs → Commodities**. Full applicability and actual scientific review remain required; no numerical defaults are invented. Rule publication alone does not adopt it for any company. |
-| Review calculation | Confirm report identity/transcription first. Report residue review asks the server to match adopted profiles and show intervals or exceptions. Review and explicitly confirm eligible results together; use expert review only for unsupported or conflicting cases. |
+| Review calculation | Confirm sample identity/transcription once with **Confirm identity and bind compatible results**. Compatible adopted profiles bind automatically; returned exceptions stay unbound. Open exception review only for missing policy, normalization or conflicting evidence. |
 
 No company setting means no adopted profile and finite calculation stays `UNRESOLVED`. Settings and rules are append-only/versioned; supersession stays within the same scope. An active override that does not match blocks corresponding inherited system applicability. Distinct matching series or same-scope ambiguity fail closed. Never assume default profile, coefficient, scientific rule, or successful calculation.
 
-Normal report work does not require entering scientific rules again. A uniquely compatible adopted profile supplies its reviewed basis, residue definition and supporting policy review. Report binding confirmation is recorded separately from that scientific review. An applicable profile is not permission to replace laboratory-provided uncertainty, ignore a missing ND threshold, or choose between conflicting reports.
+Normal report work does not require entering scientific rules again or a second routine binding confirmation. A uniquely compatible adopted profile supplies its reviewed basis, residue definition and supporting policy review. Report binding confirmation is recorded separately from scientific review. An applicable profile is not permission to replace laboratory-provided uncertainty, ignore a missing ND threshold, or choose between conflicting reports.
+
+### Matrix editing and live bounds
+
+The substance matrix summarizes existing reviewed profiles, not one universal policy per substance. Inspect each profile's commodity, method, stage/basis, fraction, conditions and effective dates before editing. Change reviewed uncertainty/ND settings or processing factors, retain explicit factor ranges where needed, then publish changed rules with one actual scientific review. Unchanged profiles are not rewritten; stale publication retains the draft and requires explicit refreshed review. Missing profiles use expert setup; blank cells never imply factor 1.
+
+Company default/override choice remains explicit and independently versioned. Publication of a system rule does not adopt it. No method wildcard or automatic scientific approval exists.
+
+Opening lot detail loads live bounds without writing history. **Refresh live preview** captures current evidence/policy again. **Lock snapshot for audit** appends an immutable historical evaluation; earlier snapshots never become current merely because they are the latest saved record.
+
+When resolving a report exception, enter reviewed absolute uncertainty or reporting threshold in the original selected report row's unit. For example, a reviewed `50 µg/kg` uncertainty is entered as `50`, then normalized to `0.05 mg/kg`; do not pre-convert and scale it twice. Raw uncertainty wording remains unchanged and is never parsed automatically.
 
 ## 2. Which records do you need?
 
@@ -59,7 +69,7 @@ Published rules appear in a table; use each row's **Details** disclosure to insp
 | Analytical basis | Interpretation only: reviewed material/moisture basis of reported concentration. UI uses this as both input and output basis. Not a unit or stage. |
 | Input / output stage | Processing only: choose physical stages before and after this transformation from the supported stage dropdowns. |
 | Input / output analytical basis | Processing only: input must match parent interval basis; output becomes resulting interval basis and must match the next rule's input basis. |
-| Concentration unit | Select `mg/kg`; no automatic conversion from other units. |
+| Concentration unit | Scientific profiles use `mg/kg`. Supported report units `µg/kg`, `μg/kg` and `ug/kg` normalize exactly by `0.001`; values, LOD, LOQ and reviewed concentration-valued selection fields scale together. Bare `ppb` remains unresolved without explicit mass-fraction semantics. |
 | Relative uncertainty percent | Only for `NUMERIC_RELATIVE_UNCERTAINTY`; exact nonnegative decimal percentage, not fraction (`10` = 10%). |
 | Reviewed relative uncertainty at numeric zero | Explicit opt-in required to use relative uncertainty at zero; otherwise numeric zero remains unresolved under relative policy. |
 | Analytical method | Interpretation only: exact text recorded in laboratory result. No automatic method-name equivalence. |

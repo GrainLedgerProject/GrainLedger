@@ -8,6 +8,7 @@ import { ResidueEvidenceControls } from './ResidueEvidenceControls';
 type ReportKind = 'PARTIAL' | 'FINAL' | 'SUPPLEMENTARY' | 'AMENDMENT' | 'RETEST';
 type AssessmentStatus = 'NOT_ASSESSED' | 'WITHIN_ASSESSED_LIMITS' | 'EXCEEDS_LIMIT' | 'INSUFFICIENT_EVIDENCE' | 'NO_MRL_IN_VN';
 type ResultSet = { id: string; sampleId: string | null; confirmedSampleId: string | null; sourceLotId: string | null; laboratorySampleReference: string | null; statedSampleCode: string | null; statedSealCode: string | null; sectionReference: string | null; identityStatus?: string; results: Array<LabCsvRow & { id?: string }> };
+type ResidueBinding = { resultId: string; sourceId: string; published: boolean; reasons: string[] };
 type Report = { id: string; laboratoryName: string; reportNumber: string; issuedOn: string; receivedAt: string; reportKind: ReportKind; status: 'UNRESOLVED' | 'PENDING_REVIEW' | 'CONFIRMED'; fileName: string; contentType: string; fileSize: number; sha256: string; recordedBy: string; capturedAt: string; recordedAt: string; confirmedBy: string | null; confirmedAt: string | null; resultSets: ResultSet[]; laboratoryConclusion?: string | null; statedStandard?: string | null; assessmentStatus: AssessmentStatus; suggestedMarketCode: string; assessmentReasons: string[]; relatedReportId?: string | null; relationshipReason?: string | null; relatedReports?: Array<{ id: string; reportKind: ReportKind; relationshipReason: string | null }> };
 type SampleOption = { id: string; code: string; sealCode: string; sourceLotId: string; materialDescription?: string | null };
 type ConfirmPayload = { identityChecked: true; transcriptionChecked: true; matches: Array<{ resultSetId: string; sampleId: string; identityBasis: 'SAMPLE_CODE' | 'SEAL_CODE' | 'LAB_REFERENCE'; evidenceRef?: string }> };
@@ -322,6 +323,7 @@ function ReportIntake({ canWrite, initialSampleId, initialLaboratory, relatedRep
 
 function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBack, onOpenReport, onOpenSample, onOpenSourceLot }: { id: string; canWrite: boolean; canManageResidueEvidence: boolean; companyId: string; onBack: () => void; onOpenReport: (id: string) => void; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
   const [report, setReport] = useState<Report | null>(null), [error, setError] = useState(''), [retry, setRetry] = useState(0), [confirmOpen, setConfirmOpen] = useState(false), [identityChecked, setIdentity] = useState(false), [transcriptionChecked, setTranscription] = useState(false), [matches, setMatches] = useState<Record<string, { sampleId: string; identityBasis: string; evidenceRef: string }>>({}), [selectedSamples, setSelectedSamples] = useState<Record<string, SampleOption>>({}), [substances, setSubstances] = useState<Record<string, { code: string; name: string }>>({}), [confirmPending, setConfirmPending] = useState<Envelope<ConfirmPayload> | null>(null), [busy, setBusy] = useState(false), [mutationError, setMutationError] = useState(''), [relationship, setRelationship] = useState<ReportKind | null>(null);
+  const [residueBindings, setResidueBindings] = useState<ResidueBinding[] | null>(null);
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -375,7 +377,8 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
     const request = confirmPending ?? newRequest(payload);
     setConfirmPending(request);
     try {
-      await api(`/api/lab-reports/${id}/confirm`, { method: 'POST', body: JSON.stringify(request) });
+      const confirmed = await api<Report & { residueBindings: ResidueBinding[] }>(`/api/lab-reports/${id}/confirm`, { method: 'POST', body: JSON.stringify(request) });
+      setResidueBindings(confirmed.residueBindings ?? []);
       setConfirmPending(null);
       setConfirmOpen(false);
       setRetry(n => n + 1);
@@ -429,6 +432,10 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
         {canWrite && (['SUPPLEMENTARY','AMENDMENT','RETEST'] as const).map(kind => <button className="secondary" key={kind} onClick={() => setRelationship(kind)}>Create linked {kind.toLowerCase()}</button>)}
       </div>
     </header>
+    {residueBindings && <section className="notice" aria-label="Confirmation residue bindings" role="status">
+      <p>Identity and transcription confirmed. {residueBindings.filter(row => row.published).length} compatible residue rows bound; {residueBindings.filter(row => !row.published).length} require exception review. No stock or HOLD changed.</p>
+      {residueBindings.filter(row => !row.published).map(row => <p key={`${row.resultId}-${row.sourceId}`}>{report.resultSets.flatMap(set => set.results).find(result => result.id === row.resultId)?.testLabel || row.resultId}: {row.reasons.join('; ')}</p>)}
+    </section>}
     <section className={bannerClass} aria-label="Server-provided assessment summary">
       <div className="lab-assessment-header">
         <div>
@@ -557,7 +564,7 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
     {relationship && <ReportIntake canWrite={canWrite} initialSampleId={initialSampleId} initialLaboratory={report.laboratoryName} relatedReportId={report.id} initialKind={relationship} onCancel={() => setRelationship(null)} onCreated={createdId => { setRelationship(null); onOpenReport(createdId); }} />}
     {confirmOpen && <div className="farmer-modal-backdrop"><section className="farmer-modal capture-modal-wide lab-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-report-title">
       <div className="farmer-modal-heading"><h2 id="confirm-report-title">Review report transcription</h2><button type="button" className="farmer-modal-close" aria-label="Close confirmation" disabled={busy} onClick={() => setConfirmOpen(false)}>×</button></div>
-      <p className="muted">Check every printed sample identity against registered custody history. Confirmation binds the results to the sample’s procurement source lot.</p>
+      <p className="muted">Check every printed sample identity against registered custody history. This one confirmation also binds unique compatible residue rows using adopted policy. Missing policy, unsupported uncertainty and retests remain visible exceptions; identity stays confirmed. No scientific values are inferred.</p>
       <form onSubmit={confirm}>
         <label className="checkbox-label"><input type="checkbox" checked={identityChecked} onChange={e => setIdentity(e.target.checked)} /> I checked sample/seal identity against original report and custody evidence.</label>
         <label className="checkbox-label"><input type="checkbox" checked={transcriptionChecked} onChange={e => setTranscription(e.target.checked)} /> I checked all result text, qualifiers, units, limits, and references against original file.</label>
@@ -625,7 +632,7 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
         {mutationError && <div role="alert" className="notice error">{mutationError}</div>}
         <div className="form-footer">
           <button type="button" className="secondary" disabled={busy} onClick={() => setConfirmOpen(false)}>Cancel</button>
-          <button disabled={busy || !identityChecked || !transcriptionChecked}>{busy ? 'Confirming…' : confirmPending ? 'Retry exact confirmation' : 'Confirm checked record'}</button>
+          <button disabled={busy || !identityChecked || !transcriptionChecked}>{busy ? 'Confirming…' : confirmPending ? 'Retry exact confirmation' : 'Confirm identity and bind compatible results'}</button>
         </div>
       </form>
     </section></div>}

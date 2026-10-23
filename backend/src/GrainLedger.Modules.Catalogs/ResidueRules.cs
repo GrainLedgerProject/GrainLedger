@@ -80,6 +80,9 @@ public static class ResidueRuleEndpoints
         group.MapPost("", PublishAsync);
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
+        endpoints.MapPost("/api/residue-matrix/publish", ResidueMatrixEndpoints.PublishAsync)
+            .RequireAuthorization().AddEndpointFilter<NoStoreFilter>()
+            .AddEndpointFilter<MutationAntiforgeryFilter>().WithTags("Reviewed residue rules");
         return endpoints;
     }
 
@@ -88,44 +91,7 @@ public static class ResidueRuleEndpoints
     {
         if (!Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var actor)) return Results.Forbid();
         var now = clock.GetUtcNow();
-        var errors = ResidueReview.Validate(request.Id, request.EffectiveFrom, request.EffectiveTo,
-            request.EvidenceRef, request.ApplicabilityStatement, request.ReviewedBy, request.ReviewAuthority,
-            request.ReviewedAt, now);
-        if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 100 || request.VersionNo < 1)
-            errors["code"] = ["Code (maximum 100 characters) and positive version are required."];
-        if (request.SubstanceId == Guid.Empty || request.DecimalPlaces is < 0 or > 18 || request.Unit != "mg/kg")
-            errors["unit"] = ["Explicit substance, mg/kg concentration unit and approved precision 0..18 required."];
-        if (request.CommodityId is null || request.CommodityId == Guid.Empty)
-            errors["commodityId"] = ["Explicit Catalog commodity applicability required; no universal default."];
-        if (request.CompanyId == Guid.Empty)
-            errors["companyId"] = ["Use null for system scope or an explicit owning company."];
-        if (new[] { request.ResidueDefinition, request.InputStage, request.OutputStage, request.InputBasis, request.OutputBasis }.Any(string.IsNullOrWhiteSpace))
-            errors["applicability"] = ["Explicit residue definition, stages and analytical bases required."];
-        if (request.Kind == "INTERPRETATION")
-        {
-            if (request.InterpretationKind is not ("NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY" or "BELOW_LIMIT" or "ND") ||
-                string.IsNullOrWhiteSpace(request.AnalyticalMethod) || request.InputBasis != request.OutputBasis ||
-                request.InputStage != request.OutputStage || request.FactorLower is not null || request.FactorUpper is not null ||
-                request.FactorSemantics is not null || request.HomogeneousMixing ||
-                (request.InterpretationKind == "ND" ? request.NdThresholdKind is not ("REPORTING_THRESHOLD" or "LOD" or "LOQ") : request.NdThresholdKind is not null))
-                errors["interpretationKind"] = ["Reviewed interpretation requires exact method, unchanged basis/stage and explicit ND threshold policy; no processing factors."];
-        }
-        else if (request.Kind == "PROCESS")
-        {
-            if (!ResidueReview.Interval(request.FactorLower, request.FactorUpper) ||
-                request.FactorSemantics is not ("STEP_CONCENTRATION" or "CUMULATIVE_CONCENTRATION") ||
-                string.IsNullOrWhiteSpace(request.Process) || string.IsNullOrWhiteSpace(request.OutputFraction) ||
-                string.IsNullOrWhiteSpace(request.Conditions) || request.InterpretationKind is not null || request.NdThresholdKind is not null)
-                errors["factor"] = ["Reviewed nonnegative concentration-factor interval, semantics, process, fraction and conditions required."];
-        }
-        else errors["kind"] = ["Use INTERPRETATION or PROCESS."];
-        if (request.InterpretationKind == "NUMERIC_RELATIVE_UNCERTAINTY" && request.Kind == "INTERPRETATION")
-        {
-            if (!ResidueReview.Number(request.RelativeUncertaintyPercent))
-                errors["relativeUncertaintyPercent"] = ["Explicit nonnegative exact percentage required; 10 means 10%, not a fraction."];
-        }
-        else if (request.RelativeUncertaintyPercent is not null || request.RelativeUncertaintyAtZero)
-            errors["relativeUncertaintyPercent"] = ["Relative settings apply only to NUMERIC_RELATIVE_UNCERTAINTY interpretation."];
+        var errors = ValidateRule(request, now);
         if (errors.Count != 0) return Results.ValidationProblem(errors);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
@@ -170,6 +136,49 @@ public static class ResidueRuleEndpoints
         return Results.Created($"/api/residue-rules/{rule.Id}", rule);
     }
 
+    internal static Dictionary<string, string[]> ValidateRule(ResidueRuleVersion request, DateTimeOffset now)
+    {
+        var errors = ResidueReview.Validate(request.Id, request.EffectiveFrom, request.EffectiveTo,
+            request.EvidenceRef, request.ApplicabilityStatement, request.ReviewedBy, request.ReviewAuthority,
+            request.ReviewedAt, now);
+        if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 100 || request.VersionNo < 1)
+            errors["code"] = ["Code (maximum 100 characters) and positive version are required."];
+        if (request.SubstanceId == Guid.Empty || request.DecimalPlaces is < 0 or > 18 || request.Unit != "mg/kg")
+            errors["unit"] = ["Explicit substance, mg/kg concentration unit and approved precision 0..18 required."];
+        if (request.CommodityId is null || request.CommodityId == Guid.Empty)
+            errors["commodityId"] = ["Explicit Catalog commodity applicability required; no universal default."];
+        if (request.CompanyId == Guid.Empty)
+            errors["companyId"] = ["Use null for system scope or an explicit owning company."];
+        if (new[] { request.ResidueDefinition, request.InputStage, request.OutputStage, request.InputBasis, request.OutputBasis }.Any(string.IsNullOrWhiteSpace))
+            errors["applicability"] = ["Explicit residue definition, stages and analytical bases required."];
+        if (request.Kind == "INTERPRETATION")
+        {
+            if (request.InterpretationKind is not ("NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY" or "BELOW_LIMIT" or "ND") ||
+                string.IsNullOrWhiteSpace(request.AnalyticalMethod) || request.InputBasis != request.OutputBasis ||
+                request.InputStage != request.OutputStage || request.FactorLower is not null || request.FactorUpper is not null ||
+                request.FactorSemantics is not null || request.HomogeneousMixing ||
+                (request.InterpretationKind == "ND" ? request.NdThresholdKind is not ("REPORTING_THRESHOLD" or "LOD" or "LOQ") : request.NdThresholdKind is not null))
+                errors["interpretationKind"] = ["Reviewed interpretation requires exact method, unchanged basis/stage and explicit ND threshold policy; no processing factors."];
+        }
+        else if (request.Kind == "PROCESS")
+        {
+            if (!ResidueReview.Interval(request.FactorLower, request.FactorUpper) ||
+                request.FactorSemantics is not ("STEP_CONCENTRATION" or "CUMULATIVE_CONCENTRATION") ||
+                string.IsNullOrWhiteSpace(request.Process) || string.IsNullOrWhiteSpace(request.OutputFraction) ||
+                string.IsNullOrWhiteSpace(request.Conditions) || request.InterpretationKind is not null || request.NdThresholdKind is not null)
+                errors["factor"] = ["Reviewed nonnegative concentration-factor interval, semantics, process, fraction and conditions required."];
+        }
+        else errors["kind"] = ["Use INTERPRETATION or PROCESS."];
+        if (request.InterpretationKind == "NUMERIC_RELATIVE_UNCERTAINTY" && request.Kind == "INTERPRETATION")
+        {
+            if (!ResidueReview.Number(request.RelativeUncertaintyPercent))
+                errors["relativeUncertaintyPercent"] = ["Explicit nonnegative exact percentage required; 10 means 10%, not a fraction."];
+        }
+        else if (request.RelativeUncertaintyPercent is not null || request.RelativeUncertaintyAtZero)
+            errors["relativeUncertaintyPercent"] = ["Relative settings apply only to NUMERIC_RELATIVE_UNCERTAINTY interpretation."];
+        return errors;
+    }
+
     private static async Task<IResult> ListAsync(HttpContext http, CatalogDbContext db, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -192,7 +201,7 @@ public static class ResidueRuleEndpoints
     }
 
 
-    private static async Task<List<ResidueRuleVersion>> ReadVersionsAsync(NpgsqlConnection connection,
+    internal static async Task<List<ResidueRuleVersion>> ReadVersionsAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid? companyId, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand("""

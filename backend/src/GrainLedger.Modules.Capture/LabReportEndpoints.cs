@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
 namespace GrainLedger.Modules.Capture;
@@ -42,7 +43,7 @@ public sealed record LabReportResponse(Guid Id, Guid CompanyId, string Laborator
     string Sha256, Guid RecordedBy, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt, string Status,
     Guid? ConfirmedBy, DateTimeOffset? ConfirmedAt, IReadOnlyList<LabResultSetResponse> ResultSets,
     IReadOnlyList<LabRelatedReportResponse> RelatedReports, string AssessmentStatus, string SuggestedMarketCode,
-    IReadOnlyList<string> AssessmentReasons);
+    IReadOnlyList<string> AssessmentReasons, IReadOnlyList<LabReportResidueBinding>? ResidueBindings = null);
 public sealed record LabReportListResponse(IReadOnlyList<LabReportResponse> Items, int Page, int PageSize, bool HasMore);
 internal sealed record VnMrlLimitRow(Guid SubstanceId, string SubstanceCode, string CommodityCode, decimal LimitValue, string Unit);
 internal sealed record SubstanceCodeRow(Guid Id, string Code);
@@ -216,7 +217,8 @@ public static class LabReportEndpoints
     }
 
     private static async Task<IResult> ConfirmAsync(Guid id, ConfirmLabReportRequest request, ClaimsPrincipal principal,
-        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, TimeProvider clock, CancellationToken ct)
+        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, TimeProvider clock,
+        IConfirmedLabReportResidueBinder residueBinder, CancellationToken ct)
     {
         var company = await CompanyAsync(principal, access, identityDb, ct);
         if (company is null) return Results.Forbid();
@@ -270,7 +272,9 @@ public static class LabReportEndpoints
             db.LabConfirmedAssociations.Add(new LabConfirmedAssociation { Id = Guid.NewGuid(), CompanyId = company.Value, ConfirmationId = confirmation.Id,
                 ResultSetId = match.ResultSetId, SampleId = match.SampleId, IdentityBasis = match.IdentityBasis!, EvidenceRef = match.EvidenceRef });
         await db.SaveChangesAsync(ct);
-        var response = (await ResponsesAsync(db, company.Value, [id], ct))[0];
+        var bindings = await residueBinder.BindConfirmedReportAsync((NpgsqlConnection)db.Database.GetDbConnection(),
+            (NpgsqlTransaction)transaction.GetDbTransaction(), actor, company.Value, id, now, ct);
+        var response = (await ResponsesAsync(db, company.Value, [id], ct))[0] with { ResidueBindings = bindings };
         await AddOperationAsync(db, company.Value, actor, request.DeviceId.Trim(), request.ClientOperationId, request.CapturedAt, now, "LAB_REPORT_CONFIRMED", canonical, hash, response, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);

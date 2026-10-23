@@ -1,9 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
 import { Feedback, useAction } from './ledger-ui';
-import { ResidueRuleMaintenance } from './ResidueRuleMaintenance';
+import { ResidueRuleMaintenance, type Rule } from './ResidueRuleMaintenance';
 
-type Rule = { id: string; code: string; versionNo: number; companyId?: string | null; substanceId: string; commodityId: string; kind: string; interpretationKind: string | null; ndThresholdKind: string | null; inputStage: string; outputStage: string; inputBasis: string; outputBasis: string; residueDefinition: string; analyticalMethod: string | null; unit: string; decimalPlaces: number; relativeUncertaintyPercent: string | null; factorLower: string | null; factorUpper: string | null; factorSemantics: string | null; process: string; conditions: string; outputFraction: string; homogeneousMixing: boolean; relativeUncertaintyAtZero: boolean; effectiveFrom: string; effectiveTo: string | null; evidenceRef: string; applicabilityStatement: string; reviewedBy: string; reviewAuthority: string; reviewedAt: string };
 type Setting = { id: string; companyId: string; ruleCode: string; versionNo: number; mode: 'SYSTEM_DEFAULT' | 'COMPANY_OVERRIDE'; effectiveFrom: string; effectiveTo: string | null; supersedesId: string | null; evidenceRef: string; applicabilityStatement: string; reviewedBy: string; reviewAuthority: string; reviewedAt: string; publishedBy?: string; publishedAt?: string };
 type Draft = Pick<Setting, 'id' | 'ruleCode' | 'versionNo' | 'supersedesId' | 'evidenceRef' | 'applicabilityStatement'> & { sourceRuleId: string | null };
 type CatalogItem = { id: string; code: string; name: string };
@@ -30,7 +29,11 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
   }, [active, allowed, companyId, reload]);
   const eligible = rules.filter(rule => !rule.companyId || rule.companyId === companyId);
   const codes = Array.from(new Set(eligible.map(rule => rule.code)));
-  const source = (code: string, selectedMode = mode) => eligible.filter(rule => rule.code === code && (selectedMode === 'SYSTEM_DEFAULT' ? !rule.companyId : rule.companyId === companyId)).sort((a, b) => b.versionNo - a.versionNo)[0];
+  const source = (code: string, selectedMode = mode) => {
+    const series = eligible.filter(rule => rule.code === code && (selectedMode === 'SYSTEM_DEFAULT' ? !rule.companyId : rule.companyId === companyId));
+    const current = series.filter(rule => !series.some(next => next.supersedesId === rule.id));
+    return current.length === 1 ? current[0] : undefined;
+  };
   const sourceChanged = drafts.some(item => item.sourceRuleId !== (source(item.ruleCode)?.id || null));
   const name = (items: CatalogItem[], id: string) => { const item = items.find(value => value.id === id); return item ? `${item.code} · ${item.name}` : id; };
   const label = (code: string) => {
@@ -160,7 +163,7 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
       <Feedback {...action} />
       {settings.length > 0 && <details><summary>Adoption and override history ({settings.length})</summary><ul>{settings.map(item => <li key={item.id}>{label(item.ruleCode)} · {item.mode === 'SYSTEM_DEFAULT' ? 'System default' : 'Company override'} · v{item.versionNo} · effective {item.effectiveFrom}{item.effectiveTo ? ` to ${item.effectiveTo}` : ' onward'} · adoption reviewed by {item.reviewedBy} · {item.reviewAuthority} · {item.reviewedAt} · {item.evidenceRef} · {item.applicabilityStatement}</li>)}</ul></details>}
     </section>
-    <ResidueRuleMaintenance active={active} allowed={allowed} companyId={companyId} onPublished={() => setReload(value => value + 1)} />
+    <ResidueRuleMaintenance active={active} allowed={allowed} companyId={companyId} policySettings={settings} onPublished={() => setReload(value => value + 1)} />
   </div>;
 }
 async function loadCatalog(path: string): Promise<CatalogItem[]> {

@@ -190,7 +190,10 @@ it('shows rejected confirmation inside dialog, allows correction and retry, and 
       }
       correctedConfirmation = body;
       confirmedReport = { ...report, status: 'CONFIRMED', confirmedBy: 'reviewer', confirmedAt: '2026-10-20T11:00:00Z' };
-      return new Response(null, { status: 204 });
+      return new Response(JSON.stringify({ ...confirmedReport, residueBindings: [
+        { resultId: 'result-a', sourceId: 'lot-a', published: true, reasons: [] },
+        { resultId: 'result-b', sourceId: 'lot-a', published: false, reasons: ['Missing compatible adopted profile'] },
+      ] }), { headers: { 'Content-Type': 'application/json' } });
     }
     return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
   });
@@ -204,17 +207,20 @@ it('shows rejected confirmation inside dialog, allows correction and retry, and 
   await screen.findByRole('option', { name: 'SMP-001 · seal SEAL-001' });
   await user.click(screen.getByRole('checkbox', { name: /I checked sample\/seal identity/ }));
   await user.click(screen.getByRole('checkbox', { name: /I checked all result text/ }));
-  await user.click(screen.getByRole('button', { name: 'Confirm checked record' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm identity and bind compatible results' }));
 
   expect(await screen.findByRole('alert')).toHaveTextContent('Identity basis does not match printed sample.');
   expect(screen.getByRole('dialog', { name: 'Review report transcription' })).toBe(dialog);
   expect(firstConfirmation?.payload.matches[0].identityBasis).toBe('SAMPLE_CODE');
   await user.selectOptions(screen.getByLabelText('Identity basis'), 'SEAL_CODE');
-  await user.click(screen.getByRole('button', { name: 'Confirm checked record' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm identity and bind compatible results' }));
 
   await waitFor(() => expect(correctedConfirmation?.payload.matches[0].identityBasis).toBe('SEAL_CODE'));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Review report transcription' })).not.toBeInTheDocument());
   expect(screen.getByText('NOT_ASSESSED')).toBeVisible();
+  expect(screen.getByLabelText('Confirmation residue bindings')).toHaveTextContent('1 compatible residue rows bound; 1 require exception review');
+  expect(screen.getByLabelText('Confirmation residue bindings')).toHaveTextContent('Missing compatible adopted profile');
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/residue-review/confirm'))).toHaveLength(0);
 });
 it('preserves imported row details over section defaults and gates contradictory interpretation', async () => {
   render(<LabReports canWrite />);

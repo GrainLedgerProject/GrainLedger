@@ -393,6 +393,7 @@ public static class LedgerModuleRegistration
             n => n.MigrationsAssembly(typeof(LedgerDbContext).Assembly.FullName).MigrationsHistoryTable("__EFMigrationsHistory", "ledger")));
         services.AddScoped<LedgerService>();
         services.AddScoped<ResidueEvaluationService>();
+        services.AddScoped<IConfirmedLabReportResidueBinder>(provider => provider.GetRequiredService<ResidueEvaluationService>());
         services.AddScoped<IProcurementLedgerPort, ProcurementLedgerPort>();
         services.AddScoped<ICommodityLedgerPort, CommodityLedgerPort>();
         return services;

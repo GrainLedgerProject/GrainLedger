@@ -105,18 +105,19 @@ As **Customer Manager**:
 5. Save report evidence.
 6. Open **Review and confirm**.
 7. Verify sample identity and transcription against the synthetic original.
-8. Confirm the checked record.
-9. Open report residue review and preview:
-   - Server matches the explicitly adopted profile against confirmed source, substance, commodity, method, stage, unit and policy applicability.
-   - Original uncertainty text requires reviewed normalization: enter absolute uncertainty **0.05** with actual supporting review in the exception workflow. It is authoritative and is not inferred from raw lab text.
-   - Review server interval/reasons and explicitly publish the reviewed selection. Existing expert selection remains available for this scientific exception.
-   - For the separate relative-uncertainty rehearsal with no reported uncertainty and a compatible adopted profile, use the report summary's single binding confirmation instead of repeating scientific review metadata.
+8. Choose **Confirm identity and bind compatible results**.
+9. Inspect returned residue-binding outcomes. This baseline's nonblank uncertainty text requires exception review, so that row stays unbound:
+   - Open **Resolve exceptions or bind after policy adoption**.
+   - Server matches the adopted profile against confirmed source, substance, commodity, method, stage, canonical unit and effective applicability.
+   - Enter reviewed absolute uncertainty **0.05** with supporting review; never infer it by parsing raw text.
+   - Preview interval/reasons and explicitly publish the reviewed exception selection.
+   - In the separate relative-uncertainty rehearsal with no reported uncertainty, compatible adopted policy binds during step 8; no second routine confirmation is required.
 
 ### Report B
 
 Record report B with **0.55 mg/kg** and its original uncertainty text, but **do not confirm or publish its reviewed selection yet**.
 
-**Expected:** A has usable reviewed evidence; B does not. Report confirmation and reviewed interval interpretation are separate steps.
+**Expected:** A has usable reviewed evidence; B does not. Identity confirmation and interval interpretation retain separate audit facts, even when the routine action records both.
 
 ## 5. Process both lots while B’s evidence remains pending
 
@@ -150,10 +151,10 @@ If nonzero measurement variance occurs, follow existing Manager review rather th
 
 As **Customer Manager**:
 
-1. Open **Ledger → Stock → blended lot detail**.
-2. Select the test substance.
-3. Click **Calculate bounds**.
-4. Record the snapshot timestamp.
+1. Open **Ledger → Stock → blended lot detail**; live bounds load automatically.
+2. Inspect the test substance's live unresolved result and captured time.
+3. Select the test substance for historical audit.
+4. Click **Lock snapshot for audit** and record its timestamp.
 5. Expand reasons and lineage dependencies.
 
 **Expected:**
@@ -172,15 +173,15 @@ As **Customer Manager**:
 
 1. Open report B.
 2. Review sample identity and transcription.
-3. Confirm the report.
-4. Draft reviewed result selection for B:
+3. Choose **Confirm identity and bind compatible results**. This baseline needs normalized uncertainty, so inspect its explicit exception.
+4. Open exception review and draft B's reviewed result selection:
    - Numeric result: **0.55 mg/kg**.
-   - Reviewed absolute uncertainty: **0.25 mg/kg**.
+   - Reviewed absolute uncertainty: **0.25 mg/kg**, entered in this report's original unit.
    - Same compatible basis and residue definition as A.
-5. Select the adopted interpretation profile. Profile supplies reviewed references/basis context; reviewer and review date remain explicit.
-6. Click **Preview server assessment**. Preview is non-mutating; inspect interval/reasons. Only empty `reasons` and non-null `lower`/`upper` represent finite result. Browser arithmetic is not authoritative.
-7. Publish reviewed selection only after review; return to blended lot.
-8. Click **Recalculate bounds**.
+5. Preview the server assessment; retain profile scientific review and record the actual normalization review note.
+6. Publish the reviewed exception selection, then return to blended lot.
+7. Click **Refresh live preview**. Refresh must not append evaluation history.
+8. Click **Lock snapshot for audit** to retain the new finite result alongside the earlier unresolved snapshot.
 
 **Expected result:**
 
@@ -235,9 +236,13 @@ Use separate test records for conflicting-evidence scenarios so they do not cont
 | Assigned operator opens derived bounds | Allowed |
 | Operator requests the original laboratory report | Denied |
 | Different company opens the saved lot URL | Access denied; no result data |
+| Confirm a supported `150 µg/kg` result under adopted synthetic relative 10% profile, without reported uncertainty | Same `[0.135, 0.165] mg/kg` source interval as `0.15 mg/kg`; original unit/value and scale retained |
+| Confirm a report containing one compatible row and one missing-policy substance | Identity remains confirmed; compatible row binds, missing-policy row remains an explicit exception |
+| Open or refresh live preview repeatedly | No evaluation history rows appended |
+| Publish matrix change against stale predecessor | 409; no partial rule/settings publication, draft retained |
 
 ## Pass condition
 
 Baseline pass criteria: late evidence updates only new calculations, history stays immutable, missing scientific inputs never become guessed bounds or PASS, and residue evaluation does not alter stock, original laboratory evidence or HOLD state. Extension acceptance additionally requires explicit profile adoption, fail-closed override behavior, correct uncertainty handling/provenance and real UI/API verification.
 
-Numeric examples above are expected synthetic test data, not operational scientific policy. Observed checks and isolated API/browser scenarios are recorded separately in the [residue-bounds verification log](residue-bounds-plan.md#14-profile-first-setup-and-compact-report-review); that log, rather than this walkthrough, identifies which flows were exercised.
+Numeric examples above are expected synthetic test data, not operational scientific policy. Observed checks and isolated API/browser scenarios are recorded separately in the [residue-bounds verification log](residue-bounds-plan.md#15-substance-matrix-single-action-report-confirmation-and-live-bounds); that log, rather than this walkthrough, identifies which flows were exercised.

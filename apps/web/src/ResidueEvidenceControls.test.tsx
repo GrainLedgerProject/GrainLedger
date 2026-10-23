@@ -104,6 +104,9 @@ it('prepares authoritative profile summary and confirms compatible rows once wit
   screen.getAllByLabelText('Material basis').forEach(field => expect(field).not.toBeVisible());
   await user.click(screen.getByText('Scientific review and applicability', { selector: 'summary' }));
   expect(screen.getByText(/Scientific reviewer: Original scientist/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Review and confirm compatible results', hidden: true })).not.toBeVisible();
+  await user.click(screen.getByText('Resolve exceptions or bind after policy adoption', { selector: 'summary' }));
+  expect(screen.getByRole('button', { name: 'Review and confirm compatible results' })).toBeVisible();
   await user.click(screen.getByRole('button', { name: 'Review and confirm compatible results' }));
   const confirmation = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/residue-review/confirm'));
   expect(confirmation).toBeDefined();
@@ -121,6 +124,7 @@ it('shows unresolved prerequisites and named conflicts; editing invalidates prev
   const user = userEvent.setup();
   render(<ResidueEvidenceControls active allowed companyId="company-1" report={confirmedReport} />);
   expect(await screen.findByText('Reported uncertainty requires explicit reviewed normalization')).toBeVisible();
+  await user.click(screen.getByText('Resolve exceptions or bind after policy adoption', { selector: 'summary' }));
   const confirm = screen.getByRole('button', { name: 'Review and confirm compatible results' });
   expect(confirm).toBeDisabled();
   await user.click(screen.getByText('Review uncertainty, threshold or report conflicts', { selector: 'summary' }));

@@ -17,6 +17,8 @@ namespace GrainLedger.Modules.Ledger;
 public sealed record ResidueEvaluationRequest(Guid Id, Guid[] SubstanceIds);
 public sealed record ResidueEvaluation(Guid Id, Guid LotId, Guid CompanyId, DateTimeOffset SnapshotAt,
     DateTimeOffset? PersistedAt, string EngineVersion, IReadOnlyList<ResidueResult> Results);
+public sealed record ResidueEvaluationPreview(Guid LotId, Guid CompanyId, DateTimeOffset SnapshotAt,
+    string EngineVersion, IReadOnlyList<ResidueResult> Results);
 
 public sealed partial class ResidueEvaluationService(IConfiguration configuration, LedgerService ledger,
     IResiduePolicyReader policyReader, IResidueEvidenceReader evidenceReader)
@@ -33,8 +35,8 @@ public sealed partial class ResidueEvaluationService(IConfiguration configuratio
         var actor = await ledger.ActorAsync(ct);
         await using var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
         await connection.OpenAsync(ct);
-        IReadOnlyList<ResidueNode> nodes; ResiduePolicySnapshot policies; ResidueEvidenceSnapshot evidence;
         DateTimeOffset snapshotAt;
+        (ResidueNode[] Nodes, ResiduePolicySnapshot Policies, ResidueEvidenceSnapshot Evidence) materialized;
         await using (var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct))
         {
             await ExecuteAsync(connection, tx, "SET TRANSACTION READ ONLY", ct);
@@ -43,19 +45,12 @@ public sealed partial class ResidueEvaluationService(IConfiguration configuratio
             var replay = await ExecuteAsync(connection, tx, "SELECT ledger.residue_replay($1,$2,$3,$4)::text", ct,
                 actor, lotId, request.Id, canonical);
             if (replay is string old) { await tx.CommitAsync(ct); return Parse(old); }
-            var graph = (string)(await ExecuteAsync(connection, tx, "SELECT ledger.residue_graph($1,$2)::text", ct, actor, lotId))!;
-            nodes = JsonSerializer.Deserialize<ResidueNode[]>(graph, Json)!;
-            var target = nodes.Single(x => x.LotId == lotId);
-            policies = await policyReader.ReadAsync(connection, tx, target.CompanyId, substances, snapshotAt, ct);
-            evidence = await evidenceReader.ReadAsync(connection, tx, target.CompanyId,
-                nodes.Where(x => x.Kind == "SOURCE").Select(x => x.LotId).ToArray(), substances, snapshotAt, ct);
+            materialized = await ReadSnapshotAsync(connection, tx, actor, lotId, substances, snapshotAt, ct);
             await tx.CommitAsync(ct);
         }
-        var sources = ResidueEvidenceResolver.Resolve(nodes, substances, evidence, policies, snapshotAt);
-        var results = ResidueCalculator.Calculate(lotId, substances, nodes, sources, ResidueEvidenceResolver.Factors(policies.Rules), policies);
-        var snapshot = new ResidueEvaluation(request.Id, lotId, nodes.Single(x => x.LotId == lotId).CompanyId,
+        var results = CalculateResults(lotId, substances, materialized.Nodes, materialized.Evidence, materialized.Policies, snapshotAt);
+        var snapshot = new ResidueEvaluation(request.Id, lotId, materialized.Nodes.Single(x => x.LotId == lotId).CompanyId,
             snapshotAt, null, ResidueCalculator.EngineVersion, results);
-        // Read snapshot is closed. Protected append uses its own READ COMMITTED transaction and current scope.
         await using var persist = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         var appended = (string)(await ExecuteAsync(connection, persist,
             "SELECT ledger.residue_append($1,$2,$3,$4,$5)::text", ct, actor, lotId, request.Id,
@@ -63,6 +58,55 @@ public sealed partial class ResidueEvaluationService(IConfiguration configuratio
             JsonSerializer.SerializeToElement(snapshot, Json)))!;
         await persist.CommitAsync(ct);
         return Parse(appended);
+    }
+
+    public async Task<ResidueEvaluationPreview> PreviewLotAsync(Guid lotId, string? substanceIds, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(substanceIds))
+            throw new LedgerException(400, "Preview requires 1–200 distinct substance IDs");
+        var values = substanceIds.Split(',', StringSplitOptions.TrimEntries);
+        if (values.Length is < 1 or > 200 || values.Any(value => !Guid.TryParse(value, out _)))
+            throw new LedgerException(400, "Preview requires 1–200 distinct substance IDs");
+        var substances = values.Select(value => Guid.Parse(value)).ToArray();
+        if (substances.Contains(Guid.Empty) || substances.Distinct().Count() != substances.Length)
+            throw new LedgerException(400, "Preview requires 1–200 distinct substance IDs");
+        var actor = await ledger.ActorAsync(ct);
+        await using var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
+        await connection.OpenAsync(ct);
+        DateTimeOffset snapshotAt;
+        (ResidueNode[] Nodes, ResiduePolicySnapshot Policies, ResidueEvidenceSnapshot Evidence) materialized;
+        await using (var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct))
+        {
+            await ExecuteAsync(connection, tx, "SET TRANSACTION READ ONLY", ct);
+            var captured = await ExecuteAsync(connection, tx, "SELECT clock_timestamp()", ct);
+            snapshotAt = new DateTimeOffset((DateTime)captured!);
+            materialized = await ReadSnapshotAsync(connection, tx, actor, lotId, substances, snapshotAt, ct);
+            await tx.CommitAsync(ct);
+        }
+        var results = CalculateResults(lotId, substances, materialized.Nodes, materialized.Evidence, materialized.Policies, snapshotAt);
+        return new ResidueEvaluationPreview(lotId, materialized.Nodes.Single(x => x.LotId == lotId).CompanyId,
+            snapshotAt, ResidueCalculator.EngineVersion, results);
+    }
+
+    private async Task<(ResidueNode[] Nodes, ResiduePolicySnapshot Policies, ResidueEvidenceSnapshot Evidence)> ReadSnapshotAsync(
+        NpgsqlConnection connection, NpgsqlTransaction tx, Guid actor, Guid lotId, Guid[] substances,
+        DateTimeOffset snapshotAt, CancellationToken ct)
+    {
+        var graph = (string)(await ExecuteAsync(connection, tx, "SELECT ledger.residue_graph($1,$2)::text", ct, actor, lotId))!;
+        var nodes = JsonSerializer.Deserialize<ResidueNode[]>(graph, Json)!;
+        var target = nodes.Single(x => x.LotId == lotId);
+        var policies = await policyReader.ReadAsync(connection, tx, target.CompanyId, substances, snapshotAt, ct);
+        var evidence = await evidenceReader.ReadAsync(connection, tx, target.CompanyId,
+            nodes.Where(x => x.Kind == "SOURCE").Select(x => x.LotId).ToArray(), substances, snapshotAt, ct);
+        return (nodes, policies, evidence);
+    }
+
+    private static IReadOnlyList<ResidueResult> CalculateResults(Guid lotId, Guid[] substances,
+        IReadOnlyList<ResidueNode> nodes, ResidueEvidenceSnapshot evidence, ResiduePolicySnapshot policies, DateTimeOffset snapshotAt)
+    {
+        var sources = ResidueEvidenceResolver.Resolve(nodes, substances, evidence, policies, snapshotAt);
+        return ResidueCalculator.Calculate(lotId, substances, nodes, sources,
+            ResidueEvidenceResolver.Factors(policies.Rules), policies);
     }
 
     public async Task<ResidueSourceBound> PreviewAsync(ResidueReportSelection request, CancellationToken ct)
@@ -163,6 +207,10 @@ public static class ResidueEvaluationEndpoints
     public static void MapResidueEvaluationRoutes(RouteGroupBuilder ledger)
     {
         var routes = ledger.MapGroup("/lots/{lotId:guid}/residue-evaluations").RequireAuthorization(Permissions.ResidueEvaluate);
+        ledger.MapGet("/lots/{lotId:guid}/residue-preview", async (Guid lotId, string? substanceIds,
+            ResidueEvaluationService service, CancellationToken ct) =>
+            Results.Ok(await service.PreviewLotAsync(lotId, substanceIds, ct)))
+            .RequireAuthorization(Permissions.ResidueEvaluate);
         routes.MapPost("", async (Guid lotId, ResidueEvaluationRequest request, ResidueEvaluationService service, CancellationToken ct) =>
             Results.Ok(await service.EvaluateAsync(lotId, request, ct)));
         routes.MapGet("", async (Guid lotId, ResidueEvaluationService service, CancellationToken ct) =>
