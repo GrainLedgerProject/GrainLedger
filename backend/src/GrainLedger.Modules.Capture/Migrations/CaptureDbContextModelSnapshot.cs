@@ -852,6 +852,22 @@ namespace GrainLedger.Modules.Capture.Migrations
                     t.HasCheckConstraint("ck_lab_reports_related", "(related_report_id IS NULL AND report_kind NOT IN ('SUPPLEMENTARY','AMENDMENT','RETEST')) OR (related_report_id IS NOT NULL AND related_report_id <> id AND relationship_reason IS NOT NULL AND length(btrim(relationship_reason)) > 0)");
                 });
             });
+            modelBuilder.Entity("GrainLedger.Modules.Capture.LabReportRetirement", b =>
+            {
+                b.Property<Guid>("ReportId").HasColumnType("uuid").HasColumnName("report_id");
+                b.Property<Guid>("CompanyId").HasColumnType("uuid").HasColumnName("company_id");
+                b.Property<Guid?>("ReplacementReportId").HasColumnType("uuid").HasColumnName("replacement_report_id");
+                b.Property<string>("Status").IsRequired().HasMaxLength(32).HasColumnType("character varying(32)").HasColumnName("status");
+                b.Property<Guid>("RecordedBy").HasColumnType("uuid").HasColumnName("recorded_by");
+                b.Property<DateTimeOffset>("RecordedAt").HasColumnType("timestamp with time zone").HasColumnName("recorded_at");
+                b.HasKey("ReportId");
+                b.HasIndex("CompanyId", "ReportId").IsUnique();
+                b.HasIndex("ReplacementReportId").IsUnique();
+                b.ToTable("lab_report_retirements", "capture", t => t.HasCheckConstraint("ck_lab_retirement_status",
+                    "(status = 'DELETED' AND replacement_report_id IS NULL) OR (status = 'SUPERSEDED' AND replacement_report_id IS NOT NULL AND replacement_report_id <> report_id)"));
+                b.HasOne("GrainLedger.Modules.Capture.LabReport", null).WithMany().HasForeignKey("ReportId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                b.HasOne("GrainLedger.Modules.Capture.LabReport", null).WithMany().HasForeignKey("ReplacementReportId").OnDelete(DeleteBehavior.Restrict);
+            });
             modelBuilder.Entity("GrainLedger.Modules.Capture.LabResultSet", b =>
             {
                 b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid").HasColumnName("id");

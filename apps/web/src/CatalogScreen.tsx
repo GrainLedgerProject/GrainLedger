@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from './api';
 import { Feedback, ListControls, Pagination, Table, useAction, type Page, type Row } from './ledger-ui';
+import { ResidueRuleMaintenance } from './ResidueRuleMaintenance';
 
 const kinds = ['MASS', 'AREA', 'RESIDUE_CONCENTRATION', 'APPLICATION_RATE', 'FRACTION'];
 type CatalogKind = 'commodities' | 'measurement-units';
 type CatalogPage = Page<Row>;
 const emptyPage: CatalogPage = { items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false };
 
-export function CatalogScreen({ active = true, selectedKind }: { active?: boolean; selectedKind?: CatalogKind }) {
+export function CatalogScreen({ active = true, selectedKind, canManageResidueRules = false }: { active?: boolean; selectedKind?: CatalogKind; canManageResidueRules?: boolean }) {
   const action = useAction();
   const requestId = useRef(0);
   const [internalKind, setInternalKind] = useState<CatalogKind>('commodities');
@@ -106,6 +107,7 @@ export function CatalogScreen({ active = true, selectedKind }: { active?: boolea
       </div>
       <Pagination label={label} page={page} pageSize={data.pageSize} totalCount={data.totalCount} onChange={setPage} busy={loading || action.busy} />
     </section>
+    {canManageResidueRules && <ResidueRuleMaintenance active={active} allowed={canManageResidueRules} />}
     {createOpen && <div className="farmer-modal-backdrop" onKeyDown={event => { if (event.key === 'Escape' && !action.busy) setCreateOpen(false); }}>
       <section className="farmer-modal catalog-create-modal" role="dialog" aria-modal="true" aria-labelledby="catalog-create-title">
         <div className="farmer-modal-heading"><div><span className="eyebrow">REFERENCE DATA</span><h2 id="catalog-create-title">Add {commodity ? 'commodity' : 'measurement unit'}</h2></div><button className="farmer-modal-close" type="button" aria-label="Close" disabled={action.busy} onClick={() => setCreateOpen(false)}>×</button></div>

@@ -18,6 +18,7 @@ public static class CatalogModule
             options.UseNpgsql(connection, n => n.MigrationsAssembly(typeof(CatalogDbContext).Assembly.FullName));
         });
         services.AddScoped<ApplicableMrlRead>();
+        services.AddScoped<IResiduePolicyReader, ResiduePolicyReader>();
         return services;
     }
 
@@ -30,6 +31,8 @@ public static class CatalogModule
         endpoints.MapRiceVarietyEndpoints();
         endpoints.MapMeasurementUnitEndpoints();
         endpoints.MapMrlVersionEndpoints();
+        endpoints.MapResidueRuleEndpoints();
+        endpoints.MapResiduePolicySettingEndpoints();
         return endpoints;
     }
 }

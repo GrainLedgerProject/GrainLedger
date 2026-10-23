@@ -143,7 +143,44 @@ Deploy the API/web changes with Capture migration `20261020000000_ExternalLabora
 
 Follow with Capture migration `20261020120000_TrimLegacyLabIdentityComparisons` when upgrading existing lab installations. It replaces only the confirmed-association guard so database comparisons use the same leading/trailing whitespace rules as the API; original evidence, stock, and HOLDs are not rewritten. Deploy the matching API and restart existing backend processes. Restarting alone does not install the database function upgrade.
 
+Unconfirmed-report editing/deletion requires the forward Capture migration `20261023000000_LabReportDraftRevisions` and matching API/web build. It adds append-only `capture.lab_report_retirements` records and guards that prevent retiring confirmed reports or confirming retired drafts. An edit appends a replacement report; deletion appends a retained tombstone. Existing original files, observations, confirmations and residue history are not rewritten or removed.
+
+Apply through the approved migration-owner job, then refresh the restricted runtime role using the existing role-configuration procedure before restarting the matching API. Runtime validation requires the new table's intended least-privilege grants. Do not grant elevated application credentials or bypass validation. Verify against disposable PostgreSQL; feature implementation does not authorize shared Supabase migrations, grants, seeds or report mutations.
+
 Original files are stored durably in PostgreSQL, limited to 10 MiB per report, and served only through scoped authenticated downloads. Include Capture laboratory tables in database backup/restore procedures. No facility or external laboratory account is required. Applying migrations to shared Supabase requires explicit approval; use disposable test containers for write-based verification unless separately approved. See [laboratory API](sample-api.md#laboratory-report-routes).
+
+### Residue bounds
+
+Residue bounds deployment requires Catalog migrations `20261022000000_ReviewedResidueRules` and forward-only `20261023000000_CompanyResiduePolicies`, Capture `20261022000000_ReviewedResidueEvidence`, and Ledger `20261022030000_ResidueBounds` in existing module migration order. Check actual installed migration history before applying anything; configured-database inspection on 2026-10-23 found these residue tables already present, but this work did not deploy or migrate features. Apply missing migrations only through explicitly approved migration-owner job. The company-policy migration adds append-only company-scoped rule/settings support and runtime grants; it does not rewrite existing rule payloads or seed/adopt policies. Downgrade is unsupported because company policy history cannot be flattened into global scope; use approved database backup restore if rollback is required. Restart with matching API/web build and reviewed restricted-runtime grant/validation setup. Routine startup must not migrate.
+
+New reviewed system/company rule versions, policy settings, source-group/report-selection payloads and evaluation snapshots are append-only. Include them in backup/restore. Runtime access remains protected: no direct Ledger snapshot writes or private-table reads; Catalog/Capture publication uses narrowly granted protected commands. Existing runtime grants must be refreshed using migration-owner deployment procedure, not owner credentials in normal application startup.
+
+No shared database migration, seed, authorization grant or deployment was performed or authorized by this work. Do not treat isolated test data as seed data. Normal use requires explicit reviewed system-profile adoption or company override setting; no default adoption exists. A company override requires full compatible same-Code rule and never falls back when missing/inapplicable. Policy setting/rule versions and provenance are retained.
+
+Section 15's matrix, combined report confirmation, exact concentration-unit normalization and live preview use existing storage/grants; they add no migration or dependency. A separately approved one-time owner transaction removed exactly 12 verified unreferenced mock rule versions from the configured database on 2026-10-23, retained all three evaluation snapshots and restored immutability guards before commit. This is not standing deletion permission or feature deployment. Cleanup and isolated verification: [section 15](residue-bounds-plan.md#15-substance-matrix-single-action-report-confirmation-and-live-bounds).
+
+Operational numeric use requires actual reviewed interpretation, material/method/residue-definition applicability, source representation, precision and process/fraction factors. `NUMERIC_RELATIVE_UNCERTAINTY` requires an exact nonnegative percent (`10` = 10%), and zero requires explicitly reviewed `RelativeUncertaintyAtZero`; normalized reviewed absolute uncertainty takes priority. Raw nonblank uncertainty without normalized absolute uncertainty remains unresolved. Missing evidence/rules/adoption yields `UNRESOLVED` with null unknown endpoints. Synthetic rules used by isolated tests/browser harness must never be published operationally. Residue bounds are not legal PASS, HOLD release or export certification. Routes, permission matrix and behavior: [residue bounds delivered contracts](residue-bounds-plan.md#9-delivered-residue-bounds-contracts).
+
+For isolated Linux tests when Docker bridge/veth creation is unavailable, opt in to a disposable PostgreSQL container using host networking, a distinct port per fixture and `listen_addresses=127.0.0.1`:
+
+```bash
+GRAINLEDGER_TEST_HOST_NETWORK=true TESTCONTAINERS_RYUK_DISABLED=true \
+  dotnet test backend/tests/GrainLedger.Api.IntegrationTests/GrainLedger.Api.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~Residue|FullyQualifiedName~Permission|FullyQualifiedName~OpenApi'
+```
+
+This test-only option does not use configured connection strings or an existing database. Normal fixture disposal removes its containers; with Ryuk disabled, interrupted runs may require cleanup of those test-owned containers. Default tests still use bridge networking. The opt-in browser host accepts loopback-only `GRAINLEDGER_BROWSER_API_URL` and `GRAINLEDGER_BROWSER_UI_URL` alongside its private `GRAINLEDGER_BROWSER_SESSION_FILE`; use separate ports and a temporary Vite proxy configuration rather than replacing a running application. Never publish the session file or test cookies.
+
+The opt-in browser host configures console logger queue overflow as `DropWrite` for both its upstream TestHost and loopback bridge. Long-running `dotnet test` output capture can fill console pipes; this test-only policy keeps console backpressure from blocking HTTP request handling. Overflow console messages may be dropped. Application logging configuration is unchanged.
+
+### Equipment retirement
+
+Ledger migration `20261023000000_RetireEquipment` adds protected referenced-equipment retirement without adding a second lifecycle flag or rewriting historical operations. Apply through the approved migration-owner deployment job and refresh restricted runtime grants before using the matching API build. Runtime validation requires the new private helpers and predecessor command/read routines to remain ungranted. Normal startup does not migrate.
+
+Unused equipment still uses versioned `DELETE`; referenced equipment uses versioned `POST /api/ledger/equipment/{id}/retire`. Both retain stored rows; retirement blocks new use and conflicts while active drafts or pending corrections remain. See [Ledger setup and permissions](ledger-implementation-plan.md#setup-and-permissions).
+
+For this overhaul, the user approved creating the forward migration and applying it only to disposable verification PostgreSQL. No shared Supabase migration, grant, seed or business-data mutation is authorized or performed by that approval.
+
 
 ### Dependency patch pins
 
