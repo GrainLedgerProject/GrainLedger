@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { LabReports, parseReportedResult } from './LabReports';
@@ -50,6 +50,136 @@ it('requires related report choice before file encoding for linked report kind',
   fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
   expect(await screen.findByRole('alert')).toHaveTextContent('Choose a related report');
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it('edits unconfirmed report using prefilled multi-section facts and retains original file', async () => {
+  const row = { id: 'result-a', testLabel: 'Cadmium', originalResultText: '0.15', resultKind: 'NUMERIC', numericValue: '0.15', unit: 'mg/kg', lod: '0.01', loq: '0.02', method: 'ICP-MS', uncertainty: '5%', reference: 'Page 2' };
+  const report = { id: 'report-a', reportNumber: 'R-001', laboratoryName: 'North Lab', issuedOn: '2026-10-19', receivedAt: '2026-10-20T10:00:00Z', reportKind: 'FINAL', status: 'UNRESOLVED', fileName: 'original.pdf', contentType: 'application/pdf', fileSize: 12, sha256: 'hash', recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null, confirmedAt: null, suggestedMarketCode: 'VN', assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [], resultSets: [{ id: 'set-a', sampleId: null, confirmedSampleId: null, sourceLotId: null, laboratorySampleReference: 'LAB-01', statedSampleCode: 'S-01', statedSealCode: 'SEAL-01', sectionReference: 'Page 2', results: [row] }, { id: 'set-b', sampleId: null, confirmedSampleId: null, sourceLotId: null, laboratorySampleReference: 'LAB-02', statedSampleCode: 'S-02', statedSealCode: 'SEAL-02', sectionReference: 'Page 3', results: [{ ...row, id: 'result-b', testLabel: 'Lead' }] }] };
+  let submitted: { payload: { entityId: string; reportNumber: string; contentBase64: string | null; resultSets: Array<{ results: Array<{ testLabel: string; unit?: string; method?: string }> }> } } | undefined;
+  const requestBodies: string[] = [];
+  fetchMock.mockImplementation(async (input, init) => {
+    const path = String(input);
+    if (path === '/api/auth/csrf') return new Response(JSON.stringify({ token: 'csrf' }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/report-a' && init?.method !== 'PUT') return new Response(JSON.stringify(report), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/active-substances?page=1&pageSize=100') return new Response(JSON.stringify({ items: [], page: 1, pageSize: 100, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/report-a' && init?.method === 'PUT') { requestBodies.push(String(init.body)); submitted = JSON.parse(String(init.body)); return requestBodies.length === 1 ? new Response(JSON.stringify({ title: 'Temporary failure' }), { status: 503, headers: { 'Content-Type': 'application/json' } }) : new Response(JSON.stringify({ ...report, id: 'replacement-a', reportNumber: 'R-002' }), { headers: { 'Content-Type': 'application/json' } }); }
+    if (path === '/api/lab-reports/replacement-a') return new Response(JSON.stringify({ ...report, id: 'replacement-a', reportNumber: 'R-002' }), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'R-001 ↗' }));
+  await user.click(await screen.findByRole('button', { name: 'Edit draft' }));
+  expect(screen.getByLabelText('Test parameter section 1 row 1')).toHaveValue('Cadmium');
+  expect(screen.getByLabelText('Test parameter section 2 row 1')).toHaveValue('Lead');
+  expect(screen.getByLabelText('method section 1 row 1')).toHaveValue('ICP-MS');
+  await user.clear(screen.getByLabelText('Report number'));
+  await user.type(screen.getByLabelText('Report number'), 'R-002');
+  fireEvent.submit(screen.getByRole('button', { name: 'Save draft changes' }).closest('form')!);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Temporary failure');
+  expect(screen.getByLabelText('Report number')).toHaveValue('R-002');
+  expect(screen.getByRole('button', { name: 'Retry exact submission' })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Retry exact submission' }));
+  await waitFor(() => expect(requestBodies).toHaveLength(2));
+  expect(requestBodies[1]).toBe(requestBodies[0]);
+  expect(submitted?.payload.reportNumber).toBe('R-002');
+  expect(submitted?.payload.entityId).toBe('report-a');
+  expect(submitted?.payload.contentBase64).toBeNull();
+  expect(submitted?.payload.resultSets).toHaveLength(2);
+  expect(submitted?.payload.resultSets[0].results[0]).toMatchObject({ testLabel: 'Cadmium', unit: 'mg/kg', method: 'ICP-MS' });
+  expect(await screen.findByRole('heading', { name: 'R-002' })).toBeInTheDocument();
+});
+it('edits null optional result fields safely and preserves untouched result facts and exact received instant', async () => {
+  const report = { id: 'report-null-fields', reportNumber: 'R-NULL', laboratoryName: 'North Lab', issuedOn: '2026-10-19', receivedAt: '2026-10-20T10:00:42.789Z', reportKind: 'FINAL', status: 'UNRESOLVED', fileName: 'original.pdf', contentType: 'application/pdf', fileSize: 12, sha256: 'hash', recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null, confirmedAt: null, suggestedMarketCode: 'VN', assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [], resultSets: [{ id: 'set-null-fields', sampleId: null, confirmedSampleId: null, sourceLotId: null, laboratorySampleReference: null, statedSampleCode: null, statedSealCode: null, sectionReference: null, results: [
+    { id: 'nd-row', testLabel: 'Aflatoxin', originalResultText: 'ND', resultKind: 'NOT_DETECTED', numericValue: null, substanceId: null, unit: null, lod: null, loq: null, method: null, uncertainty: null, reference: null },
+    { id: 'numeric-row', testLabel: 'Cadmium', originalResultText: '0.05', resultKind: 'NUMERIC', numericValue: '0.05', substanceId: null, unit: 'mg/kg', lod: null, loq: null, method: null, uncertainty: null, reference: null },
+  ] }] };
+  let submitted: { payload: { reportNumber: string; receivedAt: string; resultSets: Array<{ results: Array<{ testLabel: string; originalResultText: string; resultKind: string; numericValue?: string; unit?: string; lod?: string; loq?: string; method?: string; uncertainty?: string; reference?: string }> }> } } | undefined;
+  fetchMock.mockImplementation(async (input, init) => {
+    const path = String(input);
+    if (path === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/report-null-fields' && init?.method === 'PUT') { submitted = JSON.parse(String(init.body)); return new Response(JSON.stringify({ ...report, id: 'replacement-null-fields', reportNumber: 'R-NULL-EDITED' }), { headers: { 'Content-Type': 'application/json' } }); }
+    if (path === '/api/lab-reports/report-null-fields') return new Response(JSON.stringify(report), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/replacement-null-fields') return new Response(JSON.stringify({ ...report, id: 'replacement-null-fields', reportNumber: 'R-NULL-EDITED' }), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'R-NULL ↗' }));
+  await user.click(await screen.findByRole('button', { name: 'Edit draft' }));
+  expect(screen.getByLabelText('Reported result section 1 row 1')).toHaveValue('ND');
+  expect(screen.getByLabelText('Exact numeric string section 1 row 1')).toHaveValue('');
+  await user.clear(screen.getByLabelText('Report number'));
+  await user.type(screen.getByLabelText('Report number'), 'R-NULL-EDITED');
+  fireEvent.submit(screen.getByRole('button', { name: 'Save draft changes' }).closest('form')!);
+  await waitFor(() => expect(submitted?.payload.reportNumber).toBe('R-NULL-EDITED'));
+  expect(submitted?.payload.receivedAt).toBe('2026-10-20T10:00:42.789Z');
+  expect(submitted?.payload.resultSets[0].results).toEqual([
+    { testLabel: 'Aflatoxin', originalResultText: 'ND', resultKind: 'NOT_DETECTED' },
+    { testLabel: 'Cadmium', originalResultText: '0.05', resultKind: 'NUMERIC', numericValue: '0.05', unit: 'mg/kg' },
+  ]);
+});
+
+
+it('does not expose draft edit, delete, or confirmation controls without write permission', async () => {
+  const report = { id: 'report-a', reportNumber: 'R-001', laboratoryName: 'North Lab', issuedOn: '2026-10-19', receivedAt: '2026-10-20T10:00:00Z', reportKind: 'FINAL', status: 'UNRESOLVED', fileName: 'original.pdf', fileSize: 12, contentType: 'application/pdf', sha256: 'hash', recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null, confirmedAt: null, suggestedMarketCode: 'VN', assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [], resultSets: [] };
+  fetchMock.mockImplementation(async input => {
+    const path = String(input);
+    if (path === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/report-a') return new Response(JSON.stringify(report), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  render(<LabReports canWrite={false} />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'R-001 ↗' }));
+  await screen.findByRole('heading', { name: 'R-001' });
+  expect(screen.queryByRole('button', { name: 'Edit draft' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Delete draft' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Review and confirm' })).not.toBeInTheDocument();
+});
+it('keeps confirmed reports immutable in UI even for writers', async () => {
+  const report = { id: 'report-a', reportNumber: 'R-001', laboratoryName: 'North Lab', issuedOn: '2026-10-19', receivedAt: '2026-10-20T10:00:00Z', reportKind: 'FINAL', status: 'CONFIRMED', fileName: 'original.pdf', fileSize: 12, contentType: 'application/pdf', sha256: 'hash', recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: 'reviewer', confirmedAt: '2026-10-21T10:00:00Z', suggestedMarketCode: 'VN', assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [], resultSets: [] };
+  fetchMock.mockImplementation(async input => {
+    const path = String(input);
+    if (path === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/report-a') return new Response(JSON.stringify(report), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'R-001 ↗' }));
+  await screen.findByRole('heading', { name: 'R-001' });
+  expect(screen.queryByRole('button', { name: 'Edit draft' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Delete draft' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Review and confirm' })).not.toBeInTheDocument();
+});
+
+
+it('warns before deleting draft, keeps cancel safe, and sends exact DELETE envelope', async () => {
+  const report = { id: 'report-a', reportNumber: 'R-001', laboratoryName: 'North Lab', issuedOn: '2026-10-19', receivedAt: '2026-10-20T10:00:00Z', reportKind: 'FINAL', status: 'PENDING_REVIEW', fileName: 'original.pdf', fileSize: 12, contentType: 'application/pdf', sha256: 'hash', recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null, confirmedAt: null, suggestedMarketCode: 'VN', assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [], resultSets: [] };
+  let deletion: Record<string, unknown> | undefined;
+  fetchMock.mockImplementation(async (input, init) => {
+    const path = String(input);
+    if (path === '/api/auth/csrf') return new Response(JSON.stringify({ token: 'csrf' }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 1, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+    if (path === '/api/lab-reports/report-a' && init?.method === 'DELETE') { deletion = JSON.parse(String(init.body)); return new Response(null, { status: 204 }); }
+    if (path === '/api/lab-reports/report-a') return new Response(JSON.stringify(report), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  render(<LabReports canWrite />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'R-001 ↗' }));
+  await user.click(await screen.findByRole('button', { name: 'Delete draft' }));
+  expect(screen.getByText(/Original file, results, and audit history remain retained/)).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Delete draft' }));
+  await user.click(within(screen.getByRole('dialog', { name: 'Delete draft report?' })).getByRole('button', { name: 'Delete draft' }));
+  await waitFor(() => expect(deletion?.clientOperationId).toEqual(expect.any(String)));
+  expect(deletion).toMatchObject({ payloadSchemaVersion: 1 });
+  expect(deletion).not.toHaveProperty('payload');
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Report register' })).toBeInTheDocument());
 });
 
 it('selects readable report label and submits selected report ID', async () => {

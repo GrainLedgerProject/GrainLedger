@@ -80,6 +80,9 @@ public sealed partial class ResidueEvaluationService : IConfirmedLabReportResidu
         if (await ExecuteAsync(connection, tx, "SELECT id FROM capture.lab_reports WHERE id=$1 AND company_id=$2", ct,
             reportId, request.CompanyId) is not Guid)
             throw new LedgerException(404, "Own-company laboratory report not found");
+        if (await ExecuteAsync(connection, tx, "SELECT report_id FROM capture.lab_report_retirements WHERE report_id=$1 AND company_id=$2", ct,
+            reportId, request.CompanyId) is Guid)
+            throw new LedgerException(409, "Deleted or superseded laboratory drafts cannot be bound as residue evidence");
         var reportRows = new List<ReportRow>();
         await using (var command = new NpgsqlCommand("""
             SELECT r.id,r.substance_id,COALESCE(sl.id,'00000000-0000-0000-0000-000000000000'::uuid),

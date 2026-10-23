@@ -41,6 +41,22 @@ internal static class LabReportMappings
             b.HasIndex(x => new { x.CompanyId, x.RecordedAt, x.Id });
             b.HasIndex(x => x.RelatedReportId);
         });
+        modelBuilder.Entity<LabReportRetirement>(b =>
+        {
+            b.ToTable("lab_report_retirements", t => t.HasCheckConstraint("ck_lab_retirement_status",
+                "(status = 'DELETED' AND replacement_report_id IS NULL) OR (status = 'SUPERSEDED' AND replacement_report_id IS NOT NULL AND replacement_report_id <> report_id)"));
+            b.HasKey(x => x.ReportId);
+            b.Property(x => x.ReportId).HasColumnName("report_id");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.ReplacementReportId).HasColumnName("replacement_report_id");
+            b.Property(x => x.Status).HasColumnName("status").HasMaxLength(32);
+            b.Property(x => x.RecordedBy).HasColumnName("recorded_by");
+            b.Property(x => x.RecordedAt).HasColumnName("recorded_at");
+            b.HasIndex(x => new { x.CompanyId, x.ReportId }).IsUnique();
+            b.HasIndex(x => x.ReplacementReportId).IsUnique();
+            b.HasOne<LabReport>().WithMany().HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<LabReport>().WithMany().HasForeignKey(x => x.ReplacementReportId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<LabResultSet>(b =>
         {
             b.ToTable("lab_result_sets");

@@ -39,6 +39,14 @@ Sample registration, handover, report intake, and confirmation do not deduct sto
 
 If identity is wrong, missing or contradictory, keep the report unresolved. Do not guess from farmer, plot, similar codes or an unverified lab reference. Retain the original and obtain supporting evidence or a linked corrected report.
 
+### Edit or delete before confirmation
+
+Open an unconfirmed report and choose **Edit draft** to correct report details, sample sections or transcribed results. Existing values are prefilled. Keep the current original file, or choose a replacement and check the whole-file company-only attestation again. Saving creates a new draft version and opens it for review; earlier original bytes and transcription remain retained for audit. This does not correct the laboratory document itself: request a linked amendment/retest when the external evidence is wrong.
+
+Choose **Delete draft**, review the warning, then confirm deletion to remove an unconfirmed report from the active queue. Original evidence and the deletion audit record remain retained. A report referenced by another report cannot be deleted. Cancel leaves it unchanged.
+
+Confirmed reports have neither action and cannot be reopened. Another user's edit, deletion or confirmation makes an older draft action stale: reload the report instead of resubmitting different data under an uncertain operation ID.
+
 ### What the review status means
 
 | Status | Meaning | Next action |
@@ -46,6 +54,8 @@ If identity is wrong, missing or contradictory, keep the report unresolved. Do n
 | `UNRESOLVED` | At least one section has missing or mismatching proposed identity. | Investigate identity; do not guess a lot or claim confirmation. |
 | `PENDING_REVIEW` | Proposed identities match printed sample/seal identifiers, but a manager has not confirmed the record. | Compare original, custody evidence and transcription; explicitly confirm if valid. |
 | `CONFIRMED` | A manager recorded verified sample associations and transcription checks. | Review evidence from the source lot; append later changes as new reports. |
+| `SUPERSEDED` | Earlier unconfirmed draft replaced by a newer draft version. | Open the replacement; earlier evidence is read-only. |
+| `DELETED` | Unconfirmed draft removed from the active queue; original retained for audit. | No confirmation, editing or repeat deletion. |
 
 `NOT_ASSESSED` is a separate assessment status, not a review failure or a safety decision.
 
@@ -64,7 +74,7 @@ Reason explains the relationship; it does not resolve conflicts or release HOLD.
 
 ## Export Staff: read evidence
 
-Export Staff can read company-scoped laboratory evidence when granted `lab.read`; this does not grant report intake or confirmation. Customer Manager needs persisted `lab.write` to receive/confirm reports. Purchasing Staff's sample/custody permissions do not grant report writes. Company scoping applies to sample, report, association, metadata, and original download.
+Export Staff can read company-scoped laboratory evidence when granted `lab.read`; this does not grant report intake, editing, deletion or confirmation. Customer Manager needs persisted `lab.write` to receive, revise/delete an active unconfirmed report, or confirm it. Purchasing Staff's sample/custody permissions do not grant report writes. Company scoping applies to sample, report, association, metadata, and original download.
 
 ## Interpreting recorded results
 

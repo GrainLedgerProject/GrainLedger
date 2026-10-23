@@ -143,6 +143,10 @@ Deploy the API/web changes with Capture migration `20261020000000_ExternalLabora
 
 Follow with Capture migration `20261020120000_TrimLegacyLabIdentityComparisons` when upgrading existing lab installations. It replaces only the confirmed-association guard so database comparisons use the same leading/trailing whitespace rules as the API; original evidence, stock, and HOLDs are not rewritten. Deploy the matching API and restart existing backend processes. Restarting alone does not install the database function upgrade.
 
+Unconfirmed-report editing/deletion requires the forward Capture migration `20261023000000_LabReportDraftRevisions` and matching API/web build. It adds append-only `capture.lab_report_retirements` records and guards that prevent retiring confirmed reports or confirming retired drafts. An edit appends a replacement report; deletion appends a retained tombstone. Existing original files, observations, confirmations and residue history are not rewritten or removed.
+
+Apply through the approved migration-owner job, then refresh the restricted runtime role using the existing role-configuration procedure before restarting the matching API. Runtime validation requires the new table's intended least-privilege grants. Do not grant elevated application credentials or bypass validation. Verify against disposable PostgreSQL; feature implementation does not authorize shared Supabase migrations, grants, seeds or report mutations.
+
 Original files are stored durably in PostgreSQL, limited to 10 MiB per report, and served only through scoped authenticated downloads. Include Capture laboratory tables in database backup/restore procedures. No facility or external laboratory account is required. Applying migrations to shared Supabase requires explicit approval; use disposable test containers for write-based verification unless separately approved. See [laboratory API](sample-api.md#laboratory-report-routes).
 
 ### Residue bounds

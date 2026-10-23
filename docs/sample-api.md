@@ -72,14 +72,16 @@ This section is the HTTP contract referenced by [external laboratory workflow pl
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/api/lab-reports` | Preserve original bytes, report metadata, sample-specific sections and result rows. |
+| PUT | `/api/lab-reports/{id}` | Save a replacement revision of an active unconfirmed report; retain earlier original evidence. |
+| DELETE | `/api/lab-reports/{id}` | Remove an active unconfirmed report from the queue; retain its original and deletion audit record. |
 | GET | `/api/lab-reports?page=1&pageSize=20&sampleId={id}&sourceLotId={id}` | Company report queue; optional independent filters. Page size 1–100. |
 | GET | `/api/lab-reports/{id}` | Immutable original transcription, confirmation, related report links and assessment caveat. |
 | GET | `/api/lab-reports/{id}/file` | Scoped original download, attachment, `application/octet-stream`, no-sniff and sandbox headers. |
 | POST | `/api/lab-reports/{id}/confirm` | Append authenticated identity/transcription confirmation and verified sample associations. |
 
-No report/result/file PUT, PATCH or DELETE endpoint exists. Original report metadata, bytes, proposed sample IDs, sections, rows, and confirmed associations cannot be overwritten. Correct with a new linked report.
+Report metadata, bytes, proposed sample IDs, sections, rows, and confirmed associations are never overwritten or physically deleted. Draft editing appends a replacement report and retires its predecessor; draft deletion appends a tombstone. Confirmed reports cannot be edited, deleted, or reopened; correct them with a new linked report.
 
-Lists return `{ "items": [LabReportResponse], "page": 1, "pageSize": 20, "hasMore": false }`. IDs are paged before bulk metadata/result projection; metadata responses never materialize original bytes. `sampleId` filtering includes proposed or confirmed associations so unresolved evidence is still findable. `sourceLotId` filtering includes **confirmed associations only**. Unconfirmed or wrong identity never appears as confirmed source-lot evidence.
+Lists return `{ "items": [LabReportResponse], "page": 1, "pageSize": 20, "hasMore": false }` and exclude superseded/deleted drafts. IDs are paged before bulk metadata/result projection; metadata responses never materialize original bytes. `sampleId` filtering includes proposed or confirmed associations so active unresolved evidence is still findable. `sourceLotId` filtering includes **confirmed associations only**. Unconfirmed or wrong identity never appears as confirmed source-lot evidence. Earlier draft versions and deleted originals remain available through scoped detail/file reads for audit.
 The web sample chooser searches loaded samples only. Searching never clears the selected sample: the selected option remains visible even when it does not match the search text, and report submission preserves that sample ID. For the role-by-role application workflow, see the [laboratory workflow guide](lab-flow-guide.md).
 
 ### Receive an original report
@@ -185,6 +187,16 @@ Every generated value is synthetic, visibly marked as test data, and is not offi
 
 This standalone generator creates no report relationship: `relatedReportId` and `relationshipReason` do not apply to its unlinked `FINAL` output. For actual intake, amendments, supplements, or retests, relationship reason explains why new report links to its original; it does not replace earlier evidence or resolve conflicts.
 
+### Edit or delete an unconfirmed report
+
+`UNRESOLVED` and `PENDING_REVIEW` reports can be revised by an own-company Customer Manager with current `lab.write`. `PUT /api/lab-reports/{id}` accepts the same envelope and full payload as intake, with `payload.entityId` equal to the current route ID. Send `contentBase64: null` to retain the exact current original bytes, filename and media type, or supply a replacement file using the intake file rules. Supply every section and result row; an omitted row is not copied implicitly.
+
+Successful edit returns `200` with the replacement `LabReportResponse`. Server generates a new report ID and fresh section/result IDs. Follow the returned `id` for subsequent review, confirmation or editing. Earlier report remains immutable, marked `SUPERSEDED` with `replacementReportId`. Editing is a draft-transcription revision, not a laboratory `AMENDMENT`, `SUPPLEMENTARY` or `RETEST`; those document relationships remain separate.
+
+`DELETE /api/lab-reports/{id}` accepts a JSON body containing `deviceId`, fresh `clientOperationId`, `capturedAt` and `payloadSchemaVersion: 1`; no payload is required. Successful deletion returns `204`. A report referenced by another report cannot be deleted (`409 LAB_REPORT_REFERENCED`). Deletion removes the active queue entry, not stored original evidence, source records, stock, HOLDs or historical calculations.
+
+Both commands use current permissions, company scope, CSRF, atomic audit writes and operation-id replay. A stale edit/delete/confirmation cannot act on an already retired draft; failed validation leaves the previous version active. Confirmed reports reject edit/delete and stay confirmed. After an uncertain response, retry the exact request with the same operation ID; do not create a new operation until the outcome is known.
+
 ### Review and confirm
 
 ```json
@@ -226,7 +238,7 @@ Legacy padded identities also require Capture migration `20261020120000_TrimLega
 - `relatedReportId`, `relationshipReason`, `laboratoryConclusion`, `statedStandard`.
 - `fileName`, `contentType` (original submitted media type), `fileSize`, `sha256`; never inline original bytes or unscoped storage references.
 - Server `recordedBy`, `capturedAt`, `recordedAt`; nullable `confirmedBy`, `confirmedAt`.
-- `status`: `UNRESOLVED`, `PENDING_REVIEW`, or `CONFIRMED`. Initial pending review requires all proposed samples to match printed identity without contradictory identifiers. Only explicit successful confirmation yields confirmed.
+- `status`: `UNRESOLVED`, `PENDING_REVIEW`, `CONFIRMED`, `SUPERSEDED`, or `DELETED`. Initial pending review requires all proposed samples to match printed identity without contradictory identifiers. Only explicit successful confirmation yields confirmed. Retired draft originals are read-only; nullable `replacementReportId` links a superseded draft to its successor.
 - `resultSets`: `id`, original proposed `sampleId`, separate `confirmedSampleId`, **confirmed-only** `sourceLotId`, printed `laboratorySampleReference`, `statedSampleCode`, `statedSealCode`, `sectionReference`, `identityStatus` (`UNRESOLVED`, `MATCHED`, `CONFIRMED`), and `results`. Each result adds server `id` to its intake row fields.
 - `relatedReports`: child `{id, reportKind, relationshipReason}` links; parent remains `relatedReportId`.
 - `assessmentStatus`: `NOT_ASSESSED`, `WITHIN_ASSESSED_LIMITS`, `EXCEEDS_LIMIT`, `INSUFFICIENT_EVIDENCE`, or `NO_MRL_IN_VN`; `suggestedMarketCode: "VN"` and per-substance `assessmentReasons`.
@@ -235,7 +247,7 @@ Confirmed reports with mapped substances and published VN limits receive a serve
 
 Confirmation is a transcription/identity check, not PASS or legal compliance. Late reports follow stable procurement sample/source identity, even after receiving/processing/exhaustion. Stock and existing HOLD decisions remain unchanged.
 
-Both lab writes reuse Capture's transaction/event/offline operation convention. Successful intake returns 201 plus `Location`; confirmation returns 200. Identical device/operation/content replay returns 200; changed content returns 409 `OPERATION_CONFLICT`. Invalid syntax/decimal strings/attestations return 400; unavailable sample/related report/catalog references return 409 (`SAMPLE_NOT_FOUND`, `RELATED_REPORT_NOT_FOUND`, `SUBSTANCE_NOT_FOUND`); scoped GET/file/confirmation for absent/foreign report returns 404 `LAB_REPORT_NOT_FOUND`. Unauthorized roles receive 403. No report evidence can be obtained through an unscoped URL.
+Lab writes reuse Capture's transaction/event/offline operation convention. Successful intake returns 201 plus `Location`; confirmation and revision return 200; deletion returns 204. Identical device/operation/content replay returns the recorded result; changed content returns 409 `OPERATION_CONFLICT`. Invalid syntax/decimal strings/attestations return 400; unavailable sample/related report/catalog references return 409 (`SAMPLE_NOT_FOUND`, `RELATED_REPORT_NOT_FOUND`, `SUBSTANCE_NOT_FOUND`); scoped GET/file/mutations for absent/foreign report return 404 `LAB_REPORT_NOT_FOUND`. Unauthorized roles receive 403. No report evidence can be obtained through an unscoped URL.
 
 ## Residue bounds for derived lots
 

@@ -171,6 +171,7 @@ public static class LedgerDatabase
             GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
             REVOKE INSERT,UPDATE,DELETE ON TABLE catalog.residue_rule_versions,catalog.residue_policy_setting_versions,
                 capture.residue_source_group_versions,capture.residue_report_selections FROM {role};
+            REVOKE UPDATE,DELETE,REFERENCES ON TABLE capture.lab_report_retirements FROM {role};
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
             {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
@@ -198,7 +199,12 @@ public static class LedgerDatabase
                     OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER')
                     OR c.oid IN ('ledger.receiving_threshold_default'::regclass,'ledger.receiving_threshold_overrides'::regclass,'ledger.receiving_threshold_history'::regclass)
                        AND has_table_privilege($1,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
-            ) OR has_any_column_privilege($1,'ledger.receiving_threshold_default','SELECT')
+            ) OR has_table_privilege($1,'capture.lab_report_retirements','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+              OR has_any_column_privilege($1,'capture.lab_report_retirements','UPDATE')
+              OR has_any_column_privilege($1,'capture.lab_report_retirements','REFERENCES')
+              OR has_function_privilege($1,'capture.guard_lab_retirement()','EXECUTE')
+              OR has_function_privilege($1,'capture.guard_lab_active_report()','EXECUTE')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_default','SELECT')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_default','INSERT')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_default','UPDATE')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_default','REFERENCES')
@@ -324,6 +330,12 @@ public static class LedgerDatabase
                AND has_function_privilege(current_user,'catalog.publish_residue_policy_setting(uuid,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'capture.publish_residue_group(uuid,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'capture.publish_residue_selection(uuid,jsonb)','EXECUTE')
+               AND has_table_privilege(current_user,'capture.lab_report_retirements','SELECT,INSERT')
+               AND NOT has_table_privilege(current_user,'capture.lab_report_retirements','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+               AND NOT has_any_column_privilege(current_user,'capture.lab_report_retirements','UPDATE')
+               AND NOT has_any_column_privilege(current_user,'capture.lab_report_retirements','REFERENCES')
+               AND NOT has_function_privilege(current_user,'capture.guard_lab_retirement()','EXECUTE')
+               AND NOT has_function_privilege(current_user,'capture.guard_lab_active_report()','EXECUTE')
                AND NOT has_function_privilege(current_user,'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
                AND NOT has_function_privilege(current_user,'ledger.pool_withdraw(uuid,uuid,text,uuid,uuid,numeric,bigint)','EXECUTE')
                AND NOT has_function_privilege(current_user,'ledger.command_pre_mixed(uuid,text,jsonb)','EXECUTE')
