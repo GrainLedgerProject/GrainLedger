@@ -1,3 +1,4 @@
+using GrainLedger.Modules.Catalogs;
 using System.Globalization;
 using System.Numerics;
 
@@ -9,8 +10,10 @@ public sealed record ResidueNode(Guid LotId, Guid CompanyId, Guid CommodityId, s
     bool Inconsistent = false, string? Conditions = null);
 public sealed record ResidueProvenance(string Kind, Guid SourceLotId, Guid? ReportId = null, Guid? ResultId = null,
     Guid? GroupVersionId = null, Guid? SelectionId = null, Guid? RuleId = null,
-    Guid? SourceId = null, Guid? AssociationId = null, Guid? ResultSetId = null);
-public sealed record ResidueRuleReference(Guid Id, int Version, string Kind, string EvidenceReference);
+    Guid? SourceId = null, Guid? AssociationId = null, Guid? ResultSetId = null,
+    string? UncertaintyMode = null, string? RelativeUncertaintyPercent = null, string? AbsoluteUncertainty = null);
+public sealed record ResidueRuleReference(Guid Id, int Version, string Kind, string EvidenceReference,
+    string? PolicyOrigin = null, Guid? PolicySettingId = null, int? PolicySettingVersion = null, string? RuleCode = null);
 public sealed record ResidueDependency(Guid LotId, Guid? ParentLotId, Guid? EventId, Guid? OperationId, string Kind, string? QuantityKg);
 public sealed record ResidueSourceBound(Guid LotId, Guid SubstanceId, string? Lower, string? Upper, string? Unit,
     string? Basis, int? DecimalPlaces, IReadOnlyList<string> Reasons, IReadOnlyList<ResidueProvenance> Provenance,
@@ -55,6 +58,18 @@ public readonly record struct ResidueRational : IComparable<ResidueRational>
     public static ResidueRational operator *(ResidueRational a, ResidueRational b) => new(a.Numerator * b.Numerator, a.Denominator * b.Denominator);
     public static ResidueRational operator /(ResidueRational a, ResidueRational b) => b.Numerator > 0
         ? new(a.Numerator * b.Denominator, a.Denominator * b.Numerator) : throw new DivideByZeroException();
+    public string ExactDecimal()
+    {
+        var denominator = Denominator;
+        var twos = 0; var fives = 0;
+        while (denominator % 2 == 0) { denominator /= 2; twos++; }
+        while (denominator % 5 == 0) { denominator /= 5; fives++; }
+        if (denominator != 1) throw new FormatException("Terminating decimal required");
+        var places = Math.Max(twos, fives);
+        var units = Numerator * BigInteger.Pow(2, places - twos) * BigInteger.Pow(5, places - fives);
+        var text = BigInteger.Abs(units).ToString(CultureInfo.InvariantCulture).PadLeft(places + 1, '0');
+        return (units.Sign < 0 ? "-" : "") + (places == 0 ? text : text[..^places] + "." + text[^places..]);
+    }
     public string Round(int places, bool upward)
     {
         if (places is < 0 or > 18) throw new ArgumentOutOfRangeException(nameof(places));
@@ -70,13 +85,14 @@ public readonly record struct ResidueRational : IComparable<ResidueRational>
 
 public static class ResidueCalculator
 {
-    public const string EngineVersion = "F12-exact-1";
+    public const string EngineVersion = "residue-policy-exact-2";
     private sealed record Bound(ResidueRational? Lower, ResidueRational? Upper, string? Unit, string? Basis,
         int? Precision, string Definition, IReadOnlyList<string> Reasons, ResidueSourceBound? Source,
         ResidueFactor? Factor, IReadOnlyList<Guid> Inputs, IReadOnlyList<ResidueRuleReference>? AdditionalRules = null);
 
     public static IReadOnlyList<ResidueResult> Calculate(Guid targetLotId, IReadOnlyList<Guid> substanceIds,
-        IReadOnlyList<ResidueNode> nodes, IReadOnlyList<ResidueSourceBound> sources, IReadOnlyList<ResidueFactor> factors)
+        IReadOnlyList<ResidueNode> nodes, IReadOnlyList<ResidueSourceBound> sources, IReadOnlyList<ResidueFactor> factors,
+        ResiduePolicySnapshot? policy = null)
     {
         var graph = nodes.ToDictionary(x => x.LotId);
         var sourceMap = sources.GroupBy(x => (x.LotId, x.SubstanceId)).ToDictionary(x => x.Key, x => x.ToArray());
@@ -194,6 +210,21 @@ public static class ResidueCalculator
                         if (values.TryGetValue(id.Value, out var value) && value.Basis is not null
                             && (value.Basis != factor.InputBasis || value.Unit != factor.Unit || value.Definition != factor.ResidueDefinition)) continue;
                         matches.Add((factor, id.Value));
+                    }
+                    if (policy is not null)
+                    {
+                        var matchingIds = matches.Select(x => x.Factor.Rule.Id).ToHashSet();
+                        if (matches.Count == 0 && blockedCumulative is not null) matchingIds.Add(blockedCumulative.Rule.Id);
+                        var resolved = ResidueEvidenceResolver.SelectPolicy(policy, node.CompanyId, node.At,
+                            rule => rule.Kind == "PROCESS" && rule.SubstanceId == substance && matchingIds.Contains(rule.Id));
+                        var resolvedReferences = resolved.Rules.Select(x => ResidueEvidenceResolver.Reference(x.Rule, x.Setting)).ToArray();
+                        if (resolved.Reason is not null)
+                            return new(null, null, null, null, null, "", [resolved.Reason], null, null, inputs, resolvedReferences);
+                        var referencesById = resolvedReferences.ToDictionary(x => x.Id);
+                        matches = matches.Where(x => referencesById.ContainsKey(x.Factor.Rule.Id))
+                            .Select(x => (x.Factor with { Rule = referencesById[x.Factor.Rule.Id] }, x.Anchor)).ToList();
+                        blockedCumulative = blockedCumulative is not null && referencesById.TryGetValue(blockedCumulative.Rule.Id, out var reference)
+                            ? blockedCumulative with { Rule = reference } : null;
                     }
                     if (matches.Count == 0 && blockedCumulative is not null)
                         return new(null, null, blockedCumulative.Unit, blockedCumulative.OutputBasis,

@@ -145,13 +145,25 @@ Follow with Capture migration `20261020120000_TrimLegacyLabIdentityComparisons` 
 
 Original files are stored durably in PostgreSQL, limited to 10 MiB per report, and served only through scoped authenticated downloads. Include Capture laboratory tables in database backup/restore procedures. No facility or external laboratory account is required. Applying migrations to shared Supabase requires explicit approval; use disposable test containers for write-based verification unless separately approved. See [laboratory API](sample-api.md#laboratory-report-routes).
 
-### F12 residue bounds
+### Residue bounds
 
-F12 is implemented locally, not installed on shared Supabase. Apply Catalog `20261022000000_ReviewedResidueRules`, Capture `20261022000000_ReviewedResidueEvidence`, and Ledger `20261022030000_ResidueBounds` in the existing module migration order through an explicitly approved migration-owner job. Restart with the matching API/web build and restricted runtime grant/validation setup. Normal startup must not migrate. No seed, reset, stock backfill or automatic publication of bundled scientific coefficients is required or authorized.
+Residue bounds and company policy profiles are implemented locally, not installed on shared Supabase. Apply Catalog migrations `20261022000000_ReviewedResidueRules` and forward-only `20261023000000_CompanyResiduePolicies`, Capture `20261022000000_ReviewedResidueEvidence`, and Ledger `20261022030000_ResidueBounds` in existing module migration order through explicitly approved migration-owner job. The company-policy migration adds append-only company-scoped rule/settings support and runtime grants; it does not rewrite existing rule payloads or seed/adopt policies. Downgrade is unsupported because company policy history cannot be flattened into global scope; use approved database backup restore if rollback is required. Restart with matching API/web build and reviewed restricted-runtime grant/validation setup. Routine startup must not migrate.
 
-New reviewed rule/source-group/report-selection payloads and evaluation snapshots are append-only. Include them in backup/restore. Runtime access remains protected: no direct Ledger snapshot writes or private-table reads; Catalog/Capture publication uses narrowly granted protected commands. Existing runtime grants must be updated with the migration-owner deployment procedure, not owner credentials in normal application startup.
+New reviewed system/company rule versions, policy settings, source-group/report-selection payloads and evaluation snapshots are append-only. Include them in backup/restore. Runtime access remains protected: no direct Ledger snapshot writes or private-table reads; Catalog/Capture publication uses narrowly granted protected commands. Existing runtime grants must be refreshed using migration-owner deployment procedure, not owner credentials in normal application startup.
 
-Operational numeric use requires actual reviewed interpretation, material/method/residue-definition applicability, source representation, precision and process/fraction factors. Until present, evaluations return explicit `UNRESOLVED` with null endpoints. Synthetic rules used by isolated tests/browser harness must never be auto-published to shared or production data. F12 is not legal PASS, HOLD release or export certification. Routes, permission matrix and UI steps: [F12 delivered contracts](f12-residue-bounds-plan.md#9-delivered-f12-contracts).
+No shared database migration, seed, authorization grant or deployment was performed or authorized by this work. Do not treat isolated test data as seed data. Normal use requires explicit reviewed system-profile adoption or company override setting; no default adoption exists. A company override requires full compatible same-Code rule and never falls back when missing/inapplicable. Policy setting/rule versions and provenance are retained.
+
+Operational numeric use requires actual reviewed interpretation, material/method/residue-definition applicability, source representation, precision and process/fraction factors. `NUMERIC_RELATIVE_UNCERTAINTY` requires an exact nonnegative percent (`10` = 10%), and zero requires explicitly reviewed `RelativeUncertaintyAtZero`; normalized reviewed absolute uncertainty takes priority. Raw nonblank uncertainty without normalized absolute uncertainty remains unresolved. Missing evidence/rules/adoption yields `UNRESOLVED` with null unknown endpoints. Synthetic rules used by isolated tests/browser harness must never be published operationally. Residue bounds are not legal PASS, HOLD release or export certification. Routes, permission matrix and behavior: [residue bounds delivered contracts](residue-bounds-plan.md#9-delivered-residue-bounds-contracts).
+
+For isolated Linux tests when Docker bridge/veth creation is unavailable, opt in to a disposable PostgreSQL container using host networking, a distinct port per fixture and `listen_addresses=127.0.0.1`:
+
+```bash
+GRAINLEDGER_TEST_HOST_NETWORK=true TESTCONTAINERS_RYUK_DISABLED=true \
+  dotnet test backend/tests/GrainLedger.Api.IntegrationTests/GrainLedger.Api.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~Residue|FullyQualifiedName~Permission|FullyQualifiedName~OpenApi'
+```
+
+This test-only option does not use configured connection strings or an existing database. Normal fixture disposal removes its containers; with Ryuk disabled, interrupted runs may require cleanup of those test-owned containers. Default tests still use bridge networking. The opt-in browser host accepts loopback-only `GRAINLEDGER_BROWSER_API_URL` and `GRAINLEDGER_BROWSER_UI_URL` alongside its private `GRAINLEDGER_BROWSER_SESSION_FILE`; use separate ports and a temporary Vite proxy configuration rather than replacing a running application. Never publish the session file or test cookies.
 
 ### Dependency patch pins
 

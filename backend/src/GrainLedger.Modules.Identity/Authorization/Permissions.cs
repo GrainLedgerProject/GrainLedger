@@ -31,6 +31,7 @@ public static class Permissions
     public const string FarmsWrite = "farms.write";
     public const string PurchasesWrite = "purchases.write";
     public const string ResiduePolicyManage = "residue.policy.manage";
+    public const string ResidueCompanyPolicyManage = "residue.company-policy.manage";
     public const string ResidueEvidenceManage = "residue.evidence.manage";
     public const string ResidueEvaluate = "residue.evaluate";
 
@@ -41,7 +42,7 @@ public static class Permissions
         HoldsProcess, ReconciliationRead, HistoryRead, LotsReadFacility, LotsReceive,
         ConversionsWrite, ContainersOperate, FarmsRead, LotsReadTenant, LabWrite,
         BlendApprove, HoldsManage, TraceReadTenant, MrlRead, LabRead, BlendPropose,
-        ContainersWrite, FarmsWrite, PurchasesWrite, ResiduePolicyManage, ResidueEvidenceManage, ResidueEvaluate
+        ContainersWrite, FarmsWrite, PurchasesWrite, ResiduePolicyManage, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate
     ]);
 
     public static string[] ForRole(string role) => role switch
@@ -49,7 +50,7 @@ public static class Permissions
         Roles.Administrator => [IdentityManage, PlatformConfigure, TraceReadAll, ResiduePolicyManage],
         Roles.MillManager => [PlatformRead, LotsReadAll, ConversionsRead, ConversionsConfirm, CorrectionsReconcile, ReceivingReconcile, HoldsProcess, ReconciliationRead, HistoryRead, ResidueEvaluate],
         Roles.MillOperator => [PlatformRead, LotsReadFacility, LotsReceive, ConversionsWrite, ContainersOperate, HistoryRead, ResidueEvaluate],
-        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead, ResidueEvidenceManage, ResidueEvaluate],
+        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate],
         Roles.ExportStaff => [MrlRead, LotsReadTenant, LabRead, BlendPropose, ContainersWrite, TraceReadTenant, HistoryRead, ResidueEvaluate],
         Roles.PurchasingStaff => [FarmsWrite, PurchasesWrite, HistoryRead],
         _ => []

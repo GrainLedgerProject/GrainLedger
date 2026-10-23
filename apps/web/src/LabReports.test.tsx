@@ -50,6 +50,7 @@ it('selects readable report label and submits selected report ID', async () => {
     if (String(input) === '/api/auth/csrf') return new Response(JSON.stringify({ token: 'csrf' }), { headers: { 'Content-Type': 'application/json' } });
     if (String(input) === '/api/lab-reports?page=1&pageSize=20') return new Response(JSON.stringify({ items: [report], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
     if (String(input) === '/api/lab-reports' && init?.method === 'POST') { submitted = JSON.parse(String(init.body)); return new Response(JSON.stringify({ id: 'new-report' }), { headers: { 'Content-Type': 'application/json' } }); }
+    if (String(input) === '/api/lab-reports/new-report') return new Response(JSON.stringify({ ...report, id: 'new-report', reportNumber: 'R-002', fileName: 'report.txt', fileSize: 16, contentType: 'text/plain', sha256: 'hash', recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null, confirmedAt: null, suggestedMarketCode: 'UNKNOWN', assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [], resultSets: [] }), { headers: { 'Content-Type': 'application/json' } });
     return new Response(JSON.stringify({ items: [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
   });
   render(<LabReports canWrite />);
@@ -71,6 +72,7 @@ it('selects readable report label and submits selected report ID', async () => {
   fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
   await waitFor(() => expect(submitted?.payload.relatedReportId).toBe('report-a'));
   expect(submitted?.payload.relationshipReason).toBe('Corrected transcription');
+  expect(await screen.findByRole('heading', { name: 'R-002' })).toBeInTheDocument();
 });
 
 it('clears optional relation and reason when link checkbox turns off', async () => {
@@ -92,7 +94,7 @@ it('keeps selected sample visible and submits it when search excludes it', async
       return new Response(JSON.stringify({ items: [sampleA], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } });
     }
     if (path === '/api/auth/csrf') return new Response(JSON.stringify({ token: 'csrf' }), { headers: { 'Content-Type': 'application/json' } });
-    if (path === '/api/lab-reports/report-a') return new Response(null, { status: 204 });
+    if (path === '/api/lab-reports/report-a') return new Response(JSON.stringify({ id: 'report-a', reportNumber: 'R-002', laboratoryName: 'External laboratory', issuedOn: '2026-10-20', receivedAt: '2026-10-20T10:00:00Z', reportKind: 'FINAL', status: 'UNRESOLVED', fileName: 'report.txt', fileSize: 16, contentType: 'text/plain', sha256: 'hash', recordedBy: 'operator', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null, confirmedAt: null, suggestedMarketCode: 'UNKNOWN', assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [], resultSets: [{ id: 'set-a', sampleId: sampleA.id, sourceLotId: null, laboratorySampleReference: null, statedSampleCode: sampleA.code, statedSealCode: sampleA.sealCode, sectionReference: null, results: [] }] }), { headers: { 'Content-Type': 'application/json' } });
     if (path === '/api/lab-reports' && init?.method === 'POST') {
       submittedBody = JSON.parse(String(init.body));
       return new Response(JSON.stringify({ id: 'report-a' }), { headers: { 'Content-Type': 'application/json' } });
@@ -122,6 +124,7 @@ it('keeps selected sample visible and submits it when search excludes it', async
   fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
 
   await waitFor(() => expect(submittedBody?.payload.resultSets[0].sampleId).toBe(sampleA.id));
+  expect(await screen.findByRole('heading', { name: 'R-002' })).toBeInTheDocument();
 });
 it.each([
   { name: 'confirmed identity over proposal', resultSets: [{ id: 'set-1', sampleId: 'sample-a', confirmedSampleId: 'sample-b' }], expected: 'sample-b' },

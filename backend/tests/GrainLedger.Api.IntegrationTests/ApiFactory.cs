@@ -1,4 +1,8 @@
+using System.Collections.Generic;
+using System.Net.Sockets;
 using System.Security.Claims;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Containers;
 using GrainLedger.Modules.Identity;
 using GrainLedger.Modules.Ledger;
 using Npgsql;
@@ -25,22 +29,83 @@ namespace GrainLedger.Api.IntegrationTests;
 
 public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    private static readonly HashSet<int> ReservedHostPorts = [];
+    private readonly int? _hostPort;
+    private readonly IContainer _postgres;
+
     public FakeEmailSender Email { get; } = new();
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("grainledger_tests").WithUsername("postgres").WithPassword("postgres").Build();
+
+    public ApiFactory()
+    {
+        _hostPort = string.Equals(Environment.GetEnvironmentVariable("GRAINLEDGER_TEST_HOST_NETWORK"), "true", StringComparison.OrdinalIgnoreCase)
+            ? ReserveHostPort()
+            : null;
+
+        if (_hostPort is int port)
+        {
+            _postgres = new ContainerBuilder("postgres:17-alpine")
+                .WithEnvironment("POSTGRES_DB", "grainledger_tests")
+                .WithEnvironment("POSTGRES_USER", "postgres")
+                .WithEnvironment("POSTGRES_PASSWORD", "postgres")
+                .WithCommand("-c", "listen_addresses=127.0.0.1", "-p", port.ToString())
+                .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted(
+                    "pg_isready", "-h", "127.0.0.1", "-p", port.ToString(), "-U", "postgres", "-d", "grainledger_tests"))
+                .WithCreateParameterModifier(parameters => (parameters.HostConfig ?? throw new InvalidOperationException("Container host configuration unavailable")).NetworkMode = "host")
+                .Build();
+        }
+
+        else
+        {
+            _postgres = new PostgreSqlBuilder("postgres:17-alpine")
+                .WithDatabase("grainledger_tests").WithUsername("postgres").WithPassword("postgres").Build();
+        }
+    }
 
     public string RuntimeConnectionString { get; private set; } = "";
-    public string OwnerConnectionString => _postgres.GetConnectionString();
+    public string OwnerConnectionString
+    {
+        get
+        {
+            if (_hostPort is not int port)
+                return ((PostgreSqlContainer)_postgres).GetConnectionString();
+
+            var connectionString = new NpgsqlConnectionStringBuilder
+            {
+                Host = "127.0.0.1",
+                Port = port,
+                Database = "grainledger_tests",
+                Username = "postgres",
+                Password = "postgres"
+            };
+            return connectionString.ConnectionString;
+        }
+    }
     public bool BrowserCookies { get; init; }
     public TimeProvider Clock { get; init; } = TimeProvider.System;
     public Action<IServiceCollection>? ConfigureTestServices { get; init; }
+
+    private static int ReserveHostPort()
+    {
+        while (true)
+        {
+            using var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            lock (ReservedHostPorts)
+            {
+                if (ReservedHostPorts.Add(port))
+                    return port;
+            }
+        }
+    }
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ConnectionStrings:GrainLedger"] = _postgres.GetConnectionString(),
-            ["ConnectionStrings:GrainLedgerMigration"] = _postgres.GetConnectionString(),
+            ["ConnectionStrings:GrainLedger"] = OwnerConnectionString,
+            ["ConnectionStrings:GrainLedgerMigration"] = OwnerConnectionString,
             ["Ledger:RuntimeRole"] = "grainledger_test_runtime",
             ["Authentication:Google:ClientId"] = "tests-client",
             ["Authentication:Google:ClientSecret"] = "tests-secret",
@@ -95,8 +160,25 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public new async Task DisposeAsync()
     {
-        await base.DisposeAsync();
-        await _postgres.DisposeAsync();
+        try
+        {
+            await base.DisposeAsync();
+        }
+        finally
+        {
+            try
+            {
+                await _postgres.DisposeAsync();
+            }
+            finally
+            {
+                if (_hostPort is int port)
+                {
+                    lock (ReservedHostPorts)
+                        ReservedHostPorts.Remove(port);
+                }
+            }
+        }
     }
 
     public async Task<(User User, LoginSession Session)> SeedUserAsync(string? role, Guid? organizationId = null, bool active = true)

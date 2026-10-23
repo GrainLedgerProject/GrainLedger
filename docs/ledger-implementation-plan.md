@@ -32,7 +32,7 @@ These source revisions were inspected. Diagram design is not proof of factory/su
 
 ### Separate milestones
 
-- Mixed-bulk location pooling and custody accounting are implemented locally. Eligibility is explicit and evidence-backed; see [mixed-bulk storage plan](mixed-bulk-storage-plan.md). Sampling/lab workflow and [F12 residue bounds](f12-residue-bounds-plan.md#9-delivered-f12-contracts) are separate implemented modules/features. Market compliance, export orders, reservation, loading/container traceability, and genuine transport shortage/gain settlement remain excluded.
+- Mixed-bulk location pooling and custody accounting are implemented locally. Eligibility is explicit and evidence-backed; see [mixed-bulk storage plan](mixed-bulk-storage-plan.md). Sampling/lab workflow and [residue bounds](residue-bounds-plan.md#9-delivered-residue-bounds-contracts) are separate implemented modules/features. Market compliance, export orders, reservation, loading/container traceability, and genuine transport shortage/gain settlement remain excluded.
 
 ## 2. Architecture and database boundary
 

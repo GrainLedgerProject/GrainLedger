@@ -16,6 +16,12 @@ public sealed class BrowserWorkflowHost
     {
         var sessionFile = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_SESSION_FILE");
         if (string.IsNullOrWhiteSpace(sessionFile)) return;
+        var apiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_URL") ?? "http://localhost:5080");
+        var uiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_UI_URL") ?? "http://localhost:5173");
+        if (new[] { apiOrigin, uiOrigin }.Any(uri => !uri.IsLoopback || uri.Scheme != "http" || uri.AbsolutePath != "/" || uri.Query != "" || uri.Fragment != ""))
+            throw new InvalidOperationException("Browser test origins must be loopback HTTP origins.");
+        var apiUrl = apiOrigin.GetLeftPart(UriPartial.Authority);
+        var uiUrl = uiOrigin.GetLeftPart(UriPartial.Authority);
         var factory = new ApiFactory { BrowserCookies = true };
         await factory.InitializeAsync();
         // Synthetic password account only in the disposable browser-test database.
@@ -67,6 +73,15 @@ public sealed class BrowserWorkflowHost
         var aliquot = await residue.WithdrawAsync(mixedLocation, pool, revision, "25");
         var (remainder, _) = await residue.PoolAsync(mixedLocation);
         var initialEvaluation = await residue.EvaluateAsync(aliquot);
+        var companyPolicy = await ResidueScenario.CreateAsync(scenario);
+        var policySample = await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("10"));
+        var policyReport = await companyPolicy.ReportAsync(policySample, [companyPolicy.Result(uncertainty: null)]);
+        var relativeRule = companyPolicy.RuleBody("NUMERIC_RELATIVE_UNCERTAINTY");
+        relativeRule["relativeUncertaintyPercent"] = "10";
+        relativeRule["relativeUncertaintyAtZero"] = false;
+        var relativeRuleId = await companyPolicy.PublishRuleAsync(relativeRule, adopt: false);
+        await companyPolicy.SelectAsync(policySample, policyReport.Report, uncertainty: null);
+        var beforeAdoption = await companyPolicy.EvaluateAsync(policySample.LotId);
         var latePublished = false;
         using var lateGate = new SemaphoreSlim(1, 1);
         var accounts = new Dictionary<string, object>();
@@ -76,12 +91,12 @@ public sealed class BrowserWorkflowHost
             accounts[label] = new
             {
                 userId = account.User.Id, organizationId = account.User.OrganizationId, role = account.User.Role,
-                loginUrl = $"http://localhost:5080/__browser/session/{label}",
-                cookie = new { name = cookie.Name, value = cookie.Value, domain = "localhost", path = "/", httpOnly = true, secure = false, sameSite = "Lax" }
+                loginUrl = $"{apiUrl}/__browser/session/{label}",
+                cookie = new { name = cookie.Name, value = cookie.Value, domain = apiOrigin.Host, path = "/", httpOnly = true, secure = false, sameSite = "Lax" }
             };
         }
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
-        builder.WebHost.UseUrls("http://localhost:5080");
+        builder.WebHost.UseUrls(apiUrl);
         await using var bridge = builder.Build();
         using var upstream = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
@@ -90,29 +105,29 @@ public sealed class BrowserWorkflowHost
         bridge.Run(async context =>
         {
             // Provisioning belongs only to this loopback test bridge, never production API.
-            if (context.Request.Path == "/__browser/f12")
+            if (context.Request.Path == "/__browser/residue-bounds")
             {
                 if (!HttpMethods.IsGet(context.Request.Method)) { context.Response.StatusCode = 405; return; }
                 context.Response.ContentType = "text/html; charset=utf-8";
                 await context.Response.WriteAsync($"""
                     <!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1">
-                    <title>Synthetic F12 browser scenario</title><main><h1>SYNTHETIC F12 — isolated database only</h1>
+                    <title>Synthetic residue bounds browser scenario</title><main><h1>SYNTHETIC RESIDUE BOUNDS — isolated database only</h1>
                     <p>Not operational scientific approval or compliance. Source 60 kg [0.1,0.2] + source 40 kg [0.3,0.8],
                     drying factor 1, milling factor 0.5, blend/pool factors 1. Expected fresh interval [0.09,0.22] mg/kg.</p>
                     <p>Second report starts pending. Initial snapshot stays unresolved after late evidence.</p>
-                    <ul><li><a href="http://localhost:5173/ledger/lots/{aliquot}">Aliquot {aliquot}</a></li>
-                    <li><a href="http://localhost:5173/ledger/lots/{remainder}">Remainder {remainder}</a></li>
-                    <li><a href="http://localhost:5173/ledger/lots/{blended}">Exhausted blend {blended}</a></li>
-                    <li><a href="http://localhost:5173/ledger/lots/{first.LotId}">Exhausted source {first.LotId}</a></li>
+                    <ul><li><a href="{uiUrl}/ledger/lots/{aliquot}">Aliquot {aliquot}</a></li>
+                    <li><a href="{uiUrl}/ledger/lots/{remainder}">Remainder {remainder}</a></li>
+                    <li><a href="{uiUrl}/ledger/lots/{blended}">Exhausted blend {blended}</a></li>
+                    <li><a href="{uiUrl}/ledger/lots/{first.LotId}">Exhausted source {first.LotId}</a></li>
                     <li>Initial evaluation: {initialEvaluation.GetProperty("id").GetGuid()}</li></ul>
-                    <form method="post" action="/__browser/f12/late-evidence"><button>Confirm late evidence through real API</button></form>
+                    <form method="post" action="/__browser/residue-bounds/late-evidence"><button>Confirm late evidence through real API</button></form>
                     <p><a href="/__browser/session/customer">Open customer workspace</a> ·
                     <a href="/__browser/session/operator">Open assigned operator</a> ·
                     <a href="/__browser/session/foreignCustomer">Open foreign customer (denied lot)</a></p></main></html>
                     """);
                 return;
             }
-            if (context.Request.Path == "/__browser/f12/late-evidence")
+            if (context.Request.Path == "/__browser/residue-bounds/late-evidence")
             {
                 if (!HttpMethods.IsPost(context.Request.Method)) { context.Response.StatusCode = 405; return; }
                 await lateGate.WaitAsync(context.RequestAborted);
@@ -127,7 +142,7 @@ public sealed class BrowserWorkflowHost
                     }
                 }
                 finally { lateGate.Release(); }
-                context.Response.Redirect($"http://localhost:5173/ledger/lots/{aliquot}");
+                context.Response.Redirect($"{uiUrl}/ledger/lots/{aliquot}");
                 return;
             }
             if (context.Request.Path.StartsWithSegments("/__browser/session", out var remaining))
@@ -147,7 +162,7 @@ public sealed class BrowserWorkflowHost
                         Expires = session.ExpiresAt
                     });
                 }
-                context.Response.Redirect("http://localhost:5173");
+                context.Response.Redirect(uiUrl);
                 return;
             }
             using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), context.Request.Path + context.Request.QueryString);
@@ -170,14 +185,14 @@ public sealed class BrowserWorkflowHost
         await using (var file = new FileStream(sessionFile, options))
             await JsonSerializer.SerializeAsync(file, new
             {
-                api = "http://localhost:5080", ui = "http://localhost:5173", isolatedTestData = true,
+                api = apiUrl, ui = uiUrl, isolatedTestData = true,
                 customerOrganizationId = scenario.OwnerId, foreignCustomerOrganizationId = scenario.ForeignOwnerId,
                 facilityId = scenario.FacilityId, foreignFacilityId = scenario.ForeignFacilityId,
                 locationId = scenario.LocationId, secondLocationId = scenario.SecondLocationId,
                 isolationLocationId = scenario.IsolationLocationId, foreignLocationId = scenario.ForeignLocationId,
                 equipmentId = scenario.EquipmentId, commodityId = scenario.CommodityId, catalogCommodityId = scenario.CatalogCommodityId,
                 farmerId = scenario.FarmerId, seasonId = scenario.SeasonId, plotSeasonId = scenario.PlotSeasonId,
-                f12 = new
+                residueBounds = new
                 {
                     synthetic = true, substanceId = residue.SubstanceId, uncoveredSubstanceId = residue.OtherSubstanceId,
                     sourceLotIds = new[] { first.LotId, second.LotId }, sourceIds = new[] { first.SourceLotId, second.SourceLotId },
@@ -185,12 +200,23 @@ public sealed class BrowserWorkflowHost
                     blendedLotId = blended, poolLotId = pool, aliquotLotId = aliquot, remainderLotId = remainder,
                     mixedLocationId = mixedLocation, lateReportId = lateReport.ReportId,
                     initialEvaluationId = initialEvaluation.GetProperty("id").GetGuid(),
-                    aliquotUrl = $"http://localhost:5173/ledger/lots/{aliquot}",
-                    remainderUrl = $"http://localhost:5173/ledger/lots/{remainder}",
-                    exhaustedSourceUrl = $"http://localhost:5173/ledger/lots/{first.LotId}",
-                    actionsUrl = "http://localhost:5080/__browser/f12",
-                    lateEvidenceAction = "POST http://localhost:5080/__browser/f12/late-evidence",
+                    aliquotUrl = $"{uiUrl}/ledger/lots/{aliquot}",
+                    remainderUrl = $"{uiUrl}/ledger/lots/{remainder}",
+                    exhaustedSourceUrl = $"{uiUrl}/ledger/lots/{first.LotId}",
+                    actionsUrl = $"{apiUrl}/__browser/residue-bounds",
+                    lateEvidenceAction = $"POST {apiUrl}/__browser/residue-bounds/late-evidence",
                     expectedFreshLower = "0.09", expectedFreshUpper = "0.22", unit = "mg/kg", basis = ResidueScenario.Basis
+                },
+                companyPolicy = new
+                {
+                    synthetic = true, substanceId = companyPolicy.SubstanceId,
+                    lotId = policySample.LotId, sourceId = policySample.SourceLotId,
+                    reportId = policyReport.ReportId, ruleId = relativeRuleId,
+                    ruleCode = relativeRule["code"]!.GetValue<string>(),
+                    initialEvaluationId = beforeAdoption.GetProperty("id").GetGuid(),
+                    lotUrl = $"{uiUrl}/ledger/lots/{policySample.LotId}",
+                    expectedDefaultLower = "0.135", expectedDefaultUpper = "0.165",
+                    expectedOverrideLower = "0.12", expectedOverrideUpper = "0.18"
                 },
                 evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(), accounts
             }, new JsonSerializerOptions { WriteIndented = true });

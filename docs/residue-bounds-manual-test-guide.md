@@ -1,0 +1,244 @@
+# Manual test flow — residue bounds
+
+Flow: receive paddy → collect samples → record laboratory evidence → process stock → calculate bounds → receive late evidence → recalculate → compare history.
+
+Use an isolated test environment only. Numbers below are synthetic calculation inputs, not scientific approvals or realistic production yields. Do not run these write-based scenarios against shared Supabase without explicit database-owner approval. Do not publish synthetic rules as operational policy.
+
+This guide covers the business flow from new source records. The existing browser-test scenario already creates the source, processing and sample records; when using that prebuilt scenario, inspect those records rather than creating them again.
+
+Environment prerequisites: matching application and module migrations installed in an isolated database, configured runtime role, and test accounts for each role below. See [Setup and deployment](setup-and-deployment.md). Do not run migrations or seeds against shared data for this test.
+
+## 1. Prepare test data and rules
+
+For field-by-field instructions and synthetic rule examples, see [Residue rules entry guide](residue-rules-entry-guide.md). Use numeric interpretation and baseline drying/milling/blending rules for this flow; alternative ND and cumulative examples are separate exercises.
+
+Keep both source lots under the same customer company, with operators assigned to the processing facility.
+
+| Source | Received mass | Laboratory value | Reviewed absolute uncertainty | Source interval |
+| --- | --- | --- | --- | --- |
+| A | 60 kg | 0.15 mg/kg | 0.05 mg/kg | `[0.10, 0.20]` |
+| B | 40 kg | 0.55 mg/kg | 0.25 mg/kg | `[0.30, 0.80]` |
+
+Use the same substance, residue definition and analytical basis throughout. The laboratory method must match the interpretation rule.
+
+As **Administrator**, open **Administration → Catalogs → Commodities** and configure synthetic reviewed rules before calculating:
+
+| Process | Input → output | Concentration factor |
+| --- | --- | --- |
+| Drying | RAW_PADDY → DRIED_PADDY | 1 |
+| Milling | DRIED_PADDY → HEAD_RICE | 0.5 |
+| Blending | HEAD_RICE → BLENDED_RICE | 1 |
+| Mixed-storage ingress, if tested | BLENDED_RICE → BLENDED_RICE | 1 |
+| Mixed-storage withdrawal, if tested | BLENDED_RICE → BLENDED_RICE | 1 |
+
+Then, as **Customer Manager**, open **Residue profiles**. For interpretation Code and each process Code in use, publish a separate reviewed setting with mode **Adopt / return to system default**, effective interval covering test events, and explicit evidence/applicability/reviewer/authority/reviewed-at fields. System rule publication is not adoption; no seed or automatic adoption exists. Record setting IDs/versions for audit.
+
+Also required:
+
+- Reviewed numeric interpretation matching method, substance, commodity and material basis.
+- Explicit outward precision, for example **12 decimal places**.
+- Applicable process rules with explicit fraction/product identity, basis, conditions and factor semantics. Use per-step factors for this test. `UNCONDITIONAL` only for explicitly reviewed condition-independent synthetic rule.
+- Reviewed homogeneous mixing for multi-input operations.
+- Existing facility balance policies and blend compatibility.
+- Effective dates covering test events.
+- Clearly labelled synthetic evidence references, applicability statements and reviewer metadata on rules and settings.
+
+Do not weaken validation when setup is missing. Missing adoption or applicable rule must produce `UNRESOLVED`.
+
+For separate relative-uncertainty rehearsal, use explicitly reviewed `NUMERIC_RELATIVE_UNCERTAINTY` with exact percentage (synthetic `10` means 10%, not a fraction). Reviewed normalized absolute uncertainty takes priority. Nonblank raw uncertainty without normalized absolute value must remain unresolved; do not parse text. Relative use at numeric zero requires explicit reviewed `RelativeUncertaintyAtZero: true`. These are behavior checks only; synthetic values are not operational.
+
+## 2. Register and receive two source lots
+
+### Purchasing Staff
+
+1. Open **Paddy intake**.
+2. Register source A: **60 kg**.
+3. Register source B: **40 kg**.
+4. Record the generated source-lot codes.
+
+**Expected:** procurement source records exist, but registration alone creates no usable stock.
+
+### Mill Operator
+
+1. Open **Ledger → Receive stock**.
+2. Record arrival measurements:
+   - A: **60 kg**.
+   - B: **40 kg**.
+3. Complete receiving acceptance.
+
+Use matching expected and measured masses to avoid an unrelated shortage-review scenario.
+
+**Expected:**
+
+- Two usable `RAW_PADDY` lots.
+- Stock quantities **60 kg** and **40 kg**.
+- Correct company ownership and facility scope.
+
+## 3. Collect samples before processing
+
+As **Purchasing Staff**, repeat for A and B:
+
+1. Open **Paddy intake → receipt → source-lot code**.
+2. Click **+ Take sample**.
+3. Enter the material sampled, collection time and synthetic physical seal code.
+4. Save and record the generated sample code.
+5. Click **Send to laboratory** and record dispatch.
+
+**Expected:**
+
+- Each sample belongs to exactly one original procurement source.
+- Sample and dispatch records do not change stock.
+- Sample code and seal remain distinct identifiers.
+
+See [Laboratory workflow guide](lab-flow-guide.md) for sample identity and custody requirements.
+
+## 4. Confirm source A’s report; leave B pending
+
+As **Customer Manager**:
+
+### Report A
+
+1. Open **Samples → sample A → + Receive report**.
+2. Upload a clearly labelled synthetic report belonging only to the test company.
+3. Enter matching printed sample and seal identifiers.
+4. Record the numeric result **0.15 mg/kg**, laboratory method and original uncertainty text.
+5. Save report evidence.
+6. Open **Review and confirm**.
+7. Verify sample identity and transcription against the synthetic original.
+8. Confirm the checked record.
+9. In the reviewed report-selection form:
+   - Select source A, the substance and confirmed result.
+   - Choose its explicitly adopted interpretation profile; profile pre-fills reviewed basis/definition/references only.
+   - Enter matching material basis and residue definition; complete reviewer/date and other review metadata.
+   - Enter reviewed normalized absolute uncertainty **0.05**. It is authoritative; it is not inferred from original lab uncertainty text.
+   - Click **Preview server assessment** and inspect result/reasons. This does not publish selection. Publish only after explicit review.
+
+### Report B
+
+Record report B with **0.55 mg/kg** and its original uncertainty text, but **do not confirm or publish its reviewed selection yet**.
+
+**Expected:** A has usable reviewed evidence; B does not. Report confirmation and reviewed interval interpretation are separate steps.
+
+## 5. Process both lots while B’s evidence remains pending
+
+As **Mill Operator**, create drafts and use **Commit processing**:
+
+1. Dry A → dried lot A.
+2. Dry B → dried lot B.
+3. Mill dried A → head-rice lot A.
+4. Mill dried B → head-rice lot B.
+5. Blend both head-rice lots → blended lot.
+
+For this synthetic arithmetic test, retain:
+
+- A path: **60 kg**.
+- B path: **40 kg**.
+- Blend output: **100 kg**.
+- Declared loss: **0**.
+
+These equal-mass transitions isolate residue calculation; they are **not realistic milling-yield assumptions**. Record only the positive output fraction used by this synthetic example; do not fabricate additional byproducts.
+
+**Expected:**
+
+- Operations become committed.
+- Inputs are consumed and outputs created.
+- The blend retains ancestry through both paths.
+- Missing laboratory evidence does not independently invent a stock or HOLD block.
+
+If nonzero measurement variance occurs, follow existing Manager review rather than bypassing it. Existing receiving, HOLD, balance and compatibility restrictions still apply.
+
+## 6. Calculate before late evidence
+
+As **Customer Manager**:
+
+1. Open **Ledger → Stock → blended lot detail**.
+2. Select the test substance.
+3. Click **Calculate bounds**.
+4. Record the snapshot timestamp.
+5. Expand reasons and lineage dependencies.
+
+**Expected:**
+
+- Result: **`UNRESOLVED`**.
+- No finite interval; unknown endpoints are null in the API response.
+- Reasons identify unresolved evidence or a positive parent dependency.
+- Both source paths remain represented.
+- Calculation changes neither stock nor HOLD state.
+
+**Failure:** the system drops B and calculates from A alone.
+
+## 7. Confirm B’s evidence and recalculate
+
+As **Customer Manager**:
+
+1. Open report B.
+2. Review sample identity and transcription.
+3. Confirm the report.
+4. Draft reviewed result selection for B:
+   - Numeric result: **0.55 mg/kg**.
+   - Reviewed absolute uncertainty: **0.25 mg/kg**.
+   - Same compatible basis and residue definition as A.
+5. Select the adopted interpretation profile. Profile supplies reviewed references/basis context; reviewer and review date remain explicit.
+6. Click **Preview server assessment**. Preview is non-mutating; inspect interval/reasons. Only empty `reasons` and non-null `lower`/`upper` represent finite result. Browser arithmetic is not authoritative.
+7. Publish reviewed selection only after review; return to blended lot.
+8. Click **Recalculate bounds**.
+
+**Expected result:**
+
+```text
+Status: COMPLETE
+Lower:  0.090000000000
+Upper:  0.220000000000
+Unit:   mg/kg
+```
+
+Inspect:
+
+- Provenance references A and B.
+- Applied interpretation and process rules.
+- Physical dependencies.
+
+`COMPLETE` means a finite interval was established under the referenced reviewed inputs, not legal PASS.
+
+## 8. Compare historical snapshots
+
+1. Open the earlier snapshot created before B confirmation.
+2. Confirm it remains **`UNRESOLVED`**.
+3. Open the newest snapshot.
+4. Confirm `[0.09, 0.22] mg/kg`.
+5. Reload the page and reopen both snapshots.
+
+**Expected:** history persists; later evidence does not rewrite earlier evaluations.
+
+## 9. Optional mixed-storage continuation
+
+If the mixed-bulk location and policies are configured:
+
+1. Transfer **100 kg blend** into mixed-bulk storage.
+2. Withdraw **25 kg** to an ordinary location.
+3. Inspect:
+   - Withdrawn aliquot: **25 kg**.
+   - Remaining pool: **75 kg**.
+4. Calculate bounds for both.
+5. Open the original exhausted blend through its saved lot link and calculate again.
+
+**Expected:** all three yield `[0.09, 0.22] mg/kg`. Withdrawal does not scale concentration by remaining quantity.
+
+## 10. Negative checks
+
+Use separate test records for conflicting-evidence scenarios so they do not contaminate the successful baseline.
+
+| Test | Expected |
+| --- | --- |
+| Select a substance absent from reports, without approved fallback | `UNRESOLVED`, never zero |
+| Evaluate a path without a compatible process rule | `UNRESOLVED`, never implicit factor 1 |
+| Create a conflicting confirmed retest without reviewed resolution | `UNRESOLVED`; latest or lowest must not win automatically |
+| Assigned operator opens derived bounds | Allowed |
+| Operator requests the original laboratory report | Denied |
+| Different company opens the saved lot URL | Access denied; no result data |
+
+## Pass condition
+
+Baseline pass criteria: late evidence updates only new calculations, history stays immutable, missing scientific inputs never become guessed bounds or PASS, and residue evaluation does not alter stock, original laboratory evidence or HOLD state. Extension acceptance additionally requires explicit profile adoption, fail-closed override behavior, correct uncertainty handling/provenance and real UI/API verification.
+
+The numeric baseline and historical outcomes above describe the prior synthetic flow only. They are expected test data, not evidence that this policy-profile extension or documentation change has been verified. Parent must reconcile actual UI labels and API/browser verification before marking extension verified.

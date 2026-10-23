@@ -33,7 +33,7 @@ public sealed class ResidueEvaluationService(IConfiguration configuration, Ledge
         var actor = await ledger.ActorAsync(ct);
         await using var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
         await connection.OpenAsync(ct);
-        IReadOnlyList<ResidueNode> nodes; IReadOnlyList<ResidueRuleVersion> policies; ResidueEvidenceSnapshot evidence;
+        IReadOnlyList<ResidueNode> nodes; ResiduePolicySnapshot policies; ResidueEvidenceSnapshot evidence;
         DateTimeOffset snapshotAt;
         await using (var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct))
         {
@@ -46,13 +46,13 @@ public sealed class ResidueEvaluationService(IConfiguration configuration, Ledge
             var graph = (string)(await ExecuteAsync(connection, tx, "SELECT ledger.residue_graph($1,$2)::text", ct, actor, lotId))!;
             nodes = JsonSerializer.Deserialize<ResidueNode[]>(graph, Json)!;
             var target = nodes.Single(x => x.LotId == lotId);
-            policies = await policyReader.ReadAsync(connection, tx, substances, snapshotAt, ct);
+            policies = await policyReader.ReadAsync(connection, tx, target.CompanyId, substances, snapshotAt, ct);
             evidence = await evidenceReader.ReadAsync(connection, tx, target.CompanyId,
                 nodes.Where(x => x.Kind == "SOURCE").Select(x => x.LotId).ToArray(), substances, snapshotAt, ct);
             await tx.CommitAsync(ct);
         }
         var sources = ResidueEvidenceResolver.Resolve(nodes, substances, evidence, policies, snapshotAt);
-        var results = ResidueCalculator.Calculate(lotId, substances, nodes, sources, ResidueEvidenceResolver.Factors(policies));
+        var results = ResidueCalculator.Calculate(lotId, substances, nodes, sources, ResidueEvidenceResolver.Factors(policies.Rules), policies);
         var snapshot = new ResidueEvaluation(request.Id, lotId, nodes.Single(x => x.LotId == lotId).CompanyId,
             snapshotAt, null, ResidueCalculator.EngineVersion, results);
         // Read snapshot is closed. Protected append uses its own READ COMMITTED transaction and current scope.
@@ -63,6 +63,55 @@ public sealed class ResidueEvaluationService(IConfiguration configuration, Ledge
             JsonSerializer.SerializeToElement(snapshot, Json)))!;
         await persist.CommitAsync(ct);
         return Parse(appended);
+    }
+
+    public async Task<ResidueSourceBound> PreviewAsync(ResidueReportSelection request, CancellationToken ct)
+    {
+        if (request.Id == Guid.Empty || request.CompanyId == Guid.Empty || request.SourceId == Guid.Empty
+            || request.SubstanceId == Guid.Empty || request.SelectedResultId == Guid.Empty
+            || string.IsNullOrWhiteSpace(request.MaterialBasis) || string.IsNullOrWhiteSpace(request.ResidueDefinition)
+            || request.EffectiveTo is { } end && end <= request.EffectiveFrom
+            || request.SupersededResultIds is null || request.SupersededResultIds.Length > 1000
+            || request.SupersededResultIds.Contains(request.SelectedResultId)
+            || request.SupersededResultIds.Contains(Guid.Empty)
+            || request.SupersededResultIds.Distinct().Count() != request.SupersededResultIds.Length
+            || request.AbsoluteUncertainty is not null && !ResidueReview.Number(request.AbsoluteUncertainty)
+            || request.ReportingThreshold is not null && !ResidueReview.PositiveNumber(request.ReportingThreshold))
+            throw new LedgerException(400, "Preview requires valid source/result selection, exact uncertainty and effective interval");
+        var actor = await ledger.ActorAsync(ct);
+        await using var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
+        await connection.OpenAsync(ct);
+        await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await ExecuteAsync(connection, tx, "SET TRANSACTION READ ONLY", ct);
+        var snapshotAt = new DateTimeOffset((DateTime)(await ExecuteAsync(connection, tx, "SELECT clock_timestamp()", ct))!);
+        if (!await ResidueReview.AuthorizeAsync(connection, tx, actor, "residue.evidence.manage", request.CompanyId, ct))
+            throw new LedgerException(403, "Residue evidence company access denied");
+        var sourceLot = await ExecuteAsync(connection, tx,
+            "SELECT lot_id FROM capture.source_lots WHERE id=$1 AND company_id=$2", ct, request.SourceId, request.CompanyId);
+        if (sourceLot is not Guid lotId) throw new LedgerException(404, "Confirmed own-company source not found");
+        var graph = (string)(await ExecuteAsync(connection, tx, "SELECT ledger.residue_graph($1,$2)::text", ct, actor, lotId))!;
+        var nodes = JsonSerializer.Deserialize<ResidueNode[]>(graph, Json)!;
+        var sourceNode = nodes.SingleOrDefault(x => x.LotId == lotId && x.CompanyId == request.CompanyId && x.Kind == "SOURCE");
+        if (sourceNode is null) throw new LedgerException(400, "Selection must refer to original owned source lot");
+        var substances = new[] { request.SubstanceId };
+        var evidence = await evidenceReader.ReadAsync(connection, tx, sourceNode.CompanyId, [lotId], substances, snapshotAt, ct);
+        var results = evidence.Results.Where(x => x.SourceId == request.SourceId && x.SubstanceId == request.SubstanceId).ToArray();
+        var selected = results.FirstOrDefault(x => x.ResultId == request.SelectedResultId);
+        if (selected is null || request.SupersededResultIds.Any(id => !results.Any(x => x.ResultId == id)))
+            throw new LedgerException(400, "Selected and superseded results require confirmed same-company/source/substance associations");
+        if (request.AbsoluteUncertainty is not null && (selected.ResultKind != "NUMERIC" || string.IsNullOrWhiteSpace(selected.Uncertainty)))
+            throw new LedgerException(400, "Normalized uncertainty requires numeric result with retained raw uncertainty evidence");
+        if (request.ReportingThreshold is not null && selected.ResultKind != "NOT_DETECTED")
+            throw new LedgerException(400, "Explicit reporting threshold applies only to NOT_DETECTED result");
+        if (evidence.Selections.Any(x => x.Id == request.Id) || request.SupersedesId is { } prior
+            && (!evidence.Selections.Any(x => x.Id == prior && x.SourceId == request.SourceId && x.SubstanceId == request.SubstanceId)
+                || evidence.Selections.Any(x => x.SupersedesId == prior)))
+            throw new LedgerException(409, "Selection ID or reviewed supersession conflicts with history");
+        var policies = await policyReader.ReadAsync(connection, tx, sourceNode.CompanyId, substances, snapshotAt, ct);
+        var proposed = evidence with { Selections = evidence.Selections.Append(request).ToArray() };
+        var preview = ResidueEvidenceResolver.Resolve([sourceNode], substances, proposed, policies, snapshotAt).Single();
+        await tx.CommitAsync(ct);
+        return preview;
     }
 
     public async Task<JsonElement> HistoryAsync(Guid lotId, Guid? evaluationId, CancellationToken ct)
@@ -92,6 +141,15 @@ public sealed class ResidueEvaluationService(IConfiguration configuration, Ledge
 
 public static class ResidueEvaluationEndpoints
 {
+    public static void MapResiduePreviewRoute(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGroup("/api/residue-report-selections").RequireAuthorization("residue.evidence.manage")
+            .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>()
+            .AddEndpointFilter<LedgerErrorFilter>()
+            .MapPost("/preview", async (ResidueReportSelection request, ResidueEvaluationService service, CancellationToken ct) =>
+                Results.Ok(await service.PreviewAsync(request, ct)));
+    }
+
     public static void MapResidueEvaluationRoutes(RouteGroupBuilder ledger)
     {
         var routes = ledger.MapGroup("/lots/{lotId:guid}/residue-evaluations").RequireAuthorization(Permissions.ResidueEvaluate);

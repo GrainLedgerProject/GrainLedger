@@ -169,7 +169,7 @@ public static class LedgerDatabase
             REVOKE ALL ON TABLE ledger.receiving_threshold_default,ledger.receiving_threshold_overrides,ledger.receiving_threshold_history FROM {role};
             REVOKE ALL ON TABLE ledger.residue_evaluations FROM {role};
             GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
-            REVOKE INSERT,UPDATE,DELETE ON TABLE catalog.residue_rule_versions,
+            REVOKE INSERT,UPDATE,DELETE ON TABLE catalog.residue_rule_versions,catalog.residue_policy_setting_versions,
                 capture.residue_source_group_versions,capture.residue_report_selections FROM {role};
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
             {legacyRevoke}
@@ -184,7 +184,7 @@ public static class LedgerDatabase
                 ledger.receiving_threshold_read(uuid,text,jsonb),ledger.receiving_threshold_command(uuid,text,jsonb),
                 ledger.residue_graph(uuid,uuid),ledger.residue_history(uuid,uuid,uuid),
                 ledger.residue_replay(uuid,uuid,uuid,jsonb),ledger.residue_append(uuid,uuid,uuid,jsonb,jsonb),
-                catalog.publish_residue_rule(uuid,jsonb),capture.publish_residue_group(uuid,jsonb),
+                catalog.publish_residue_rule(uuid,jsonb),catalog.publish_residue_policy_setting(uuid,jsonb),capture.publish_residue_group(uuid,jsonb),
                 capture.publish_residue_selection(uuid,jsonb),
                 ledger.can_read_lot(uuid,uuid),ledger.assigned(uuid,uuid),
                 ledger.own(uuid,uuid),ledger.role(uuid)
@@ -223,7 +223,8 @@ public static class LedgerDatabase
                       ('ledger.reserve_lot_code_internal(uuid,uuid,text,uuid,text,text)'),
                       ('ledger.mixed_bulk_custody_derived(uuid)'),('ledger.effective_hold_ids(uuid)'),
                       ('ledger.mixed_bulk_independent_blocked(uuid,uuid)'),('ledger.blocked(uuid,uuid)'),
-                      ('ledger.require_mixed_correction_safe(text,jsonb)'),('ledger.residue_authorized(uuid,uuid)')
+                      ('ledger.require_mixed_correction_safe(text,jsonb)'),('ledger.residue_authorized(uuid,uuid)'),
+                      ('catalog.validate_residue_policy_review(jsonb)')
                   ) private_function(signature)
                   WHERE has_function_privilege($1,private_function.signature,'EXECUTE')
               )
@@ -240,7 +241,7 @@ public static class LedgerDatabase
                      OR has_any_column_privilege($1,protected.table_name,'REFERENCES')
               )
               OR EXISTS (
-                  SELECT 1 FROM (VALUES ('catalog.residue_rule_versions'),
+                  SELECT 1 FROM (VALUES ('catalog.residue_rule_versions'),('catalog.residue_policy_setting_versions'),
                       ('capture.residue_source_group_versions'),('capture.residue_report_selections')) protected(table_name)
                   WHERE has_table_privilege($1,protected.table_name::regclass,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
                      OR has_any_column_privilege($1,protected.table_name,'INSERT')
@@ -320,6 +321,7 @@ public static class LedgerDatabase
                AND has_function_privilege(current_user,'ledger.residue_replay(uuid,uuid,uuid,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.residue_append(uuid,uuid,uuid,jsonb,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'catalog.publish_residue_rule(uuid,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'catalog.publish_residue_policy_setting(uuid,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'capture.publish_residue_group(uuid,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'capture.publish_residue_selection(uuid,jsonb)','EXECUTE')
                AND NOT has_function_privilege(current_user,'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
@@ -335,7 +337,8 @@ public static class LedgerDatabase
                        ('ledger.reserve_lot_code_internal(uuid,uuid,text,uuid,text,text)'),
                        ('ledger.mixed_bulk_custody_derived(uuid)'),('ledger.effective_hold_ids(uuid)'),
                        ('ledger.mixed_bulk_independent_blocked(uuid,uuid)'),('ledger.blocked(uuid,uuid)'),
-                       ('ledger.require_mixed_correction_safe(text,jsonb)'),('ledger.residue_authorized(uuid,uuid)')
+                       ('ledger.require_mixed_correction_safe(text,jsonb)'),('ledger.residue_authorized(uuid,uuid)'),
+                       ('catalog.validate_residue_policy_review(jsonb)')
                    ) private_function(signature)
                    WHERE has_function_privilege(current_user,private_function.signature,'EXECUTE')
                )
@@ -352,7 +355,7 @@ public static class LedgerDatabase
                       OR has_any_column_privilege(current_user,protected.table_name,'REFERENCES')
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM (VALUES ('catalog.residue_rule_versions'),
+                   SELECT 1 FROM (VALUES ('catalog.residue_rule_versions'),('catalog.residue_policy_setting_versions'),
                        ('capture.residue_source_group_versions'),('capture.residue_report_selections')) protected(table_name)
                    WHERE has_table_privilege(current_user,protected.table_name::regclass,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
                       OR has_any_column_privilege(current_user,protected.table_name,'INSERT')

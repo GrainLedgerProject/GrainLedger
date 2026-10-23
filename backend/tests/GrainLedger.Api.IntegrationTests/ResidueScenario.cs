@@ -23,7 +23,7 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
         {
             var substance = await SendAsync(ledger.Admin, HttpMethod.Post, "/api/active-substances", new
             {
-                code = $"F12{Guid.NewGuid():N}", name = $"SYNTHETIC residue {(other ? "panel gap" : "analyte")}"
+                code = $"RES{Guid.NewGuid():N}", name = $"SYNTHETIC residue {(other ? "panel gap" : "analyte")}"
             });
             if (other) scenario.OtherSubstanceId = substance.GetProperty("id").GetGuid();
             else scenario.SubstanceId = substance.GetProperty("id").GetGuid();
@@ -101,10 +101,32 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
             reviewAuthority = "Isolated integration test", reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
         })!.AsObject();
 
-    public async Task<Guid> PublishRuleAsync(JsonObject? body = null)
+    public async Task<Guid> PublishRuleAsync(JsonObject? body = null, bool adopt = true)
     {
         var request = body ?? RuleBody();
         await SendAsync(Ledger.Admin, HttpMethod.Post, "/api/residue-rules", request);
+        if (adopt && request["companyId"] is null)
+        {
+            var settings = await GetAsync(Ledger.Customer, "/api/residue-policy-settings");
+            var code = request["code"]!.GetValue<string>();
+            if (!settings.GetProperty("items").EnumerateArray().Any(x => x.GetProperty("ruleCode").GetString() == code))
+                await PublishSettingAsync(SettingBody(code));
+        }
+        return request["id"]!.GetValue<Guid>();
+    }
+
+    public JsonObject SettingBody(string ruleCode, string mode = "SYSTEM_DEFAULT", int version = 1,
+        Guid? supersedesId = null) => JsonSerializer.SerializeToNode(new
+        {
+            id = Guid.NewGuid(), companyId = Ledger.OwnerId, ruleCode, versionNo = version, mode,
+            effectiveFrom = DateTimeOffset.UtcNow.AddYears(-1), effectiveTo = (DateTimeOffset?)null, supersedesId,
+            evidenceRef = Review, applicabilityStatement = Review, reviewedBy = "Synthetic reviewer",
+            reviewAuthority = "Isolated integration test", reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        })!.AsObject();
+
+    public async Task<Guid> PublishSettingAsync(JsonObject request, HttpClient? client = null)
+    {
+        await SendAsync(client ?? Ledger.Customer, HttpMethod.Post, "/api/residue-policy-settings", request);
         return request["id"]!.GetValue<Guid>();
     }
 
@@ -153,7 +175,7 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
         var locationId = Guid.NewGuid();
         await SendAsync(Ledger.Admin, HttpMethod.Post, "/api/ledger/locations", new
         {
-            id = locationId, facilityId = Ledger.FacilityId, name = "SYNTHETIC F12 pool", kind = "STORE", mixedBulk = true
+            id = locationId, facilityId = Ledger.FacilityId, name = "SYNTHETIC residue pool", kind = "STORE", mixedBulk = true
         });
         await SendAsync(Ledger.Admin, HttpMethod.Post, "/api/ledger/mixed-bulk-policies", new
         {

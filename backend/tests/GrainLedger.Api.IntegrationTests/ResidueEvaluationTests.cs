@@ -428,6 +428,9 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         var f = await ResidueScenario.CreateAsync(s);
         var sample = await SampleAsync(s, await s.ReceiptAsync("100")); var (_, report) = await f.ReportAsync(sample);
         var rule = await f.PublishRuleAsync(); var selection = await f.SelectAsync(sample, report);
+        var ruleCode = (await GetAsync(s.Customer, $"/api/residue-rules/{rule}")).GetProperty("code").GetString();
+        var setting = (await GetAsync(s.Customer, "/api/residue-policy-settings")).GetProperty("items").EnumerateArray()
+            .Single(x => x.GetProperty("ruleCode").GetString() == ruleCode).GetProperty("id").GetGuid();
         var group = f.GroupBody([sample.SourceLotId], [report.GetProperty("resultSets")[0].GetProperty("results")[0].GetProperty("id").GetGuid()]);
         await SendAsync(s.Customer, HttpMethod.Post, "/api/residue-source-groups", group);
         var evaluation = await f.EvaluateAsync(sample.LotId); var evaluationId = evaluation.GetProperty("id").GetGuid();
@@ -436,6 +439,7 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         foreach (var (table, id) in new[]
         {
             ("catalog.residue_rule_versions", rule), ("capture.residue_report_selections", selection),
+            ("catalog.residue_policy_setting_versions", setting),
             ("capture.residue_source_group_versions", group["id"]!.GetValue<Guid>()),
             ("ledger.residue_evaluations", evaluationId)
         })

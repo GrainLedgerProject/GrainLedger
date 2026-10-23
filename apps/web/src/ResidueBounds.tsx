@@ -11,8 +11,11 @@ type Provenance = {
   groupVersionId?: string | null;
   selectionId?: string | null;
   ruleId?: string | null;
+  uncertaintyMode?: string | null;
+  relativeUncertaintyPercent?: string | null;
+  absoluteUncertainty?: string | null;
 };
-type RuleReference = { id: string; version: number; kind: string; evidenceReference: string };
+type RuleReference = { id: string; version: number; kind: string; evidenceReference: string; policyOrigin?: string | null; policySettingId?: string | null; policySettingVersion?: number | null; ruleCode?: string | null };
 type Dependency = {
   lotId: string;
   parentLotId?: string | null;
@@ -116,7 +119,7 @@ export function ResidueBounds({ lotId, allowed }: { lotId: string; allowed: bool
   }
 
   return <section className="panel residue-panel" aria-labelledby="residue-title">
-    <h3 id="residue-title">F12 lot residue bounds</h3>
+    <h3 id="residue-title">Lot residue bounds</h3>
     <p>Calculated intervals inherit confirmed evidence through committed processing and custody paths. This is not a VN report comparison or a market compliance decision.</p>
     {!allowed && <p className="notice pending">Your account cannot inspect derived residue evaluations.</p>}
     {allowed && <>
@@ -135,7 +138,7 @@ export function ResidueBounds({ lotId, allowed }: { lotId: string; allowed: bool
         <h4 id="residue-history-title">Immutable evaluation history</h4>
         {loading ? null : history.length ? <ul className="residue-history">{history.map(item => <li key={item.id}>
           <button type="button" className="secondary" disabled={busy} aria-current={evaluation?.id === item.id ? 'true' : undefined} onClick={() => void loadEvaluation(item.id)}>
-            {new Date(item.snapshotAt).toLocaleString()} · engine {item.engineVersion}
+            {new Date(item.snapshotAt).toLocaleString()} · engine {item.engineVersion === 'F12-exact-1' ? 'Residue bounds exact 1' : item.engineVersion}
           </button>
           <span>Persisted {new Date(item.persistedAt).toLocaleString()}</span>
         </li>)}</ul> : <p className="empty">No saved evaluations for this lot.</p>}
@@ -163,7 +166,7 @@ function EvaluationDetail({ evaluation, substances }: { evaluation: Evaluation; 
   };
   return <article className="residue-snapshot">
     <h4>Historical snapshot · {new Date(evaluation.snapshotAt).toLocaleString()}</h4>
-    <dl><dt>Engine version</dt><dd>{evaluation.engineVersion}</dd><dt>Persisted at</dt><dd>{new Date(evaluation.persistedAt).toLocaleString()}</dd></dl>
+    <dl><dt>Engine version</dt><dd>{evaluation.engineVersion === 'F12-exact-1' ? 'Residue bounds exact 1' : evaluation.engineVersion}</dd><dt>Persisted at</dt><dd>{new Date(evaluation.persistedAt).toLocaleString()}</dd></dl>
     <p className="notice pending">Snapshot records evidence visible at calculation time. Recalculate to inspect current evidence. No PASS or market-compliance status is implied.</p>
     {evaluation.results.map((result, index) => <section className="residue-result" key={`${result.substanceId}-${index}`}>
       <div className="residue-result-heading"><h5>{label(result.substanceId)}</h5><span className={`badge${result.status === 'UNRESOLVED' ? ' inactive' : ''}`}>{result.status}</span></div>
@@ -173,8 +176,9 @@ function EvaluationDetail({ evaluation, substances }: { evaluation: Evaluation; 
       {result.provenance.length > 0 && <><h6>Evidence provenance</h6><ul>{result.provenance.map((source, sourceIndex) => <li key={`${source.kind}-${sourceIndex}`}>
         {source.kind === 'DIRECT' ? 'Direct confirmed evidence' : source.kind === 'GROUP_FALLBACK' ? 'Approved source-group fallback' : source.kind === 'INHERITED' ? 'Inherited through lot lineage' : source.kind}
         {source.sourceLotId && ` · source lot ${source.sourceLotId}`}{source.groupVersionId && ` · source-group version ${source.groupVersionId}`}{source.selectionId && ` · reviewed selection ${source.selectionId}`}{source.reportId && ` · report reference ${source.reportId}`}{source.resultId && ` · result reference ${source.resultId}`}
+        {source.uncertaintyMode && ` · uncertainty ${source.uncertaintyMode}`}{source.relativeUncertaintyPercent !== undefined && source.relativeUncertaintyPercent !== null && ` · ${source.relativeUncertaintyPercent}%`}{source.absoluteUncertainty !== undefined && source.absoluteUncertainty !== null && ` · derived absolute uncertainty ${source.absoluteUncertainty}`}
       </li>)}</ul></>}
-      {result.rules.length > 0 && <><h6>Applied rules</h6><ul>{result.rules.map((rule, ruleIndex) => <li key={`${rule.id}-${ruleIndex}`}>Rule {rule.id} · version {rule.version} · {rule.kind}{rule.evidenceReference && ` · evidence ${rule.evidenceReference}`}</li>)}</ul></>}
+      {result.rules.length > 0 && <><h6>Applied rules and policy settings</h6><ul>{result.rules.map((rule, ruleIndex) => <li key={`${rule.id}-${ruleIndex}`}>{rule.policyOrigin ? `${rule.policyOrigin === 'SYSTEM_DEFAULT' ? 'System default' : 'Company override'} · ` : ''}{rule.ruleCode ? `${rule.ruleCode} · ` : `Rule ${rule.id} · `}version {rule.version}{rule.policySettingVersion !== undefined && rule.policySettingVersion !== null ? ` · setting v${rule.policySettingVersion}` : ''}{rule.policySettingId ? ` (${rule.policySettingId})` : ''} · {rule.kind}{rule.evidenceReference && ` · evidence ${rule.evidenceReference}`}</li>)}</ul></>}
       {result.dependencies.length > 0 && <details><summary>Lineage dependencies</summary><ul>{result.dependencies.map((dependency, dependencyIndex) => <li key={`${dependency.lotId}-${dependencyIndex}`}>Lot {dependency.lotId}{dependency.parentLotId && ` ← parent ${dependency.parentLotId}`}{dependency.operationId && ` · operation ${dependency.operationId}`}{dependency.eventId && ` · event ${dependency.eventId}`}{dependency.kind && ` · ${dependency.kind}`}{dependency.quantityKg && ` · ${dependency.quantityKg} kg`}</li>)}</ul></details>}
     </section>)}
   </article>;

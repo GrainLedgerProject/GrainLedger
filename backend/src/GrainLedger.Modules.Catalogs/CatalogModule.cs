@@ -31,6 +31,7 @@ public static class CatalogModule
         endpoints.MapMeasurementUnitEndpoints();
         endpoints.MapMrlVersionEndpoints();
         endpoints.MapResidueRuleEndpoints();
+        endpoints.MapResiduePolicySettingEndpoints();
         return endpoints;
     }
 }
