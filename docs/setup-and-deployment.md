@@ -80,6 +80,16 @@ Migration and seed commands mutate their target database. First verify both conn
 
 Run migrations only when deliberately installing/updating schema. This updates Identity → Catalog → Capture → Ledger; it does not seed data or automatically convert historical source records. Existing Ledger stock/history remains unchanged.
 
+The trace starting-point/lab-entry release requires Ledger `20261024000000_TraceEntryPoints` after the preceding migrations. Its approved migration workflow grants the configured restricted role EXECUTE on `ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer)` and retains the four-argument `trace_lot` grant; the metadata helper `ledger.trace_lot_metadata(uuid,uuid[])` stays private. New startup validates these boundaries and does not repair grants. This release was tested in isolated PostgreSQL and then deployed to the configured shared database on 24/10/2026 following the user’s explicit repair request; postflight runtime validation and backend `/health` passed. Future deployments remain separate approved actions. See [trace API/deployment contracts](traceability-api.md#starting-points-và-lab-entry--24102026).
+
+### Shared database: avoid resetting grants from an older branch
+
+`ConfigureRuntimeRoleAsync` revokes Ledger function privileges and reapplies a finite entry-point list. Running this workflow from an older branch whose list omits tracing can remove trace EXECUTE even though the database still contains the trace function. Merely switching Git branches or restarting the API does not itself run this reset. A read-only check on 24/10/2026 found the configured runtime login matched `Ledger:RuntimeRole`, `trace_lot` existed without EXECUTE, and `trace_starts`/`trace_lot_metadata` were absent. This establishes missing grants and an unapplied feature upgrade; it does not identify who last changed the ACL.
+
+For a shared database, designate one migration/deployment owner or CI job running the agreed integrated revision. Merge the feature's migrations **and** runtime-grant configuration into that revision together, then run its approved `--migrate` workflow once and validate with the restricted runtime login. Other developers use ordinary `dotnet run` and the same agreed runtime configuration; they need no owner privileges for application use. Do not run grant reconciliation from stale branches after this deployment. Each future schema/function upgrade requires its own coordinated deployment; ordinary restarts require none. `dotnet ef database update` alone does not invoke the application's runtime-grant configuration.
+
+Do not grant EXECUTE on every Ledger function or use default EXECUTE grants as a workaround: private helpers intentionally remain inaccessible to the runtime role. Do not add owner-driven grant repair to normal startup. If permission disappears after deployment, check which migration/grant workflow ran against the shared database before applying another manual grant.
+
 ```bash
 ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --migrate
 ```

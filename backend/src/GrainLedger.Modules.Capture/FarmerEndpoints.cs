@@ -28,6 +28,8 @@ public static class CaptureModule
 {
     public static IServiceCollection AddCaptureModule(this IServiceCollection services)
     {
+        services.AddScoped<ISourceProvenanceReader, SourceProvenanceReader>();
+        services.AddScoped<IConfirmedLabTraceReader, ConfirmedLabTraceReader>();
         services.AddDbContext<CaptureDbContext>((provider, options) =>
         {
             var connection = provider.GetRequiredService<IConfiguration>().GetConnectionString("GrainLedger");

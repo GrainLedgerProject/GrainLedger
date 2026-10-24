@@ -218,10 +218,12 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
         demoteFirst.Headers.TryAddWithoutValidation("If-Match", firstAdmin.Version.ToString("N"));
 
         var responses = await Task.WhenAll(firstClient.SendAsync(demoteSecond), secondClient.SendAsync(demoteFirst));
-        Assert.Contains(responses, x => x.StatusCode == HttpStatusCode.OK);
-        Assert.Contains(responses, x => x.StatusCode == HttpStatusCode.Conflict);
+        Assert.Single(responses, x => x.StatusCode == HttpStatusCode.OK);
+        // The losing request may reach the transaction guard (409), or its actor's
+        // session/role may already be revoked before authentication/authorization (401/403).
+        Assert.Single(responses, x => x.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden);
         using var scope = factory.Services.CreateScope();
-        Assert.True(await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.AnyAsync(x => x.Role == Roles.Administrator && x.IsActive));
+        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.CountAsync(x => x.Role == Roles.Administrator && x.IsActive));
     }
 
     [Fact]

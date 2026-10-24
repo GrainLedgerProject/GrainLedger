@@ -2,6 +2,8 @@
 
 GrainLedger is a rice supply-chain traceability platform. It connects identity and access control, shared product catalogs, procurement source records, and a protected ledger for receiving, stock, processing, and history.
 
+Lot-to-lot tracing is available through Ledger → Traceability and the [audited trace API](docs/traceability-api.md). The [implementation plan](docs/traceability-implementation-plan.md) records current scope and deferred lab/export/container dependencies. New trace migration/runtime grants require explicit deployment; normal startup does not apply them.
+
 ## What it does
 
 - **Identity:** Google and email/password sign-in, verified onboarding, session management, and administrator-managed organizations and permissions.

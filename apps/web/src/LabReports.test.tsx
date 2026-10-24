@@ -6,6 +6,25 @@ import { clearLocalSession } from './api';
 
 const fetchMock = vi.fn<typeof fetch>();
 
+it.each(['CONFIRMED', 'PENDING_REVIEW'])('offers result tracing only for confirmed sample associations: %s', async status => {
+  const report = { id: 'trace-report', reportNumber: 'R-TRACE', laboratoryName: 'Lab', issuedOn: '2026-10-20', receivedAt: '2026-10-20T10:00:00Z', reportKind: 'FINAL', status,
+    fileName: 'report.pdf', contentType: 'application/pdf', fileSize: 1, sha256: 'hash', recordedBy: 'actor', capturedAt: '2026-10-20T10:00:00Z', recordedAt: '2026-10-20T10:00:00Z', confirmedBy: null, confirmedAt: null, suggestedMarketCode: 'VN', assessmentStatus: 'NOT_ASSESSED', assessmentReasons: [],
+    resultSets: [{ id: 'panel', sampleId: 'proposed-sample', confirmedSampleId: status === 'CONFIRMED' ? 'confirmed-sample' : null, sourceLotId: 'source', laboratorySampleReference: null, statedSampleCode: null, statedSealCode: null, sectionReference: null,
+      results: [{ id: 'selected-row', testLabel: 'Cadmium', originalResultText: '0.15', resultKind: 'NUMERIC', numericValue: '0.15', unit: 'mg/kg' }] }] };
+  fetchMock.mockImplementation(async input => new Response(JSON.stringify(String(input) === '/api/lab-reports/trace-report' ? report
+    : { items: String(input).startsWith('/api/lab-reports?') ? [report] : [], page: 1, pageSize: 20, hasMore: false }), { headers: { 'Content-Type': 'application/json' } }));
+  const onTraceResult = vi.fn();
+  render(<LabReports canWrite={false} onTraceResult={onTraceResult} />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'R-TRACE ↗' }));
+  await screen.findByRole('heading', { name: 'R-TRACE' });
+  if (status === 'CONFIRMED') {
+    await user.click(screen.getByRole('button', { name: 'Trace forward from result' }));
+    expect(onTraceResult).toHaveBeenCalledWith({ reportId: 'trace-report', resultId: 'selected-row' });
+  } else expect(screen.queryByRole('button', { name: 'Trace forward from result' })).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
 beforeEach(() => {
   clearLocalSession();
   vi.stubGlobal('fetch', fetchMock);
