@@ -212,7 +212,7 @@ describe('Capture journey', () => {
   it('lets laboratory writers receive report against selected sample without custody controls', async () => {
     const sampleId = '5a000000-0000-4000-8000-000000000001';
     const customerManager = { ...staff, role: 'CustomerManager', permissions: ['lab.write'] };
-    const reportPayloads: Array<{ resultSets: Array<{ sampleId?: string }> }> = [];
+    const reportPayloads: Array<{ resultSets: Array<{ sampleId?: string; results: Array<{ testLabel: string; originalResultText: string; resultKind: string; numericValue?: string }> }> }> = [];
     fetchMock.mockImplementation(async (url, init) => {
       const path = String(url);
       if (path === '/api/auth/session') return json(customerManager);
@@ -237,11 +237,12 @@ describe('Capture journey', () => {
     await browser.type(screen.getByLabelText('Issue date'), '2026-10-20');
     await browser.upload(screen.getByLabelText('Original report file'), new File(['report'], 'report.pdf', { type: 'application/pdf' }));
     await browser.click(screen.getByLabelText(/this original file contains this company/i));
-    await browser.type(screen.getByLabelText('testLabel section 1 row 1'), 'Moisture');
-    await browser.type(screen.getByLabelText('originalResultText section 1 row 1'), '12.5%');
+    await browser.type(screen.getByLabelText('Test parameter section 1 row 1'), 'Moisture');
+    await browser.type(screen.getByLabelText('Reported result section 1 row 1'), '12.5');
     fireEvent.submit(screen.getByRole('button', { name: 'Save report evidence' }).closest('form')!);
     await waitFor(() => expect(reportPayloads).toHaveLength(1));
     expect(reportPayloads[0].resultSets[0].sampleId).toBe(sampleId);
+    expect(reportPayloads[0].resultSets[0].results[0]).toMatchObject({ testLabel: 'Moisture', originalResultText: '12.5', resultKind: 'NUMERIC', numericValue: '12.5' });
   });
   it('keeps export access read-only on sample custody and reports', async () => {
     const sampleId = '5a000000-0000-4000-8000-000000000002';

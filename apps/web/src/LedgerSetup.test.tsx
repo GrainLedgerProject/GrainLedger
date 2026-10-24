@@ -34,7 +34,7 @@ it('requires uploaded evidence for scoped balance policy and invalidates it when
   return originalFetch(input, init);
  });
  render(<LedgerSetup user={user} />);
- await browser.click(await screen.findByText(/Advanced policy/, { selector: 'summary' }));
+ await browser.click(await screen.findByText(/Evidence-backed policies/, { selector: 'summary' }));
  const panel = screen.getByRole('heading', { name: 'Confirmed balance policy' }).closest('section')!;
  await browser.selectOptions(panel.querySelectorAll('select')[0], 'facility-a');
  await browser.selectOptions(panel.querySelectorAll('select')[1], 'owner-a');
@@ -74,7 +74,6 @@ it('shows setup lists and performs creator-authorized edit and confirmed delete 
  const confirmMock = vi.fn(() => true);
  vi.stubGlobal('confirm', confirmMock);
  render(<LedgerSetup user={user} />);
- await screen.findByRole('heading', { name: 'Facilities' });
  await browser.click(await screen.findByRole('button', { name: 'Edit Mill A' }));
  await browser.clear(screen.getByLabelText('Facility name'));
  await browser.type(screen.getByLabelText('Facility name'), 'Mill Updated');
@@ -88,13 +87,16 @@ it('keeps scoped setup rows visible but hides unauthorized management actions', 
  const readOnly: User = { ...user, permissions: [] };
  fetchMock.mockImplementation(async url => {
   const path = String(url).split('?')[0];
-  if (path === '/api/ledger/setup') return response({ owners: [], facilities: [{ id: 'f', name: 'Read-only Mill', version: '1', createdBy: 'other', canEdit: false, canDelete: false }], locations: [], commodities: [], equipment: [], assignments: [], policies: [{ id: 'p', kind: 'DRYING', tolerancePercent: '0', effectiveFrom: '2026-01-01', facilityId: 'f', evidenceId: 'e', canEdit: false, canDelete: false }], compatibilities: [] });
+  if (path === '/api/ledger/setup') return response({ owners: [], facilities: [{ id: 'f', name: 'Read-only Mill', version: '1', createdBy: 'other', canEdit: false, canDelete: false }], locations: [], commodities: [], equipment: [{ id: 'eq', name: 'Read-only Dryer', facilityId: 'f', version: '1', canEdit: false, canDelete: false, canRetire: false }], assignments: [], policies: [{ id: 'p', kind: 'DRYING', tolerancePercent: '0', effectiveFrom: '2026-01-01', facilityId: 'f', evidenceId: 'e', canEdit: false, canDelete: false }], compatibilities: [] });
   return response([]);
  });
  render(<LedgerSetup user={readOnly} />);
  const facilitiesTable = screen.getByRole('region', { name: 'Facilities' });
  await within(facilitiesTable).findByRole('cell', { name: 'Read-only Mill' });
  expect(within(facilitiesTable).queryByRole('button', { name: /Edit|Delete/ })).not.toBeInTheDocument();
+ const equipmentTable = within(screen.getByRole('region', { name: 'Equipment' }));
+ await equipmentTable.findByRole('cell', { name: 'Read-only Dryer' });
+ expect(equipmentTable.queryByRole('button', { name: /Edit|Delete|Retire/ })).not.toBeInTheDocument();
  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/receiving-thresholds'))).toBe(false);
 });
 it('edits default and company override with reasons and revisions, then removes override while retaining history', async () => {
@@ -139,7 +141,7 @@ it('edits default and company override with reasons and revisions, then removes 
  });
  vi.stubGlobal('confirm', vi.fn(() => true));
  render(<LedgerSetup user={user} />);
- await browser.click(await screen.findByText('Advanced setup — Receiving loss thresholds', { selector: 'summary' }));
+ await browser.click(await screen.findByText(/Everyday maintenance: clearance and receiving thresholds/, { selector: 'summary' }));
  await browser.clear(await screen.findByLabelText('Default threshold (%)'));
  await browser.type(screen.getByLabelText('Default threshold (%)'), '3');
  await browser.type(screen.getByLabelText('Reason for change').closest('form')!.querySelector('textarea')!, 'Approved policy update');
@@ -197,7 +199,7 @@ it('keeps newest history filter results when older response arrives last', async
   return response({ title: `Unexpected route ${path}` });
  });
  render(<LedgerSetup user={user} />);
- await browser.click(await screen.findByText('Advanced setup — Receiving loss thresholds', { selector: 'summary' }));
+ await browser.click(await screen.findByText(/Everyday maintenance: clearance and receiving thresholds/, { selector: 'summary' }));
  await screen.findByText('Initial unfiltered');
  await browser.selectOptions(screen.getByLabelText('Filter by scope'), 'SYSTEM_DEFAULT');
  await waitFor(() => expect(pending.SYSTEM_DEFAULT).toBeDefined());
@@ -225,7 +227,7 @@ it('requires exact-scope confirmation before recording evidence-backed mixed-bul
   return response({});
  });
  render(<LedgerSetup user={user} />);
- await browser.click(await screen.findByText(/Advanced policy/, { selector: 'summary' }));
+ await browser.click(await screen.findByText(/Evidence-backed policies/, { selector: 'summary' }));
  const mixedPanel = screen.getByRole('heading', { name: 'Mixed-bulk location policies' }).closest('section')!;
  const policyOwner = within(mixedPanel).getByLabelText('Policy owner');
  expect(within(mixedPanel).getByRole('option', { name: 'Owner A' })).toBeInTheDocument();
@@ -244,4 +246,86 @@ it('requires exact-scope confirmation before recording evidence-backed mixed-bul
  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/ledger/mixed-bulk-policies')).toBe(true));
  const write = fetchMock.mock.calls.find(([url]) => String(url) === '/api/ledger/mixed-bulk-policies')!;
  expect(JSON.parse(String(write[1]?.body))).toMatchObject({ locationId: 'silo-a', ownerId: 'owner-a', commodityId: 'paddy', stage: 'RAW_PADDY', productIdentity: 'RAW_PADDY', evidenceId: 'evidence-a', identityScopeConfirmed: true });
+});
+it('renders facility-scoped equipment and submits versioned edit and delete actions', async () => {
+ const browser = userEvent.setup();
+ const equipment = [{ id: 'equipment-a', name: 'Dryer A', facilityId: 'facility-a', version: 'equip-v1', createdBy: 'admin', canEdit: true, canDelete: true, canRetire: true }];
+ fetchMock.mockImplementation(async (input, init) => {
+  const path = String(input).split('?')[0];
+  if (path === '/api/auth/csrf') return response({ token: 'csrf' });
+  if (path === '/api/ledger/setup') return response({ owners: [], facilities, locations: [], commodities: [], equipment, assignments: [], policies: [], compatibilities: [] });
+  if (path === '/api/admin/users' || path === '/api/admin/organizations') return response([]);
+  if (path === '/api/commodities' || path === '/api/measurement-units') return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+  if (path === '/api/ledger/receiving-thresholds') return response({ systemDefault: { percentage: '2', version: 'threshold-v1' }, companyOverrides: [] });
+  if (path === '/api/ledger/receiving-thresholds/companies' || path === '/api/ledger/receiving-thresholds/history') return response({ items: [], page: 1, pageSize: 20, totalCount: 0, hasMore: false });
+  return response({});
+ });
+ vi.stubGlobal('confirm', vi.fn(() => true));
+ render(<LedgerSetup user={user} />);
+ const table = within(screen.getByRole('region', { name: 'Equipment' }));
+ await table.findByRole('cell', { name: 'Dryer A' });
+ expect(within(screen.getByRole('table', { name: 'Equipment' })).getByRole('cell', { name: 'Mill A' })).toBeInTheDocument();
+ await browser.click(table.getByRole('button', { name: 'Edit Dryer A' }));
+ await browser.clear(screen.getByLabelText('Equipment name'));
+ await browser.type(screen.getByLabelText('Equipment name'), 'Dryer Updated');
+ await browser.click(screen.getByRole('button', { name: 'Save equipment' }));
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/ledger/equipment/equipment-a' && init?.method === 'PUT' && JSON.parse(String(init.body)).version === 'equip-v1')).toBe(true));
+ await browser.click(table.getByRole('button', { name: 'Delete Dryer A' }));
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/ledger/equipment/equipment-a' && init?.method === 'DELETE' && JSON.parse(String(init.body)).version === 'equip-v1')).toBe(true));
+});
+it('shows backend equipment retirement conflict without hiding scoped equipment', async () => {
+ const browser = userEvent.setup();
+ const equipment = [{ id: 'equipment-a', name: 'Referenced Dryer', facilityId: 'facility-a', version: 'equip-v2', createdBy: 'admin', canEdit: true, canDelete: false, canRetire: true }];
+ const originalFetch = fetchMock.getMockImplementation()!;
+ fetchMock.mockImplementation(async (input, init) => {
+  const path = String(input).split('?')[0];
+  if (path === '/api/ledger/setup') return response({ owners: [], facilities, locations: [], commodities: [], equipment, assignments: [], policies: [], compatibilities: [] });
+  if (path === '/api/ledger/equipment/equipment-a/retire' && init?.method === 'POST') return new Response(JSON.stringify({ title: 'Equipment has active drafts or pending corrections; resolve them before retirement.' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+  return originalFetch(input, init);
+ });
+ vi.stubGlobal('confirm', vi.fn(() => true));
+ render(<LedgerSetup user={user} />);
+ const table = within(screen.getByRole('region', { name: 'Equipment' }));
+ await table.findByRole('cell', { name: 'Referenced Dryer' });
+ expect(table.queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument();
+ await browser.click(table.getByRole('button', { name: 'Retire Referenced Dryer' }));
+ expect(await screen.findByRole('alert')).toHaveTextContent('Equipment has active drafts or pending corrections; resolve them before retirement.');
+ expect(table.getByRole('cell', { name: 'Referenced Dryer' })).toBeInTheDocument();
+ const retire = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/ledger/equipment/equipment-a/retire' && init?.method === 'POST');
+ expect(retire).toBeDefined();
+ expect(JSON.parse(String(retire?.[1]?.body))).toEqual({ version: 'equip-v2' });
+});
+it('binds compartment clearance evidence to its chosen owner and facility', async () => {
+ const browser = userEvent.setup();
+ const owners = [{ id: 'owner-a', name: 'Owner A' }, { id: 'owner-b', name: 'Owner B' }];
+ fetchMock.mockImplementation(async (input, init) => {
+  const path = String(input).split('?')[0];
+  if (path === '/api/auth/csrf') return response({ token: 'csrf' });
+  if (path === '/api/ledger/setup') return response({ owners, facilities, locations: [{ id: 'comp-a', name: 'Compartment A', facilityId: 'facility-a', kind: 'COMPARTMENT' }, { id: 'comp-b', name: 'Compartment B', facilityId: 'facility-b', kind: 'COMPARTMENT' }], commodities: [], equipment: [], assignments: [], policies: [], compatibilities: [] });
+  if (path === '/api/admin/users') return response([]);
+  if (path === '/api/admin/organizations') return response(owners);
+  if (path === '/api/ledger/receiving-thresholds') return response({ systemDefault: { percentage: '2', version: 'threshold-v1' }, companyOverrides: [] });
+  if (path === '/api/ledger/receiving-thresholds/companies' || path === '/api/ledger/receiving-thresholds/history') return response({ items: [], page: 1, pageSize: 20, totalCount: 0, hasMore: false });
+  if (path === '/api/commodities' || path === '/api/measurement-units') return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+  if (path === '/api/ledger/evidence' && init?.method === 'POST') return response({ id: 'stored-evidence' });
+  return response([]);
+ });
+ render(<LedgerSetup user={user} />);
+ await browser.click(await screen.findByText(/Everyday maintenance: clearance and receiving thresholds/, { selector: 'summary' }));
+ const clearance = screen.getByRole('heading', { name: 'Recorded compartment clearance' }).closest('section')!;
+ await browser.selectOptions(within(clearance).getByLabelText('Evidence owner'), 'owner-a');
+ await browser.selectOptions(within(clearance).getByLabelText('Compartment'), 'comp-a');
+ await browser.upload(within(clearance).getByLabelText('Evidence file'), new File(['approval'], 'clearance.pdf', { type: 'application/pdf' }));
+ await browser.click(within(clearance).getByRole('button', { name: 'Upload evidence' }));
+ await within(clearance).findByRole('link', { name: 'View stored evidence' });
+ const firstUpload = fetchMock.mock.calls.find(([url]) => String(url) === '/api/ledger/evidence')!;
+ expect(JSON.parse(String(firstUpload[1]?.body))).toMatchObject({ ownerId: 'owner-a', facilityId: 'facility-a' });
+ await browser.selectOptions(within(clearance).getByLabelText('Compartment'), 'comp-b');
+ expect(within(clearance).queryByRole('link', { name: 'View stored evidence' })).not.toBeInTheDocument();
+ await browser.click(within(clearance).getByRole('button', { name: 'Upload evidence' }));
+ await within(clearance).findByRole('link', { name: 'View stored evidence' });
+ const secondUpload = fetchMock.mock.calls.filter(([url]) => String(url) === '/api/ledger/evidence')[1];
+ expect(JSON.parse(String(secondUpload[1]?.body))).toMatchObject({ ownerId: 'owner-a', facilityId: 'facility-b' });
+ await browser.selectOptions(within(clearance).getByLabelText('Evidence owner'), 'owner-b');
+ expect(within(clearance).queryByRole('link', { name: 'View stored evidence' })).not.toBeInTheDocument();
 });

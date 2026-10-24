@@ -49,7 +49,7 @@ public sealed class MixedBulkMigrationTests
         Assert.Equal(1L, (long)(await columns.ExecuteScalarAsync())!);
         // Upgrade the same existing database; custody trace must be a forward
         // replacement preserving both earlier migration entries and business rows.
-        await ledger.Database.MigrateAsync();
+        await ledger.GetService<IMigrator>().MigrateAsync("20261021010000_CustodyTraceability");
         var traceHistory = await HistoryAsync(owner);
         Assert.Contains("20261021010000_CustodyTraceability", traceHistory);
         Assert.Equal(migratedHistory, traceHistory.Where(id => id != "20261021010000_CustodyTraceability").ToArray());
@@ -57,6 +57,7 @@ public sealed class MixedBulkMigrationTests
         var definition = (string)(await routine.ExecuteScalarAsync())!;
         Assert.Contains("RECORDED_MATERIAL_RELATIONSHIPS", definition);
         Assert.Contains("effective_hold_ids", definition);
+        await ledger.Database.MigrateAsync();
         Assert.Equal("Pre-mixed legacy facility", await check.ExecuteScalarAsync());
 
     }
