@@ -3,6 +3,7 @@ import { api, errorMessage } from './api';
 import { newRequest, type Envelope, wasRejected } from './captureWrite';
 import { labCsvHeaders, parseLabCsv, type LabCsvPreview, type LabCsvRow } from './labCsv';
 import type { Page } from './procurementTypes';
+import type { LabTraceOrigin } from './LedgerTraceability';
 import { ResidueEvidenceControls } from './ResidueEvidenceControls';
 
 type ReportKind = 'PARTIAL' | 'FINAL' | 'SUPPLEMENTARY' | 'AMENDMENT' | 'RETEST';
@@ -88,7 +89,7 @@ function assessmentPillClass(status: AssessmentStatus) {
   return 'lab-pill neutral';
 }
 
-export function LabReports({ canWrite, canManageResidueEvidence = false, companyId = '', sampleId, sourceLotId, onOpenSample, onOpenSourceLot }: { canWrite: boolean; canManageResidueEvidence?: boolean; companyId?: string; sampleId?: string; sourceLotId?: string; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
+export function LabReports({ canWrite, canManageResidueEvidence = false, companyId = '', sampleId, sourceLotId, onOpenSample, onOpenSourceLot, onTraceResult }: { canWrite: boolean; canManageResidueEvidence?: boolean; companyId?: string; sampleId?: string; sourceLotId?: string; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void; onTraceResult?: (origin: LabTraceOrigin) => void }) {
   const [page, setPage] = useState(1), [retry, setRetry] = useState(0), [list, setList] = useState<Page<Report> | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState(''), [selected, setSelected] = useState<string | null>(null), [creating, setCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | Report['status']>('ALL'), [searchQuery, setSearchQuery] = useState('');
   useEffect(() => {
@@ -105,7 +106,7 @@ export function LabReports({ canWrite, canManageResidueEvidence = false, company
     return () => { active = false; controller.abort(); };
   }, [page, retry, sampleId, sourceLotId]);
 
-  if (selected) return <ReportDetail key={selected} id={selected} canWrite={canWrite} canManageResidueEvidence={canManageResidueEvidence} companyId={companyId} onBack={() => { setSelected(null); setRetry(value => value + 1); }} onOpenReport={setSelected} onOpenSample={onOpenSample} onOpenSourceLot={onOpenSourceLot} />;
+  if (selected) return <ReportDetail key={selected} id={selected} canWrite={canWrite} canManageResidueEvidence={canManageResidueEvidence} companyId={companyId} onBack={() => { setSelected(null); setRetry(value => value + 1); }} onOpenReport={setSelected} onOpenSample={onOpenSample} onOpenSourceLot={onOpenSourceLot} onTraceResult={onTraceResult} />;
 
   const items = list?.items ?? [];
   const confirmedCount = items.filter(r => r.status === 'CONFIRMED').length;
@@ -322,7 +323,7 @@ function ReportIntake({ canWrite, initialSampleId, initialLaboratory, relatedRep
     </form></section></div>;
 }
 
-function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBack, onOpenReport, onOpenSample, onOpenSourceLot }: { id: string; canWrite: boolean; canManageResidueEvidence: boolean; companyId: string; onBack: () => void; onOpenReport: (id: string) => void; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void }) {
+function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBack, onOpenReport, onOpenSample, onOpenSourceLot, onTraceResult }: { id: string; canWrite: boolean; canManageResidueEvidence: boolean; companyId: string; onBack: () => void; onOpenReport: (id: string) => void; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void; onTraceResult?: (origin: LabTraceOrigin) => void }) {
   const [report, setReport] = useState<Report | null>(null), [error, setError] = useState(''), [retry, setRetry] = useState(0), [confirmOpen, setConfirmOpen] = useState(false), [identityChecked, setIdentity] = useState(false), [transcriptionChecked, setTranscription] = useState(false), [matches, setMatches] = useState<Record<string, { sampleId: string; identityBasis: string; evidenceRef: string }>>({}), [selectedSamples, setSelectedSamples] = useState<Record<string, SampleOption>>({}), [substances, setSubstances] = useState<Record<string, { code: string; name: string }>>({}), [confirmPending, setConfirmPending] = useState<Envelope<ConfirmPayload> | null>(null), [busy, setBusy] = useState(false), [mutationError, setMutationError] = useState(''), [relationship, setRelationship] = useState<ReportKind | null>(null);
   const [residueBindings, setResidueBindings] = useState<ResidueBinding[] | null>(null);
   const [editing, setEditing] = useState(false), [deleteOpen, setDeleteOpen] = useState(false), [deletePending, setDeletePending] = useState<Envelope<null> | null>(null), [deleteBusy, setDeleteBusy] = useState(false), [deleteError, setDeleteError] = useState('');
@@ -551,7 +552,7 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
                   <th>LOD / LOQ</th>
                   <th>Method</th>
                   <th>Uncertainty</th>
-                  <th>Reference</th>
+                  <th>Reference</th>{onTraceResult && <th>Trace</th>}
                 </tr>
               </thead>
               <tbody>
@@ -568,7 +569,7 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
                     <td className="mono-cell">{row.lod || '—'} / {row.loq || '—'}</td>
                     <td>{row.method || '—'}</td>
                     <td className="mono-cell">{row.uncertainty || '—'}</td>
-                    <td>{row.reference || '—'}</td>
+                    <td>{row.reference || '—'}</td>{onTraceResult && <td>{report.status === 'CONFIRMED' && set.confirmedSampleId && row.id && <button type="button" onClick={() => onTraceResult({ reportId: report.id, resultId: row.id! })}>Trace forward from result</button>}</td>}
                   </tr>;
                 })}
               </tbody>

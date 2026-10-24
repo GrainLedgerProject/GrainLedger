@@ -175,7 +175,7 @@ public static class LedgerDatabase
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
             {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
-                ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.trace_lot(uuid,uuid,text,text),ledger.lock_writes(),
+                ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.trace_lot(uuid,uuid,text,text),ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer),ledger.lock_writes(),
                 ledger.provision_catalog_commodities(uuid),
                 ledger.register_pending_procurement(uuid,uuid),ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid),
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
@@ -405,6 +405,14 @@ public static class LedgerDatabase
             """, connection);
         if (!Equals(await trace.ExecuteScalarAsync(ct), true))
             throw new InvalidOperationException("Traceability runtime function or EXECUTE grant missing. Run approved owner migrations and runtime-role configuration; normal startup does not apply grants.");
+        await using var entries = new NpgsqlCommand("""
+            SELECT CASE WHEN to_regprocedure('ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer)') IS NULL
+                OR to_regprocedure('ledger.trace_lot_metadata(uuid,uuid[])') IS NULL THEN false ELSE
+                has_function_privilege(current_user,'ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer)','EXECUTE')
+                AND NOT has_function_privilege(current_user,'ledger.trace_lot_metadata(uuid,uuid[])','EXECUTE') END
+            """, connection);
+        if (!Equals(await entries.ExecuteScalarAsync(ct), true))
+            throw new InvalidOperationException("Trace entry upgrade or runtime grants missing. Run approved owner migrations and runtime-role configuration.");
     }
 }
 

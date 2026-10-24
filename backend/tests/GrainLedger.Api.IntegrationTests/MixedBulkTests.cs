@@ -108,6 +108,90 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         return response.GetProperty("actualLotId").GetGuid();
     }
 
+    [Fact]
+    public async Task Trace_starts_filters_current_pools_before_paging_and_preserves_history_labels_and_scope()
+    {
+        var site = await CreateMixedSiteAsync(); using var s = site.Scenario;
+        await s.ReceiptAsync(Enumerable.Repeat("1", 31).ToArray());
+        var root = Lots(await ArriveAsync(site, "10")).Single();
+        var (oldPool, _) = await PoolAsync(site.LocationId);
+        await ArriveAsync(site, "2"); var (pool, _) = await PoolAsync(site.LocationId);
+        var starts = await GetAsync(s.Customer, "/api/ledger/trace/starts?mode=pools&page=1&pageSize=1");
+        Assert.Equal(1, starts.GetProperty("totalCount").GetInt32());
+        var selected = Assert.Single(starts.GetProperty("items").EnumerateArray());
+        Assert.Equal(pool, selected.GetProperty("id").GetGuid());
+        Assert.Equal("CURRENT_POOL", selected.GetProperty("kind").GetString());
+        Assert.Equal("12.000000", selected.GetProperty("quantityKg").GetString());
+        Assert.Contains("Synthetic mixed bulk store", selected.GetProperty("positions")[0].GetProperty("locationName").GetString());
+        var sources = await GetAsync(s.Customer, "/api/ledger/trace/starts?mode=sources&page=2&pageSize=25");
+        Assert.Equal(33, sources.GetProperty("totalCount").GetInt32());
+        Assert.Equal(8, sources.GetProperty("items").GetArrayLength());
+        Assert.All(sources.GetProperty("items").EnumerateArray(), item => Assert.Equal("SOURCE", item.GetProperty("kind").GetString()));
+        var filtered = await GetAsync(s.Customer, $"/api/ledger/trace/starts?mode=pools&locationId={s.LocationId}");
+        Assert.Equal(0, filtered.GetProperty("totalCount").GetInt32());
+        var foreign = await GetAsync(s.ForeignCustomer, $"/api/ledger/trace/starts?mode=all&locationId={site.LocationId}");
+        Assert.Empty(foreign.GetProperty("items").EnumerateArray());
+        Assert.DoesNotContain(site.LocationId.ToString(), foreign.GetRawText());
+        var trace = await TraceAsync(s.Customer, pool, "backward");
+        Assert.Equal("POOL_GENERATION", trace.GetProperty("lots").EnumerateArray().Single(l => l.GetProperty("id").GetGuid() == oldPool).GetProperty("kind").GetString());
+        Assert.True(trace.GetProperty("lots").EnumerateArray().Single(l => l.GetProperty("id").GetGuid() == root).GetProperty("enteredPool").GetBoolean());
+        Assert.NotEmpty((await GetAsync(s.Admin, "/api/ledger/trace/starts?mode=pools")).GetProperty("items").EnumerateArray());
+        using var denied = await s.Operator.GetAsync("/api/ledger/trace/starts"); Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using var malformed = await s.Customer.GetAsync("/api/ledger/trace/starts?ownerId=" + s.ForeignOwnerId); Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
+        await using var command = new NpgsqlCommand("SELECT ledger.trace_lot_metadata($1,NULL)", runtime); command.Parameters.AddWithValue(s.Accounts["customer"].User.Id);
+        Assert.Equal("42501", (await Assert.ThrowsAsync<PostgresException>(async () => await command.ExecuteScalarAsync())).SqlState);
+    }
+
+    [Fact]
+    public async Task Confirmed_lab_entry_resolves_the_selected_result_source_and_redacts_export_sources()
+    {
+        var site = await CreateMixedSiteAsync(); using var s = site.Scenario;
+        var receipt = await ArriveAsync(site, "10"); var sample = await LabReportTests.SampleAsync(s, receipt);
+        var other = await LabReportTests.SampleAsync(s, await s.ReceiptAsync("3"));
+        var body = LabReportTests.ReportRequest([LabReportTests.ResultSet(sample), LabReportTests.ResultSet(other)]);
+        var id = LabReportTests.EntityId(body);
+        var report = await SendAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", body);
+        var result = report.GetProperty("resultSets")[0].GetProperty("results")[0].GetProperty("id").GetGuid();
+        using (var unconfirmed = await s.Customer.PostAsJsonAsync("/api/ledger/trace/from-lab", new { reportId = id, resultId = result }))
+            Assert.Equal(HttpStatusCode.NotFound, unconfirmed.StatusCode);
+        await SendAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", LabReportTests.ConfirmRequest(report, sample, other));
+        var trace = await SendAsync(s.Customer, HttpMethod.Post, "/api/ledger/trace/from-lab", new { reportId = id, resultId = result });
+        Assert.Equal(sample.LotId, trace.GetProperty("targetLotId").GetGuid());
+        Assert.Equal("forward", trace.GetProperty("direction").GetString());
+        Assert.Equal(sample.Id, trace.GetProperty("labOrigin").GetProperty("sampleId").GetGuid());
+        Assert.Contains((await PoolAsync(site.LocationId)).LotId, TraceIds(trace));
+        Assert.DoesNotContain(other.LotId, TraceIds(trace));
+        using (var wrongRow = await s.Customer.PostAsJsonAsync("/api/ledger/trace/from-lab", new { reportId = id, resultId = Guid.NewGuid() }))
+            Assert.Equal(HttpStatusCode.NotFound, wrongRow.StatusCode);
+        using (var wrongCompany = await s.ForeignCustomer.PostAsJsonAsync("/api/ledger/trace/from-lab", new { reportId = id, resultId = result }))
+            Assert.Equal(HttpStatusCode.NotFound, wrongCompany.StatusCode);
+        using (var admin = await s.Admin.PostAsJsonAsync("/api/ledger/trace/from-lab", new { reportId = id, resultId = result }))
+            Assert.Equal(HttpStatusCode.Forbidden, admin.StatusCode);
+        using (var spoofed = await s.Customer.PostAsJsonAsync("/api/ledger/trace/from-lab", new { reportId = id, resultId = result, lotId = other.LotId }))
+            Assert.Equal(HttpStatusCode.BadRequest, spoofed.StatusCode);
+        var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff, s.OwnerId);
+        using var export = factory.CreateRealCookieClient(user, session); await CsrfAsync(export);
+        var redacted = await SendAsync(export, HttpMethod.Post, "/api/ledger/trace/from-lab", new { reportId = id, resultId = result });
+        Assert.Empty(redacted.GetProperty("sources").EnumerateArray());
+        Assert.All(redacted.GetProperty("lots").EnumerateArray(), l => Assert.Equal(JsonValueKind.Null, l.GetProperty("contributions").ValueKind));
+    }
+
+    [Fact]
+    public async Task Confirmed_lab_entry_does_not_create_a_pending_source_Ledger_lot()
+    {
+        using var s = await CreateAsync(factory);
+        var sample = await LabReportTests.SampleAsync(s);
+        var body = LabReportTests.ReportRequest([LabReportTests.ResultSet(sample)]); var id = LabReportTests.EntityId(body);
+        var report = await SendAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", body);
+        await SendAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", LabReportTests.ConfirmRequest(report, sample));
+        var result = report.GetProperty("resultSets")[0].GetProperty("results")[0].GetProperty("id").GetGuid();
+        using var response = await s.Customer.PostAsJsonAsync("/api/ledger/trace/from-lab", new { reportId = id, resultId = result });
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE id=$1", sample.LotId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE kind='TRACEBACK' AND lot_id=$1", sample.LotId));
+    }
+
     private static Task<JsonElement> TraceAsync(HttpClient client, Guid lotId, string direction = "forward", string view = "current") =>
         SendAsync(client, HttpMethod.Post, "/api/ledger/trace", new { lotId, direction, view });
     private static Guid[] TraceIds(JsonElement trace) => trace.GetProperty("lots").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToArray();

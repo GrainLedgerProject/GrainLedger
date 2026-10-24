@@ -6,7 +6,7 @@ Ngày bắt đầu: 17/10/2026. Căn cứ: [đánh giá khả thi](traceability-
 
 Triển khai phần độc lập: **Ledger lot ↔ công đoạn đã commit ↔ nguồn thu mua/ruộng/vụ**. Bước A đã hoàn thành cho baseline trước mixed-bulk; chưa nghiệm thu toàn bộ truy xuất qua custody/plan/container.
 
-**Cập nhật 21/10/2026:** đã merge dev mixed-bulk `7f7cb73` vào feat/trace, merge commit `2dfe2d3`. Có thể tiếp tục tracing thuần túy ngay, ưu tiên nối custody và actual processing input; không cần chờ lab/compliance hoặc export. Trace hiện tại chưa đầy đủ cho mixed-bulk dù routine cũ trả complete=true. Mục 9 là đánh giá trước triển khai; **mục 10 là trạng thái source hiện hành sau khi thực hiện T0–T2, điều hướng Stock và source lab evidence**. Mục 6–9 giữ căn cứ và nhật ký theo từng baseline.
+**Cập nhật 21/10/2026:** đã merge dev mixed-bulk `7f7cb73` vào feat/trace, merge commit `2dfe2d3`. Có thể tiếp tục tracing thuần túy ngay, ưu tiên nối custody và actual processing input; không cần chờ lab/compliance hoặc export. Trace hiện tại chưa đầy đủ cho mixed-bulk dù routine cũ trả complete=true. Mục 9 là đánh giá trước triển khai; mục 10 ghi kết quả custody trace đã làm. **Mục 11 là plan sau merge dev residue `9bd3e8d` ngày 24/10/2026**; **mục 12 chốt ràng buộc hiện hành: chỉ thực hiện MVP/in scope**, không làm extended/out of scope. Mục 6–10 giữ căn cứ và nhật ký theo từng baseline. **Mục 13 ghi thực thi và deployment đã xong; mục 14 là kết luận bàn giao trước merge và backlog cho lần tiếp theo.**
 
 - [x] Đọc và xác minh yêu cầu, source và giới hạn phụ thuộc.
 - [x] Ghi kế hoạch trước khi thực hiện.
@@ -382,3 +382,219 @@ Sau yêu cầu trực tiếp “vậy chạy update database đi”, đã cập 
 - Process exit 0. Chỉ migration CustodyTraceability được cài; postflight không còn Ledger pending, trace schema v2=true, runtime trace EXECUTE=true và `ValidateRuntimeAsync` PASS. Các module khác không có pending tại preflight.
 - Container routine vẫn tồn tại, runtime EXECUTE vẫn false như preflight; không tự sửa quyền container trong yêu cầu cập nhật tracing này. Không thu hồi hay mở rộng các quyền khác.
 - Không chạy seed, trace POST/audit hoặc data-changing smoke trên database dùng chung. Không thay stock, HOLD, báo cáo xét nghiệm hoặc container data. Console preflight/deployment tạm nằm ngoài repository, không chứa credentials trong source/output.
+
+
+## 11. Plan cải thiện tracing theo silo sau dev mới — 24/10/2026
+
+### 11.1. Baseline đã xác minh
+
+Đã fetch origin và kiểm tra `dev`/`origin/dev` tại `9bd3e8d` (PR #14, 23/10/2026): **Enhance residue management and streamline workflows across ledger and web**. Đây là một squash commit gồm residue bounds/rules, company adoption, reviewed report selection/uncertainty, concentration normalization, live preview/audit snapshots, unconfirmed lab draft revisions/deletion, equipment retirement và cập nhật npm packages. Không có commit dev mới hơn tại thời điểm fetch.
+
+Đã merge dev vào `feat/trace` qua **`73935b0 chore(ledger): merge residue workflows into trace feature`**. Giải quyết conflict ở LabReports, lab tests, BrowserWorkflowHost, architecture và sample API: giữ export Report type cho trace evidence đồng thời giữ result IDs/draft lifecycle của dev; giữ cả trace/residue browser fixtures và loopback origin validation, hỗ trợ cả URL và port env vars. Runtime grants vẫn có trace entry cùng các residue routines; không mở private custody helpers.
+
+Thay đổi `9bd3e8d` **không sửa** `MixedBulkStorage.sql`, `MixedBulkCommands.sql`, `PhysicalReceiving.sql` hoặc `ProcurementLedgerPort.cs`. Cơ chế nhiều nguồn nhập thành một pool đã có từ **`7f7cb73` (#11)**; custody trace đã làm tại `7d0565b`. Nhận định “Ledger hiện chỉ giữ mỗi thu mua thành một lô riêng, chưa gộp được” không mô tả đầy đủ baseline hiện nay.
+
+### 11.2. Proposal nói gì và tracing phải biểu diễn ra sao
+
+Căn cứ `GrainLedger_V2.pdf` trong Week1_report (30/09/2026), trang 1, 6 và 9: nhiều nguồn bị trộn ở silo; hàng nhiều nông hộ **cùng khách hàng** được gom, không trộn giữa khách; thu mua vẫn tạo nguồn có chủ sở hữu; F18 cần truy từ bằng chứng xấu đến container và từ container về thửa/tỷ lệ. Ví dụ trang 6 gồm ba nguồn 50/30/20 tấn trong 100 tấn silo. Chuỗi minh họa cũng có nhận/sấy trước lưu silo; không suy rằng mọi đăng ký thu mua phải lập tức tạo tồn hoặc tự động vào cùng một silo.
+
+Cần phân biệt:
+
+- **Nguồn thu mua:** hồ sơ nguồn/thửa/vụ/mẫu và Ledger root sau khi nhận, theo dòng thu mua. Một procurement có thể có nhiều dòng; không phải luôn một procurement = đúng một Ledger source lot. Giữ các identity này để đọc sample/lab và audit.
+- **Lô tồn trong silo:** current pool của một location/owner/commodity/stage/product identity hợp lệ. Khi nhiều nguồn vào kho trộn, tồn thực nằm ở pool chung; nguồn giữ attribution chứ không còn là các tồn riêng có thể rút thêm.
+- **Generation lịch sử:** mỗi ingress/top-up/withdraw có thể tạo UUID và revision mới; location silo ổn định nhưng pool hiện hành đổi. Không sửa pool cũ tại chỗ hoặc gộp/xóa các nguồn để giả chỉ còn một UUID suốt đời silo.
+
+Ví dụ dễ kiểm chứng: A 600 kg vào silo → pool P1 600 kg; B 200 kg vào cùng silo → pool P2 800 kg. A/B/P1 hết tồn tại vị trí đó, P2 còn 800 kg; composition P2 giữ A 600 và B 200. Truy ngược từ P2 phải thấy cả hai nguồn và lần nhập qua P1. Truy xuôi từ A phải đến các pool/output thực liên quan. Không cộng lượng tạo ra của A/B/P1/P2 thành tồn kho.
+
+**Quyết định cho UX:** ưu tiên bắt đầu từ silo/pool hiện hành cho câu hỏi “hàng đang nằm ở đâu, từ nguồn nào”, vẫn cho bắt đầu từ nguồn hoặc lô lịch sử cho điều tra. Không bỏ phần trước silo khỏi lineage; không giới hạn traversal vào current pool pointer.
+
+### 11.3. Khi thấy nhiều lô riêng, cần kiểm tra gì trước
+
+Không sửa tracing bằng cách ẩn các nguồn để che lỗi cấu hình/ghi nhận vật liệu. Cần kiểm tra theo đúng scope:
+
+1. Đang nhìn **danh sách nguồn**, **toàn bộ trace/history**, hay **tồn vật lý hiện hành**? Có nhiều source/history rows là đúng dù chỉ một pool còn stock.
+2. Arrival thực tế được nhận vào location nào? Nếu vào kho thường rồi mới chuyển silo, pooling chỉ xảy ra ở bước nhập silo đã ghi; đăng ký procurement chưa tạo stock.
+3. Location đó có `mixedBulk=true` và evidence-backed policy đúng owner/commodity/stage/product identity/effective time không? Chỉ đặt kind/name là SILO không tự bật pooling. `pool_ingress` trả lot đầu vào khi location không mixed; mixed thiếu policy thì fail closed.
+4. Có cùng silo, cùng owner và identity phù hợp không? Khác silo/customer/stage có thể là nhiều pool hợp lệ, không phải lỗi “chưa gộp”. Không trộn giữa công ty để làm giao diện giống ví dụ.
+5. Khi nhập thành công, `mixed_bulk_pools.lot_id/revision`, positions, custody edges và source stock projection có nhất quán không? Tỷ lệ khi tạo và attribution còn lại sau rút phải phân biệt.
+
+Lượt rà soát này chưa đọc cấu hình/dữ liệu Supabase hiện tại nên **chưa kết luận silo của team đã opt-in/policy đúng hoặc migrations dev mới đã được áp dụng**. Không tự bật silo, tạo policy hay sửa hàng đã ghi.
+
+### 11.4. Dev residue mới mở thêm được gì
+
+Đã có [residue graph](../backend/src/GrainLedger.Modules.Ledger/Sql/ResidueBounds.sql), [calculator](../backend/src/GrainLedger.Modules.Ledger/ResidueCalculator.cs), [preview/evaluation service](../backend/src/GrainLedger.Modules.Ledger/ResidueEvaluations.cs), [report review/binding](../backend/src/GrainLedger.Modules.Ledger/ResidueReportReview.cs) và Stock live preview. Có thể nối trace lot → preview/historical evaluation và explanation về reports/results/rules/settings/dependencies mà không viết lại calculator.
+
+Ba lớp phải giữ riêng:
+
+- Recorded material/custody graph: quan hệ vật liệu đã ghi.
+- Kg/source composition và positive accounting paths: phân bổ kế toán exact micro-kg đang có trong trace.
+- Residue intervals/dependencies: dùng physical mass, exact rational và reviewed scientific applicability. Dev mới giữ cả exposure dương nhỏ hơn ngưỡng làm tròn kế toán; **không lọc chemical dependencies bằng `positivePathSourceIds`, `custody_processing_allocations.quantity>0` hoặc percentage đã làm tròn của trace**.
+
+Residue trả finite bounds hoặc `UNRESOLVED` theo rule/evidence, không phải legal market PASS. Missing adoption, method, uncertainty, basis, factor hoặc evidence không được thay bằng 0/factor 1/MRL. Lab identity confirmation và residue binding là facts riêng; report confirmed vẫn có thể chưa đủ điều kiện tính bounds. Draft sửa/xóa appends revision/tombstone; không biến draft mới thành replacement pháp lý cho confirmed evidence.
+
+### 11.5. Thứ tự triển khai đề xuất
+
+Cập nhật trạng thái sau mục 13: P1–P3 đã triển khai ở mức MVP; P4 đã có lab-result → forward material trace và residue theo node, còn hoàn thiện liên kết evidence/diễn giải ảnh hưởng; P5 đã có regression/browser cho phạm vi hiện tại, chưa nghiệm thu benchmark. Chi tiết bàn giao mới nhất tại mục 14. Mô tả dưới đây giữ yêu cầu gốc, không dùng checkbox P4/P5 để suy rằng mọi phần của chúng đều chưa làm.
+
+- [x] **P0 — Merge và kiểm chứng baseline:** giữ cả custody trace và residue mới, sửa conflict, kiểm tra grants/source role, migration compatibility và test thực tế. Kết quả ở 11.7.
+- [x] **P1 — Ưu tiên silo/current pool trong điểm bắt đầu (làm tiếp ngay):** thêm lựa chọn rõ “Hàng trong silo/kho”, “Nguồn thu mua”, “Lô/generation lịch sử”; scoped server filter theo facility/location và current pool. Hiện tên vị trí, owner theo quyền, stage, quantity/available và revision; không suy loại lô từ prefix RAW. Không chỉ lọc một trang 25 dòng ở browser rồi coi là đủ pools. Giữ manual Ledger ID và quyền riêng Admin/Export. Kiểm tra setup theo 11.3 bằng đường đọc; chỉ đề nghị thay policy/ghi nhận hàng khi có căn cứ và authorization riêng.
+- [x] **P2 — Làm graph/table nói đúng ngôn ngữ nghiệp vụ (sau P1):** nhãn riêng “Nguồn”, “Pool hiện hành”, “Generation cũ”, “Phần rút ra”, “Phần còn lại”; vị trí/silo dễ đọc. Nguồn tồn 0 ghi rõ “đã nhập pool” khi có custody evidence. Tách quantity khi tạo, tồn hiện tại và kg nguồn còn lại; Starting lot khác node đang chọn. View Current vẫn là effective operation relationships, không bỏ hết generation cũ. Giữ full result/IDs/edge counts và mở được đường chi tiết; không thêm một chế độ compact/analytics riêng trong đợt MVP này.
+- [x] **P3 — Nối residue evidence vào trace (đủ nền code, sau P1/P2):** theo quyền `residue.evaluate`, cho mở preview hoặc evaluation đã lưu của node. Reuse existing service/routes và rule/result/dependency refs; không gọi preview từng node khi tải graph. Hiện status, khoảng/unit/basis, lý do UNRESOLVED và thời điểm/snapshot riêng; graph snapshot và preview không mặc nhiên cùng thời điểm. `GET .../residue-preview` không ghi snapshot; POST evaluation ghi audit chỉ khi người dùng chủ động yêu cầu. Không mở original lab cho Admin hoặc mở backward/source composition cho Export chỉ vì được evaluate.
+- [ ] **P4 — Truy xuôi từ kết quả lab xấu (core tracing, sau P3):** resolve confirmed result → source Ledger identity đúng company, forward material trace, rồi đọc chemical dependencies/provenance để giải thích phần liên quan. Source bị nghi ngờ không đồng nghĩa mọi structural descendant đã được chứng minh nhiễm. Không tự đánh FAIL, áp HOLD hay release; giữ late evidence và evaluation snapshots cũ bất biến.
+- [ ] **P5 — Nghiệm thu, hiệu năng:** mỗi bước có regression và actual API/browser cô lập; đo fan-in/top-up/withdraw, dataset/source count và thời gian DB/API/page riêng. Không tuyên bố đạt NFR toàn mùa vụ từ timeout hoặc build timing.
+- [ ] **Để sau — actual order/loading/container:** nối khi có committed loading/allocation và closing dossier contracts. Container draft/planned target không phải hàng đã xuất; residue bounds chưa thay assessment dùng để cho phép CLOSE.
+
+**Thứ tự lúc lập plan: P1 → P2.** Các bước này đã triển khai tại mục 13; lần sau tiếp tục theo mục 14, không làm lại từ đầu.
+
+### 11.6. Acceptance cho phần cải thiện
+
+1. Hai nguồn cùng công ty vào silo mixed hợp lệ: current selector chỉ ra pool hiện hành với tổng còn lại, backward vẫn đủ sources/generations, không còn coi source balance đã tiêu thụ là hàng có thể rút thêm.
+2. Kho thường giữ source lots; silo chưa mixed hoặc thiếu policy được giải thích đúng, không fake pooling trên trace. Hai silo/khác customer không bị gộp bởi filter/UI.
+3. A/B → pool → withdrawal Q → top-up C: Q cũ không nhận C; current pool composition dùng remainder + C. Historical pool vẫn mở được dù tồn 0.
+4. Sấy/xay trước hoặc sau silo theo actual committed input/stage: không hardcode chỉ RAW_PADDY hoặc coi nhiều procurement luôn nhập cùng một location.
+5. Root share kế toán về 0 nhưng residue dependency còn dương: source composition, material graph và chemical interval/explanation không được đồng nhất; UNRESOLVED được giữ nếu thiếu khoa học/policy.
+6. CustomerManager own-company hai chiều; Export forward-only không nhận nguồn qua residue links; Admin trace không tự được original lab/evaluate. Scope/revocation và helper-grant denial tiếp tục được kiểm backend.
+7. Draft report edit/delete, confirmed result selection/supersession, late evidence: trace evidence đúng association; evaluation cũ không bị rewrite, preview có thời điểm riêng, không tự thay HOLD.
+8. Full Table/Flowchart nhất quán, current/history không lẫn inventory-as-of; guards giữ đủ custody/event nodes, không silent truncate hoặc client-side filter bỏ pool nằm ở trang sau.
+
+### 11.7. Kiểm chứng merge và giới hạn kết luận
+
+- `npm ci` theo lockfile dev mới; không tự nâng package ngoài merge. `npm run build`: PASS TypeScript/Vite, còn chunk warning trên 500 kB.
+- Backend nhóm liên quan: lượt cuối **176/176 PASS** trên PostgreSQL Testcontainers, gồm lot trace, mixed-bulk, migration/cutover, lab, residue evaluation/review/company policies, equipment/ledger management và permission contracts. Actual HTTP paths nằm trong integration suite; không chạy toàn bộ backend solution suite.
+- Lượt đầu backend có 66 fail/110 pass: một assertion migration của trace giả định không có migration tương lai, đã sửa thành kiểm bước upgrade riêng đến CustodyTraceability rồi nâng tiếp latest, vẫn giữ assertion history và legacy marker. Các lỗi lab 500/residue rule ở cùng lượt không tái hiện khi chạy hai ca riêng trên cả dev `9bd3e8d` và merge; lượt cuối đủ 176 pass. Chưa xác định nguyên nhân lỗi tạm thời đó, không kết luận đã sửa lỗi lab nghiệp vụ hay chứng minh mọi lần chạy đều ổn định.
+- Frontend lượt cuối **208/208 PASS**; chạy `npm run test --workspace @grainledger/web -- --maxWorkers=2`. Lượt full mặc định trước đó có 206 pass/2 fail ở ResidueRuleMaintenance (timeout/async assertion); không đổi timeout hoặc logic residue để che lỗi. Các trace/source-evidence tests pass. Cần giữ theo dõi độ ổn định suite nặng ở P0/P5.
+- Browser dùng test bridge/Vite riêng `5087/5177`, không dùng Supabase: Stock detail có cả Trace this lot và live residue preview; pool 10 kg HOLD hiện available 0, trace backward 2 lots/1 relation, Flowchart 3 nodes với 1 custody event, đúng direct/inherited HOLD. Đổi display vẫn 1 trace request. Preview riêng trả UNRESOLVED và reasons khi không có applicable rules/evidence, không tự tạo snapshot/HOLD. Focused click/snapshot tools có timeout; smoke tiếp tục bằng DOM events/evaluation trong cùng T3 preview, không báo đã kiểm pointer interaction hay performance.
+- Không chạy migration, seed, grant reset, trace audit hoặc data-changing smoke trên database dùng chung. Các migrations/routines residue mới có trong code không chứng minh đã được cài trên DB của team. Merge không tự deploy; muốn chạy backend với DB đó cần kiểm pending migrations/runtime grants theo deployment guide và approval riêng.
+- Merge commit đã tạo theo yêu cầu merge; plan mục 11 giữ ngoài merge commit để review, chưa push. Đây là plan cải thiện, chưa triển khai P1–P4 trong lượt này.
+
+
+## 12. Ràng buộc chỉ triển khai in scope/MVP — 24/10/2026
+
+Theo yêu cầu người dùng: **chỉ làm in scope; không làm extended scope hoặc out of scope**. Áp dụng cho các bước tiếp theo; code hoặc nền kỹ thuật đã tồn tại không tự biến một extension thành yêu cầu MVP.
+
+Đã đối chiếu `review/FA26SE272_GrainLedger_Proposal_v1.1.docx.pdf`: core traceback trang 4, deliverables/extension trang 9, phân tách minimum/extended/excluded trang 11. `GrainLedger_V2.pdf` trang 8–9 là mapping F01–F20 để tham chiếu. Nếu một phần Theory gợi ý EPCIS/solver rộng hơn, không lấy đó để vượt giới hạn minimum scope ghi rõ ở deliverables/comments.
+
+### 12.1. In scope toàn dự án
+
+- Tài khoản/quyền/company scope, cấu hình nhà máy/kho và danh mục/MRL có phiên bản.
+- Farmer/plot/season, khai báo thuốc, procurement/intake, sample/lab; mobile-friendly web capture và offline/idempotent sync.
+- Ledger/stock, core conversions/custody, exact mass balance, chống double consumption, corrections append-only, nguồn đóng góp.
+- Conservative residue bounds và evidence/rules, destination limits; blend feasibility và lý do từ chối cơ bản; Manager approval.
+- Loading/CLOSE container, hồ sơ tuân thủ/truy xuất có thể xuất ra.
+- Tracing hai chiều source/plot/lot/adverse lab result → stock/container và container → contributing plots/percentages/events/evidence; authorized HOLD/response, history/audit.
+- Test/simulation/synthetic-season fixtures, correctness/concurrency/sync checks và traceback benchmarks thuộc deliverables cốt lõi, không phải extension nghiệp vụ.
+
+Đây là phân loại phạm vi dự án, không phải tuyên bố tất cả đã triển khai hoặc thuộc trách nhiệm riêng của nhánh trace.
+
+### 12.2. Extended scope — không triển khai tiếp
+
+- Tối ưu nhiều container/orders, mixed-integer/advanced optimisation thay vì feasibility tối thiểu.
+- Advanced mathematical infeasibility diagnostics; không yêu cầu IIS/chứng minh tối ưu/bất khả thi hình thức cho MVP.
+- Portal hoặc shipment view/link dành cho buyer/auditor bên ngoài.
+- GS1 EPCIS 2.0-compatible export/integration.
+- Automated regulatory/market-limit ingestion và bulk import mở rộng; quản lý/versioned lookup MRL cơ bản vẫn là core.
+- Dedicated native Android app; mobile-friendly/offline web client vẫn là core.
+
+### 12.3. Out of scope — không triển khai
+
+- Dự đoán dư lượng từ vệ tinh/thời tiết.
+- Tính carbon/methane credits.
+- Quản lý thanh toán/giá mua/quyết toán cho nông dân.
+- Tích hợp ERP hoặc hải quan. Shipment dossier/export chứng từ nội bộ là core và không đồng nghĩa tích hợp hải quan.
+
+### 12.4. Hệ quả cho plan tracing
+
+- Cần sửa cách gọi trước đây: **truy từ kết quả lab xấu đến lô/pool/container là in scope (core traceback/F18), không phải extended scope**. Việc chưa triển khai hoặc còn chờ actual loading là trạng thái dependency, không phải phân loại ngoài MVP. Không mở thêm một module điều tra/phân tích nâng cao.
+- P1/P2 chỉ cải thiện chọn đúng silo/current pool, nhận diện nguồn/generation và đọc graph hiện có cho core tracing; không đưa compact/analytics mới vào điều kiện hoàn thành.
+- P3 chỉ nối evidence/bounds/rule references cần để hiểu nguồn và tính toán, reuse residue module; không tạo engine hoặc dự đoán mới.
+- P4 chỉ thực hiện entry từ confirmed adverse result đến đường truy xuất và các outputs thực có; không thêm suy luận điều tra nâng cao hoặc tự đặt/release HOLD.
+- Container tracing/HOLD/dossier vẫn trong scope dự án, nhưng chỉ tích hợp khi có actual committed loading và đúng contract/authority từ phần sở hữu. Không tạo container giả để coi core trace hoàn tất.
+- Không triển khai các extension liệt kê ở 12.2, không dùng chúng làm prerequisite cho tracing; không sửa/xóa một tính năng đã có ở nhánh khác chỉ để đổi phân loại scope trong lượt cập nhật plan này.
+
+## 13. Plan thực thi MVP: silo, bounds và lab-to-trace — 24/10/2026
+
+Phạm vi được yêu cầu: thực hiện P1/P2/P3/P4 của mục 11 trong giới hạn mục 12. Không actual container/loading mới, auto-HOLD, optimizer, EPCIS, portal hoặc dự đoán.
+
+- [x] **S1 — Điểm bắt đầu và loại lô:** protected paged GET `/api/ledger/trace/starts`, filter pools/sources/all, facility/location/search áp dụng server trước pagination. Scope actor lấy từ persisted role/company; Admin chỉ trace projection, không general stock grant. Dùng forward migration mới cho finite selector routine/private metadata helper và bổ sung kind/tên vị trí vào trace schema v2 (additive). UI mặc định current pools, vẫn cho nguồn/history/manual ID. Phân loại từ receipt/custody/pool facts, không prefix mã lô.
+- [x] **S2 — Lab entry:** Capture-owned confirmed-result resolver cùng connection/transaction do trace caller sở hữu; POST `/api/ledger/trace/from-lab` nhận report/result IDs và view, server resolve đúng sample → Capture source → Ledger root. Chỉ actor có cả trace và lab scope; forced forward, không tin request source/owner. Pending/no accepted Ledger lot báo rõ, không tạo stock. Reuse trace traversal/audit; response giữ lab origin refs riêng, không tự đưa lab result thành chemical verdict hoặc saved residue assessment.
+- [x] **S3 — UI liên kết:** Table/Flowchart cùng labels source/current pool/old pool/aliquot/remainder/output và vị trí. Report confirmed/trace source evidence có action mở forward trace từ đúng result; vào Traceability theo context report/result, không tự POST trace khi mount. Chọn node có thể mở ResidueBounds hiện có theo `residue.evaluate`, chỉ một node khi người dùng yêu cầu, không N calls cho toàn graph; preview/history/snapshot giữ mốc riêng và hành động ghi audit tường minh.
+- [x] **S4 — Verification:** isolated PostgreSQL HTTP cho server filtering >1 page, owner/role/revocation/private helper denial, exact quantities, labels/chronology, confirmed row mapping và mismatch/unconfirmed/pending/foreign denial; UI request lifecycle, filter pagination, manual/history entry, selected-node bounds và lab navigation. Actual browser test host cô lập, không dùng shared DB. Build và affected regressions; ghi kết quả thật.
+- [x] **S5 — Bàn giao:** docs request/response + web guide + migration boundary; không migrate/seed/grant trên shared DB và không commit/push khi chưa yêu cầu.
+
+Lab origin là liên kết confirmed evidence được resolve trong lần trace, không phải assessment pháp lý đã lưu. Khoảng dư lượng lấy từ service hiện có với snapshot riêng; positive accounting paths không được dùng làm chemical dependencies. Nếu selector migration chưa cài, API trả lỗi feature deployment rõ; không lùi về một trang stock rồi báo là đủ current pools.
+
+
+### 13.1. Kết quả thực hiện và kiểm chứng
+
+- S1/S2/S3 đã có trong source trên `feat/trace`: selector server-side có pagination/filter và current labels, node kinds lấy từ receipt/custody facts, Capture-owned resolver cho từng confirmed lab result, HTTP entry forced-forward, Table/Flowchart cùng labels, lab navigation và residue panel theo node. Không thêm dependency npm, không sửa lịch sử migration đã phát hành.
+- Đổi role/company xóa request/result/lab context cũ và remount selector để không giữ danh sách của scope trước. Stock → Trace this lot thay thế context lab. Lab resolver recheck confirmed association và company/role trước commit; từ chối không có graph thay vì tạo stock.
+- Backend **106/106 PASS** trên PostgreSQL Testcontainers: LotTraceabilityTests, MixedBulkTests, MixedBulkMigrationTests, LabReportTests, ResidueEvaluationTests, PermissionContractTests. Sau bổ sung recheck lab ở cuối transaction, chạy lại nhóm lab-entry + LotTraceability: **12/12 PASS**. Không cộng hai lượt thành số test distinct. Bộ 106 gồm regression migrations nâng từ baseline trước custody đến latest và bảo toàn history/legacy marker.
+- Frontend full suite lượt cuối **215/215 PASS**, 29 files, `--maxWorkers=2`; sau thay đổi clear scope và sửa test phải nhập lại lot khi đổi role, nhóm trực tiếp Traceability/TraceStartPicker/Workspace/LabReports **76/76 PASS**. Full suite chưa chạy lại sau thay đổi scope cuối; nhóm affected đã pass. Lượt full trước chạy đồng thời backend/browser có **210 pass/2 fail** tại ResidueRuleMaintenance (timeout/async assertion); lượt full chạy lại khi backend đã xong pass. Không đổi timeout hay code residue để che lỗi; chưa xác minh nguyên nhân duy nhất là contention.
+- Web build `tsc --noEmit && vite build` PASS sau thay đổi cuối; còn warning chunk >500 kB. Backend compile qua `dotnet test`, còn CS9113 `LedgerService.access` đã có. `git diff --check` PASS. Không chạy toàn bộ backend solution suite hoặc benchmark production.
+- Actual browser: test bridge + Vite riêng **5088/5178**, disposable PostgreSQL. CustomerManager dùng native selector tìm pool RAW_PADDY 10 kg → Backward Current trả 2 lots/1 relation, tên Trace mixed store, source direct HOLD/pool inherited HOLD và available 0. Table/Flowchart cùng trace reference, đổi display không thêm POST.
+- Browser mở residue cho node đang chọn: history/preview hiện UNRESOLVED với reasons vì fixture này thiếu applicable evidence/rules; không tạo evaluation/HOLD. Dev StrictMode replay GET history khi mount, không coi đó là N calls cho mọi node; chỉ mở một selected lot. Không đo performance production.
+- Browser mở confirmed report → đúng result action → trace context; mount và reload URL không POST. Bấm Run trả **8 lots/7 relationships**, từ nguồn 60 kg đã hết tồn qua DRYING/MILLING/BLENDING và pool/withdrawal/remainder; kinds và vị trí hiển thị đúng, Forward bị khóa. Focused navigate/click/select tools hoạt động; DOM evaluation dùng để đọc kết quả/network. Lần login đầu ERR_CONNECTION_REFUSED do host chưa listen, retry sau khi fixture sẵn sàng thành công.
+- Browser host đã dừng; session file chứa test cookies và Vite config tạm được xóa. Không thay `.env`, không truy vấn ghi shared Supabase, không chạy shared migration/seed/grant, không commit/push trong lượt này. Hướng dẫn test mới ở [web guide mục 8](traceability-web-test-guide.md#8-test-tính-năng-mới-silo-dư-lượng-và-lab--trace-24102026); hợp đồng tại [trace API](traceability-api.md).
+
+### 13.2. Phần để sau và điều kiện tiếp tục
+
+1. **Deployment bản này:** shared DB cần approved owner migration `20261024000000_TraceEntryPoints` cùng runtime-role configuration trước khi backend mới chạy. Đây chưa phải đã triển khai; startup chủ động dừng nếu thiếu routine/grant hoặc helper bị lộ EXECUTE. Giữ restricted runtime, không dùng owner làm application connection.
+2. **Core trace đến container:** chờ actual committed loading/output contracts (order/approved blend/reservation, loaded lots + exact quantities, container/CLOSE identity và evidence authority). Khi có mới thêm material/custody links và container dossier; preparation metadata không phải actual loading. Không tạo shipment/stock giả.
+3. **Kết luận ảnh hưởng lab:** entry hiện truy material descendants của sampled source. Không khẳng định một kết quả áp dụng trực tiếp cho mọi hậu duệ, không tự HOLD/release hoặc kết luận đạt thị trường. Dùng residue bounds/rules/evidence service hiện có; missing policy/coverage phải unresolved. Khi cần immutable lab-to-trace evidence reference trong query audit, phải bổ sung hợp đồng snapshot rõ; hiện labOrigin chỉ là response context, TRACEBACK audit vẫn ghi root/graph.
+4. **Full MVP chưa được tuyên bố hoàn tất:** actual container traceback/dossier, action HOLD theo authority và export assessment còn phụ thuộc phần sở hữu. Extended/out of scope mục 12.2–12.3 tiếp tục không triển khai. Benchmark theo deliverables cần dataset/acceptance target riêng; không dùng smoke này làm bằng chứng tốc độ hoặc coverage toàn dự án.
+
+
+### 13.3. Sửa deployment/runtime grants theo yêu cầu — 24/10/2026
+
+Người dùng yêu cầu “là sửa chưa, sửa đi” sau khi được giải thích thiếu migration và quyền EXECUTE trên DB dùng chung. Đã chạy preflight chỉ đọc bằng cấu hình hiện hành: runtime login khớp `Ledger:RuntimeRole`; `trace_lot` có nhưng thiếu EXECUTE; `trace_starts` và metadata helper chưa tồn tại. Identity/Catalog/Capture không có pending migration; Ledger chỉ thiếu `20261024000000_TraceEntryPoints`.
+
+- Đã chạy workflow `dotnet run --project backend/src/GrainLedger.Api -- --migrate`: áp dụng đúng migration trên, sau đó `ConfigureRuntimeRoleAsync` cấp lại finite runtime grants. Không seed, không đổi connection settings, không dùng owner cho normal application startup. Migration thay routine, không tạo stock/receipt/sample hoặc viết lại lineage.
+- Postflight: cả bốn contexts không pending; runtime EXECUTE trace_lot và trace_starts đều true; metadata helper tồn tại nhưng runtime EXECUTE false; ledger.command vẫn EXECUTE true. `LedgerDatabase.ValidateRuntimeAsync` bằng restricted connection PASS.
+- Actual normal startup `dotnet run --project backend/src/GrainLedger.Api --no-build` thành công; `GET http://localhost:5080/health` trả HTTP 200 `{"status":"ok"}`. Không chạy authenticated trace trên shared DB vì nó ghi TRACEBACK audit. Backend dùng để kiểm tra đã dừng sau smoke để không giữ port 5080 của người dùng.
+- Nguy cơ còn lại: local dev hiện có blanket revoke/regrant với allowlist chưa chứa tracing. Chạy owner migration/grant workflow từ bản đó có thể thu hồi lại quyền trace. Không xác định người/process đã sửa ACL trước đó. Source feat/trace đã có finite grants mới; cần tích hợp migrations và grants cùng nhau vào nhánh deploy chung. Chưa merge vào dev, commit hoặc push trong lượt sửa DB này. Chuyển branch/restart bình thường không gọi workflow thu hồi quyền.
+
+Mục 13.1–13.2 ghi trạng thái trước phê duyệt deployment; ghi nhận này cập nhật trạng thái shared DB mới nhất. Actual loading/container dependencies vẫn giữ nguyên.
+
+
+## 14. Bàn giao trước merge dev và plan lần sau — 24/10/2026
+
+### 14.1. Kết luận trạng thái
+
+**Đã hoàn thành phạm vi đợt hiện tại: tracing các Ledger lots/pools và processing/custody đã commit, cùng lab entry/evidence. Có thể đưa phần này vào review và merge dev như một mốc chức năng độc lập; chưa đánh dấu toàn bộ tracing MVP của dự án hoàn tất.** Việc merge không yêu cầu chờ đội order/blend/loading làm xong, nhưng full source/lab ↔ actual container traceback và dossier chưa thể nghiệm thu.
+
+Đã có:
+
+- [x] Forward/backward; Current effective operations/History giữ superseded operations; nguồn đã hết tồn và historical generations vẫn truy được.
+- [x] Mixed-bulk ingress/withdrawal/remainder, actual resolved processing input và persisted source allocation; không bỏ provenance trước silo. Shares kế toán và chemical dependencies được giải thích riêng.
+- [x] Table/Flowchart cùng response/snapshot; starting lot khác selected node; selector current pools/sources/all, server-side location/facility/search/pagination, manual Ledger ID.
+- [x] Nguồn thu mua → farmer/plot/season metadata; samples/confirmed report sections theo đúng nguồn và quyền. Đây chưa phải toàn bộ audit thay đổi đăng ký thửa ruộng.
+- [x] Confirmed lab result → server resolve đúng accepted source → forward material graph. Không tự coi kết quả đo nguồn là nồng độ mọi hậu duệ.
+- [x] Mở residue preview/history theo selected node, reuse module hiện có, explicit snapshot action; không gọi preview cho mọi node khi mount graph.
+- [x] Hiển thị direct/effective HOLD và available stock. API đặt/respond HOLD đã tồn tại trong Ledger; phần trace không tự đặt hoặc release HOLD.
+- [x] Persisted role/company scope, Export forward/redaction, Admin không có lab wildcard, query audit và guards công bố. Lab origin refs hiện chỉ nằm trong response, xem R2.
+- [x] Migration `20261024000000_TraceEntryPoints` và finite runtime grants đã cài trên DB chung theo phê duyệt, runtime validation/health pass (13.3). Không cần chạy lại chỉ vì restart. Không suy deployment sang môi trường khác từ kết quả này.
+
+Bằng chứng kiểm tra dùng kết quả thật tại 13.1/13.3: backend 106/106, sau thay đổi recheck lab nhóm 12/12; frontend full 215/215, sau thay đổi scope nhóm affected 76/76; web build PASS, browser Testcontainers PASS. Không cộng các lượt thành số test distinct; chưa có full suite cuối trên merge commit tương lai, chưa benchmark NFR. User đã gửi ảnh pool 800 kg trên web; không coi đó là nghiệm thu tất cả ca trong walkthrough.
+
+### 14.2. Các việc còn lại — chỉ in scope
+
+- [ ] **R1 — Dễ đọc UI (độc lập, ưu tiên sớm):** tách dòng/spacing nhãn Type/storage và Stage/revision; ảnh hiện có `Current poolDemo Dry Store`, `RAW_PADDYCurrent pool`. Dùng custody evidence có sẵn để giải thích nguồn/generation tồn 0 đã chuyển vào pool; không suy mọi stock 0 là do pooling. Giữ số chính xác và bảng/graph thống nhất. Đạt khi ảnh desktop/mobile không dính nhãn, starting lot dễ nhận diện, không thay totals hoặc accounting.
+- [ ] **R2 — Hoàn thiện lab-to-trace evidence/audit (độc lập với container):** hiện TRACEBACK lưu query root/scope/view/basis/lot IDs, không lưu `reportId/resultId/sampleId` của lab entry và không giữ toàn bộ graph/evaluation response. Thiết kế minimal immutable origin refs cùng association/version và link evaluation đã lưu khi người dùng chọn, trong cùng audit transaction/đúng quyền; không copy report bytes hoặc tự lưu evaluation ở mount. Phân biệt rerun theo current evidence với xem căn cứ lúc chạy. Reuse residue replay/history để giải thích chemical dependencies theo chất/basis, kể cả accounting share về 0, thay vì suy từ structural descendants. Đạt khi có regression cho multi-sample report, late/replacement evidence và reauthorization, old refs không bị rewrite; UI không tuyên bố trace reference tự tái dựng chứng nhận cũ.
+- [ ] **R3 — Entry trực tiếp từ plot/vụ/source record (đối chiếu acceptance F18 trước khi chốt đầu vào):** hiện đã xem được plot/vụ trong source composition, nhưng các entry trace chỉ có Ledger lot và confirmed lab result; chưa tìm thửa/vụ để truy đồng thời mọi source lot của thửa/vụ đó. Khi làm, Capture cung cấp scoped paged/bulk mapping sang accepted Ledger roots; hỗ trợ nhiều procurements và nguồn chưa nhận mà không tạo stock. Không gọi N trace requests rồi cộng trùng generations hoặc tiết lộ source composition cho Export. Đạt khi đúng company/season, không thiếu nguồn qua pagination, phân biệt hiển thị origin đã có với entry tìm theo plot chưa có. Không mở module audit đăng ký ruộng mới trong nhánh trace.
+- [ ] **R4 — Actual loading/container traceback (chờ contract của luồng sở hữu):** owner order/blend/reservation/loading cung cấp actual committed load IDs, consumed lots/aliquots, exact kg, reversals/corrections, container identity và CLOSE/dossier refs. Sau đó nối source/confirmed lab → affected stock/actual containers và container → tất cả contributing sources/plots/percentages/events. Planned targets/drafts/preparation metadata không tạo material edge. Đạt khi partial/multiple loading, mixed-bulk resolved inputs, correction và owner scope không double count; closed evidence giữ bất biến và late evidence được đọc tách.
+- [ ] **R5 — Hồ sơ xuất và response theo quyền (sau contract R4, phối hợp compliance/HOLD):** gắn truy xuất với closing dossier/document export hiện thực tế; phân biệt material relationship, kết quả residue/assessment và hành động xử lý. HOLD/response đi qua API/authority hiện có, có lý do/evidence/audit; không auto-HOLD, auto-release hay dùng trace thay điều kiện CLOSE. Đây là tích hợp các phần của MVP, không yêu cầu trace tự viết engine compliance, order approval hoặc reservation. File export/API cần cùng owner/redaction scope và exact mass với UI.
+- [ ] **R6 — Nghiệm thu hiệu năng và coverage cuối (có thể chuẩn bị lot/pool trước R4):** chốt dataset/acceptance target từ proposal với team, đo full-season fan-in/fan-out/depth/top-up/withdraw, role/concurrency và correctness; tách cold/warm DB/API/page, dùng production web build cho loading measurement. Backend hiện guard 5.000 lots/20.000 edges và graph UI 250 nodes/500 relationships; chưa chứng minh đáp ứng dataset toàn mùa vụ. Đạt khi công bố đủ dataset/counts/môi trường/kết quả và hành vi quá giới hạn; không silent truncate hoặc lấy timeout làm bằng chứng đạt NFR. Khi có R4 bổ sung actual container cases.
+
+Thứ tự lần sau: **R1 → chốt R2/R3 theo acceptance → benchmark lot/pool R6** có thể làm ngay; **R4 → R5 → nghiệm thu container R6** khi team có actual loading/closing contracts. Không dùng dependency container để trì hoãn sửa UI hoặc benchmark lot hiện có. R2/R3 không phải lý do đánh phần lot/pool đã triển khai là chưa dùng được; là các gap cần chốt khi nghiệm thu đầy đủ tracing MVP.
+
+Tiếp tục loại trừ toàn bộ extended/out of scope ở mục 12: không optimizer nhiều container, portal ngoài, EPCIS, native Android, dự đoán vệ tinh/thời tiết, carbon credits, thanh toán hay ERP/customs.
+
+### 14.3. Lưu ý khi merge vào dev
+
+- [ ] Commit toàn bộ implementation/contracts/tests/docs và **hai file migration/resource mới** `TraceEntryPointsMigration.cs` + `TraceEntryPoints.sql`, cùng grant changes trong `LedgerDatabase.cs`. Những file untracked hiện chưa nằm trong Git history; không chỉ merge commit cũ rồi nghĩ code mới đã đi theo.
+- [ ] Review target dev mới nhất, xử lý conflict rồi chạy affected regressions/build trên kết quả tích hợp. Bản local dev tại thời điểm rà không có commit đi trước feat/trace (`dev...feat/trace = 0/10`), nhưng chưa fetch xác minh remote trong lượt cập nhật docs này. Không suy remote/PR CI đã xanh.
+- [ ] Giữ cả finite EXECUTE grants `trace_lot` và `trace_starts`, deny direct metadata helper. Không lấy allowlist dev cũ ghi đè: đó là cơ chế có thể thu hồi quyền trace trên DB chung. Shared deployment cần một revision tích hợp thống nhất và người/job sở hữu; không cấp EXECUTE tất cả functions để né lỗi.
+- [ ] CI/Testcontainers kiểm migration mới từ clean DB và upgrade; khi deploy môi trường khác chạy approved migration workflow + runtime validation, không seed/reset hoặc dùng owner cho normal startup. DB chung hiện đã apply thì workflow không cần áp dụng lại migration cũ.
+- [ ] Smoke web theo [4 luồng đã chuẩn bị](traceability-web-walkthrough.md): backward pool → source composition, forward source, confirmed lab entry, residue selected node; kiểm thêm effective HOLD và role redaction trên fixture cô lập. Ghi kết quả thật; không tạo data-changing shared scenarios khi chưa được phép.
+
+**Không coi R1–R6 là đã hoàn thành chỉ vì merge dev.** Mốc merge nên mô tả “lot/pool tracing, confirmed lab entry và residue evidence links”; không ghi “full end-to-end container tracing completed”. Lượt này chỉ cập nhật plan, không commit/push/merge hoặc thay database.

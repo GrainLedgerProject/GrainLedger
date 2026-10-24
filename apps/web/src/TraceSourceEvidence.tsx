@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, errorMessage } from './api';
+import type { LabTraceOrigin } from './LedgerTraceability';
 import type { Report } from './LabReports';
 import { SampleList } from './Samples';
 import { Panel } from './ledger-ui';
@@ -12,7 +13,7 @@ const comparisonLabels: Record<string, string> = {
 
 // This is a separate, explicitly requested evidence read. It does not change the
 // captured graph/audit or pretend that mutable comparison results share its snapshot.
-export function TraceSourceEvidence({ sourceRecordId, onClose }: { sourceRecordId: string; onClose: () => void }) {
+export function TraceSourceEvidence({ sourceRecordId, onClose, onTraceResult }: { sourceRecordId: string; onClose: () => void; onTraceResult?: (origin: LabTraceOrigin) => void }) {
   const [page, setPage] = useState(1), [retry, setRetry] = useState(0);
   const [reports, setReports] = useState<ReportPage | null>(null), [error, setError] = useState(''), [readAt, setReadAt] = useState('');
   useEffect(() => {
@@ -46,8 +47,8 @@ export function TraceSourceEvidence({ sourceRecordId, onClose }: { sourceRecordI
             <p>Sample: {set.statedSampleCode || set.confirmedSampleId} · Seal: {set.statedSealCode || 'Not recorded'}</p>
             <a href={`/capture/samples/${encodeURIComponent(set.confirmedSampleId!)}`}>View sample and handover history</a>
             <div className="table-scroll"><table aria-label={`Results for source ${sourceRecordId} in ${report.reportNumber}`}>
-              <thead><tr><th>Test</th><th>Reported result</th><th>Unit</th><th>LOD</th><th>LOQ</th><th>Method</th></tr></thead>
-              <tbody>{set.results.map((row, index) => <tr key={index}><td>{row.testLabel}</td><td>{row.originalResultText}</td><td>{row.unit || '—'}</td><td>{row.lod || '—'}</td><td>{row.loq || '—'}</td><td>{row.method || '—'}</td></tr>)}</tbody>
+              <thead><tr><th>Test</th><th>Reported result</th><th>Unit</th><th>LOD</th><th>LOQ</th><th>Method</th><th>Trace</th></tr></thead>
+              <tbody>{set.results.map((row, index) => <tr key={index}><td>{row.testLabel}</td><td>{row.originalResultText}</td><td>{row.unit || '—'}</td><td>{row.lod || '—'}</td><td>{row.loq || '—'}</td><td>{row.method || '—'}</td><td>{row.id && onTraceResult && <button type="button" onClick={() => onTraceResult({ reportId: report.id, resultId: row.id! })}>Trace forward from result</button>}</td></tr>)}</tbody>
             </table></div>
           </div>)}
           <details><summary>Whole-report VN comparison</summary>

@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { traceKindLabel } from './trace-kind';
 import type { LotTrace } from './LedgerTraceability';
 import { buildTraceFlow, flowCard, traceRelationKey, traceRelationLabel } from './trace-flow';
 
@@ -82,9 +83,9 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
             return <button type="button" key={node.id} ref={start ? startingLot : undefined} style={style}
               className={`trace-flow-node trace-flow-lot${start ? ' trace-flow-start' : ''}`}
               aria-label={`Select lot ${lot.code}${start ? ' — starting lot' : ''}`} aria-pressed={lot.id === selectedId} onClick={() => onSelect(lot.id)} title={`${lot.code} · ${lot.id}`}>
-              <span className="trace-flow-kicker">{start ? 'STARTING LOT' : 'LOT'}</span><strong>{lot.code}</strong><span>{lot.stage} · {lot.producedKg} kg created{lot.poolRevision != null ? ` · ${lot.isCurrentPool ? 'Current pool' : 'Generation'} r${lot.poolRevision}` : ''}</span>
+              <span className="trace-flow-kicker">{start ? 'STARTING LOT · ' : ''}{traceKindLabel(lot)}</span><strong>{lot.code}</strong><span>{lot.stage} · {lot.producedKg} kg created{lot.poolRevision != null ? ` · ${lot.isCurrentPool ? 'Current pool' : 'Generation'} r${lot.poolRevision}` : ''}</span>
               <span className={lot.restrictions.length ? 'trace-flow-restriction' : 'trace-flow-clear'}>{lot.restrictions.join(' · ') || 'No recorded restrictions'}</span>
-              <small>{lot.id}</small>
+              <small title={lot.id}>{lot.positions.map(p => p.locationName || p.locationId).join(' · ') || lot.id}</small>
             </button>;
           })}
         </div>
@@ -95,7 +96,7 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
       <strong>{selected.code}</strong>{selected.id === trace.targetLotId && <span className="trace-start-badge">Starting lot</span>}
       <p>{selected.stage} · Quantity when created: {selected.producedKg} kg · {selected.restrictions.join(', ') || 'No recorded restrictions'}</p>
       <small>{selected.id}</small>
-      {selected.positions.map(position => <p key={position.locationId}>Current stock: {position.quantityKg} kg · Available: {position.availableKg} kg · {position.locationId}</p>)}
+      {selected.positions.map(position => <p key={position.locationId}>Current stock: {position.quantityKg} kg · Available: {position.availableKg} kg · {position.locationName || position.locationId}</p>)}
     </section>}
     <details className="trace-flow-quantities"><summary>Event quantities and exact relationships</summary><p>Processing amounts belong to each operation input/output; custody input is edge mass and output is whole created lot; do not sum repeated output amounts across input–output pairs.</p>
       <ul>{trace.edges.map(edge => <li key={`${traceRelationKey(edge)}/${edge.inputLotId}/${edge.outputLotId}`}>

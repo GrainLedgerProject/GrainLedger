@@ -42,7 +42,7 @@ public sealed class LotTraceabilityTests(ApiFactory factory) : IClassFixture<Api
             audit.Parameters.AddWithValue(source);
             Assert.Equal(0L, await audit.ExecuteScalarAsync());
         }
-        finally { await InstallAsync("CustodyTraceability"); }
+        finally { await InstallAsync("TraceEntryPoints"); }
         Assert.True((await Trace(s.Customer, source)).GetProperty("complete").GetBoolean());
     }
 

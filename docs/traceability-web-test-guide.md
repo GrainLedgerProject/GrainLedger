@@ -1,5 +1,7 @@
 # Kịch bản test tracing trên web với dữ liệu hiện có
 
+Muốn test nhanh theo từng bước: xem [4 luồng thực hành đã đối chiếu lại dữ liệu ngày 24/10](traceability-web-walkthrough.md).
+
 Đối chiếu code và đọc database ngày 21/10/2026, nhánh `feat/trace`. Không tạo/seed hoặc thay dữ liệu nghiệp vụ để chuẩn bị hướng dẫn. Số tồn và current generation có thể thay đổi nếu người khác nhập/rút hàng; các kỳ vọng dưới đây theo thời điểm kiểm tra.
 
 Mục tiêu: **pool 800 kg → truy ngược về hai nguồn → xem mẫu/báo cáo nguồn → truy xuôi một nguồn về pool**.
@@ -83,3 +85,18 @@ Chuyển **Trace view → History**, rồi bấm Run trace lại. Chuỗi này c
 Nếu dữ liệu đã thay đổi trong lúc test, kiểm tra generation/tồn mới trước khi kết luận bug. Muốn kiểm thêm withdrawal, top-up sau withdrawal, DRYING/MILLING hoặc inherited HOLD cần chuỗi dữ liệu có các thao tác đó; không tạo các thao tác trên DB chung chỉ để khớp kỳ vọng của hướng dẫn này.
 
 Các thao tác Run trace ghi audit truy xuất theo thiết kế, không trừ tồn. Lượt chuẩn bị tài liệu này chỉ đọc database, chưa thực hiện kịch bản bằng tài khoản web trên database dùng chung. Backend/frontend regression và browser cô lập đã chạy được ghi tại [kết quả triển khai](traceability-implementation-plan.md#103-kiểm-chứng-thực-tế).
+
+## 8. Test tính năng mới: silo, dư lượng và lab → trace (24/10/2026)
+
+**Điều kiện:** backend/web cùng phiên bản mới; Ledger migration `20261024000000_TraceEntryPoints` và runtime grants đã được người quản trị áp dụng theo [setup guide](setup-and-deployment.md). Code mới đã test trong Testcontainers; sau yêu cầu sửa lỗi của người dùng, migration/grants mới đã được áp dụng lên database dùng chung ngày 24/10 (plan mục 13.3). Câu “không cần migration thêm” ở kịch bản 21/10 chỉ áp dụng bản cũ; không dùng làm hướng dẫn triển khai bản này. Không seed thêm dữ liệu lên DB team để test.
+
+1. Đăng nhập Customer Manager có trace/lab/residue permissions của đúng company, vào **Ledger → Traceability**. **Starting point type** mặc định **Current silo / warehouse pools**. Chọn **Trace facility**, **Trace silo / location** hoặc tìm tên/mã; danh sách phải hiển thị pool hiện hành + revision + kg chính xác. Pool đang HOLD vẫn cần xuất hiện. Không có pool thì thử Procurement sources; không kết luận hệ thống mất dữ liệu.
+2. Chọn pool → Backward → Current → **Run trace**. Trong cột Type/storage phải phân biệt Current pool, Historical pool, Procurement source; vẫn thấy nguồn trước silo. So source composition với các ingress đã ghi, không cộng tất cả generations thành tổng tồn. Pool có nhiều nguồn phải giữ đầy đủ source refs, kể cả lô đã hết tồn.
+3. Bấm **Flowchart**: cùng snapshot/reference; nhãn loại lô và tên vị trí phải khớp Table. Chọn node nguồn/pool để đổi chi tiết. **All recorded lots, including history** hoặc nhập Ledger UUID cho phép bắt đầu từ generation cũ; chế độ này không cho rút tồn của lô cũ.
+4. Trong **Residue evidence — [lô đang chọn]**, bấm **View residue bounds for selected lot**. Trước khi bấm chưa tải preview cho mọi node. Đọc Live preview, timestamp, reasons và Immutable evaluation history. Thiếu policy/evidence phải UNRESOLVED; report comparison và graph không tự thành PASS. Chỉ bấm Lock snapshot nếu được phép ghi snapshot trên môi trường đang test. Chọn node khác đóng panel; mở lại mới đọc dữ liệu node đó.
+5. Vào **Laboratory reports**, mở report **CONFIRMED**, chọn đúng section/sample và dòng kết quả → **Trace forward from result**. Màn Traceability phải ghi report/result đang dùng, khóa direction Forward; chưa có trace result trước khi Run. Có thể thử reload: context vẫn giữ, không tự truy vấn có audit.
+6. Bấm **Run trace**: starting lot là accepted Ledger root của sample được confirm, kể cả root stock 0; downstream gồm đúng processing/pool/aliquot/remainder đã ghi. Không dùng proposed sample chưa confirm hoặc result của section khác. Một report nhiều mẫu phải chạy từng dòng cho đúng nguồn. Trace không khẳng định mọi hậu duệ nhiễm hoặc nồng độ bằng nguồn.
+7. Bấm **Choose another starting point** hoặc mở Stock → **Trace this lot**: bỏ context lab, điền đúng stock lot mới, direction có thể chọn lại theo quyền. Report pending/unresolved không có action. Confirmed sample chưa nhận hàng trả thông báo không có accepted Ledger lot; không tự tạo lot/stock.
+8. Export Staff chỉ Forward, không source composition/lab nguồn; lab entry vẫn cần quyền lab và company hợp lệ. Admin trace toàn cục không đồng nghĩa có quyền lab/residue; Purchasing/MillOperator không được mở trace chỉ nhờ quyền stock. Các denial/foreign/mismatched IDs kiểm bằng integration suite; không thay dữ liệu hoặc role trên DB dùng chung để tạo ca kiểm thử.
+
+Trong Dev, React StrictMode có thể replay GET khi mount (ví dụ hai GET history), nhưng bấm Run một lần phải chỉ có một POST trace. Không suy benchmark production từ phiên dev này. Chuỗi container chỉ xuất hiện sau khi actual committed loading được tích hợp; chưa coi phần này hoàn tất.

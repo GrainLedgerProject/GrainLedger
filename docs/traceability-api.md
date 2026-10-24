@@ -2,7 +2,13 @@
 
 Trạng thái source: API/Table/Flowchart hỗ trợ quan hệ processing và mixed-bulk custody, actual resolved inputs và effective HOLD. Source evidence mở theo yêu cầu qua API Capture riêng, không nằm trong material graph response. Plan/reservation/actual loading/container chưa tích hợp. Kết quả kiểm chứng và phần còn lại nằm ở [plan mục 10](traceability-implementation-plan.md#10-kết-quả-triển-khai-tiếp--21102026).
 
+Cập nhật 24/10: có selector current pool, phân loại lô, lab-result entry và mở residue theo node. **Cần migration mới `20261024000000_TraceEntryPoints` và runtime-role configuration trước khi chạy backend mới**; đã áp dụng lên database dùng chung ngày 24/10 theo yêu cầu trực tiếp của người dùng; postflight runtime validation và backend health pass (plan mục 13.3). Các ghi nhận deployment bên dưới là lịch sử của những migration trước, không chứng minh bản mới đã được cài.
+
 Deployment cần migration mới `20261021010000_CustodyTraceability` sau mixed-bulk và runtime grants hiện có cho `ledger.trace_lot(uuid,uuid,text,text)`. Không sửa migration cũ; startup không tự apply. Backend/web mới từ chối response trước schemaVersion 2 thay vì hiện graph cũ thiếu custody như kết quả đầy đủ. Sau yêu cầu cập nhật database của người dùng, migration này đã áp dụng lên database dùng chung đang cấu hình và runtime trace EXECUTE đã được khôi phục; postflight schema v2/runtime validation pass. Xem [deployment record](traceability-implementation-plan.md#105-cập-nhật-database-theo-phê-duyệt--21102026).
+
+## Silo và nguồn thu mua sau dev mới
+
+Nhiều nguồn cùng owner/identity vào location mixed hợp lệ tạo current pool; source lots và pool generations cũ vẫn là provenance, không phải tồn có thể rút thêm. Selector mặc định current pools, vẫn giữ nguồn trước silo và history. Dev residue `9bd3e8d` bổ sung calculation/preview riêng; accounting positive paths của trace không thay chemical dependencies. Xem [plan hiện hành](traceability-implementation-plan.md#13-plan-thực-thi-mvp-silo-bounds-và-lab-to-trace--24102026).
 
 ## Request
 
@@ -131,3 +137,33 @@ Có thể thực hành theo [kịch bản test web với pool 800 kg hiện có]
 - Whole-report VN comparison được ghi rõ là cấp toàn báo cáo; report có thể chứa nhiều mẫu. Không gán summary này thành verdict nguồn/pool/output, không lấy số liệu nguồn suy nồng độ hậu duệ, không tự thay HOLD.
 - Evidence đọc sau trace có thời điểm riêng; không phải snapshot cùng graph hoặc assessment pinned tại thời điểm trace. Đổi Table/Flowchart giữ panel đã mở, không gọi lại graph hoặc report. Chọn lô khác/đổi request đóng panel để tránh lẫn nguồn.
 - Admin global trace và Export forward trace không có panel source lab này; không mở quyền lab/source composition mới. Không có quyền khác với không có report; lỗi đọc hiện rõ, không chuyển thành danh sách rỗng giả.
+
+## Starting points và lab entry — 24/10/2026
+
+`GET /api/ledger/trace/starts?mode=pools&page=1&pageSize=25`
+
+- `mode`: `pools` mặc định (current pool còn lượng vật lý), `sources` (procurement receipt roots), `all` (cả historical/exhausted lots). HOLD không loại pool khỏi selector: trace cần thấy hàng đang bị giữ.
+- Optional `search` tối đa 200 ký tự tìm code hoặc tên location; `facilityId`, `locationId` UUID. Filter được áp dụng trước pagination, sắp code/UUID ổn định; page ≥1, tối đa 1.000.000, pageSize 1–100. Query key lạ bị 400, không nhận owner/actor.
+- Response `items`, `page`, `pageSize`, `totalCount`, `hasMore`, `facilities`, `locations`. Facets là current labels của vị trí trong scope, không chỉ trang đang xem. Một nguồn đã hết tồn có thể không còn vị trí phù hợp filter location; chọn sources/all và bỏ filter để tìm nó.
+- Item có `id`, `code`, `ownerId`, `stage`, `kind`, `enteredPool`, `isCurrentPool`, `poolRevision`, `quantityKg` string và `positions`. Đây là trace projection có scope, không cấp general inventory API cho Admin. GET không ghi TRACEBACK audit.
+- Trace `lots[]` bổ sung cùng `kind` và `enteredPool`; `positions` bổ sung `locationName`, `locationKind`, `facilityName`. Names là nhãn hiện tại, không phải tên bất biến ở thời điểm ingress. Kind: `SOURCE`, `CURRENT_POOL`, `POOL_GENERATION`, `ALIQUOT`, `REMAINDER`, `PROCESSING_OUTPUT`, `LOT`; current pool ưu tiên hơn loại generation gốc. Không suy loại từ RAW_PADDY hay prefix code.
+
+`POST /api/ledger/trace/from-lab`
+
+```json
+{
+  "reportId": "00000000-0000-0000-0000-000000000001",
+  "resultId": "00000000-0000-0000-0000-000000000002",
+  "view": "current"
+}
+```
+
+Actor cần trace permission và `lab.read` hoặc `lab.write`, đồng thời persisted CustomerManager/ExportStaff của company chứa report. Admin không có lab wildcard. Capture resolver xác minh result thuộc report và section có confirmed sample association, report chưa bị retire, sample/source cùng company. Server map đến accepted Ledger root; luôn forward. Không chấp nhận source/lot/owner/direction giả mạo trong body. Result mismatch/unconfirmed/foreign: 404; chưa có accepted Ledger lot: 409; invalid input: 400; thiếu quyền: 403. Recheck trace authority và confirmed lab association trước commit.
+
+Response giữ trace schema v2 và thêm `labOrigin`: `ownerId`, `lotId`, `reportId`, `resultId`, `sampleId`, nullable `substanceId`. Export vẫn `sources=[]`, contributions/positive source paths redacted; không gửi dữ liệu nguồn qua composition. Resolver chỉ trả identity evidence tối thiểu, không report bytes hoặc farmer/plot metadata. `TRACEBACK` audit hiện có lưu root/graph query; **labOrigin là response context, chưa được lưu thành evidence/assessment snapshot bất biến trong audit đó**. Muốn tái lập evidence dùng history/snapshot của residue service riêng; không coi trace reference là assessment pháp lý.
+
+Trên web, confirmed result có **Trace forward from result**. Chỉ chuẩn bị URL/context, người dùng bấm Run trace; reload URL giữ report/result context mà không tự POST. Khi đổi actor/role/company, kết quả, lab context và selector cũ bị xóa. Stock → Trace this lot thay thế context lab trước đó.
+
+Panel **Residue evidence — selected lot** chỉ cho actor có `residue.evaluate` (không Admin). Bấm **View residue bounds for selected lot** mới mount component hiện có: live preview/history đọc riêng, không tải toàn graph; đổi node đóng panel. Table/Flowchart không chạy lại trace. Lock snapshot là thao tác ghi tường minh của residue module; không tự HOLD/release, không xem accounting shares là nồng độ.
+
+Forward migration `20261024000000_TraceEntryPoints` thêm selector và private metadata helper, thay trace routine bằng bản additive v2; không rewrite stock/history. Approved migration workflow cấu hình EXECUTE cho `ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer)` cùng trace routine hiện có. Runtime không được gọi trực tiếp `ledger.trace_lot_metadata(uuid,uuid[])`, không grant PUBLIC. Startup xác minh cả entry/helper ACL; nếu thiếu thì dừng với lỗi deployment rõ, không tự sửa quyền hoặc đổi sang owner connection. Đã áp dụng migration/grants mới lên shared DB theo yêu cầu sửa lỗi tiếp theo của người dùng; xem plan mục 13.3.

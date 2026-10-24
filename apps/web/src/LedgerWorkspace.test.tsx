@@ -34,7 +34,7 @@ function readResponse(url: string, source = routes) {
 beforeEach(() => {
  vi.restoreAllMocks(); vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset();
  routes = {
-  '/api/auth/csrf': { token: 'csrf' }, '/api/ledger/lookups': look, '/api/ledger/lots': page([lot]), '/api/ledger/lots/source': lot, '/api/ledger/holds': page([]), '/api/ledger/notifications': page([]), '/api/ledger/history': page([]), '/api/ledger/operations': page([draft]), '/api/ledger/corrections': page([]),
+  '/api/auth/csrf': { token: 'csrf' }, '/api/ledger/trace/starts': page([]), '/api/ledger/lookups': look, '/api/ledger/lots': page([lot]), '/api/ledger/lots/source': lot, '/api/ledger/holds': page([]), '/api/ledger/notifications': page([]), '/api/ledger/history': page([]), '/api/ledger/operations': page([draft]), '/api/ledger/corrections': page([]),
   '/api/ledger/setup': { ...look, assignments: [], policies: [], compatibilities: [] }, '/api/admin/users': [], '/api/commodities': page([]), '/api/measurement-units': page([]),
   '/api/admin/organizations': [{ id: 'company', name: 'Customer', kind: 'Customer' }], '/api/ledger/receiving-thresholds/own-company': { companyId: 'company', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'default-r1' },
   '/api/farmers': page([{ id: 'farmer', name: 'Farmer', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plots': page([{ id: 'plot', farmerId: 'farmer', code: 'Plot', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/crop-seasons': page([{ id: 'season', name: 'Season', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plot-seasons': page([{ id: 'ps', plotId: 'plot', seasonId: 'season', riceVariety: 'IR', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]),
@@ -675,5 +675,18 @@ it('opens tracing from the selected stock lot without automatically executing an
   await browser.click(await screen.findByRole('button', { name: 'Trace this lot' }));
   expect(await screen.findByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('source');
   expect(screen.getByRole('button', { name: 'Traceability' })).toHaveAttribute('aria-current', 'page');
-  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ledger/trace'))).toBe(false);
+  expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/ledger/trace' && init?.method === 'POST')).toBe(false);
+});
+
+it('replaces a laboratory entry when tracing a stock lot in the same workspace', async () => {
+  render(<LedgerWorkspace user={{ ...actor, role: 'CustomerManager', organizationId: 'company', permissions: ['lots.read.tenant', 'trace.read.tenant'] }} initialLotId="source" initialLabOrigin={{ reportId: 'report', resultId: 'row' }} />);
+  const browser = userEvent.setup();
+  expect(screen.getByRole('button', { name: 'Traceability' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByText(/Starting from a confirmed laboratory result/)).toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: 'Stock & HOLDs' }));
+  await browser.click(await screen.findByRole('button', { name: 'Trace this lot' }));
+  expect(await screen.findByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('source');
+  expect(screen.queryByText(/Starting from a confirmed laboratory result/)).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: 'Trace direction' })).toBeEnabled();
+  expect(fetchMock.mock.calls.some(([url, init]) => String(url).startsWith('/api/ledger/trace') && init?.method === 'POST')).toBe(false);
 });
