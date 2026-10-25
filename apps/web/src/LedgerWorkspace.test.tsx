@@ -690,3 +690,22 @@ it('replaces a laboratory entry when tracing a stock lot in the same workspace',
   expect(screen.getByRole('combobox', { name: 'Trace direction' })).toBeEnabled();
   expect(fetchMock.mock.calls.some(([url, init]) => String(url).startsWith('/api/ledger/trace') && init?.method === 'POST')).toBe(false);
 });
+
+it('opens the selected container loading lot in dev tracing and replaces laboratory context', async () => {
+  const container = { preparationVersion: 2, id: 'container', code: 'BOX-TRACE', status: 'OPEN', facilityId: 'facility', orderId: null, targetKg: '1', version: 'v1', committedLoadedKg: '0', remainingKg: '1', containerNumber: null, sealNumber: null,
+    drafts: [{ id: 'loading-draft', loadedAt: '2026-10-25T00:00:00Z', totalKg: '1', lines: [{ lotId: 'source', lotCode: 'Source lot', locationId: 'store', quantityKg: '1' }] }] };
+  const implementation = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (url, init) => String(url).startsWith('/api/ledger/containers?') ? response(page([container]))
+    : String(url) === '/api/ledger/containers/container' ? response(container)
+    : String(url).includes('/containers/container/history') ? response(page([])) : implementation(url, init));
+  render(<LedgerWorkspace user={{ ...actor, role: 'ExportStaff', organizationId: 'customer', permissions: ['containers.write', 'trace.read.tenant'] }} initialLabOrigin={{ reportId: 'old-report', resultId: 'old-result' }} />);
+  const browser = userEvent.setup();
+  await browser.click(screen.getByRole('button', { name: 'Containers' }));
+  await browser.click(await screen.findByRole('button', { name: 'BOX-TRACE' }));
+  await browser.click(screen.getByRole('button', { name: 'Inspect lot Source lot' }));
+  await browser.click(screen.getByRole('button', { name: 'Trace selected loading lot' }));
+  expect(screen.getByRole('button', { name: 'Traceability' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('source');
+  expect(screen.queryByText(/Starting from a confirmed laboratory result/)).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url, init]) => String(url).startsWith('/api/ledger/trace') && init?.method === 'POST')).toBe(false);
+});

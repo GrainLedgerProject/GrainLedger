@@ -90,6 +90,57 @@ public sealed class ContainerTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal(HttpStatusCode.BadRequest, (await export.PostAsJsonAsync("/api/ledger/containers", new { id = Guid.NewGuid(), requestId = Guid.NewGuid(), code = "NUMERIC-KG", facilityId = s.FacilityId, targetKg = 2 })).StatusCode);
     }
     [Fact]
+    public async Task Permission_revoked_while_waiting_for_stock_lock_cannot_mutate_container()
+    {
+        using var s = await CreateAsync(factory);
+        var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff, s.OwnerId);
+        using var export = factory.CreateRealCookieClient(user, session); await CsrfAsync(export);
+        var id = Guid.NewGuid(); var c = await Post(export, "", Create(id, s.FacilityId));
+        await using var holder = new NpgsqlConnection(factory.OwnerConnectionString); await holder.OpenAsync();
+        await using var tx = await holder.BeginTransactionAsync();
+        await using (var locked = new NpgsqlCommand("SELECT ledger.lock_writes()", holder, tx)) await locked.ExecuteNonQueryAsync();
+        var pending = export.PostAsJsonAsync($"/api/ledger/containers/{id}/metadata", new { requestId = Guid.NewGuid(), version = c.GetProperty("version"), containerNumber = "REVOKED", sealNumber = "S" });
+        await using var observer = new NpgsqlConnection(factory.OwnerConnectionString); await observer.OpenAsync();
+        var waiting = false;
+        for (var i = 0; i < 150; i++)
+        {
+            await using var probe = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND query LIKE '%ledger.container_action%' AND wait_event='advisory')", observer);
+            if (Equals(await probe.ExecuteScalarAsync(), true)) { waiting = true; break; }
+            await Task.Delay(20);
+        }
+        Assert.True(waiting, "Mutation must reach the advisory lock before authority is revoked");
+        await using (var revoke = new NpgsqlCommand("UPDATE identity.users SET \"Role\"='CustomerManager' WHERE \"Id\"=$1", observer))
+        { revoke.Parameters.AddWithValue(user.Id); await revoke.ExecuteNonQueryAsync(); }
+        await tx.CommitAsync();
+        using var response = await pending;
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var detail = await s.Customer.GetFromJsonAsync<JsonElement>($"/api/ledger/containers/{id}");
+        Assert.Equal(c.GetProperty("version").GetGuid(), detail.GetProperty("version").GetGuid());
+        Assert.Equal(JsonValueKind.Null, detail.GetProperty("containerNumber").ValueKind);
+        var history = await GetAsync(s.Customer, $"/api/ledger/containers/{id}/history");
+        Assert.Equal(1, history.GetProperty("totalCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task Draft_save_rejects_empty_or_restricted_positions_and_spoofed_pool_revision()
+    {
+        using var s = await CreateAsync(factory); using var export = await Export(s.OwnerId);
+        var lot = Lots(await s.ReceiptAsync("2"))[0]; var id = Guid.NewGuid();
+        var c = await Post(export, "", Create(id, s.FacilityId, "2"));
+        var spoof = new { requestId = Guid.NewGuid(), version = c.GetProperty("version"), draftId = Guid.NewGuid(), loadedAt = DateTimeOffset.UtcNow,
+            lines = new[] { new { lotId = lot, locationId = s.LocationId, quantityKg = "1", poolRevision = "1" } } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await export.PostAsJsonAsync($"/api/ledger/containers/{id}/loading-draft", spoof)).StatusCode);
+        await s.CommitAsync(await s.DraftAsync("DRYING", [(lot, "2")], [("DRIED_PADDY", "2")]));
+        Assert.Equal(HttpStatusCode.Conflict, (await export.PostAsJsonAsync($"/api/ledger/containers/{id}/loading-draft", Draft(c, lot, s.LocationId, null, "1"))).StatusCode);
+        var held = Lots(await s.ReceiptAsync("2"))[0];
+        await SendAsync(s.Customer, HttpMethod.Post, "/api/ledger/holds", new { id = Guid.NewGuid(), lotId = held, reason = "Synthetic preparation block" });
+        Assert.Equal(HttpStatusCode.Conflict, (await export.PostAsJsonAsync($"/api/ledger/containers/{id}/loading-draft", Draft(c, held, s.LocationId, null, "1"))).StatusCode);
+        var detail = await export.GetFromJsonAsync<JsonElement>($"/api/ledger/containers/{id}");
+        Assert.Empty(detail.GetProperty("drafts").EnumerateArray());
+        Assert.Equal(2m, Quantity(await s.LotAsync(held)));
+    }
+
+    [Fact]
     public async Task Concurrent_metadata_has_one_winner_and_hold_readiness_is_fresh()
     {
         using var s = await CreateAsync(factory); using var export = await Export(s.OwnerId);

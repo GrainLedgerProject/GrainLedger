@@ -109,6 +109,88 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
     }
 
     [Fact]
+    public async Task Container_draft_retains_pool_observation_and_requires_reselection_after_topup()
+    {
+        var site = await CreateMixedSiteAsync(); using var s = site.Scenario;
+        await ArriveAsync(site, "10"); var (pool, revision) = await PoolAsync(site.LocationId);
+        var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff, s.OwnerId);
+        using var export = factory.CreateRealCookieClient(user, session); await CsrfAsync(export);
+        var id = Guid.NewGuid(); var draftId = Guid.NewGuid();
+        var c = await SendAsync(export, HttpMethod.Post, "/api/ledger/containers", new { id, requestId = Guid.NewGuid(), code = $"POOL-{id:N}", facilityId = s.FacilityId, targetKg = "20" });
+        object Draft(Guid lot, string? observed, Guid? requestId = null) => new { requestId = requestId ?? Guid.NewGuid(), version = c.GetProperty("version"), draftId, loadedAt = "2026-10-25T00:00:00Z", lines = new[] { new { lotId = lot, locationId = site.LocationId, quantityKg = "6.000001", poolRevision = observed } } };
+        var path = $"/api/ledger/containers/{id}/loading-draft";
+        Assert.Equal(HttpStatusCode.BadRequest, (await export.PostAsJsonAsync(path, Draft(pool, null))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await export.PostAsJsonAsync(path, Draft(pool, (revision + 1).ToString()))).StatusCode);
+        var request = Draft(pool, revision.ToString());
+        var saved = await SendAsync(export, HttpMethod.Post, path, request);
+        Assert.Equal(2, saved.GetProperty("preparationVersion").GetInt32());
+        Assert.Equal(revision.ToString(), saved.GetProperty("drafts")[0].GetProperty("lines")[0].GetProperty("poolRevision").GetString());
+        var check = await SendAsync(export, HttpMethod.Post, $"/api/ledger/containers/{id}/loading-check", new { draftId });
+        Assert.True(check.GetProperty("stockChecksPerformed").GetBoolean());
+        Assert.False(check.GetProperty("ready").GetBoolean());
+        Assert.DoesNotContain(check.GetProperty("findings").EnumerateArray(), f => f.GetProperty("code").GetString() == "POOL_CHANGED");
+        await ArriveAsync(site, "2"); var (nextPool, nextRevision) = await PoolAsync(site.LocationId);
+        Assert.Equal(saved.GetRawText(), (await SendAsync(export, HttpMethod.Post, path, request)).GetRawText()); // old receipt, no fresh approval
+        check = await SendAsync(export, HttpMethod.Post, $"/api/ledger/containers/{id}/loading-check", new { draftId });
+        Assert.Contains(check.GetProperty("findings").EnumerateArray(), f => f.GetProperty("code").GetString() == "POOL_CHANGED");
+        var detail = await GetAsync(export, $"/api/ledger/containers/{id}");
+        Assert.Equal(pool, detail.GetProperty("drafts")[0].GetProperty("lines")[0].GetProperty("lotId").GetGuid());
+        c = detail;
+        Assert.Equal(HttpStatusCode.Conflict, (await export.PostAsJsonAsync(path, Draft(pool, revision.ToString()))).StatusCode);
+        var refreshed = await SendAsync(export, HttpMethod.Post, path, Draft(nextPool, nextRevision.ToString()));
+        Assert.Equal(nextPool, refreshed.GetProperty("drafts")[0].GetProperty("lines")[0].GetProperty("lotId").GetGuid());
+        Assert.Equal(12m, await PositionAsync(nextPool, site.LocationId));
+        Assert.Equal("0.000000", refreshed.GetProperty("committedLoadedKg").GetString());
+        var history = await GetAsync(export, $"/api/ledger/containers/{id}/history");
+        Assert.Equal(3, history.GetProperty("totalCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task Legacy_pool_draft_without_revision_is_readable_but_cannot_be_treated_as_current()
+    {
+        var site = await CreateMixedSiteAsync(); using var s = site.Scenario;
+        await ArriveAsync(site, "10"); var (pool, _) = await PoolAsync(site.LocationId);
+        var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff, s.OwnerId);
+        using var export = factory.CreateRealCookieClient(user, session); await CsrfAsync(export);
+        var id = Guid.NewGuid(); var draftId = Guid.NewGuid();
+        await SendAsync(export, HttpMethod.Post, "/api/ledger/containers", new { id, requestId = Guid.NewGuid(), code = $"LEGACY-{id:N}", facilityId = s.FacilityId, targetKg = "10" });
+        // Retained pre-upgrade draft shape: no pool observation. Only the disposable fixture owner inserts it.
+        await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
+        await using var seed = new NpgsqlCommand("INSERT INTO ledger.container_loading_drafts(id,container_id,loaded_at,lines,recorded_by) VALUES($1,$2,now(),$3,$4)", owner);
+        seed.Parameters.AddWithValue(draftId); seed.Parameters.AddWithValue(id);
+        seed.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new[] { new { lotId = pool, locationId = site.LocationId, quantityKg = "1.000000" } }));
+        seed.Parameters.AddWithValue(user.Id); await seed.ExecuteNonQueryAsync();
+        var before = await GetAsync(export, $"/api/ledger/containers/{id}");
+        var check = await SendAsync(export, HttpMethod.Post, $"/api/ledger/containers/{id}/loading-check", new { draftId });
+        Assert.Contains(check.GetProperty("findings").EnumerateArray(), f => f.GetProperty("code").GetString() == "POOL_REVISION_NOT_RECORDED");
+        var after = await GetAsync(export, $"/api/ledger/containers/{id}");
+        Assert.Equal(before.GetProperty("drafts").GetRawText(), after.GetProperty("drafts").GetRawText());
+        Assert.False(after.GetProperty("drafts")[0].GetProperty("lines")[0].TryGetProperty("poolRevision", out _));
+        Assert.Equal(10m, await PositionAsync(pool, site.LocationId));
+    }
+
+    [Fact]
+    public async Task Available_only_filters_zero_and_effectively_held_lots_before_pagination()
+    {
+        var site = await CreateMixedSiteAsync(); using var s = site.Scenario;
+        var lots = Lots(await s.ReceiptAsync(Enumerable.Repeat("1", 31).ToArray()));
+        var output = Output(await s.CommitAsync(await s.DraftAsync("DRYING", lots.Select(id => (id, "1")).ToArray(), [("DRIED_PADDY", "31")])));
+        var root = Lots(await ArriveAsync(site, "10")).Single(); var (pool, _) = await PoolAsync(site.LocationId);
+        var page = await GetAsync(s.Customer, $"/api/ledger/lots?availableOnly=true&facilityId={s.FacilityId}&pageSize=1");
+        Assert.Equal(2, page.GetProperty("totalCount").GetInt32());
+        var page2 = await GetAsync(s.Customer, $"/api/ledger/lots?availableOnly=true&facilityId={s.FacilityId}&pageSize=1&page=2");
+        Assert.Equal(2, page2.GetProperty("totalCount").GetInt32());
+        Assert.Equal(new[] { output, pool }.Order(), new[] { page.GetProperty("items")[0].GetProperty("id").GetGuid(), page2.GetProperty("items")[0].GetProperty("id").GetGuid() }.Order());
+        await SendAsync(s.Customer, HttpMethod.Post, "/api/ledger/holds", new { id = Guid.NewGuid(), lotId = root, reason = "Synthetic inherited hold" });
+        var held = await GetAsync(s.Customer, $"/api/ledger/lots?availableOnly=true&facilityId={s.FacilityId}");
+        Assert.Equal(output, Assert.Single(held.GetProperty("items").EnumerateArray()).GetProperty("id").GetGuid());
+        var historical = await GetAsync(s.Customer, $"/api/ledger/lots?ids={lots[0]}");
+        Assert.Single(historical.GetProperty("items").EnumerateArray());
+        var foreign = await GetAsync(s.ForeignCustomer, $"/api/ledger/lots?availableOnly=true&locationId={site.LocationId}");
+        Assert.Empty(foreign.GetProperty("items").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Trace_starts_filters_current_pools_before_paging_and_preserves_history_labels_and_scope()
     {
         var site = await CreateMixedSiteAsync(); using var s = site.Scenario;

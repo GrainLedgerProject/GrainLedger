@@ -109,6 +109,8 @@ Normal application startup is separate and neither migrates nor seeds:
 dotnet run --project backend/src/GrainLedger.Api
 ```
 
+Container draft preparation v2 requires forward Ledger migration `20261025000000_ContainerDraftReadiness`. It preserves existing container/trace entry signatures and grants, adds observed pool-revision validation and correct server-side `availableOnly` paging. No startup auto-repair or new owner runtime access is introduced. Until approved deployment, older preparation detail is shown with an explicit draft-save upgrade gate; normal backend startup is not newly blocked by this optional feature upgrade. See [container API](container-api.md#draft-preparation-v2--implementation-25102026). Do not apply it to shared databases as routine verification.
+
 ## Mixed-bulk forward migration and activation
 
 Ledger migration `20261020000000_MixedBulkStorage` installs mixed-bulk location/pool state, protected command/safety/read routines, and restricted grants through four embedded SQL resources. It is forward-only; rollback is unsupported because custody history is immutable. Implementation is local and is not deployed to shared Supabase or production. Do not run `--migrate`, seeds, grant changes or schema changes against any shared database without explicit database-owner approval.
