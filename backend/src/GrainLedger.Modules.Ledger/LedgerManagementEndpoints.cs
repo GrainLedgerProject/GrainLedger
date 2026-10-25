@@ -33,6 +33,12 @@ public static class LedgerManagementEndpoints
                 return Results.Ok(await ledger.CommandAsync(action + "_delete", request, ct));
             }).RequireAuthorization("platform.configure");
         }
+        group.MapPost("/equipment/{id:guid}/retire", async (Guid id, JsonObject request, LedgerService ledger, CancellationToken ct) =>
+        {
+            RequireVersion(request);
+            request["id"] = id;
+            return Results.Ok(await ledger.CommandAsync("equipment_retire", request, ct));
+        }).RequireAuthorization("platform.configure");
         group.MapPut("/assignments/{userId:guid}/{facilityId:guid}", async (Guid userId, Guid facilityId, JsonObject request, LedgerService ledger, CancellationToken ct) =>
         {
             RequireVersion(request);

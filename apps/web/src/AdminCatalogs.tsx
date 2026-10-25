@@ -12,7 +12,7 @@ const definitions = {
   'quality-attributes': { title: 'Quality attributes', singular: 'quality attribute', maxCode: 60, canDelete: false },
 } as const;
 
-export function AdminCatalogs() {
+export function AdminCatalogs({ canManageResidueRules = false }: { canManageResidueRules?: boolean }) {
   const [kind, setKind] = useState<CatalogKind>('active-substances');
   return <div className="admin-catalogs">
     <div className="page-heading"><span className="eyebrow">REFERENCE DATA</span><h1>Catalogs</h1><p className="muted">Maintain the shared values used by field records and MRL tables.</p></div>
@@ -22,7 +22,7 @@ export function AdminCatalogs() {
       <button type="button" aria-current={kind === 'measurement-units' ? 'page' : undefined} onClick={() => setKind('measurement-units')}>Measurement units</button>
     </nav>
     {kind === 'commodities' || kind === 'measurement-units'
-      ? <CatalogScreen key={kind} selectedKind={kind} />
+      ? <CatalogScreen key={kind} selectedKind={kind} canManageResidueRules={canManageResidueRules} />
       : <CatalogEditor key={kind} kind={kind} />}
   </div>;
 }

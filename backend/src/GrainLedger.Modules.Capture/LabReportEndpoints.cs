@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
 namespace GrainLedger.Modules.Capture;
@@ -25,6 +26,8 @@ public sealed record LabReportInput(Guid EntityId, string? LaboratoryName, strin
     string? LaboratoryConclusion, string? StatedStandard, IReadOnlyList<LabResultSetInput>? ResultSets);
 public sealed record CaptureLabReportRequest(string? DeviceId, Guid ClientOperationId, DateTimeOffset CapturedAt,
     int PayloadSchemaVersion, LabReportInput? Payload);
+public sealed record DeleteLabReportRequest(string? DeviceId, Guid ClientOperationId, DateTimeOffset CapturedAt,
+    int PayloadSchemaVersion);
 public sealed record LabReportMatchInput(Guid ResultSetId, Guid SampleId, string? IdentityBasis, string? EvidenceRef = null);
 public sealed record ConfirmLabReportInput(bool IdentityChecked, bool TranscriptionChecked, IReadOnlyList<LabReportMatchInput>? Matches);
 public sealed record ConfirmLabReportRequest(string? DeviceId, Guid ClientOperationId, DateTimeOffset CapturedAt,
@@ -42,7 +45,8 @@ public sealed record LabReportResponse(Guid Id, Guid CompanyId, string Laborator
     string Sha256, Guid RecordedBy, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt, string Status,
     Guid? ConfirmedBy, DateTimeOffset? ConfirmedAt, IReadOnlyList<LabResultSetResponse> ResultSets,
     IReadOnlyList<LabRelatedReportResponse> RelatedReports, string AssessmentStatus, string SuggestedMarketCode,
-    IReadOnlyList<string> AssessmentReasons);
+    IReadOnlyList<string> AssessmentReasons, IReadOnlyList<LabReportResidueBinding>? ResidueBindings = null,
+    Guid? ReplacementReportId = null);
 public sealed record LabReportListResponse(IReadOnlyList<LabReportResponse> Items, int Page, int PageSize, bool HasMore);
 internal sealed record VnMrlLimitRow(Guid SubstanceId, string SubstanceCode, string CommodityCode, decimal LimitValue, string Unit);
 internal sealed record SubstanceCodeRow(Guid Id, string Code);
@@ -58,6 +62,9 @@ public static class LabReportEndpoints
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>().WithTags("Laboratory reports");
         group.MapPost("", CreateAsync).RequireAuthorization("lab.write")
             .WithMetadata(new RequestSizeLimitAttribute(20 * 1024 * 1024));
+        group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("lab.write")
+            .WithMetadata(new RequestSizeLimitAttribute(20 * 1024 * 1024));
+        group.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization("lab.write");
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         group.MapGet("/{id:guid}/file", FileAsync);
@@ -65,18 +72,35 @@ public static class LabReportEndpoints
         return endpoints;
     }
 
-    private static async Task<IResult> CreateAsync(CaptureLabReportRequest request, ClaimsPrincipal principal,
+    private static Task<IResult> CreateAsync(CaptureLabReportRequest request, ClaimsPrincipal principal,
+        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, TimeProvider clock, CancellationToken ct) =>
+        SaveAsync(null, request, principal, access, identityDb, db, clock, ct);
+
+    private static Task<IResult> UpdateAsync(Guid id, CaptureLabReportRequest request, ClaimsPrincipal principal,
+        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, TimeProvider clock, CancellationToken ct) =>
+        SaveAsync(id, request, principal, access, identityDb, db, clock, ct);
+
+    private static async Task<IResult> SaveAsync(Guid? editingId, CaptureLabReportRequest request, ClaimsPrincipal principal,
         ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, TimeProvider clock, CancellationToken ct)
     {
         var company = await CompanyAsync(principal, access, identityDb, ct);
         if (company is null) return Results.Forbid();
         var errors = Envelope(request.DeviceId, request.ClientOperationId, request.CapturedAt, request.PayloadSchemaVersion);
         var p = request.Payload;
+        var originalPayload = p;
+        LabReport? retainedFile = null;
+        if (editingId is { } currentId && p?.ContentBase64 is null)
+        {
+            retainedFile = await db.LabReports.AsNoTracking().SingleOrDefaultAsync(x => x.CompanyId == company && x.Id == currentId, ct);
+            if (retainedFile is null) return Problem(404, "LAB_REPORT_NOT_FOUND", "Report not found.");
+            if (p is not null) p = p with { FileName = retainedFile.FileName, ContentType = retainedFile.ContentType };
+        }
         byte[] bytes = [];
         if (p is null) errors["payload"] = ["Report data is required."];
         else
         {
             if (p.EntityId == Guid.Empty) errors["payload.entityId"] = ["Report ID is required."];
+            if (editingId is { } routeId && p.EntityId != routeId) errors["payload.entityId"] = ["Report ID must match the route."];
             Required(errors, "laboratoryName", p.LaboratoryName, 200);
             Required(errors, "reportNumber", p.ReportNumber, 200);
             Required(errors, "fileName", p.FileName, 255);
@@ -95,7 +119,8 @@ public static class LabReportEndpoints
                 errors["payload.relatedReportId"] = ["A related report is required for this report kind."];
             if (p.RelatedReportId is not null && string.IsNullOrWhiteSpace(p.RelationshipReason))
                 errors["payload.relationshipReason"] = ["A relationship reason is required."];
-            if (p.ContentBase64 is null || p.ContentBase64.Length > ((MaxFileBytes + 2) / 3) * 4)
+            if (p.ContentBase64 is null && retainedFile is not null) bytes = retainedFile.Content;
+            else if (p.ContentBase64 is null || p.ContentBase64.Length > ((MaxFileBytes + 2) / 3) * 4)
                 errors["payload.contentBase64"] = ["An original file of 1 byte to 10 MiB is required."];
             else
             {
@@ -134,9 +159,13 @@ public static class LabReportEndpoints
         }
         if (errors.Count != 0 || p?.ResultSets is not { } resultSets) return Results.ValidationProblem(errors);
         var actor = Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var fileHash = Convert.ToHexString(SHA256.HashData(bytes));
-        var canonical = JsonSerializer.Serialize(new { operationType = "LAB_REPORT_RECEIVED", request.CapturedAt, request.PayloadSchemaVersion,
-            payload = p! with { ContentBase64 = null }, fileHash });
+        var fileHash = retainedFile?.Sha256 ?? Convert.ToHexString(SHA256.HashData(bytes));
+        var eventType = editingId is null ? "LAB_REPORT_RECEIVED" : "LAB_REPORT_REVISED";
+        var canonical = editingId is null
+            ? JsonSerializer.Serialize(new { operationType = eventType, request.CapturedAt, request.PayloadSchemaVersion,
+                payload = originalPayload! with { ContentBase64 = null }, fileHash })
+            : JsonSerializer.Serialize(new { operationType = eventType, reportId = editingId, request.CapturedAt, request.PayloadSchemaVersion,
+                payload = originalPayload! with { ContentBase64 = null }, fileHash });
         var hash = Hash(canonical);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
@@ -144,11 +173,22 @@ public static class LabReportEndpoints
         await LockOperationAsync(db, company.Value, request.DeviceId!.Trim(), request.ClientOperationId, ct);
         var prior = await PriorAsync(db, company.Value, request.DeviceId.Trim(), request.ClientOperationId, ct);
         if (prior is not null) return Replay(prior, hash);
+        if (editingId is { } oldId)
+        {
+            if (!await db.LabReports.AnyAsync(x => x.CompanyId == company && x.Id == oldId, ct)) return Problem(404, "LAB_REPORT_NOT_FOUND", "Report not found.");
+            if (await db.LabReportConfirmations.AnyAsync(x => x.CompanyId == company && x.ReportId == oldId, ct))
+                return Problem(409, "REPORT_ALREADY_CONFIRMED", "Confirmed evidence is immutable. Append a linked report to correct it.");
+            if (await db.LabReportRetirements.AnyAsync(x => x.CompanyId == company && x.ReportId == oldId, ct))
+                return Problem(409, "LAB_REPORT_RETIRED", "This draft was deleted or superseded. Reload the current report.");
+            p = p! with { EntityId = Guid.NewGuid(), ResultSets = resultSets.Select(s => s with { EntityId = Guid.NewGuid() }).ToArray() };
+            resultSets = p.ResultSets!;
+        }
         var resultSetIds = resultSets.Select(s => s.EntityId).ToArray();
         if (await db.LabReports.AnyAsync(x => x.Id == p!.EntityId, ct) || await db.LabResultSets.AnyAsync(x => resultSetIds.Contains(x.Id), ct))
             return Problem(409, "ENTITY_ALREADY_EXISTS", "The report or result set ID already exists.");
-        if (p!.RelatedReportId is { } related && !await db.LabReports.AnyAsync(x => x.CompanyId == company && x.Id == related, ct))
-            return Problem(409, "RELATED_REPORT_NOT_FOUND", "Related report is not available in this company.");
+        if (p!.RelatedReportId is { } related && (!await db.LabReports.AnyAsync(x => x.CompanyId == company && x.Id == related, ct) ||
+            await db.LabReportRetirements.AnyAsync(x => x.CompanyId == company && x.ReportId == related, ct) || related == editingId))
+            return Problem(409, "RELATED_REPORT_NOT_FOUND", "Related report is not active in this company.");
         var sampleIds = resultSets.Where(x => x.SampleId.HasValue).Select(x => x.SampleId!.Value).Distinct().ToArray();
         if (await db.Samples.CountAsync(x => x.CompanyId == company && sampleIds.Contains(x.Id), ct) != sampleIds.Length)
             return Problem(409, "SAMPLE_NOT_FOUND", "Every proposed sample must belong to this company.");
@@ -203,11 +243,17 @@ public static class LabReportEndpoints
         try
         {
             await db.SaveChangesAsync(ct);
+            if (editingId is { } retiredId)
+            {
+                db.LabReportRetirements.Add(new LabReportRetirement { ReportId = retiredId, CompanyId = company.Value,
+                    ReplacementReportId = p.EntityId, Status = "SUPERSEDED", RecordedBy = actor, RecordedAt = now });
+                await db.SaveChangesAsync(ct);
+            }
             var response = (await ResponsesAsync(db, company.Value, [p.EntityId], ct))[0];
-            await AddOperationAsync(db, company.Value, actor, request.DeviceId.Trim(), request.ClientOperationId, request.CapturedAt, now, "LAB_REPORT_RECEIVED", canonical, hash, response, ct);
+            await AddOperationAsync(db, company.Value, actor, request.DeviceId.Trim(), request.ClientOperationId, request.CapturedAt, now, eventType, canonical, hash, response, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            return Results.Created($"/api/lab-reports/{p.EntityId}", response);
+            return editingId is null ? Results.Created($"/api/lab-reports/{p.EntityId}", response) : Results.Ok(response);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         { return Problem(409, "ENTITY_ALREADY_EXISTS", "The report or result set ID already exists."); }
@@ -215,8 +261,45 @@ public static class LabReportEndpoints
         { return Problem(409, "REFERENCE_CHANGED", "A referenced record changed. Reload before retrying."); }
     }
 
-    private static async Task<IResult> ConfirmAsync(Guid id, ConfirmLabReportRequest request, ClaimsPrincipal principal,
+    private static async Task<IResult> DeleteAsync(Guid id, [FromBody] DeleteLabReportRequest request, ClaimsPrincipal principal,
         ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var company = await CompanyAsync(principal, access, identityDb, ct);
+        if (company is null) return Results.Forbid();
+        var errors = Envelope(request.DeviceId, request.ClientOperationId, request.CapturedAt, request.PayloadSchemaVersion);
+        if (errors.Count != 0) return Results.ValidationProblem(errors);
+        var actor = Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var canonical = JsonSerializer.Serialize(new { operationType = "LAB_REPORT_DELETED", reportId = id,
+            request.CapturedAt, request.PayloadSchemaVersion });
+        var hash = Hash(canonical);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
+        if (!await CropSeasonEndpoints.HasPermissionInTransactionAsync(db, actor, "lab.write", company.Value, ct: ct)) return Results.Forbid();
+        await LockOperationAsync(db, company.Value, request.DeviceId!.Trim(), request.ClientOperationId, ct);
+        var prior = await PriorAsync(db, company.Value, request.DeviceId.Trim(), request.ClientOperationId, ct);
+        if (prior is not null) return Replay(prior, hash);
+        if (!await db.LabReports.AnyAsync(x => x.CompanyId == company && x.Id == id, ct)) return Problem(404, "LAB_REPORT_NOT_FOUND", "Report not found.");
+        if (await db.LabReportConfirmations.AnyAsync(x => x.CompanyId == company && x.ReportId == id, ct))
+            return Problem(409, "REPORT_ALREADY_CONFIRMED", "Confirmed evidence is immutable. Append a linked report to correct it.");
+        if (await db.LabReportRetirements.AnyAsync(x => x.CompanyId == company && x.ReportId == id, ct))
+            return Problem(409, "LAB_REPORT_RETIRED", "This draft was deleted or superseded. Reload the current report.");
+        if (await db.LabReports.AnyAsync(x => x.CompanyId == company && x.RelatedReportId == id, ct))
+            return Problem(409, "LAB_REPORT_REFERENCED", "Another report references this draft. Its source evidence must remain available.");
+        var now = clock.GetUtcNow();
+        db.LabReportRetirements.Add(new LabReportRetirement { ReportId = id, CompanyId = company.Value,
+            Status = "DELETED", RecordedBy = actor, RecordedAt = now });
+        await db.SaveChangesAsync(ct);
+        var response = (await ResponsesAsync(db, company.Value, [id], ct))[0];
+        await AddOperationAsync(db, company.Value, actor, request.DeviceId.Trim(), request.ClientOperationId,
+            request.CapturedAt, now, "LAB_REPORT_DELETED", canonical, hash, response, ct);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ConfirmAsync(Guid id, ConfirmLabReportRequest request, ClaimsPrincipal principal,
+        ICurrentAccess access, IdentityDbContext identityDb, CaptureDbContext db, TimeProvider clock,
+        IConfirmedLabReportResidueBinder residueBinder, CancellationToken ct)
     {
         var company = await CompanyAsync(principal, access, identityDb, ct);
         if (company is null) return Results.Forbid();
@@ -239,6 +322,8 @@ public static class LabReportEndpoints
             .Select(x => new { x.LaboratoryName }).SingleOrDefaultAsync(ct);
         if (report is null) return Problem(404, "LAB_REPORT_NOT_FOUND", "Report not found.");
         if (await db.LabReportConfirmations.AnyAsync(x => x.CompanyId == company && x.ReportId == id, ct)) return Problem(409, "REPORT_ALREADY_CONFIRMED", "Confirmed evidence is immutable. Append a linked report to correct it.");
+        if (await db.LabReportRetirements.AnyAsync(x => x.CompanyId == company && x.ReportId == id, ct))
+            return Problem(409, "LAB_REPORT_RETIRED", "This draft was deleted or superseded. Reload the current report.");
         var sets = await db.LabResultSets.AsNoTracking().Where(x => x.CompanyId == company && x.ReportId == id).ToListAsync(ct);
         if (p!.Matches!.Count != sets.Count || p.Matches.Select(x => x.ResultSetId).Distinct().Count() != sets.Count || p.Matches.Any(x => sets.All(s => s.Id != x.ResultSetId)))
             return Problem(409, "REPORT_IDENTITY_UNRESOLVED", "Confirm every result set exactly once.");
@@ -270,7 +355,9 @@ public static class LabReportEndpoints
             db.LabConfirmedAssociations.Add(new LabConfirmedAssociation { Id = Guid.NewGuid(), CompanyId = company.Value, ConfirmationId = confirmation.Id,
                 ResultSetId = match.ResultSetId, SampleId = match.SampleId, IdentityBasis = match.IdentityBasis!, EvidenceRef = match.EvidenceRef });
         await db.SaveChangesAsync(ct);
-        var response = (await ResponsesAsync(db, company.Value, [id], ct))[0];
+        var bindings = await residueBinder.BindConfirmedReportAsync((NpgsqlConnection)db.Database.GetDbConnection(),
+            (NpgsqlTransaction)transaction.GetDbTransaction(), actor, company.Value, id, now, ct);
+        var response = (await ResponsesAsync(db, company.Value, [id], ct))[0] with { ResidueBindings = bindings };
         await AddOperationAsync(db, company.Value, actor, request.DeviceId.Trim(), request.ClientOperationId, request.CapturedAt, now, "LAB_REPORT_CONFIRMED", canonical, hash, response, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -287,7 +374,8 @@ public static class LabReportEndpoints
         if (!Page(http, "page", ref page, 1000000) || !Page(http, "pageSize", ref size, 100)) return QueryError();
         Guid? sample = null; Guid? source = null;
         if (!Filter(http, "sampleId", ref sample) || !Filter(http, "sourceLotId", ref source)) return QueryError();
-        var query = db.LabReports.AsNoTracking().Where(x => x.CompanyId == company);
+        var query = db.LabReports.AsNoTracking().Where(x => x.CompanyId == company &&
+            !db.LabReportRetirements.Any(r => r.CompanyId == company && r.ReportId == x.Id));
         if (sample is not null) query = query.Where(r => db.LabResultSets.Any(s => s.CompanyId == company && s.ReportId == r.Id && (s.SampleId == sample || db.LabConfirmedAssociations.Any(a => a.CompanyId == company && a.ResultSetId == s.Id && a.SampleId == sample))));
         if (source is not null) query = query.Where(r => db.LabResultSets.Any(s => s.CompanyId == company && s.ReportId == r.Id && db.LabConfirmedAssociations.Any(a => a.CompanyId == company && a.ResultSetId == s.Id && db.Samples.Any(p => p.CompanyId == company && p.Id == a.SampleId && p.SourceLotId == source))));
         var ids = await query.OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id).Skip((page - 1) * size).Take(size + 1).Select(x => x.Id).ToArrayAsync(ct);
@@ -329,10 +417,12 @@ public static class LabReportEndpoints
         var setIds = sets.Select(x => x.Id).ToArray();
         var rows = await db.LabResults.AsNoTracking().Where(x => x.CompanyId == company && setIds.Contains(x.ResultSetId)).OrderBy(x => x.Position).ToListAsync(ct);
         var confirmations = await db.LabReportConfirmations.AsNoTracking().Where(x => x.CompanyId == company && ids.Contains(x.ReportId)).ToDictionaryAsync(x => x.ReportId, ct);
+        var retirements = await db.LabReportRetirements.AsNoTracking().Where(x => x.CompanyId == company && ids.Contains(x.ReportId)).ToDictionaryAsync(x => x.ReportId, ct);
         var associations = await db.LabConfirmedAssociations.AsNoTracking().Where(x => x.CompanyId == company && setIds.Contains(x.ResultSetId)).ToDictionaryAsync(x => x.ResultSetId, ct);
         var sampleIds = sets.Where(x => x.SampleId != null).Select(x => x.SampleId!.Value).Concat(associations.Values.Select(x => x.SampleId)).Distinct().ToArray();
         var samples = await db.Samples.AsNoTracking().Where(x => x.CompanyId == company && sampleIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-        var related = await db.LabReports.AsNoTracking().Where(x => x.CompanyId == company && x.RelatedReportId != null && ids.Contains(x.RelatedReportId.Value))
+        var related = await db.LabReports.AsNoTracking().Where(x => x.CompanyId == company && x.RelatedReportId != null && ids.Contains(x.RelatedReportId.Value) &&
+            !db.LabReportRetirements.Any(r => r.CompanyId == company && r.ReportId == x.Id))
             .Select(x => new { ParentId = x.RelatedReportId!.Value, x.Id, x.ReportKind, x.RelationshipReason }).ToListAsync(ct);
         var mappedIds = rows.Where(x => x.SubstanceId.HasValue).Select(x => x.SubstanceId!.Value).Distinct().ToArray();
         var substanceCodes = mappedIds.Length == 0
@@ -364,6 +454,7 @@ public static class LabReportEndpoints
         {
             var r = reports[id];
             confirmations.TryGetValue(id, out var confirmation);
+            retirements.TryGetValue(id, out var retirement);
             var reportRows = setLookup[id].SelectMany(s => rowLookup[s.Id]).ToArray();
             var (assessmentStatus, assessmentReasons) = AssessVn(confirmation is not null, reportRows, substanceCodes, vnLimitsBySubstance, hasPublishedVnTable);
             var resultSets = setLookup[id].Select(s =>
@@ -379,9 +470,9 @@ public static class LabReportEndpoints
             }).ToArray();
             return new LabReportResponse(r.Id, r.CompanyId, r.LaboratoryName, r.ReportNumber, r.IssuedOn, r.ReceivedAt, r.ReportKind,
                 r.RelatedReportId, r.RelationshipReason, r.LaboratoryConclusion, r.StatedStandard, r.FileName, r.ContentType, r.FileSize,
-                r.Sha256, r.RecordedBy, r.CapturedAt, r.RecordedAt, confirmation is not null ? "CONFIRMED" : resultSets.All(x => x.IdentityStatus == "MATCHED") ? "PENDING_REVIEW" : "UNRESOLVED",
+                r.Sha256, r.RecordedBy, r.CapturedAt, r.RecordedAt, retirement?.Status ?? (confirmation is not null ? "CONFIRMED" : resultSets.All(x => x.IdentityStatus == "MATCHED") ? "PENDING_REVIEW" : "UNRESOLVED"),
                 confirmation?.ConfirmedBy, confirmation?.ConfirmedAt, resultSets, relatedLookup[id].Select(x => new LabRelatedReportResponse(x.Id, x.ReportKind, x.RelationshipReason)).ToArray(),
-                assessmentStatus, "VN", assessmentReasons);
+                assessmentStatus, "VN", assessmentReasons, ReplacementReportId: retirement?.ReplacementReportId);
         }).ToArray();
     }
 
@@ -518,7 +609,9 @@ public static class LabReportEndpoints
         db.OfflineOperations.AsNoTracking().SingleOrDefaultAsync(x => x.CompanyId == company && x.DeviceId == device && x.ClientOperationId == operation, ct);
     private static IResult Replay(CaptureOperation prior, string hash) => prior.PayloadHash != hash
         ? Problem(409, "OPERATION_CONFLICT", "The operation ID has already been used with different content.")
-        : prior.Status == "APPLIED" && prior.ResultPayload is not null ? Results.Ok(JsonSerializer.Deserialize<LabReportResponse>(prior.ResultPayload))
+        : prior.Status == "APPLIED" && prior.ResultPayload is not null
+            ? JsonSerializer.Deserialize<JsonElement>(prior.Payload).GetProperty("operationType").GetString() == "LAB_REPORT_DELETED"
+                ? Results.NoContent() : Results.Ok(JsonSerializer.Deserialize<LabReportResponse>(prior.ResultPayload))
         : Problem(409, "OPERATION_NOT_APPLIED", "This operation has no accepted result.");
     private static async Task AddOperationAsync(CaptureDbContext db, Guid company, Guid actor, string device, Guid operation,
         DateTimeOffset captured, DateTimeOffset now, string eventType, string canonical, string hash, LabReportResponse response, CancellationToken ct)

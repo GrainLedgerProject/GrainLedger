@@ -17,6 +17,6 @@ export function AdminWorkspace({ user, section, onSelect }: { user: User; sectio
       <button type="button" aria-current={section === 'mrl-lookup' ? 'page' : undefined} onClick={() => onSelect('mrl-lookup')}>Applicable MRL</button>
     </nav>
     {!canConfigure && section !== 'people' ? <div className="notice error" role="alert">This account cannot configure catalogs or MRL tables.</div>
-      : section === 'people' ? <Administration currentUser={user} /> : section === 'catalogs' ? <AdminCatalogs /> : section === 'crop-seasons' ? <AdminCropSeasons /> : section === 'mrl-lookup' ? <MrlLookup /> : <AdminMrl onOpenCatalogs={() => onSelect('catalogs')} />}
+      : section === 'people' ? <Administration currentUser={user} /> : section === 'catalogs' ? <AdminCatalogs canManageResidueRules={user.permissions.includes('residue.policy.manage')} /> : section === 'crop-seasons' ? <AdminCropSeasons /> : section === 'mrl-lookup' ? <MrlLookup /> : <AdminMrl onOpenCatalogs={() => onSelect('catalogs')} />}
   </div>;
 }

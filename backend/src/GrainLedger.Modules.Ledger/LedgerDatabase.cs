@@ -102,6 +102,20 @@ public sealed class PhysicalReceiving : Migration
         throw new NotSupportedException("Physical receiving preserves immutable source and arrival history and cannot be reversed.");
 }
 
+[DbContext(typeof(LedgerDbContext))]
+[Migration("20261022030000_ResidueBounds")]
+public sealed class AddResidueBounds : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        using var stream = typeof(AddResidueBounds).Assembly.GetManifestResourceStream("GrainLedger.Modules.Ledger.Sql.ResidueBounds.sql")!;
+        using var reader = new StreamReader(stream);
+        migrationBuilder.Sql(reader.ReadToEnd());
+    }
+    protected override void Down(MigrationBuilder migrationBuilder) =>
+        throw new NotSupportedException("Residue evaluations preserve immutable scientific history.");
+}
+
 public static class LedgerDatabase
 {
     public static async Task ConfigureRuntimeRoleAsync(string connectionString, string runtimeRole, CancellationToken ct = default)
@@ -149,18 +163,30 @@ public static class LedgerDatabase
             REVOKE ALL ON ALL TABLES IN SCHEMA ledger FROM {role};
             REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ledger FROM {role};
             GRANT SELECT ON ALL TABLES IN SCHEMA ledger TO {role};
+            REVOKE ALL ON TABLE ledger.mixed_bulk_policies,ledger.mixed_bulk_pools,ledger.custody_events,
+                ledger.custody_edges,ledger.custody_allocations,ledger.custody_processing_allocations,
+                ledger.mixed_bulk_command_results FROM {role};
             REVOKE ALL ON TABLE ledger.receiving_threshold_default,ledger.receiving_threshold_overrides,ledger.receiving_threshold_history FROM {role};
+            REVOKE ALL ON TABLE ledger.residue_evaluations FROM {role};
             GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
+            REVOKE INSERT,UPDATE,DELETE ON TABLE catalog.residue_rule_versions,catalog.residue_policy_setting_versions,
+                capture.residue_source_group_versions,capture.residue_report_selections FROM {role};
+            REVOKE UPDATE,DELETE,REFERENCES ON TABLE capture.lab_report_retirements FROM {role};
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
             {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
-                ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.trace_lot(uuid,uuid,text,text),ledger.container_action(uuid,text,jsonb),ledger.lock_writes(),
+                ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.trace_lot(uuid,uuid,text,text),ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer),ledger.container_action(uuid,text,jsonb),ledger.lock_writes(),
                 ledger.provision_catalog_commodities(uuid),
                 ledger.register_pending_procurement(uuid,uuid),ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid),
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
-                ledger.procurement_stock(uuid,uuid),
+                ledger.procurement_stock(uuid,uuid),ledger.procurement_stock_bulk(uuid,uuid[]),
+                ledger.procurement_source_lineage(uuid,uuid),
                 ledger.arrival_command(uuid,uuid,text,jsonb),
                 ledger.receiving_threshold_read(uuid,text,jsonb),ledger.receiving_threshold_command(uuid,text,jsonb),
+                ledger.residue_graph(uuid,uuid),ledger.residue_history(uuid,uuid,uuid),
+                ledger.residue_replay(uuid,uuid,uuid,jsonb),ledger.residue_append(uuid,uuid,uuid,jsonb,jsonb),
+                catalog.publish_residue_rule(uuid,jsonb),catalog.publish_residue_policy_setting(uuid,jsonb),capture.publish_residue_group(uuid,jsonb),
+                capture.publish_residue_selection(uuid,jsonb),
                 ledger.can_read_lot(uuid,uuid),ledger.assigned(uuid,uuid),
                 ledger.own(uuid,uuid),ledger.role(uuid)
             TO {role};
@@ -173,7 +199,12 @@ public static class LedgerDatabase
                     OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER')
                     OR c.oid IN ('ledger.receiving_threshold_default'::regclass,'ledger.receiving_threshold_overrides'::regclass,'ledger.receiving_threshold_history'::regclass)
                        AND has_table_privilege($1,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
-            ) OR has_any_column_privilege($1,'ledger.receiving_threshold_default','SELECT')
+            ) OR has_table_privilege($1,'capture.lab_report_retirements','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+              OR has_any_column_privilege($1,'capture.lab_report_retirements','UPDATE')
+              OR has_any_column_privilege($1,'capture.lab_report_retirements','REFERENCES')
+              OR has_function_privilege($1,'capture.guard_lab_retirement()','EXECUTE')
+              OR has_function_privilege($1,'capture.guard_lab_active_report()','EXECUTE')
+              OR has_any_column_privilege($1,'ledger.receiving_threshold_default','SELECT')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_default','INSERT')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_default','UPDATE')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_default','REFERENCES')
@@ -185,6 +216,47 @@ public static class LedgerDatabase
               OR has_any_column_privilege($1,'ledger.receiving_threshold_history','INSERT')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_history','UPDATE')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_history','REFERENCES')
+            OR has_function_privilege($1,'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
+              OR has_function_privilege($1,'ledger.pool_withdraw(uuid,uuid,text,uuid,uuid,numeric,bigint)','EXECUTE')
+              OR has_function_privilege($1,'ledger.command_pre_mixed(uuid,text,jsonb)','EXECUTE')
+              OR has_function_privilege($1,'ledger.read_before_mixed_bulk(uuid,text,jsonb)','EXECUTE')
+              OR EXISTS (
+                  SELECT 1 FROM (VALUES
+                      ('ledger.mixed_bulk_eligible(uuid,uuid,uuid,text,text,timestamptz)'),
+                      ('ledger.mixed_bulk_assert_location(uuid)'),('ledger.mixed_bulk_location_guard()'),
+                      ('ledger.mixed_bulk_pool_deferred_guard()'),('ledger.mixed_bulk_pool_row()'),
+                      ('ledger.custody_allocation_guard()'),('ledger.custody_processing_allocation_guard()'),
+                      ('ledger.reserve_lot_code_internal(uuid,uuid,text,uuid,text,text)'),
+                      ('ledger.mixed_bulk_custody_derived(uuid)'),('ledger.effective_hold_ids(uuid)'),
+                      ('ledger.mixed_bulk_independent_blocked(uuid,uuid)'),('ledger.blocked(uuid,uuid)'),
+                      ('ledger.require_mixed_correction_safe(text,jsonb)'),('ledger.residue_authorized(uuid,uuid)'),
+                      ('ledger.equipment_has_pending_work(uuid)'),
+                      ('ledger.command_before_equipment_retirement(uuid,text,jsonb)'),
+                      ('ledger.read_before_equipment_retirement(uuid,text,jsonb)'),
+                      ('catalog.validate_residue_policy_review(jsonb)')
+                  ) private_function(signature)
+                  WHERE has_function_privilege($1,private_function.signature,'EXECUTE')
+              )
+              OR EXISTS (
+                  SELECT 1 FROM (VALUES
+                      ('ledger.mixed_bulk_policies'),('ledger.mixed_bulk_pools'),('ledger.custody_events'),
+                      ('ledger.custody_edges'),('ledger.custody_allocations'),('ledger.custody_processing_allocations'),
+                      ('ledger.mixed_bulk_command_results'),('ledger.residue_evaluations')
+                  ) protected(table_name)
+                  WHERE has_table_privilege($1,protected.table_name::regclass,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                     OR has_any_column_privilege($1,protected.table_name,'SELECT')
+                     OR has_any_column_privilege($1,protected.table_name,'INSERT')
+                     OR has_any_column_privilege($1,protected.table_name,'UPDATE')
+                     OR has_any_column_privilege($1,protected.table_name,'REFERENCES')
+              )
+              OR EXISTS (
+                  SELECT 1 FROM (VALUES ('catalog.residue_rule_versions'),('catalog.residue_policy_setting_versions'),
+                      ('capture.residue_source_group_versions'),('capture.residue_report_selections')) protected(table_name)
+                  WHERE has_table_privilege($1,protected.table_name::regclass,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                     OR has_any_column_privilege($1,protected.table_name,'INSERT')
+                     OR has_any_column_privilege($1,protected.table_name,'UPDATE')
+                     OR has_any_column_privilege($1,protected.table_name,'REFERENCES')
+              )
             """, connection);
         inherited.Parameters.AddWithValue(runtimeRole);
         if (Equals(await inherited.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("Runtime role inherits unsafe module mutation authority; remove inherited grants before deployment.");
@@ -245,16 +317,69 @@ public static class LedgerDatabase
             """, connection);
         if (Equals(await command.ExecuteScalarAsync(ct), true)) throw new InvalidOperationException("API database role must not be superuser, schema/table owner or owner-role member. Configure separate migration and runtime credentials.");
         await using var required = new NpgsqlCommand("""
-            SELECT has_function_privilege(current_user,'ledger.register_pending_procurement(uuid,uuid)','EXECUTE')
-               AND has_function_privilege(current_user,'ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid)','EXECUTE')
+            SELECT has_function_privilege(current_user,'ledger.procurement_stock_bulk(uuid,uuid[])','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.procurement_source_lineage(uuid,uuid)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.register_pending_procurement(uuid,uuid)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.arrival_command(uuid,uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.receiving_threshold_read(uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.receiving_threshold_command(uuid,text,jsonb)','EXECUTE')
                AND has_function_privilege(current_user,'ledger.lock_writes()','EXECUTE')
                AND has_function_privilege(current_user,'ledger.provision_catalog_commodities(uuid)','EXECUTE')
-               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_default','SELECT')
-               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_overrides','SELECT')
-               AND NOT has_table_privilege(current_user,'ledger.receiving_threshold_history','SELECT')
+               AND has_function_privilege(current_user,'ledger.residue_graph(uuid,uuid)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.residue_history(uuid,uuid,uuid)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.residue_replay(uuid,uuid,uuid,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'ledger.residue_append(uuid,uuid,uuid,jsonb,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'catalog.publish_residue_rule(uuid,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'catalog.publish_residue_policy_setting(uuid,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'capture.publish_residue_group(uuid,jsonb)','EXECUTE')
+               AND has_function_privilege(current_user,'capture.publish_residue_selection(uuid,jsonb)','EXECUTE')
+               AND has_table_privilege(current_user,'capture.lab_report_retirements','SELECT,INSERT')
+               AND NOT has_table_privilege(current_user,'capture.lab_report_retirements','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+               AND NOT has_any_column_privilege(current_user,'capture.lab_report_retirements','UPDATE')
+               AND NOT has_any_column_privilege(current_user,'capture.lab_report_retirements','REFERENCES')
+               AND NOT has_function_privilege(current_user,'capture.guard_lab_retirement()','EXECUTE')
+               AND NOT has_function_privilege(current_user,'capture.guard_lab_active_report()','EXECUTE')
+               AND NOT has_function_privilege(current_user,'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
+               AND NOT has_function_privilege(current_user,'ledger.pool_withdraw(uuid,uuid,text,uuid,uuid,numeric,bigint)','EXECUTE')
+               AND NOT has_function_privilege(current_user,'ledger.command_pre_mixed(uuid,text,jsonb)','EXECUTE')
+               AND NOT has_function_privilege(current_user,'ledger.read_before_mixed_bulk(uuid,text,jsonb)','EXECUTE')
+               AND NOT EXISTS (
+                   SELECT 1 FROM (VALUES
+                       ('ledger.mixed_bulk_eligible(uuid,uuid,uuid,text,text,timestamptz)'),
+                       ('ledger.mixed_bulk_assert_location(uuid)'),('ledger.mixed_bulk_location_guard()'),
+                       ('ledger.mixed_bulk_pool_deferred_guard()'),('ledger.mixed_bulk_pool_row()'),
+                       ('ledger.custody_allocation_guard()'),('ledger.custody_processing_allocation_guard()'),
+                       ('ledger.reserve_lot_code_internal(uuid,uuid,text,uuid,text,text)'),
+                       ('ledger.mixed_bulk_custody_derived(uuid)'),('ledger.effective_hold_ids(uuid)'),
+                       ('ledger.mixed_bulk_independent_blocked(uuid,uuid)'),('ledger.blocked(uuid,uuid)'),
+                       ('ledger.require_mixed_correction_safe(text,jsonb)'),('ledger.residue_authorized(uuid,uuid)'),
+                       ('ledger.equipment_has_pending_work(uuid)'),
+                       ('ledger.command_before_equipment_retirement(uuid,text,jsonb)'),
+                       ('ledger.read_before_equipment_retirement(uuid,text,jsonb)'),
+                       ('catalog.validate_residue_policy_review(jsonb)')
+                   ) private_function(signature)
+                   WHERE has_function_privilege(current_user,private_function.signature,'EXECUTE')
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM (VALUES
+                       ('ledger.mixed_bulk_policies'),('ledger.mixed_bulk_pools'),('ledger.custody_events'),
+                       ('ledger.custody_edges'),('ledger.custody_allocations'),('ledger.custody_processing_allocations'),
+                       ('ledger.mixed_bulk_command_results'),('ledger.residue_evaluations')
+                   ) protected(table_name)
+                   WHERE has_table_privilege(current_user,protected.table_name::regclass,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                      OR has_any_column_privilege(current_user,protected.table_name,'SELECT')
+                      OR has_any_column_privilege(current_user,protected.table_name,'INSERT')
+                      OR has_any_column_privilege(current_user,protected.table_name,'UPDATE')
+                      OR has_any_column_privilege(current_user,protected.table_name,'REFERENCES')
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM (VALUES ('catalog.residue_rule_versions'),('catalog.residue_policy_setting_versions'),
+                       ('capture.residue_source_group_versions'),('capture.residue_report_selections')) protected(table_name)
+                   WHERE has_table_privilege(current_user,protected.table_name::regclass,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                      OR has_any_column_privilege(current_user,protected.table_name,'INSERT')
+                      OR has_any_column_privilege(current_user,protected.table_name,'UPDATE')
+                      OR has_any_column_privilege(current_user,protected.table_name,'REFERENCES')
+               )
                AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','SELECT')
                AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','INSERT')
                AND NOT has_any_column_privilege(current_user,'ledger.receiving_threshold_default','UPDATE')
@@ -280,6 +405,14 @@ public static class LedgerDatabase
             """, connection);
         if (!Equals(await trace.ExecuteScalarAsync(ct), true))
             throw new InvalidOperationException("Traceability runtime function or EXECUTE grant missing. Run approved owner migrations and runtime-role configuration; normal startup does not apply grants.");
+        await using var entries = new NpgsqlCommand("""
+            SELECT CASE WHEN to_regprocedure('ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer)') IS NULL
+                OR to_regprocedure('ledger.trace_lot_metadata(uuid,uuid[])') IS NULL THEN false ELSE
+                has_function_privilege(current_user,'ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer)','EXECUTE')
+                AND NOT has_function_privilege(current_user,'ledger.trace_lot_metadata(uuid,uuid[])','EXECUTE') END
+            """, connection);
+        if (!Equals(await entries.ExecuteScalarAsync(ct), true))
+            throw new InvalidOperationException("Trace entry upgrade or runtime grants missing. Run approved owner migrations and runtime-role configuration.");
     }
 }
 
@@ -291,6 +424,8 @@ public static class LedgerModuleRegistration
             provider.GetRequiredService<IConfiguration>().GetConnectionString("GrainLedger"),
             n => n.MigrationsAssembly(typeof(LedgerDbContext).Assembly.FullName).MigrationsHistoryTable("__EFMigrationsHistory", "ledger")));
         services.AddScoped<LedgerService>();
+        services.AddScoped<ResidueEvaluationService>();
+        services.AddScoped<IConfirmedLabReportResidueBinder>(provider => provider.GetRequiredService<ResidueEvaluationService>());
         services.AddScoped<IProcurementLedgerPort, ProcurementLedgerPort>();
         services.AddScoped<ICommodityLedgerPort, CommodityLedgerPort>();
         return services;

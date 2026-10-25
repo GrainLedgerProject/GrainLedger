@@ -4,6 +4,8 @@ Ngày đánh giá: **20/10/2026**. Baseline source: nhánh **`dev`**, commit **`
 
 Trạng thái cập nhật: **đã triển khai preparation/draft và readiness gates trên feat/container từ feat/trace `f399aa7`**; xem mục 14 và [API contract](container-api.md). Loading commit/CLOSE thực chưa bật vì order/blend/reservation do team khác triển khai, theo xác nhận của người dùng. Sau triển khai/test cô lập, người dùng đã phê duyệt migration database đang cấu hình; kết quả tại mục 15. Không seed hoặc commit/push. Source có migration không chứng minh deployment ở database khác.
 
+Cập nhật 25/10/2026: đã đọc dev `eecde7e` và tích hợp vào nhánh container; **mục 16** là đánh giá dependency/plan hiện hành. Mục 3 và roadmap gốc giữ bối cảnh lúc lập plan, không phải tuyên bố dev mới chưa có tracing/residue.
+
 ## 1. Kết luận và phạm vi
 
 Có thể bắt đầu xây phần quản lý order/target/container và draft loading. Chưa thể bật **commit loading hoặc CLOSE có giá trị nghiệp vụ** chỉ với stock và lab hiện tại: cần quyền dùng hàng từ phương án đã duyệt, reservation tồn kho, assessment đúng phạm vi và cơ chế freshness/invalidation.
@@ -208,3 +210,55 @@ Sau yêu cầu “chạy migration luôn đi, nhớ cấp quyền execute”, đ
 - Migration exit 0; chỉ áp dụng `20261021000000_ContainerDrafts`, kèm ConfigureRuntimeRoleAsync theo code hiện tại. Không chạy seed, không tạo container/draft mẫu, không gọi trace POST hoặc data-changing smoke trên database chung.
 - Postflight chỉ đọc: cả bốn module không còn pending migration; container table/function tồn tại; runtime EXECUTE container_action=true, trace_lot=true và ValidateRuntimeAsync PASS. PUBLIC không có EXECUTE entry container; runtime không có quyền INSERT/UPDATE/DELETE trực tiếp lên containers/drafts và không được EXECUTE helper container_json.
 - Có thể tải lại trang Containers để test preparation. Commit loading/CLOSE vẫn bị chặn bởi dependency như mục 14; migration không tự cung cấp order/blend/reservation/compliance authority. Chưa commit/push.
+
+
+## 16. Sau merge dev ngày 25/10/2026: làm tiếp được gì?
+
+### 16.1. Baseline và kết luận
+
+Đã fetch origin, chuyển sang dev và fast-forward từ `9bd3e8d` lên `eecde7e` (#15), sau đó merge dev vào `feat/container` (trước merge: `7ad419f`). Không merge container ngược vào dev, không push, không chạy shared migration/seed/grant.
+
+**Có thể tiếp tục phần chuẩn bị loading dựa trên mixed-bulk, lab/residue và tracing mới. Chưa đủ điều kiện bật commit loading hoặc CLOSE thật.** Order → approved blend/review → reservation/execution vẫn thuộc team khác theo phân công đã chốt; không làm thay nền này trong nhánh container.
+
+Dev #15 là tracing được tích hợp từ feat/trace, không phải một tracing engine khác. Phần core trace được lấy nguyên bản mới từ dev; container chỉ thêm workspace section/routes/entry grant bên cạnh nó. Không giữ một fork tracing cũ hoặc triển khai lại trace trong lượt merge.
+
+### 16.2. Những nền mới có thể tái sử dụng
+
+- **Mixed-bulk từ `7f7cb73` (#11):** ingress/current pool generations, withdrawal/aliquot/remainder, exact persisted source allocations, actual resolved processing inputs, pool revision và effective HOLD. Stock picker mới đã có nhãn current pool revision/historical generation và không chọn generation cũ hết tồn cho nghiệp vụ. Container precheck vốn gọi `ledger.blocked`, sau merge sử dụng semantics effective HOLD hiện hành; đó vẫn là lot restriction, chưa có container-level risk provider. Chưa có server fence pool revision riêng trong loading draft/commit.
+- **Residue/lab từ `9bd3e8d` (#14):** confirmed report binding/review, versioned rules và company adoption/overrides, exact residue bounds/provenance/dependencies, live preview và immutable evaluations/replay/history. Có thể đọc evidence và lý do UNRESOLVED cho lot dự định xếp. Finite interval/COMPLETE không phải PASS thị trường; service này chưa cung cấp LOADING/CLOSE decision contract hay freshness fence trong transaction stock write.
+- **Tracing từ `eecde7e` (#15):** lot/pool graph, Current/History, source field/season, confirmed lab-result entry, selected-node bounds và scoped/redacted views. Có thể mở trace của một loading candidate để kiểm tra nguồn theo quyền; hiện material graph chưa có actual loading/container edges.
+- **Bảo trì phụ trợ:** retire equipment và lab draft revision/tombstone đã theo dev; không làm mất immutable operation/report history. Chúng không tạo output authority/reservation cho container.
+
+Các API đọc sẵn dùng: `GET /api/ledger/lots` + safe lookup/detail (pool positions/revision), `GET /api/ledger/lots/{lotId}/residue-preview`, evaluation history/detail, audited trace POST hiện có. Reuse module contracts, không truyền EF entities hoặc copy calculator vào container.
+
+### 16.3. Những dependency chưa có — vẫn chặn C3/C4
+
+- **D1 chưa có:** không tìm thấy persistence/API/in-process contract cho actual export order/spec version, approved blend plan/review/execution và giữ/tiêu thụ OUTPUT stock reservation. `blend.approve`/`containers.*` permission và physical BLENDING operation không thay cho các hợp đồng này. `lot_code_reservations` chỉ giữ mã, không giữ kg. Order reference trong container vẫn là UUID chưa xác minh.
+- **D2 có thêm đầu vào nhưng chưa hoàn tất:** đã có residue engine/evidence/rules, nhưng thiếu contract đánh giá theo destination/commodity/specification, required analyte/quality coverage, MRL/margin versions và freshness/revocation fence dùng cho từng LOADING và whole-container CLOSE. Không suy missing margin=0, COMPLETE=PASS hoặc dùng whole-report VN summary làm quyết định xuất hàng.
+- **Container restriction:** existing lot HOLD/effective ancestry đã có; chưa có container-level HOLD/risk/status contract hoặc luồng late evidence ảnh hưởng container đã loading/CLOSED. Không coi `ledger.blocked(lot)` là kiểm hết container restrictions.
+- **Actual loading/CLOSE:** hiện SQL `containers.status` chỉ cho OPEN; detail trả committedLoadedKg=0; mọi readiness vẫn có bốn unconditional integration findings, endpoints commit/close trả 409. Không có committed loading/withdrawal/reservation-consumption records hoặc closing dossier/document exporter ở nhánh này.
+
+Vì vậy không bỏ các findings `ORDER_PLAN_AUTHORITY_UNAVAILABLE`, `OUTPUT_RESERVATION_UNAVAILABLE`, `EXPORT_ASSESSMENT_UNAVAILABLE`, `CONTAINER_RESTRICTIONS_UNAVAILABLE` chỉ do dev đã có lab/residue/tracing. Đây không phải feature flag có thể bật trước bằng UI.
+
+### 16.4. Plan tiếp theo trong phạm vi container
+
+- [ ] **N1 — Chuẩn bị loading hiểu mixed-bulk (làm ngay):** audit picker/position theo owner/facility/current positive stock; hiện picker đã có phần nhãn, cần hoàn thiện draft contract giữ observed pool revision/lot/location, freshness findings khi generation thay đổi và nút reload/reselect. Không âm thầm remap draft cũ sang pool mới. Forward migration nếu đổi persisted draft shape; preserve historical drafts/audit. Test pool top-up/withdraw giữa chọn–save–check, mixed/ordinary positions và scope; mọi test vẫn chứng minh không trừ tồn/reserve.
+- [ ] **N2 — Evidence panel cho candidate loading (làm ngay sau N1, hoặc song song):** theo `residue.evaluate`, mở existing lot preview/history khi người dùng chọn line; nút trace theo đúng permission. Hiện basis/unit/lower-upper/reasons + evidence/rule refs và timestamp riêng. Không N calls cho toàn bộ danh sách khi mount; batch/bulk nếu thật sự cần nhiều lot. Cùng lot nhiều dòng không tính lại dư lượng theo số dòng. Không tự lấy trung bình nồng độ của hàng xếp chung container như thể đã trộn vật lý; aggregate/sampling semantics cần policy được duyệt. Không mở source/lab ngoài scope cho Export/Mill roles.
+- [ ] **N3 — Chốt integration contracts cùng team (làm ngay, không tạo fake provider):** thống nhất order/target/spec version; approved plan/review authority và ALL_REMAINING/OUTPUT_ONLY; actual output/aliquot mapping; OUTPUT reservation ID/outstanding kg; atomic consume port dùng cùng connection/READ COMMITTED transaction/lock; LOADING/CLOSE assessment input/output/basis/revision fence; container restriction version. Bổ sung concrete DTO/ports khi module sở hữu thực sự có contracts. Không nhận ready/approved/assessment ID từ client làm authority, không tạo reservation giả hoặc làm order/blend thay team.
+- [ ] **N4 — Commit loading (chờ D1 + D2 + restriction contract):** dưới existing stock advisory lock trước stock rows, revalidate owner/facility, current pool/revision, authoritative actual output và reservation; rút đúng lot/aliquot, consume đúng OUTPUT quota, retain actual load + assessment/evidence basis/audit atomically và idempotently. Phối hợp tất cả stock writer/transfer/correction để tôn trọng reservation. Test double load/overconsumption/retry/concurrent HOLD/review revocation, exact partial loading. Chỉ lúc đạt mới mở button/API success; CLOSE không trừ tồn lần hai.
+- [ ] **N5 — CLOSE và dossier (sau N4):** lấy toàn bộ committed loadings xuyên draft/plan version; kiểm target/order cap, metadata/seal, current restrictions và fresh assessment, lưu CLOSED+dossier trong cùng transaction. Draft không tính là loaded. Preserve late evidence/supplement riêng, không rewrite closing snapshot. Document export dựa dossier thật, chưa làm portal/EPCIS/ERP/customs hoặc dispatch lifecycle mới.
+- [ ] **N6 — Nối tracing actual container và nghiệm thu (sau N4/N5, phối hợp trace):** container → actual loads → consumed lots/aliquots → sources/plots/percentages, và adverse source/lab → actual containers đúng snapshot/authority. Không nối planned drafts vào material graph. Kiểm nhiều loading/partial/multiple plan versions, zero accounting shares vs chemical dependencies, role redaction và correction scope. Benchmarks riêng theo dataset/target, không suy từ build/test duration.
+
+**Ưu tiên khuyến nghị: N1 → N2 và chốt N3 với team.** N4/N5 chỉ triển khai để bật thật khi các dependency tồn tại và pass contract tests; không cần chờ container để chuẩn bị read UI/evidence. Chỉ in scope/MVP; không solver nâng cao, portal, EPCIS hoặc integration ngoài.
+
+### 16.5. Merge và verification
+
+Đã resolve 16 conflicted files, phần lớn là tracing add/add do squash merge trên dev; giữ container tab/routes/grants và toàn bộ tracing/residue mới. `ledger.container_action`, `trace_lot`, `trace_starts` cùng finite EXECUTE list; metadata helpers vẫn private. Không sửa applied migration SQL để né conflict.
+
+Regression migration cũ giả định chỉ có CustodyTraceability giữa mixed-bulk và trace; khi merge có ContainerDrafts xen giữa, assertion history fail. Đã thêm bước migrate đúng ContainerDrafts, kiểm prior history và legacy marker giữ nguyên, rồi nâng CustodyTraceability và latest. Không bỏ assertion preservation hoặc reset history.
+
+Đã chạy `dotnet build GrainLedger.slnx`: PASS, warning CS9113 đã có. Frontend full suite `--maxWorkers=2`: **221/221 PASS**, 30 files; `npm run build`: PASS TypeScript/Vite, còn warning chunk >500 kB. Backend lượt đầu **131 pass/1 fail** (132 cases), đúng ca history migration kể trên; sau sửa, migration retest **1/1 PASS**. Lượt cuối sau sửa: **132/132 PASS** trên PostgreSQL Testcontainers, gồm container/trace/mixed-bulk/migration/residue evaluation/company policy/report review/permission/cutover HTTP contracts. Không chạy toàn bộ backend solution suite hoặc benchmark production.
+
+Browser smoke dùng test bridge/Vite riêng **5091/5181** + PostgreSQL Testcontainers: Export Staff tạo synthetic preparation target 8.000000 kg, chọn actual available lot/position, save loading draft 8.000000 kg; audit create/draft hiện đủ, committed loaded vẫn 0.000000. Check loading và closure trả dependency findings; Commit loading/Close container disabled. Chuyển sang Traceability thấy current-pool selector và chỉ Forward theo Export role, quay lại Containers vẫn thấy draft đã lưu. Không tạo thêm business feature hoặc giả approved blend; đây chỉ là smoke preparation. Focused click ban đầu dùng exact label `Check loading` thiếu draft UUID nên timeout; sửa locator theo label hiện tại thành công. Không dùng timeout này để kết luận app lỗi. Không đo mobile/loading performance trong lượt này.
+
+Đã dừng browser/dev bridge riêng và xóa session file/config tạm. Đây không phải phê duyệt triển khai shared DB. Migration code có sẵn không chứng minh target DB khác đã đủ migration/grants. Không tự chạy lại migration chỉ vì merge.

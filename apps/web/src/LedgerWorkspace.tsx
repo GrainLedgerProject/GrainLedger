@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type User } from './api';
 import { LedgerOperations } from './LedgerOperations';
 import { LedgerReceiving } from './LedgerReceiving';
 import { LedgerSetup } from './LedgerSetup';
 import { LedgerStock } from './LedgerStock';
 import { LedgerContainers } from './LedgerContainers';
-import { LedgerTraceability } from './LedgerTraceability';
+import { LedgerTraceability, type LabTraceOrigin } from './LedgerTraceability';
 import { OwnReceivingThreshold } from './ReceivingThresholds';
 
 export const ledgerSections = [
@@ -16,14 +16,21 @@ export const ledgerSections = [
   { id: 'operations', label: 'Process & correct', description: 'Processing, transfers & corrections', permissions: ['conversions.read', 'conversions.write', 'conversions.confirm', 'corrections.reconcile'] },
   { id: 'setup', label: 'Setup', description: 'Catalog, facilities & policies', permissions: ['platform.read', 'platform.configure'] },
 ] as const;
-export function LedgerWorkspace({ user }: { user: User }) {
+export function LedgerWorkspace({ user, initialLotId, initialLabOrigin }: { user: User; initialLotId?: string; initialLabOrigin?: LabTraceOrigin }) {
   const allowed = ledgerSections.filter(section => section.permissions.some(permission => user.permissions.includes(permission)));
-  const preferred = user.permissions.includes('platform.configure') ? 'setup'
+  const preferred = initialLabOrigin ? 'traceability' : initialLotId && allowed.some(section => section.id === 'inventory') ? 'inventory' : user.permissions.includes('platform.configure') ? 'setup'
     : user.permissions.some(permission => ['purchases.write', 'lots.receive', 'receiving.reconcile'].includes(permission)) ? 'receiving' : 'inventory';
   const initial = allowed.some(section => section.id === preferred) ? preferred : allowed[0]?.id || '';
+  const labEntry = useRef(`${initialLabOrigin?.reportId || ''}:${initialLabOrigin?.resultId || ''}`);
+  const [traceStart, setTraceStart] = useState<{ lotId?: string; labOrigin?: LabTraceOrigin; version: number }>({ labOrigin: initialLabOrigin, version: 0 });
   const [selected, setSelected] = useState<string>(initial);
   const [visited, setVisited] = useState<string[]>([initial]);
   const tab = allowed.some(section => section.id === selected) ? selected : allowed[0]?.id;
+  useEffect(() => {
+    const key = `${initialLabOrigin?.reportId || ''}:${initialLabOrigin?.resultId || ''}`;
+    if (labEntry.current !== key && initialLabOrigin) { setTraceStart(previous => ({ labOrigin: initialLabOrigin, version: previous.version + 1 })); setSelected('traceability'); setVisited(previous => previous.includes('traceability') ? previous : [...previous, 'traceability']); }
+    labEntry.current = key;
+  }, [initialLabOrigin?.reportId, initialLabOrigin?.resultId]);
   function selectSection(section: string) {
     setSelected(section);
     setVisited(previous => previous.includes(section) ? previous : [...previous, section]);
@@ -33,7 +40,7 @@ export function LedgerWorkspace({ user }: { user: User }) {
     {['CustomerManager', 'PurchasingStaff', 'ExportStaff'].includes(user.role || '') && <OwnReceivingThreshold active />}
     <nav className="ledger-nav" aria-label="Ledger sections">{allowed.map(section => <button key={section.id} aria-label={section.label} aria-current={tab === section.id ? 'page' : undefined} aria-controls={`ledger-${section.id}`} onClick={() => selectSection(section.id)}><strong>{section.label}</strong><small>{section.description}</small></button>)}</nav>
     {allowed.map(section => <div key={section.id} id={`ledger-${section.id}`} hidden={tab !== section.id}>
-      {(visited.includes(section.id) || tab === section.id) && (section.id === 'containers' ? <LedgerContainers user={user} active={tab === section.id} /> : section.id === 'traceability' ? <LedgerTraceability user={user} active={tab === section.id} /> : section.id === 'inventory' ? <LedgerStock user={user} active={tab === section.id} /> : section.id === 'receiving' ? <LedgerReceiving user={user} active={tab === section.id} /> : section.id === 'operations' ? <LedgerOperations user={user} active={tab === section.id} /> : <LedgerSetup user={user} active={tab === section.id} />)}
+      {(visited.includes(section.id) || tab === section.id) && (section.id === 'containers' ? <LedgerContainers user={user} active={tab === section.id} /> : section.id === 'traceability' ? <LedgerTraceability key={traceStart.version} user={user} active={tab === section.id} initialLotId={traceStart?.lotId} initialLabOrigin={traceStart.labOrigin} /> : section.id === 'inventory' ? <LedgerStock user={user} active={tab === section.id} initialLotId={initialLotId} onTrace={lotId => { setTraceStart(previous => ({ lotId, version: (previous?.version || 0) + 1 })); selectSection('traceability'); }} /> : section.id === 'receiving' ? <LedgerReceiving user={user} active={tab === section.id} /> : section.id === 'operations' ? <LedgerOperations user={user} active={tab === section.id} /> : <LedgerSetup user={user} active={tab === section.id} />)}
     </div>)}
     {!allowed.length && <p className="notice">No ledger permissions assigned.</p>}
   </div>;

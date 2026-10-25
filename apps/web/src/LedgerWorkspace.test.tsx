@@ -34,7 +34,7 @@ function readResponse(url: string, source = routes) {
 beforeEach(() => {
  vi.restoreAllMocks(); vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset();
  routes = {
-  '/api/auth/csrf': { token: 'csrf' }, '/api/ledger/lookups': look, '/api/ledger/lots': page([lot]), '/api/ledger/lots/source': lot, '/api/ledger/holds': page([]), '/api/ledger/notifications': page([]), '/api/ledger/history': page([]), '/api/ledger/operations': page([draft]), '/api/ledger/corrections': page([]),
+  '/api/auth/csrf': { token: 'csrf' }, '/api/ledger/trace/starts': page([]), '/api/ledger/lookups': look, '/api/ledger/lots': page([lot]), '/api/ledger/lots/source': lot, '/api/ledger/holds': page([]), '/api/ledger/notifications': page([]), '/api/ledger/history': page([]), '/api/ledger/operations': page([draft]), '/api/ledger/corrections': page([]),
   '/api/ledger/setup': { ...look, assignments: [], policies: [], compatibilities: [] }, '/api/admin/users': [], '/api/commodities': page([]), '/api/measurement-units': page([]),
   '/api/admin/organizations': [{ id: 'company', name: 'Customer', kind: 'Customer' }], '/api/ledger/receiving-thresholds/own-company': { companyId: 'company', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'default-r1' },
   '/api/farmers': page([{ id: 'farmer', name: 'Farmer', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plots': page([{ id: 'plot', farmerId: 'farmer', code: 'Plot', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/crop-seasons': page([{ id: 'season', name: 'Season', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plot-seasons': page([{ id: 'ps', plotId: 'plot', seasonId: 'season', riceVariety: 'IR', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]),
@@ -154,6 +154,23 @@ it('disables shortage approval whenever any received line has surplus', async ()
  expect(screen.getByRole('option', { name: /Approve shortage and post actual stock/ })).toBeDisabled();
  expect(screen.getByRole('option', { name: /Request remeasurement/ })).toBeEnabled();
 });
+it.each([false, true])('shows historical equipment labels without adding retired equipment to new processing choices (retired=%s)', async retired => {
+ const equipmentName = retired ? 'Old dryer (retired)' : 'Dryer';
+ routes['/api/ledger/operations'] = page([{ ...draft, id: 'committed', status: 'COMMITTED', equipmentId: retired ? 'old-dryer' : 'dryer', equipmentName, canEdit: false, canDelete: false }]);
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByRole('button', { name: 'Process & correct' }));
+ await browser.click(screen.getByRole('button', { name: 'Committed list' }));
+ const summary = await screen.findByText(new RegExp(`DRYING:.*${retired ? 'Old dryer \\(retired\\)' : 'Dryer'}.*COMMITTED`), { selector: 'summary' });
+ await browser.click(summary);
+ expect(within(summary.closest('details')!).getByText(equipmentName, { selector: 'dd' })).toBeInTheDocument();
+ await browser.click(screen.getByText('Create processing draft', { selector: 'summary' }));
+ const form = within(screen.getByRole('heading', { name: 'New processing draft' }).closest('section')!);
+ await browser.selectOptions(form.getByLabelText('Processing facility'), 'facility');
+ const choices = within(form.getByLabelText('Equipment'));
+ expect(choices.getByRole('option', { name: 'Dryer' })).toHaveValue('dryer');
+ expect(choices.queryByRole('option', { name: /Old dryer|\(retired\)/ })).not.toBeInTheDocument();
+});
 it('edits processing draft with decimal strings and supports multiple actual output rows', async () => {
  render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
  const browser = userEvent.setup();
@@ -171,6 +188,37 @@ it('edits processing draft with decimal strings and supports multiple actual out
  await browser.click(await screen.findByText('Create processing draft', { selector: 'summary' }));
  await browser.click(screen.getByRole('button', { name: 'Add actual output' }));
  expect(screen.getAllByLabelText('Actual output (kg)')).toHaveLength(2);
+});
+it('requires explicit refresh and reselect for stale mixed-bulk draft inputs', async () => {
+ const historicalLot = { ...lot, positions: lot.positions.map(position => ({ ...position, quantityKg: '0', availableKg: '0' })), mixedBulk: true, isCurrentPool: false, poolLocationId: 'store', poolRevision: 1 };
+ const initialPool = { ...lot, id: 'pool-v2', code: 'Pool v2', mixedBulk: true, isCurrentPool: true, poolLocationId: 'store', poolRevision: 2 };
+ routes['/api/ledger/lots'] = page([initialPool, historicalLot]);
+ routes['/api/ledger/lots/source'] = historicalLot;
+ routes['/api/ledger/operations'] = page([{ ...draft, inputs: [{ ...draft.inputs[0], poolRevision: 1 }] }]);
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByText(/DRYING:.*DRAFT/));
+ await browser.click(screen.getByRole('button', { name: 'Edit processing draft' }));
+ const editor = screen.getByRole('heading', { name: 'Edit processing draft' }).closest('section')!;
+ expect(within(editor).getByRole('button', { name: 'Save draft changes' })).toBeDisabled();
+ const picker = within(editor).getByLabelText('Input lot');
+ await waitFor(() => {
+  const historicalOption = picker.querySelector('option[value="source"]');
+  expect(historicalOption).toBeInTheDocument();
+  expect(historicalOption).toBeDisabled();
+ });
+ const currentPool = { ...initialPool, id: 'pool-v3', code: 'Pool v3', poolRevision: 3 };
+ routes['/api/ledger/lots'] = page([currentPool]);
+ await browser.click(within(editor).getByRole('button', { name: 'Reload stock options and reselect' }));
+ await within(editor).findByRole('option', { name: /current pool revision 3/ });
+ await browser.selectOptions(picker, 'pool-v3');
+ await browser.selectOptions(within(editor).getByLabelText('Input stock position'), 'store');
+ expect(within(editor).getByText(/Draft revision: 3 · current revision: 3/)).toBeInTheDocument();
+ expect(within(editor).getByRole('button', { name: 'Save draft changes' })).toBeEnabled();
+ await browser.click(within(editor).getByRole('button', { name: 'Save draft changes' }));
+ await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/ledger/operations/draft' && init?.method === 'PUT')).toBe(true));
+ const saved = JSON.parse(String(fetchMock.mock.calls.find(([url, init]) => url === '/api/ledger/operations/draft' && init?.method === 'PUT')![1]?.body));
+ expect(saved.inputs[0]).toMatchObject({ lotId: 'pool-v3', poolRevision: 3 });
 });
 it('derives processing output payloads by kind while preserving exact strings and correction locations', async () => {
  const { } = render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
@@ -619,4 +667,26 @@ it('does not let stale processing searches replace newer server results', async 
  await act(async () => { releaseOld?.(response(page([old]))); });
  expect(screen.getByText(/DRYING: New result.*DRAFT/)).toBeInTheDocument();
  expect(screen.queryByText(/DRYING: Old result.*DRAFT/)).not.toBeInTheDocument();
+});
+
+it('opens tracing from the selected stock lot without automatically executing an audited trace', async () => {
+  render(<LedgerWorkspace user={{ ...actor, role: 'CustomerManager', organizationId: 'company', permissions: ['lots.read.tenant', 'trace.read.tenant'] }} initialLotId="source" />);
+  const browser = userEvent.setup();
+  await browser.click(await screen.findByRole('button', { name: 'Trace this lot' }));
+  expect(await screen.findByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('source');
+  expect(screen.getByRole('button', { name: 'Traceability' })).toHaveAttribute('aria-current', 'page');
+  expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/ledger/trace' && init?.method === 'POST')).toBe(false);
+});
+
+it('replaces a laboratory entry when tracing a stock lot in the same workspace', async () => {
+  render(<LedgerWorkspace user={{ ...actor, role: 'CustomerManager', organizationId: 'company', permissions: ['lots.read.tenant', 'trace.read.tenant'] }} initialLotId="source" initialLabOrigin={{ reportId: 'report', resultId: 'row' }} />);
+  const browser = userEvent.setup();
+  expect(screen.getByRole('button', { name: 'Traceability' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByText(/Starting from a confirmed laboratory result/)).toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: 'Stock & HOLDs' }));
+  await browser.click(await screen.findByRole('button', { name: 'Trace this lot' }));
+  expect(await screen.findByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('source');
+  expect(screen.queryByText(/Starting from a confirmed laboratory result/)).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: 'Trace direction' })).toBeEnabled();
+  expect(fetchMock.mock.calls.some(([url, init]) => String(url).startsWith('/api/ledger/trace') && init?.method === 'POST')).toBe(false);
 });

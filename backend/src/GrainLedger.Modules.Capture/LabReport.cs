@@ -24,6 +24,16 @@ public sealed class LabReport
     public DateTimeOffset RecordedAt { get; set; }
 }
 
+public sealed class LabReportRetirement
+{
+    public Guid ReportId { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid? ReplacementReportId { get; set; }
+    public required string Status { get; set; }
+    public Guid RecordedBy { get; set; }
+    public DateTimeOffset RecordedAt { get; set; }
+}
+
 public sealed class LabResultSet
 {
     public Guid Id { get; set; }

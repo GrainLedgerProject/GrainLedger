@@ -50,3 +50,7 @@ restricted runtime grants with the existing role-configuration procedure
 before starting the new API. Pause intake and processing writes during the
 API cutover; old API instances cannot issue or validate the new codes. Do not
 roll back to an API version that only understands `LL-…` after new codes exist.
+
+## Mixed-bulk custody generations
+
+Mixed-bulk ingress and partial withdrawal create new immutable lot generations with new reserved lot codes; they do not reuse a prior pool code as a correction. Current generation and revision are exposed by Ledger lot/location reads; source composition and custody links are lineage, not separate physical stock. A full drain clears current generation pointer, but identity remains until recorded clearance. Mixed-custody correction and downstream compensation are unsupported and fail closed; original untouched-package correction is not enabled without approved policy. Migration `20261020000000_MixedBulkStorage` is forward-only and implemented locally, not deployed. No reset/backfill/conversion; get explicit database-owner approval before shared migration, grants or seeds.

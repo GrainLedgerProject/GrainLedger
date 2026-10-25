@@ -29,12 +29,14 @@ public static class CaptureModule
     public static IServiceCollection AddCaptureModule(this IServiceCollection services)
     {
         services.AddScoped<ISourceProvenanceReader, SourceProvenanceReader>();
+        services.AddScoped<IConfirmedLabTraceReader, ConfirmedLabTraceReader>();
         services.AddDbContext<CaptureDbContext>((provider, options) =>
         {
             var connection = provider.GetRequiredService<IConfiguration>().GetConnectionString("GrainLedger");
             if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("ConnectionStrings:GrainLedger is required.");
             options.UseNpgsql(connection, n => n.MigrationsAssembly(typeof(CaptureDbContext).Assembly.FullName));
         });
+        services.AddScoped<IResidueEvidenceReader, ResidueEvidenceReader>();
         return services;
     }
 
@@ -42,6 +44,7 @@ public static class CaptureModule
     {
         endpoints.MapSampleEndpoints();
         endpoints.MapLabReportEndpoints();
+        endpoints.MapResidueEvidenceEndpoints();
         var group = endpoints.MapGroup("/api/farmers").RequireAuthorization()
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>();
         group.MapPost("", RegisterAsync).RequireAuthorization("farms.write");

@@ -1,6 +1,6 @@
 # Container preparation API and integration boundary
 
-Implementation branch: `feat/container`, based on `feat/trace` at `f399aa7`. Implements container preparation and loading drafts while the order/approved blend/reservation workflow is delivered separately. **There is no inventory withdrawal, reservation consumption, successful CLOSE or dossier generation in this release.** Commit and close refuse on the backend, including direct HTTP requests.
+Implementation branch: `feat/container`, originally based on `feat/trace` at `f399aa7`, now integrating dev `eecde7e` (25/10/2026). Implements container preparation and loading drafts while the order/approved blend/reservation workflow is delivered separately. **There is no inventory withdrawal, reservation consumption, successful CLOSE or dossier generation in this release.** Commit and close refuse on the backend, including direct HTTP requests.
 
 See [implementation plan](container-loading-implementation-plan.md) for the full target and remaining gates. Migration `20261021000000_ContainerDrafts` adds Ledger-owned container/draft/audit/idempotency tables and the protected `ledger.container_action(uuid,text,jsonb)` entry routine. Normal startup does not install it. Missing feature migration returns 503 at the feature endpoint; deployment must use the approved owner migration/runtime-grant workflow, never an elevated runtime login. After the user explicitly approved deployment, this migration and the runtime grants were applied to the configured database; read-only postflight passed. See section 15 of the implementation plan. No seed or data-changing smoke was run there.
 
@@ -112,3 +112,8 @@ dotnet test backend/tests/GrainLedger.Api.IntegrationTests --filter 'FullyQualif
 npm test
 npm run build
 ```
+
+
+## After dev integration — 25/10/2026
+
+Mixed-bulk pool stock/revision, effective lot HOLD, residue preview/history and confirmed lab tracing are now available in the merged code. Container preparation can reuse these reads; it still has no verified order/approved output/reservation/LOADING-CLOSE assessment or container restriction integration. Existing four readiness gates, OPEN-only state and zero committed loaded mass remain enforced. Pool revision is not yet a persisted loading-line fence; do not treat a displayed picker revision as commit authority. Residue COMPLETE means a finite interval, not export PASS. See [next steps N1–N6](container-loading-implementation-plan.md#164-plan-tiếp-theo-trong-phạm-vi-container).

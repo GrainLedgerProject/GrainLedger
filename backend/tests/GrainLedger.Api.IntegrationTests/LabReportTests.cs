@@ -20,6 +20,347 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
     private static readonly byte[] OriginalBytes = [0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0x00, 0x80, 0xff];
 
     [Fact]
+    public async Task Draft_edit_appends_new_rows_retains_original_file_and_replays_exact_response()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var request = ReportRequest([ResultSet(sample)]);
+        var id = EntityId(request);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", request, HttpStatusCode.Created);
+        var before = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        var edit = EditRequest(request);
+        edit["payload"]!["laboratoryName"] = "Correct laboratory";
+        edit["payload"]!["reportNumber"] = "Correct number";
+        edit["payload"]!["issuedOn"] = "2026-10-18";
+        edit["payload"]!["laboratoryConclusion"] = "Corrected conclusion";
+        edit["payload"]!["statedStandard"] = "Printed standard";
+        edit["payload"]!["resultSets"]![0]!["laboratorySampleReference"] = "Correct reference";
+        edit["payload"]!["resultSets"]![0]!["sectionReference"] = "page 4";
+        var row = edit["payload"]!["resultSets"]![0]!["results"]![0]!;
+        row["testLabel"] = "Correct label";
+        row["originalResultText"] = "000.024000000001";
+        row["numericValue"] = "000.024000000001";
+        row["method"] = "Correct method";
+        row["uncertainty"] = "±0.000000000002";
+        row["reference"] = "page 4, row 3";
+        var revised = await SendAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", edit);
+        var replacement = revised.GetProperty("id").GetGuid();
+        Assert.NotEqual(id, replacement);
+        Assert.Equal("PENDING_REVIEW", revised.GetProperty("status").GetString());
+        Assert.Equal("Correct laboratory", revised.GetProperty("laboratoryName").GetString());
+        Assert.Equal("Correct number", revised.GetProperty("reportNumber").GetString());
+        Assert.Equal("2026-10-18", revised.GetProperty("issuedOn").GetString());
+        Assert.Equal("Corrected conclusion", revised.GetProperty("laboratoryConclusion").GetString());
+        Assert.Equal("Printed standard", revised.GetProperty("statedStandard").GetString());
+        Assert.Equal(before.GetProperty("sha256").GetString(), revised.GetProperty("sha256").GetString());
+        var revisedSet = revised.GetProperty("resultSets")[0];
+        Assert.NotEqual(before.GetProperty("resultSets")[0].GetProperty("id").GetGuid(), revisedSet.GetProperty("id").GetGuid());
+        Assert.Equal("Correct reference", revisedSet.GetProperty("laboratorySampleReference").GetString());
+        Assert.Equal("page 4", revisedSet.GetProperty("sectionReference").GetString());
+        var revisedRow = revisedSet.GetProperty("results")[0];
+        Assert.NotEqual(before.GetProperty("resultSets")[0].GetProperty("results")[0].GetProperty("id").GetGuid(), revisedRow.GetProperty("id").GetGuid());
+        foreach (var field in new[] { "testLabel", "originalResultText", "numericValue", "method", "uncertainty", "reference" })
+            Assert.Equal(row[field]!.GetValue<string>(), revisedRow.GetProperty(field).GetString());
+        var retired = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        Assert.Equal("SUPERSEDED", retired.GetProperty("status").GetString());
+        Assert.Equal(replacement, retired.GetProperty("replacementReportId").GetGuid());
+        AssertOriginalFacts(before, retired);
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/residue-review/preview",
+            new { companyId = s.OwnerId, rows = Array.Empty<object>() }, HttpStatusCode.Conflict);
+        await AssertFileAsync(s.Customer, id, OriginalBytes);
+        await AssertFileAsync(s.Customer, replacement, OriginalBytes);
+        var visible = await GetAsync(s.Customer, $"/api/lab-reports?sampleId={sample.Id}");
+        Assert.Equal(replacement, Assert.Single(visible.GetProperty("items").EnumerateArray()).GetProperty("id").GetGuid());
+        await ExpectCodeAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", ConfirmRequest(before, sample), "LAB_REPORT_RETIRED");
+        await ExpectCodeAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", EditRequest(request), "LAB_REPORT_RETIRED");
+        await ExpectCodeAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", DeleteRequest(), "LAB_REPORT_RETIRED");
+        await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{replacement}", DeleteRequest(), HttpStatusCode.NoContent);
+        var replay = await SendAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", edit);
+        Assert.Equal(revised.GetRawText(), replay.GetRawText());
+        var changed = edit.DeepClone().AsObject();
+        changed["payload"]!["reportNumber"] = "Changed retry";
+        await ExpectCodeAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", changed, "OPERATION_CONFLICT");
+        await AssertNoPrearrivalStockAsync(s, sample);
+    }
+
+    [Fact]
+    public async Task Draft_invalid_edit_rolls_back_and_new_file_and_sample_are_exact()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var otherSample = await SampleAsync(s);
+        var request = ReportRequest([ResultSet(sample)]);
+        var id = EntityId(request);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", request, HttpStatusCode.Created);
+        var before = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        var edit = EditRequest(request);
+        edit["payload"]!["resultSets"]![0]!["results"]![0]!["numericValue"] = "1e-3";
+        await ExpectAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", edit, HttpStatusCode.BadRequest);
+        edit["payload"]!["resultSets"]![0]!["results"]![0]!["numericValue"] = "0.023000000001";
+        edit["payload"]!["resultSets"]![0]!["sampleId"] = Guid.NewGuid();
+        await ExpectCodeAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", edit, "SAMPLE_NOT_FOUND");
+        edit["payload"]!["resultSets"]![0]!["sampleId"] = sample.Id;
+        edit["payload"]!["contentBase64"] = "invalid!";
+        await ExpectAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", edit, HttpStatusCode.BadRequest);
+        edit["payload"]!["contentBase64"] = null;
+        edit["payload"]!["entityId"] = Guid.NewGuid();
+        await ExpectAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", edit, HttpStatusCode.BadRequest);
+        Assert.Equal(before.GetRawText(), (await GetAsync(s.Customer, $"/api/lab-reports/{id}")).GetRawText());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+            Assert.Equal(1, await db.LabReports.CountAsync(x => x.CompanyId == s.OwnerId));
+            Assert.False(await db.LabReportRetirements.AnyAsync(x => x.ReportId == id));
+            var operation = edit["clientOperationId"]!.GetValue<Guid>();
+            Assert.False(await db.OfflineOperations.AnyAsync(x => x.CompanyId == s.OwnerId && x.ClientOperationId == operation));
+            Assert.False(await db.BusinessEvents.AnyAsync(x => x.CompanyId == s.OwnerId && x.CorrelationId == operation));
+        }
+        edit["payload"]!["entityId"] = id;
+        edit["payload"]!["resultSets"]![0] = JsonSerializer.SerializeToNode(ResultSet(otherSample, [Result("Threshold", "<0.000000000001", "BELOW_LIMIT", "0.000000000001")]));
+        var newBytes = Encoding.UTF8.GetBytes("Replacement original, not an overwrite.");
+        edit["payload"]!["contentBase64"] = Convert.ToBase64String(newBytes);
+        edit["payload"]!["fileName"] = "replacement.txt";
+        edit["payload"]!["contentType"] = "text/plain";
+        var revised = await SendAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", edit);
+        Assert.Equal("replacement.txt", revised.GetProperty("fileName").GetString());
+        Assert.Equal("text/plain", revised.GetProperty("contentType").GetString());
+        Assert.Equal(newBytes.Length, revised.GetProperty("fileSize").GetInt32());
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(newBytes)), revised.GetProperty("sha256").GetString());
+        Assert.Equal(otherSample.Id, revised.GetProperty("resultSets")[0].GetProperty("sampleId").GetGuid());
+        Assert.Equal("<0.000000000001", revised.GetProperty("resultSets")[0].GetProperty("results")[0].GetProperty("originalResultText").GetString());
+        await AssertFileAsync(s.Customer, revised.GetProperty("id").GetGuid(), newBytes);
+        await AssertFileAsync(s.Customer, id, OriginalBytes);
+        AssertOriginalFacts(before, await GetAsync(s.Customer, $"/api/lab-reports/{id}"));
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{revised.GetProperty("id").GetGuid()}/confirm",
+            ConfirmRequest(revised, otherSample), HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Draft_delete_is_append_only_idempotent_and_blocked_for_references_or_confirmation()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var request = ReportRequest([ResultSet(null)]);
+        var id = EntityId(request);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", request, HttpStatusCode.Created);
+        var before = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        var deletion = DeleteRequest();
+        await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", deletion, HttpStatusCode.NoContent);
+        await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", deletion, HttpStatusCode.NoContent);
+        var changed = deletion.DeepClone().AsObject();
+        changed["capturedAt"] = CapturedAt.AddMinutes(1);
+        await ExpectCodeAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", changed, "OPERATION_CONFLICT");
+        var deleted = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        Assert.Equal("DELETED", deleted.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, deleted.GetProperty("replacementReportId").ValueKind);
+        AssertOriginalFacts(before, deleted);
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/residue-review/preview",
+            new { companyId = s.OwnerId, rows = Array.Empty<object>() }, HttpStatusCode.Conflict);
+        Assert.Empty((await GetAsync(s.Customer, "/api/lab-reports")).GetProperty("items").EnumerateArray());
+        await AssertFileAsync(s.Customer, id, OriginalBytes);
+        await ExpectCodeAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", ConfirmRequest(before, sample), "LAB_REPORT_RETIRED");
+        var parent = ReportRequest([ResultSet(sample)]);
+        var parentId = EntityId(parent);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", parent, HttpStatusCode.Created);
+        var child = ReportRequest([ResultSet(sample)], "AMENDMENT", parentId, "Preserved evidence relation");
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", child, HttpStatusCode.Created);
+        await ExpectCodeAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{parentId}", DeleteRequest(), "LAB_REPORT_REFERENCED");
+        var parentBefore = await GetAsync(s.Customer, $"/api/lab-reports/{parentId}");
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{parentId}/confirm", ConfirmRequest(parentBefore, sample), HttpStatusCode.OK);
+        var confirmed = await GetAsync(s.Customer, $"/api/lab-reports/{parentId}");
+        await ExpectCodeAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{parentId}", EditRequest(parent), "REPORT_ALREADY_CONFIRMED");
+        await ExpectCodeAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{parentId}", DeleteRequest(), "REPORT_ALREADY_CONFIRMED");
+        Assert.Equal(confirmed.GetRawText(), (await GetAsync(s.Customer, $"/api/lab-reports/{parentId}")).GetRawText());
+        await AssertFileAsync(s.Customer, parentId, OriginalBytes);
+    }
+
+    [Fact]
+    public async Task Draft_mutations_require_current_company_role_and_cookie_csrf()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var request = ReportRequest([ResultSet(sample)]);
+        var id = EntityId(request);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", request, HttpStatusCode.Created);
+        foreach (var denied in new[] { s.Purchaser, s.Admin, s.Manager, s.Operator })
+        {
+            await ExpectAsync(denied, HttpMethod.Put, $"/api/lab-reports/{id}", EditRequest(request), HttpStatusCode.Forbidden);
+            await ExpectAsync(denied, HttpMethod.Delete, $"/api/lab-reports/{id}", DeleteRequest(), HttpStatusCode.Forbidden);
+        }
+        await ExpectAsync(s.ForeignCustomer, HttpMethod.Put, $"/api/lab-reports/{id}", EditRequest(request), HttpStatusCode.NotFound);
+        await ExpectAsync(s.ForeignCustomer, HttpMethod.Delete, $"/api/lab-reports/{id}", DeleteRequest(), HttpStatusCode.NotFound);
+        s.Customer.DefaultRequestHeaders.Remove("X-CSRF-TOKEN");
+        await ExpectAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", EditRequest(request), HttpStatusCode.BadRequest);
+        await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", DeleteRequest(), HttpStatusCode.BadRequest);
+        await CsrfAsync(s.Customer);
+        var malformed = DeleteRequest();
+        malformed["payloadSchemaVersion"] = 2;
+        await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", malformed, HttpStatusCode.BadRequest);
+        var before = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        using (var scope = factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.Where(x => x.Id == s.Accounts["customer"].User.Id)
+                .ExecuteUpdateAsync(x => x.SetProperty(u => u.Role, Roles.ExportStaff));
+        await ExpectAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", EditRequest(request), HttpStatusCode.Forbidden);
+        await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", DeleteRequest(), HttpStatusCode.Forbidden);
+        Assert.Equal(before.GetRawText(), (await GetAsync(s.Customer, $"/api/lab-reports/{id}")).GetRawText());
+    }
+
+    [Fact]
+    public async Task Concurrent_draft_mutations_accept_only_one_terminal_action()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        foreach (var race in new[] { "edit", "confirm", "delete" })
+        {
+            var request = ReportRequest([ResultSet(sample)]);
+            var id = EntityId(request);
+            await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", request, HttpStatusCode.Created);
+            var before = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+            var second = race switch
+            {
+                "edit" => RawAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", EditRequest(request)),
+                "confirm" => RawAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", ConfirmRequest(before, sample)),
+                _ => RawAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", DeleteRequest())
+            };
+            var responses = await Task.WhenAll(RawAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", EditRequest(request)), second);
+            try
+            {
+                Assert.Single(responses, x => x.IsSuccessStatusCode);
+                Assert.Equal(HttpStatusCode.Conflict, Assert.Single(responses, x => !x.IsSuccessStatusCode).StatusCode);
+                var current = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+                Assert.Contains(current.GetProperty("status").GetString(), new[] { "SUPERSEDED", "CONFIRMED", "DELETED" });
+                AssertOriginalFacts(before, current, allowConfirmation: true);
+                await AssertFileAsync(s.Customer, id, OriginalBytes);
+            }
+            finally { foreach (var response in responses) response.Dispose(); }
+        }
+    }
+
+    [Fact]
+    public async Task Persistence_guards_and_runtime_grants_prevent_retired_confirmation_and_confirmed_retirement()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var request = ReportRequest([ResultSet(sample)]);
+        var id = EntityId(request);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", request, HttpStatusCode.Created);
+        var detail = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", ConfirmRequest(detail, sample), HttpStatusCode.OK);
+        await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
+        await runtime.OpenAsync();
+        await using (var privileges = new NpgsqlCommand("""
+            SELECT has_table_privilege(current_user,'capture.lab_report_retirements','SELECT,INSERT')
+                AND NOT has_table_privilege(current_user,'capture.lab_report_retirements','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                AND NOT has_function_privilege(current_user,'capture.guard_lab_retirement()','EXECUTE')
+                AND NOT has_function_privilege(current_user,'capture.guard_lab_active_report()','EXECUTE')
+            """, runtime))
+            Assert.Equal(true, await privileges.ExecuteScalarAsync());
+        await using (var command = new NpgsqlCommand("""
+            INSERT INTO capture.lab_report_retirements(report_id,company_id,status,recorded_by,recorded_at)
+            VALUES($1,$2,'DELETED',$3,clock_timestamp())
+            """, runtime))
+        {
+            command.Parameters.AddWithValue(id); command.Parameters.AddWithValue(s.OwnerId); command.Parameters.AddWithValue(s.Accounts["customer"].User.Id);
+            Assert.Equal("55000", (await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync())).SqlState);
+        }
+        var draft = ReportRequest([ResultSet(sample)]);
+        var draftId = EntityId(draft);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", draft, HttpStatusCode.Created);
+        await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{draftId}", DeleteRequest(), HttpStatusCode.NoContent);
+        await using (var command = new NpgsqlCommand("""
+            INSERT INTO capture.lab_report_confirmations(id,company_id,report_id,confirmed_by,confirmed_at,identity_checked,transcription_checked)
+            VALUES($1,$2,$3,$4,clock_timestamp(),true,true)
+            """, runtime))
+        {
+            command.Parameters.AddWithValue(Guid.NewGuid()); command.Parameters.AddWithValue(s.OwnerId);
+            command.Parameters.AddWithValue(draftId); command.Parameters.AddWithValue(s.Accounts["customer"].User.Id);
+            Assert.Equal("55000", (await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync())).SqlState);
+        }
+        await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
+        await owner.OpenAsync();
+        await using var mutation = new NpgsqlCommand("DELETE FROM capture.lab_report_retirements WHERE report_id=$1", owner);
+        mutation.Parameters.AddWithValue(draftId);
+        Assert.Equal("55000", (await Assert.ThrowsAsync<PostgresException>(() => mutation.ExecuteNonQueryAsync())).SqlState);
+        Assert.Equal("CONFIRMED", (await GetAsync(s.Customer, $"/api/lab-reports/{id}")).GetProperty("status").GetString());
+        Assert.Equal("DELETED", (await GetAsync(s.Customer, $"/api/lab-reports/{draftId}")).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Draft_revision_keeps_genuine_document_relationship_and_rejects_self_link()
+    {
+        using var s = await CreateAsync(factory, policies: false);
+        var sample = await SampleAsync(s);
+        var parent = ReportRequest([ResultSet(sample)]);
+        var parentId = EntityId(parent);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", parent, HttpStatusCode.Created);
+        var parentDraft = await GetAsync(s.Customer, $"/api/lab-reports/{parentId}");
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{parentId}/confirm", ConfirmRequest(parentDraft, sample), HttpStatusCode.OK);
+        var child = ReportRequest([ResultSet(sample)], "AMENDMENT", parentId, "Correct laboratory document");
+        var childId = EntityId(child);
+        await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", child, HttpStatusCode.Created);
+        var edit = EditRequest(child);
+        edit["payload"]!["relatedReportId"] = childId;
+        await ExpectCodeAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{childId}", edit, "RELATED_REPORT_NOT_FOUND");
+        edit["payload"]!["relatedReportId"] = parentId;
+        edit["payload"]!["reportKind"] = "SUPPLEMENTARY";
+        edit["payload"]!["relationshipReason"] = "Correct supplementary document";
+        var revised = await SendAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{childId}", edit);
+        Assert.Equal(parentId, revised.GetProperty("relatedReportId").GetGuid());
+        Assert.Equal("SUPPLEMENTARY", revised.GetProperty("reportKind").GetString());
+        Assert.Equal("Correct supplementary document", revised.GetProperty("relationshipReason").GetString());
+        var historical = await GetAsync(s.Customer, $"/api/lab-reports/{childId}");
+        Assert.Equal(parentId, historical.GetProperty("relatedReportId").GetGuid());
+        Assert.Equal("AMENDMENT", historical.GetProperty("reportKind").GetString());
+        var currentParent = await GetAsync(s.Customer, $"/api/lab-reports/{parentId}");
+        Assert.Equal("CONFIRMED", currentParent.GetProperty("status").GetString());
+        Assert.Equal(parentDraft.GetProperty("resultSets")[0].GetProperty("results").GetRawText(),
+            currentParent.GetProperty("resultSets")[0].GetProperty("results").GetRawText());
+        Assert.Equal(revised.GetProperty("id").GetGuid(), Assert.Single(currentParent.GetProperty("relatedReports").EnumerateArray()).GetProperty("id").GetGuid());
+        await AssertFileAsync(s.Customer, parentId, OriginalBytes);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var retirement = await db.LabReportRetirements.SingleAsync(x => x.ReportId == childId);
+        Assert.Equal(s.Accounts["customer"].User.Id, retirement.RecordedBy);
+        Assert.True(retirement.RecordedAt > CapturedAt);
+        Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CompanyId == s.OwnerId && x.EventType == "LAB_REPORT_REVISED"));
+    }
+
+    private static JsonObject EditRequest(JsonObject original)
+    {
+        var request = original.DeepClone().AsObject();
+        request["clientOperationId"] = Guid.NewGuid();
+        request["payload"]!["contentBase64"] = null;
+        return request;
+    }
+
+    private static JsonObject DeleteRequest()
+    {
+        var request = Envelope(new { });
+        request.Remove("payload");
+        return request;
+    }
+
+    private static void AssertOriginalFacts(JsonElement original, JsonElement current, bool allowConfirmation = false)
+    {
+        foreach (var property in original.EnumerateObject())
+        {
+            if (property.Name is "status" or "replacementReportId") continue;
+            if (allowConfirmation && property.Name is "confirmedBy" or "confirmedAt" or "resultSets" or "assessmentStatus" or "assessmentReasons") continue;
+            Assert.Equal(property.Value.GetRawText(), current.GetProperty(property.Name).GetRawText());
+        }
+        if (allowConfirmation)
+            Assert.Equal(original.GetProperty("resultSets")[0].GetProperty("results").GetRawText(), current.GetProperty("resultSets")[0].GetProperty("results").GetRawText());
+    }
+
+    private static async Task ExpectCodeAsync(HttpClient client, HttpMethod method, string route, object body, string code)
+    {
+        using var response = await RawAsync(client, method, route, body);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(code, problem.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Lab_reference_confirmation_requires_matching_recorded_dispatch_evidence_not_generic_handover()
     {
         using var s = await CreateAsync(factory, policies: false);
@@ -418,7 +759,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", unknownSubstance, HttpStatusCode.Conflict);
     }
 
-    private static JsonObject ConfirmRequest(JsonElement report, params SampleIdentity[] samples) => Envelope(new
+    internal static JsonObject ConfirmRequest(JsonElement report, params SampleIdentity[] samples) => Envelope(new
     {
         identityChecked = true, transcriptionChecked = true,
         matches = report.GetProperty("resultSets").EnumerateArray().Select((set, index) => new
@@ -591,7 +932,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal("INSUFFICIENT_EVIDENCE", insuffConfirmed.GetProperty("assessmentStatus").GetString());
     }
 
-    private static async Task<SampleIdentity> SampleAsync(LedgerScenario s, JsonElement? receipt = null, HttpClient? purchaser = null)
+    internal static async Task<SampleIdentity> SampleAsync(LedgerScenario s, JsonElement? receipt = null, HttpClient? purchaser = null)
     {
         var procurement = receipt ?? await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), ["100"]));
         var sourceLotId = procurement.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
@@ -625,14 +966,14 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         method = "Laboratory method A", uncertainty = "±0.000000000001", reference = "page 2, row 1"
     };
 
-    private static object ResultSet(SampleIdentity? sample, object[]? results = null, string? statedCode = null) => new
+    internal static object ResultSet(SampleIdentity? sample, object[]? results = null, string? statedCode = null) => new
     {
         entityId = Guid.NewGuid(), sampleId = sample?.Id, laboratorySampleReference = (string?)null,
         statedSampleCode = statedCode ?? sample?.Code, statedSealCode = sample?.Seal,
         sectionReference = "page 2", results = results ?? [Result()]
     };
 
-    private static JsonObject ReportRequest(object[] sets, string kind = "FINAL", Guid? relatedReportId = null,
+    internal static JsonObject ReportRequest(object[] sets, string kind = "FINAL", Guid? relatedReportId = null,
         string? reason = null, byte[]? bytes = null) => Envelope(new
     {
         entityId = Guid.NewGuid(), laboratoryName = "External Test Laboratory", reportNumber = $"LAB-{Guid.NewGuid():N}",
@@ -649,7 +990,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         payloadSchemaVersion = 1, payload
     })!.AsObject();
 
-    private static Guid EntityId(JsonObject envelope) => envelope["payload"]!["entityId"]!.GetValue<Guid>();
+    internal static Guid EntityId(JsonObject envelope) => envelope["payload"]!["entityId"]!.GetValue<Guid>();
 
     private static async Task ExpectAsync(HttpClient client, HttpMethod method, string route, object body, HttpStatusCode expected)
     {
@@ -668,5 +1009,5 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Contains("nosniff", response.Headers.GetValues("X-Content-Type-Options"));
     }
 
-    private sealed record SampleIdentity(Guid Id, Guid SourceLotId, Guid LotId, string Code, string Seal, JsonElement Receipt);
+    internal sealed record SampleIdentity(Guid Id, Guid SourceLotId, Guid LotId, string Code, string Seal, JsonElement Receipt);
 }

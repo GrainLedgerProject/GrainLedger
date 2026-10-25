@@ -1,0 +1,19 @@
+.residue-dialog-backdrop { z-index: 120; }
+.residue-dialog { width: min(1100px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; overflow-wrap: anywhere; }
+.residue-dialog .farmer-modal-close { width: 44px; height: 44px; }
+.residue-dialog fieldset { min-width: 0; }
+.residue-rule-maintenance label, .residue-company-policies label { min-width: 0; }
+.residue-rule-maintenance select, .residue-dialog select { max-width: 100%; }
+.residue-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-block: 1rem; }
+.residue-toolbar label { flex: 1 1 150px; min-width: 0; }
+.residue-toolbar input, .residue-toolbar select { width: 100%; }
+.residue-profile-list { display: grid; gap: 1rem; }
+.residue-profile-list > section, .residue-history-series { border: 1px solid var(--border, #d6dce4); border-radius: .5rem; padding: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.residue-history-series { margin-block: .75rem; }
+.residue-history-series li { margin-block: .75rem; }
+.residue-counts { font-variant-numeric: tabular-nums; }
+.residue-rule-history-heading td { background: var(--surface-alt, #f4f6f8); }
+@media (max-width: 600px) {
+  .residue-dialog { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; }
+  .residue-toolbar label { flex-basis: 100%; }
+}

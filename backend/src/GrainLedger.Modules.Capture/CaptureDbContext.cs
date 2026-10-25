@@ -61,6 +61,7 @@ public sealed class CaptureDbContext(DbContextOptions<CaptureDbContext> options)
     public DbSet<Sample> Samples => Set<Sample>();
     public DbSet<SampleHandover> SampleHandovers => Set<SampleHandover>();
     public DbSet<LabReport> LabReports => Set<LabReport>();
+    public DbSet<LabReportRetirement> LabReportRetirements => Set<LabReportRetirement>();
     public DbSet<LabResultSet> LabResultSets => Set<LabResultSet>();
     public DbSet<LabResult> LabResults => Set<LabResult>();
     public DbSet<LabReportConfirmation> LabReportConfirmations => Set<LabReportConfirmation>();

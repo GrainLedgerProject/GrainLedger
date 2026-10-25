@@ -6,7 +6,7 @@ import { type User } from './api';
 
 const actor: User = { id: 'actor', email: 'test@example.com', displayName: 'Test', phoneNumber: null, role: 'Administrator', organizationId: 'mill', organizationName: 'Mill', isActive: true, permissions: ['trace.read.all'] };
 const lotId = 'b9c6099b-19b1-4187-a2a7-542a29186dd8';
-const trace: LotTrace = { traceId: 'trace-1', targetLotId: lotId, direction: 'backward', view: 'current', asOf: '2026-10-17T00:00:00Z', complete: true, lotCount: 1, edgeCount: 0, sourceContributionsVisible: true,
+const trace: LotTrace = { schemaVersion: 2, traceId: 'trace-1', targetLotId: lotId, direction: 'backward', view: 'current', asOf: '2026-10-17T00:00:00Z', complete: true, lotCount: 1, edgeCount: 0, sourceContributionsVisible: true,
   lots: [{ id: lotId, code: 'LOT-TRACE', stage: 'DRIED_PADDY', producedKg: '0.000001', positions: [{ locationId: 'store', quantityKg: '0.000001', availableKg: '0.000000' }], restrictions: ['HOLD'], contributions: [{ sourceLotId: 'source', quantityKg: '0.000000', denominatorKg: '0.000001', percentage: '0.000000' }] }],
   edges: [], operations: [], corrections: [], sources: [{ lotId: 'source', status: 'LEGACY_SOURCE_UNAVAILABLE', provenance: null }] };
 const fetchMock = vi.fn<typeof fetch>();
@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset();
   fetchMock.mockImplementation(async url => {
     if (String(url) === '/api/auth/csrf') return response({ token: 'csrf' });
-    if (String(url).startsWith('/api/ledger/lots?')) return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+    if (String(url).startsWith('/api/ledger/trace/starts?')) return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
     return response(trace);
   });
 });
@@ -38,7 +38,7 @@ it('submits scoped trace with CSRF and keeps exact zero allocation, stock restri
 it('only offers affected-lot direction to Export Staff and never fetches automatically on mount', async () => {
   render(<LedgerTraceability user={{ ...actor, role: 'ExportStaff', permissions: ['trace.read.tenant'], organizationId: 'customer' }} />);
   expect(screen.queryByRole('option', { name: /Backward/ })).not.toBeInTheDocument();
-  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/ledger/lots?'))).toBe(true));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/ledger/trace/starts?'))).toBe(true));
   expect(fetchMock.mock.calls.some(([url]) => url === '/api/ledger/trace')).toBe(false);
 });
 
@@ -110,7 +110,7 @@ it('displays a lone starting lot and zoom controls without inventing downstream 
 
 it('keeps source data hidden in the Export Staff flowchart as in the API response', async () => {
   const exported: LotTrace = { ...branchingTrace, sourceContributionsVisible: false, sources: [], lots: branchingTrace.lots.map(lot => ({ ...lot, contributions: null })) };
-  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : String(url).startsWith('/api/ledger/lots?') ? response({ items: [branchingTrace.lots[1]], page: 1, pageSize: 25, totalCount: 1, hasMore: false }) : response(exported));
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : String(url).startsWith('/api/ledger/trace/starts?') ? response({ items: [branchingTrace.lots[1]], page: 1, pageSize: 25, totalCount: 1, hasMore: false }) : response(exported));
   const browser = userEvent.setup(); render(<LedgerTraceability user={{ ...actor, role: 'ExportStaff', permissions: ['trace.read.tenant'] }} />);
   await screen.findByRole('option', { name: /LOT-TRACE/ });
   await browser.selectOptions(screen.getByLabelText('Starting lot'), lotId);
@@ -179,4 +179,134 @@ it('keeps recorded origin IDs available when reference labels are missing', asyn
   const origin = screen.getByRole('list', { name: 'Recorded origin for source' });
   expect(origin).toHaveTextContent('Name unavailable'); expect(origin).toHaveTextContent('plot-id');
   expect(screen.queryByText(/Legacy source details unavailable/)).not.toBeInTheDocument();
+});
+
+it('shows pool generations, effective HOLD and custody relationships consistently in Table and Flowchart', async () => {
+  const custody: LotTrace = { ...branchingTrace, schemaVersion: 2, positivePathCoverage: 'PERSISTED_ALLOCATIONS',
+    lots: branchingTrace.lots.map(lot => ({ ...lot, isCurrentPool: lot.id === childId, poolRevision: 2, directHold: false, effectiveHold: true, positivePathSourceIds: [] })),
+    operations: [], custodyEvents: [{ id: 'withdraw', action: 'WITHDRAW', locationId: 'store', revision: 2, occurredAt: trace.asOf, primaryOutputLotId: childId }],
+    edges: [{ ...branchingTrace.edges[0], operationId: null, relationType: 'CUSTODY', relationId: 'withdraw', inputEventKg: '0.000001' }] };
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : response(custody));
+  const browser = userEvent.setup(); render(<LedgerTraceability user={actor} />);
+  await browser.type(screen.getByLabelText('Ledger lot ID'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  const table = await screen.findByRole('table', { name: 'Traced lots' });
+  expect(table).toHaveTextContent('Current pool · revision 2');
+  expect(table).toHaveTextContent('HOLD inherited through recorded source ancestry');
+  expect(screen.getByRole('table', { name: 'Storage and processing relationships' })).toHaveTextContent('Withdrawal · revision 2');
+  expect(screen.getByText(/An empty set means no positive source path/)).toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: 'Flowchart' }));
+  expect(screen.getByRole('group', { name: 'WITHDRAW storage event withdraw' })).toHaveTextContent('Withdrawal / remainder');
+  expect(screen.queryByRole('group', { name: /Processing operation/ })).not.toBeInTheDocument();
+  await browser.click(screen.getByRole('button', { name: 'Table' }));
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/api/ledger/trace')).toHaveLength(1);
+});
+
+it('opens source evidence only on demand for the lab-authorized Customer Manager and maps the Capture source record', async () => {
+  const recorded: LotTrace = { ...trace, sources: [{ lotId: 'source', status: 'RECORDED', provenance: {
+    sourceRecordId: 'capture-source-record', procurementId: 'procurement', procurementItemId: 'item', procurementCode: 'PUR-01',
+    farmerId: 'farmer', plotId: 'plot', seasonId: 'season', plotSeasonId: 'ps', riceVariety: 'ST25', expectedKg: '1', originalValue: '1', originalUnit: 'kg'
+  } }] };
+  fetchMock.mockImplementation(async url => {
+    if (String(url) === '/api/auth/csrf') return response({ token: 'csrf' });
+    if (String(url).startsWith('/api/ledger/trace/starts?')) return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+    if (String(url).startsWith('/api/samples') || String(url).startsWith('/api/lab-reports')) return response({ items: [], page: 1, hasMore: false });
+    return response(recorded);
+  });
+  const browser = userEvent.setup();
+  const view = render(<LedgerTraceability user={{ ...actor, role: 'CustomerManager', organizationId: 'company', permissions: ['trace.read.tenant', 'lab.write'] }} initialLotId={lotId} />);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  await browser.click(await screen.findByRole('button', { name: 'View samples and laboratory evidence' }));
+  await screen.findByText(/No confirmed report evidence found/);
+  const evidenceCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/lab-reports') || String(url).startsWith('/api/samples'));
+  expect(evidenceCalls).toHaveLength(2);
+  expect(evidenceCalls.every(([url]) => String(url).includes('sourceLotId=capture-source-record'))).toBe(true);
+  await browser.click(screen.getByRole('button', { name: 'Flowchart' }));
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/lab-reports'))).toHaveLength(1);
+  view.rerender(<LedgerTraceability user={actor} initialLotId={lotId} />);
+  await browser.type(screen.getByRole('textbox', { name: 'Ledger lot ID' }), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  await screen.findByRole('table', { name: 'Traced source contributions' });
+  expect(screen.queryByRole('button', { name: 'View samples and laboratory evidence' })).not.toBeInTheDocument();
+});
+
+it('allows historical exhausted pool selection for tracing without making it eligible for stock operations', async () => {
+  const historical = { ...trace.lots[0], mixedBulk: true, kind: 'POOL_GENERATION', isCurrentPool: false, positions: [], ownerId: 'company', commodityId: 'paddy' };
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : String(url).startsWith('/api/ledger/trace/starts?') ? response({ items: [historical], page: 1, pageSize: 25, totalCount: 1, hasMore: false }) : response(trace));
+  const browser = userEvent.setup();
+  render(<LedgerTraceability user={{ ...actor, role: 'CustomerManager', organizationId: 'company', permissions: ['trace.read.tenant'] }} />);
+  const option = await screen.findByRole('option', { name: /Historical pool/ });
+  expect(option).toBeEnabled();
+  await browser.selectOptions(screen.getByLabelText('Starting lot'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  await screen.findByRole('table', { name: 'Traced lots' });
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/ledger/trace/starts?')).every(([url]) => !String(url).includes('availableOnly=true'))).toBe(true);
+});
+
+it('rejects a legacy complete result instead of presenting it as a complete custody trace', async () => {
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : response({ ...trace, schemaVersion: undefined }));
+  const browser = userEvent.setup(); render(<LedgerTraceability user={actor} initialLotId={lotId} />);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('requires an upgrade');
+  expect(screen.queryByRole('table', { name: 'Traced lots' })).not.toBeInTheDocument();
+});
+
+it('clears previously loaded source facts when the active role or company changes', async () => {
+  const browser = userEvent.setup();
+  const view = render(<LedgerTraceability user={{ ...actor, role: 'CustomerManager', organizationId: 'company', permissions: ['trace.read.tenant', 'lab.write'] }} initialLotId={lotId} />);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  await screen.findByRole('table', { name: 'Traced source contributions' });
+  view.rerender(<LedgerTraceability user={{ ...actor, role: 'ExportStaff', organizationId: 'company', permissions: ['trace.read.tenant', 'lab.read'] }} initialLotId={lotId} />);
+  expect(screen.queryByRole('table', { name: 'Traced source contributions' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Trace result' })).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('');
+});
+
+it('discards a previous company laboratory entry on a scope change', () => {
+  const user = { ...actor, role: 'CustomerManager', organizationId: 'company-a', permissions: ['trace.read.tenant', 'lab.write'] };
+  const view = render(<LedgerTraceability user={user} initialLabOrigin={{ reportId: 'report-a', resultId: 'result-a' }} />);
+  expect(screen.getByText(/Starting from a confirmed laboratory result/)).toBeInTheDocument();
+  view.rerender(<LedgerTraceability user={{ ...user, organizationId: 'company-b' }} initialLabOrigin={{ reportId: 'report-a', resultId: 'result-a' }} />);
+  expect(screen.queryByText(/Starting from a confirmed laboratory result/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Run trace' })).toBeDisabled();
+});
+
+it('prepares lab tracing without a POST on mount and asks the server to resolve the source', async () => {
+  const origin = { reportId: 'report', resultId: 'result' };
+  fetchMock.mockImplementation(async url => String(url) === '/api/auth/csrf' ? response({ token: 'csrf' }) : response({ ...trace, labOrigin: { ...origin, lotId, sampleId: 'sample' } }));
+  const user = userEvent.setup();
+  render(<LedgerTraceability user={{ ...actor, role: 'CustomerManager', permissions: ['trace.read.tenant', 'lab.write'] }} initialLabOrigin={origin} />);
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ledger/trace'))).toBe(false);
+  expect(screen.getByLabelText('Trace direction')).toBeDisabled();
+  await user.click(screen.getByRole('button', { name: 'Run trace' }));
+  await screen.findByRole('table', { name: 'Traced lots' });
+  const call = fetchMock.mock.calls.find(([url]) => url === '/api/ledger/trace/from-lab')!;
+  expect(JSON.parse(String(call[1]?.body))).toEqual({ ...origin, view: 'current' });
+  expect(screen.getByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue(lotId);
+  await user.click(screen.getByRole('button', { name: 'Choose another starting point' }));
+  expect(screen.getByLabelText('Trace direction')).toBeEnabled();
+  expect(screen.queryByRole('table', { name: 'Traced lots' })).not.toBeInTheDocument();
+});
+
+it('loads residue only for the requested selected node and keeps it separate from the graph', async () => {
+  fetchMock.mockImplementation(async url => {
+    if (String(url) === '/api/auth/csrf') return response({ token: 'csrf' });
+    if (String(url).startsWith('/api/ledger/trace/starts?')) return response({ items: [], page: 1, pageSize: 25, totalCount: 0 });
+    if (String(url).startsWith('/api/active-substances')) return response({ items: [], page: 1, pageSize: 100, hasMore: false });
+    if (String(url).includes('/residue-evaluations')) return response({ items: [] });
+    return response(branchingTrace);
+  });
+  const user = userEvent.setup();
+  render(<LedgerTraceability user={{ ...actor, role: 'CustomerManager', permissions: ['trace.read.tenant', 'residue.evaluate'] }} initialLotId={lotId} />);
+  await user.click(screen.getByRole('button', { name: 'Run trace' }));
+  await screen.findByRole('table', { name: 'Traced lots' });
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/residue-'))).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'View residue bounds for selected lot' }));
+  await screen.findByText('No active substances are available.');
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/residue-evaluations'))[0][0]).toContain(lotId);
+  await user.click(screen.getByRole('button', { name: 'Flowchart' }));
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/residue-evaluations'))).toHaveLength(1);
+  await user.click(screen.getByRole('button', { name: 'Select lot CHILD' }));
+  expect(screen.queryByRole('heading', { name: 'Lot residue bounds' })).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`${childId}/residue`))).toBe(false);
 });

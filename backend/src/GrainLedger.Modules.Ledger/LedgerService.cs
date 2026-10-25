@@ -42,7 +42,7 @@ public sealed class LedgerService(IConfiguration configuration, IHttpContextAcce
             else command.Parameters.Add(new NpgsqlParameter { Value = value ?? DBNull.Value });
         }
         try { return await command.ExecuteScalarAsync(ct); }
-        catch (PostgresException ex) when (ex.SqlState is "23514" or "23505" or "23503" or "23502" or "42501" or "P0002" or "22P02" or "22003" or "22023" or "22007" or "22008")
+        catch (PostgresException ex) when (ex.SqlState is "23514" or "23505" or "23503" or "23502" or "42501" or "40001" or "P0002" or "22P02" or "22003" or "22023" or "22007" or "22008")
         { throw new LedgerException(ex.SqlState == "42501" ? 403 : ex.SqlState == "23502" || ex.SqlState.StartsWith("22", StringComparison.Ordinal) ? 400 : 409, ex.MessageText); }
     }
     public async Task<JsonElement> CommandAsync(string action, JsonObject payload, CancellationToken ct = default)
