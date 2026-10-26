@@ -1,58 +1,116 @@
-import React from 'react';
+import React from "react";
+import "@/index.css";
 
 export interface GrainLoaderProps {
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: "sm" | "md" | "lg" | "xl";
   label?: string;
   fullPage?: boolean;
   className?: string;
 }
 
+const sizeMap = {
+  sm: 24,
+  md: 36,
+  lg: 52,
+  xl: 68,
+};
+
 export const GrainLoader: React.FC<GrainLoaderProps> = ({
-  size = 'md',
+  size = "md",
   label,
   fullPage = false,
-  className = '',
+  className = "",
 }) => {
-  const sizeMap = {
-    sm: 20,
-    md: 32,
-    lg: 48,
-    xl: 64,
-  };
+  const dimension = sizeMap[size];
 
-  const content = (
+  const loader = (
     <div
-      className={`inline-flex flex-col items-center justify-center gap-3 transition-opacity duration-300 ${className}`}
       role="status"
       aria-live="polite"
+      className={`flex flex-col items-center justify-center gap-4 ${className}`}
     >
-      <div className="relative flex items-center justify-center">
-        {/* Subtle rotating glow ring */}
+      <div
+        className="relative flex items-center justify-center"
+        style={{
+          width: dimension + 24,
+          height: dimension + 24,
+        }}
+      >
+        {/* Soft green glow */}
         <div
-          className="absolute inset-0 rounded-full border border-accent-primary/20 border-t-accent-primary animate-spin"
-          style={{ width: sizeMap[size] + 16, height: sizeMap[size] + 16, animationDuration: '1.2s' }}
+          className="
+            absolute rounded-full bg-emerald-500/10
+            blur-xl animate-pulse
+            motion-reduce:animate-none
+          "
+          style={{
+            width: dimension,
+            height: dimension,
+          }}
+          aria-hidden="true"
         />
-        {/* Rotating Grain */}
-        <div className="animate-bounce" style={{ animationDuration: '1.4s' }}>
-          <img src="/favicon.svg" alt="GrainLedger" className="w-12 h-12" />
-        </div>
+
+        {/* Rotating progress arc */}
+        <svg
+          className="absolute inset-0 h-full w-full animate-spin motion-reduce:animate-none"
+          style={{ animationDuration: "2.4s" }}
+          viewBox="0 0 100 100"
+          fill="none"
+          aria-hidden="true"
+        >
+          <circle
+            cx="50"
+            cy="50"
+            r="46"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className="text-emerald-700/10"
+          />
+          <circle
+            cx="50"
+            cy="50"
+            r="46"
+            stroke="#D5AD43"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray="64 225"
+          />
+        </svg>
+
+        {/* Your original GrainLedger logo */}
+        <img
+          src="/favicon.svg"
+          alt=""
+          draggable={false}
+          className="
+            relative z-10 object-contain
+            animate-grain-breathe
+            motion-reduce:animate-none
+          "
+          style={{
+            width: dimension,
+            height: dimension,
+          }}
+        />
       </div>
+
       {label && (
-        <span className="text-xs uppercase tracking-wider font-semibold text-ink-secondary">
+        <span className="text-xs font-semibold tracking-widest text-ink-secondary">
           {label}
         </span>
       )}
-      <span className="sr-only">Đang tải dữ liệu...</span>
+
+      <span className="sr-only">
+        {label ? `${label}. ` : ""}Đang tải dữ liệu...
+      </span>
     </div>
   );
 
-  if (fullPage) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 backdrop-blur-sm">
-        {content}
-      </div>
-    );
-  }
+  if (!fullPage) return loader;
 
-  return content;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 backdrop-blur-sm">
+      {loader}
+    </div>
+  );
 };

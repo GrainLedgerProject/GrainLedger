@@ -1,6 +1,7 @@
 import { AppHeader } from "@/components/AppHeader/AppHeader";
 import { AppSidebar } from "@/components/AppSidebar/AppSidebar";
 import { CompanyContextBar } from "@/components/CompanyContextBar/CompanyContextBar";
+import { DynamicIslandNotification } from "@/components/DynamicIslandNotification/DynamicIslandNotification";
 import { ErrorBoundary } from "@/components/ErrorBoundary/ErrorBoundary";
 import { GlobalSearchModal } from "@/components/GlobalSearchModal/GlobalSearchModal";
 import React from "react";
@@ -11,7 +12,10 @@ export const AppLayout: React.FC = () => {
   const { t } = useTranslation();
 
   return (
-    <div className="min-h-screen bg-parchment-grain flex flex-row selection:bg-accent-primary/20 selection:text-accent-primary">
+    <div className="min-h-screen bg-surface-base flex flex-row selection:bg-accent-primary/20 selection:text-accent-primary">
+      {/* Dynamic Island Floating Notification */}
+      {/* <DynamicIslandNotification /> */}
+
       {/* App Sidebar */}
       <AppSidebar />
 
@@ -27,23 +31,23 @@ export const AppLayout: React.FC = () => {
           </ErrorBoundary>
         </main>
 
-        {/* Minimal Operational Footer */}
-        <footer className="border-t border-ink-tertiary/15 py-3 px-6 text-xs text-ink-tertiary flex flex-col sm:flex-row items-center justify-between gap-2 bg-surface-base/80">
-          <footer className="h-16 flex items-center px-4">
-            <div className="flex items-center gap-2 h-full">
-              <img
-                src="/favicon.svg"
-                alt="GrainLedger"
-                className="h-full w-auto shrink-0 object-contain"
-              />
-              <span>
-                GrainLedger © 2026 GFA26SE137 (FA26SE272) — Tiền Giang, Vietnam
-              </span>
-            </div>
-          </footer>
-          <div className="flex items-center gap-4 text-[11px]">
-            <span>{t('common.isoComplianceFooter', 'Tuân thủ mô hình Mass Balance ISO 22095:2020')}</span>
-            <span>{t('common.versionFooter', 'Phiên bản v1.0.0-dev')}</span>
+        {/* Minimal Operational Footer — Apple-style clean */}
+        <footer className="border-t border-ink-tertiary/10 py-4 px-6 text-xs text-ink-tertiary flex flex-col sm:flex-row items-center justify-between gap-2 bg-surface-base">
+          <div className="flex items-center gap-3">
+            <img
+              src="/favicon.svg"
+              alt="GrainLedger"
+              className="h-5 w-5 shrink-0 opacity-60"
+            />
+            <span className="text-[11px]">
+              GrainLedger © 2026 — Tiền Giang, Vietnam
+            </span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] text-ink-tertiary/70">
+            <span>
+              {t("common.isoComplianceFooter", "ISO 22095:2020 Mass Balance")}
+            </span>
+            <span>{t("common.versionFooter", "v1.0.0-dev")}</span>
           </div>
         </footer>
       </div>

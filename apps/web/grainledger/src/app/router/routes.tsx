@@ -1,61 +1,245 @@
 /**
  * Complete Route Tree Scaffold for all 35 screens
  * Defined in SRS §3.1.1, §3.1.2, §3.1.3 and technical specs
+ *
+ * Phase 1: Code-split all page components via React.lazy to reduce
+ * initial bundle from ~1.96 MB to <200 kB.
  */
+/* eslint-disable react-refresh/only-export-components */
 import { AppLayout } from "@/components/AppLayout/AppLayout";
-import { PlaceholderPage } from "@/components/PlaceholderPage/PlaceholderPage";
-import { BalancePolicyPage } from "@/features/admin/pages/BalancePolicyPage";
-import { CustomerOrganizationsPage } from "@/features/admin/pages/CustomerOrganizationsPage";
-import { FacilityConfigPage } from "@/features/admin/pages/FacilityConfigPage";
-import { ReceivingThresholdsPage } from "@/features/admin/pages/ReceivingThresholdsPage";
-import { UserAccessManagementPage } from "@/features/admin/pages/UserAccessManagementPage";
-import { EventHistoryPage } from "@/features/audit/pages/EventHistoryPage";
-import { AcceptInvitationPage } from "@/features/auth/pages/AcceptInvitationPage";
-import { ChangePasswordPage } from "@/features/auth/pages/ChangePasswordPage";
-import { EditProfilePage } from "@/features/auth/pages/EditProfilePage";
-import { ForgotPasswordPage } from "@/features/auth/pages/ForgotPasswordPage";
-import { SignInPage } from "@/features/auth/pages/SignInPage";
-import { MasterDataPage } from "@/features/catalogs/pages/MasterDataPage";
-import { MrlVersionsPage } from "@/features/catalogs/pages/MrlVersionsPage";
-import { LabSampleRegistrationPage } from "@/features/compliance/pages/LabSampleRegistrationPage";
-import { MrlComplianceCheckPage } from "@/features/compliance/pages/MrlComplianceCheckPage";
-import { SafetyMarginPolicyPage } from "@/features/compliance/pages/SafetyMarginPolicyPage";
-import { RoleHomePage } from "@/features/dashboard/pages/RoleHomePage";
-import { FarmerRegistrationPage } from "@/features/field/pages/FarmerRegistrationPage";
-import { FieldSampleRegistrationPage } from "@/features/field/pages/FieldSampleRegistrationPage";
-import { OfflineSyncQueuePage } from "@/features/field/pages/OfflineSyncQueuePage";
-import { PesticideDeclarationPage } from "@/features/field/pages/PesticideDeclarationPage";
-import { PlotRegistrationPage } from "@/features/field/pages/PlotRegistrationPage";
-import { ProcurementReceiptPage } from "@/features/field/pages/ProcurementReceiptPage";
-import { LandingPage } from "@/features/landing/pages/LandingPage";
-import { CorrectionRequestPage } from "@/features/mill/pages/CorrectionRequestPage";
-import { OperationEntryPage } from "@/features/mill/pages/OperationEntryPage";
-import { PendingCorrectionsPage } from "@/features/mill/pages/PendingCorrectionsPage";
-import { ReconciliationReviewPage } from "@/features/mill/pages/ReconciliationReviewPage";
-import { ReceivingTasksPage } from "@/features/mill/pages/ReceivingTasksPage";
-import { StockOverviewPage } from "@/features/mill/pages/StockOverviewPage";
-import { HoldManagementPage } from "@/features/risk/pages/HoldManagementPage";
-import React from "react";
+import { SuspenseLoader } from "@/components/SuspenseLoader/SuspenseLoader";
+import React, { Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "./ProtectedRoute";
 
+// ---------------------------------------------------------------------------
+// Lazy-loaded page components — each becomes its own async chunk.
+// PlaceholderPage stays static (tiny, used by many routes).
+// ---------------------------------------------------------------------------
+const PlaceholderPage = React.lazy(() =>
+  import("@/components/PlaceholderPage/PlaceholderPage").then((m) => ({
+    default: m.PlaceholderPage,
+  })),
+);
+
+// Auth pages (public, loaded on-demand)
+const SignInPage = React.lazy(() =>
+  import("@/features/auth/pages/SignInPage").then((m) => ({
+    default: m.SignInPage,
+  })),
+);
+const ForgotPasswordPage = React.lazy(() =>
+  import("@/features/auth/pages/ForgotPasswordPage").then((m) => ({
+    default: m.ForgotPasswordPage,
+  })),
+);
+const AcceptInvitationPage = React.lazy(() =>
+  import("@/features/auth/pages/AcceptInvitationPage").then((m) => ({
+    default: m.AcceptInvitationPage,
+  })),
+);
+const EditProfilePage = React.lazy(() =>
+  import("@/features/auth/pages/EditProfilePage").then((m) => ({
+    default: m.EditProfilePage,
+  })),
+);
+const ChangePasswordPage = React.lazy(() =>
+  import("@/features/auth/pages/ChangePasswordPage").then((m) => ({
+    default: m.ChangePasswordPage,
+  })),
+);
+
+// Landing
+const LandingPage = React.lazy(() =>
+  import("@/features/landing/pages/LandingPage").then((m) => ({
+    default: m.LandingPage,
+  })),
+);
+
+// Dashboard
+const RoleHomePage = React.lazy(() =>
+  import("@/features/dashboard/pages/RoleHomePage").then((m) => ({
+    default: m.RoleHomePage,
+  })),
+);
+
+// Admin pages
+const CustomerOrganizationsPage = React.lazy(() =>
+  import("@/features/admin/pages/CustomerOrganizationsPage").then((m) => ({
+    default: m.CustomerOrganizationsPage,
+  })),
+);
+const UserAccessManagementPage = React.lazy(() =>
+  import("@/features/admin/pages/UserAccessManagementPage").then((m) => ({
+    default: m.UserAccessManagementPage,
+  })),
+);
+const FacilityConfigPage = React.lazy(() =>
+  import("@/features/admin/pages/FacilityConfigPage").then((m) => ({
+    default: m.FacilityConfigPage,
+  })),
+);
+const BalancePolicyPage = React.lazy(() =>
+  import("@/features/admin/pages/BalancePolicyPage").then((m) => ({
+    default: m.BalancePolicyPage,
+  })),
+);
+const ReceivingThresholdsPage = React.lazy(() =>
+  import("@/features/admin/pages/ReceivingThresholdsPage").then((m) => ({
+    default: m.ReceivingThresholdsPage,
+  })),
+);
+
+// Catalogs
+const MasterDataPage = React.lazy(() =>
+  import("@/features/catalogs/pages/MasterDataPage").then((m) => ({
+    default: m.MasterDataPage,
+  })),
+);
+const MrlVersionsPage = React.lazy(() =>
+  import("@/features/catalogs/pages/MrlVersionsPage").then((m) => ({
+    default: m.MrlVersionsPage,
+  })),
+);
+
+// Field pages
+const FarmerRegistrationPage = React.lazy(() =>
+  import("@/features/field/pages/FarmerRegistrationPage").then((m) => ({
+    default: m.FarmerRegistrationPage,
+  })),
+);
+const PlotRegistrationPage = React.lazy(() =>
+  import("@/features/field/pages/PlotRegistrationPage").then((m) => ({
+    default: m.PlotRegistrationPage,
+  })),
+);
+const PesticideDeclarationPage = React.lazy(() =>
+  import("@/features/field/pages/PesticideDeclarationPage").then((m) => ({
+    default: m.PesticideDeclarationPage,
+  })),
+);
+const ProcurementReceiptPage = React.lazy(() =>
+  import("@/features/field/pages/ProcurementReceiptPage").then((m) => ({
+    default: m.ProcurementReceiptPage,
+  })),
+);
+const FieldSampleRegistrationPage = React.lazy(() =>
+  import("@/features/field/pages/FieldSampleRegistrationPage").then((m) => ({
+    default: m.FieldSampleRegistrationPage,
+  })),
+);
+const OfflineSyncQueuePage = React.lazy(() =>
+  import("@/features/field/pages/OfflineSyncQueuePage").then((m) => ({
+    default: m.OfflineSyncQueuePage,
+  })),
+);
+
+// Mill pages
+const ReceivingTasksPage = React.lazy(() =>
+  import("@/features/mill/pages/ReceivingTasksPage").then((m) => ({
+    default: m.ReceivingTasksPage,
+  })),
+);
+const OperationEntryPage = React.lazy(() =>
+  import("@/features/mill/pages/OperationEntryPage").then((m) => ({
+    default: m.OperationEntryPage,
+  })),
+);
+const CorrectionRequestPage = React.lazy(() =>
+  import("@/features/mill/pages/CorrectionRequestPage").then((m) => ({
+    default: m.CorrectionRequestPage,
+  })),
+);
+const PendingCorrectionsPage = React.lazy(() =>
+  import("@/features/mill/pages/PendingCorrectionsPage").then((m) => ({
+    default: m.PendingCorrectionsPage,
+  })),
+);
+const ReconciliationReviewPage = React.lazy(() =>
+  import("@/features/mill/pages/ReconciliationReviewPage").then((m) => ({
+    default: m.ReconciliationReviewPage,
+  })),
+);
+const StockOverviewPage = React.lazy(() =>
+  import("@/features/mill/pages/StockOverviewPage").then((m) => ({
+    default: m.StockOverviewPage,
+  })),
+);
+
+// Compliance pages
+const LabSampleRegistrationPage = React.lazy(() =>
+  import("@/features/compliance/pages/LabSampleRegistrationPage").then((m) => ({
+    default: m.LabSampleRegistrationPage,
+  })),
+);
+const MrlComplianceCheckPage = React.lazy(() =>
+  import("@/features/compliance/pages/MrlComplianceCheckPage").then((m) => ({
+    default: m.MrlComplianceCheckPage,
+  })),
+);
+const SafetyMarginPolicyPage = React.lazy(() =>
+  import("@/features/compliance/pages/SafetyMarginPolicyPage").then((m) => ({
+    default: m.SafetyMarginPolicyPage,
+  })),
+);
+
+// Audit
+const EventHistoryPage = React.lazy(() =>
+  import("@/features/audit/pages/EventHistoryPage").then((m) => ({
+    default: m.EventHistoryPage,
+  })),
+);
+
+// Risk
+const HoldManagementPage = React.lazy(() =>
+  import("@/features/risk/pages/HoldManagementPage").then((m) => ({
+    default: m.HoldManagementPage,
+  })),
+);
+
+// ---------------------------------------------------------------------------
+// Suspense wrapper — wraps every lazy route element with shimmer fallback
+// ---------------------------------------------------------------------------
+function L(props: { children: React.ReactNode }) {
+  return <Suspense fallback={<SuspenseLoader />}>{props.children}</Suspense>;
+}
+
+// ---------------------------------------------------------------------------
+// Router definition
+// ---------------------------------------------------------------------------
 export const router = createBrowserRouter([
   // Public Unauthenticated Routes
   {
     path: "/",
-    element: <LandingPage />,
+    element: (
+      <L>
+        <LandingPage />
+      </L>
+    ),
   },
   {
     path: "/sign-in",
-    element: <SignInPage />,
+    element: (
+      <L>
+        <SignInPage />
+      </L>
+    ),
   },
   {
     path: "/invite/:token",
-    element: <AcceptInvitationPage />,
+    element: (
+      <L>
+        <AcceptInvitationPage />
+      </L>
+    ),
   },
   {
     path: "/forgot-password",
-    element: <ForgotPasswordPage />,
+    element: (
+      <L>
+        <ForgotPasswordPage />
+      </L>
+    ),
   },
 
   // Authenticated App Shell Routes
@@ -68,25 +252,45 @@ export const router = createBrowserRouter([
     children: [
       {
         path: "/home",
-        element: <RoleHomePage />,
+        element: (
+          <L>
+            <RoleHomePage />
+          </L>
+        ),
       },
       {
         path: "/settings/profile",
-        element: <EditProfilePage />,
+        element: (
+          <L>
+            <EditProfilePage />
+          </L>
+        ),
       },
       {
         path: "/settings/security",
-        element: <ChangePasswordPage />,
+        element: (
+          <L>
+            <ChangePasswordPage />
+          </L>
+        ),
       },
 
       // --- Internal Audit & Event History (All internal roles) ---
       {
         path: "/events",
-        element: <EventHistoryPage />,
+        element: (
+          <L>
+            <EventHistoryPage />
+          </L>
+        ),
       },
       {
         path: "/events/:type/:id",
-        element: <EventHistoryPage />,
+        element: (
+          <L>
+            <EventHistoryPage />
+          </L>
+        ),
       },
 
       // --- Mill Administration (Mill Administrator) ---
@@ -94,7 +298,9 @@ export const router = createBrowserRouter([
         path: "/admin/customers",
         element: (
           <ProtectedRoute allowedRoles={["MILL_ADMIN"]}>
-            <CustomerOrganizationsPage />
+            <L>
+              <CustomerOrganizationsPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -102,7 +308,9 @@ export const router = createBrowserRouter([
         path: "/admin/access",
         element: (
           <ProtectedRoute allowedRoles={["MILL_ADMIN"]}>
-            <UserAccessManagementPage />
+            <L>
+              <UserAccessManagementPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -110,7 +318,9 @@ export const router = createBrowserRouter([
         path: "/admin/facilities",
         element: (
           <ProtectedRoute allowedRoles={["MILL_ADMIN"]}>
-            <FacilityConfigPage />
+            <L>
+              <FacilityConfigPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -118,7 +328,9 @@ export const router = createBrowserRouter([
         path: "/admin/balance-policy",
         element: (
           <ProtectedRoute allowedRoles={["MILL_ADMIN", "MILL_MANAGER"]}>
-            <BalancePolicyPage />
+            <L>
+              <BalancePolicyPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -126,7 +338,9 @@ export const router = createBrowserRouter([
         path: "/admin/receiving-thresholds",
         element: (
           <ProtectedRoute allowedRoles={["MILL_ADMIN", "MILL_MANAGER"]}>
-            <ReceivingThresholdsPage />
+            <L>
+              <ReceivingThresholdsPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -134,7 +348,9 @@ export const router = createBrowserRouter([
         path: "/admin/master-data",
         element: (
           <ProtectedRoute allowedRoles={["MILL_ADMIN"]}>
-            <MasterDataPage />
+            <L>
+              <MasterDataPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -148,7 +364,9 @@ export const router = createBrowserRouter([
               "CUSTOMER_EXPORT_OFFICER",
             ]}
           >
-            <MrlVersionsPage />
+            <L>
+              <MrlVersionsPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -160,7 +378,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
           >
-            <FarmerRegistrationPage />
+            <L>
+              <FarmerRegistrationPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -170,7 +390,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlotRegistrationPage />
+            <L>
+              <PlotRegistrationPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -180,7 +402,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
           >
-            <PesticideDeclarationPage />
+            <L>
+              <PesticideDeclarationPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -190,7 +414,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
           >
-            <ProcurementReceiptPage />
+            <L>
+              <ProcurementReceiptPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -200,7 +426,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
           >
-            <FieldSampleRegistrationPage />
+            <L>
+              <FieldSampleRegistrationPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -210,7 +438,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_PROCUREMENT_OFFICER", "MILL_ADMIN"]}
           >
-            <OfflineSyncQueuePage />
+            <L>
+              <OfflineSyncQueuePage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -222,7 +452,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}
           >
-            <ReceivingTasksPage />
+            <L>
+              <ReceivingTasksPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -232,7 +464,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}
           >
-            <OperationEntryPage />
+            <L>
+              <OperationEntryPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -240,7 +474,9 @@ export const router = createBrowserRouter([
         path: "/mill/corrections/new",
         element: (
           <ProtectedRoute allowedRoles={["MILL_OPERATOR", "MILL_ADMIN"]}>
-            <CorrectionRequestPage />
+            <L>
+              <CorrectionRequestPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -250,7 +486,9 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["MILL_OPERATOR", "MILL_MANAGER", "MILL_ADMIN"]}
           >
-            <PendingCorrectionsPage />
+            <L>
+              <PendingCorrectionsPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -258,7 +496,9 @@ export const router = createBrowserRouter([
         path: "/mill/reconciliations",
         element: (
           <ProtectedRoute allowedRoles={["MILL_MANAGER", "MILL_ADMIN"]}>
-            <ReconciliationReviewPage />
+            <L>
+              <ReconciliationReviewPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -266,7 +506,9 @@ export const router = createBrowserRouter([
         path: "/mill/reconciliations/:id",
         element: (
           <ProtectedRoute allowedRoles={["MILL_MANAGER", "MILL_ADMIN"]}>
-            <ReconciliationReviewPage />
+            <L>
+              <ReconciliationReviewPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -274,13 +516,15 @@ export const router = createBrowserRouter([
         path: "/mill/plan-executions/:planId",
         element: (
           <ProtectedRoute allowedRoles={["MILL_OPERATOR", "MILL_ADMIN"]}>
-            <PlaceholderPage
-              titleVi="Thực thi Phương án Phối trộn đã Duyệt (Approved Plan Execution)"
-              titleEn="Approved Plan Execution"
-              roles={["MILL_OPERATOR"]}
-              descriptionVi="Nhân viên vận hành lấy đúng số lượng gạo từ các silo đã được Customer Manager phê duyệt để thực hiện mẻ phối trộn xuất khẩu."
-              businessRuleCodes={["BR-02", "BR-08", "BR-14"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Thực thi Phương án Phối trộn đã Duyệt (Approved Plan Execution)"
+                titleEn="Approved Plan Execution"
+                roles={["MILL_OPERATOR"]}
+                descriptionVi="Nhân viên vận hành lấy đúng số lượng gạo từ các silo đã được Customer Manager phê duyệt để thực hiện mẻ phối trộn xuất khẩu."
+                businessRuleCodes={["BR-02", "BR-08", "BR-14"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -288,11 +532,19 @@ export const router = createBrowserRouter([
       // --- Stock Positions (Stock Viewer, Mill Manager, Customer Manager, Mill Admin) ---
       {
         path: "/stock",
-        element: <StockOverviewPage />,
+        element: (
+          <L>
+            <StockOverviewPage />
+          </L>
+        ),
       },
       {
         path: "/stock/lots/:lotId",
-        element: <StockOverviewPage />,
+        element: (
+          <L>
+            <StockOverviewPage />
+          </L>
+        ),
       },
 
       // --- Compliance & Lab Evidences (Customer Manager & Mill Admin) ---
@@ -300,7 +552,9 @@ export const router = createBrowserRouter([
         path: "/compliance/lab-samples",
         element: (
           <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
-            <LabSampleRegistrationPage defaultTab="LIST" />
+            <L>
+              <LabSampleRegistrationPage defaultTab="LIST" />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -308,7 +562,9 @@ export const router = createBrowserRouter([
         path: "/compliance/lab-samples/new",
         element: (
           <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
-            <LabSampleRegistrationPage defaultTab="CREATE" />
+            <L>
+              <LabSampleRegistrationPage defaultTab="CREATE" />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -316,7 +572,9 @@ export const router = createBrowserRouter([
         path: "/compliance/lab-results",
         element: (
           <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
-            <MrlComplianceCheckPage />
+            <L>
+              <MrlComplianceCheckPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -324,7 +582,9 @@ export const router = createBrowserRouter([
         path: "/compliance/lab-results/:id",
         element: (
           <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
-            <MrlComplianceCheckPage />
+            <L>
+              <MrlComplianceCheckPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -332,7 +592,9 @@ export const router = createBrowserRouter([
         path: "/compliance/safety-margin",
         element: (
           <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
-            <SafetyMarginPolicyPage />
+            <L>
+              <SafetyMarginPolicyPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -344,13 +606,15 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlaceholderPage
-              titleVi="Đơn hàng Xuất khẩu & Mục tiêu Container (Export Order)"
-              titleEn="Export Order"
-              roles={["CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Ghi nhận hợp đồng xuất khẩu gạo với thị trường đích, khối lượng yêu cầu, chuẩn chất lượng và số lượng container 20ft mục tiêu."
-              businessRuleCodes={["BR-05", "BR-14"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Đơn hàng Xuất khẩu & Mục tiêu Container (Export Order)"
+                titleEn="Export Order"
+                roles={["CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Ghi nhận hợp đồng xuất khẩu gạo với thị trường đích, khối lượng yêu cầu, chuẩn chất lượng và số lượng container 20ft mục tiêu."
+                businessRuleCodes={["BR-05", "BR-14"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -360,13 +624,15 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlaceholderPage
-              titleVi="Yêu cầu Phương án Phối trộn (Blend Plan Request)"
-              titleEn="Blend Plan Request"
-              roles={["CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Thuật toán đề xuất công thức phối trộn từ các lô khả dụng của công ty để đạt quy cách % tấm và giới hạn MRL thị trường."
-              businessRuleCodes={["BR-02", "BR-06", "BR-07", "BR-14"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Yêu cầu Phương án Phối trộn (Blend Plan Request)"
+                titleEn="Blend Plan Request"
+                roles={["CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Thuật toán đề xuất công thức phối trộn từ các lô khả dụng của công ty để đạt quy cách % tấm và giới hạn MRL thị trường."
+                businessRuleCodes={["BR-02", "BR-06", "BR-07", "BR-14"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -384,13 +650,15 @@ export const router = createBrowserRouter([
               "MILL_ADMIN",
             ]}
           >
-            <PlaceholderPage
-              titleVi="Duyệt hoặc Từ chối Phương án Phối trộn (Blend Plan Review)"
-              titleEn="Blend Plan Review"
-              roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Customer Manager kiểm tra đánh giá tuân thủ (PASS) và phê duyệt kế hoạch rút gạo từ silo trước khi cho phép công nhân thực thi."
-              businessRuleCodes={["BR-07", "BR-08", "BR-14"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Duyệt hoặc Từ chối Phương án Phối trộn (Blend Plan Review)"
+                titleEn="Blend Plan Review"
+                roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Customer Manager kiểm tra đánh giá tuân thủ (PASS) và phê duyệt kế hoạch rút gạo từ silo trước khi cho phép công nhân thực thi."
+                businessRuleCodes={["BR-07", "BR-08", "BR-14"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -404,13 +672,15 @@ export const router = createBrowserRouter([
               "MILL_ADMIN",
             ]}
           >
-            <PlaceholderPage
-              titleVi="Chi tiết Thẩm định Phương án Phối trộn"
-              titleEn="Blend Plan Review Detail"
-              roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Kiểm tra chi tiết tỷ lệ thành phần các lô, cận dư lượng 95%, và biên an toàn được áp dụng trước khi ký duyệt."
-              businessRuleCodes={["BR-07", "BR-08", "BR-14"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Chi tiết Thẩm định Phương án Phối trộn"
+                titleEn="Blend Plan Review Detail"
+                roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Kiểm tra chi tiết tỷ lệ thành phần các lô, cận dư lượng 95%, và biên an toàn được áp dụng trước khi ký duyệt."
+                businessRuleCodes={["BR-07", "BR-08", "BR-14"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -420,13 +690,15 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlaceholderPage
-              titleVi="Danh sách & Giám sát Xếp Container"
-              titleEn="Containers Overview"
-              roles={["CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Theo dõi tiến độ xếp các container xuất khẩu thuộc các đơn hàng đang triển khai."
-              businessRuleCodes={["BR-16"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Danh sách & Giám sát Xếp Container"
+                titleEn="Containers Overview"
+                roles={["CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Theo dõi tiến độ xếp các container xuất khẩu thuộc các đơn hàng đang triển khai."
+                businessRuleCodes={["BR-16"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -436,13 +708,15 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlaceholderPage
-              titleVi="Ghi nhận Xếp hàng lên Container (Container Loading)"
-              titleEn="Container Loading"
-              roles={["CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Ghi nhận số lượng bao gạo thực tế đưa vào container theo đúng phương án đã duyệt. Khấu trừ số dư bảo lưu."
-              businessRuleCodes={["BR-02", "BR-08", "BR-16"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Ghi nhận Xếp hàng lên Container (Container Loading)"
+                titleEn="Container Loading"
+                roles={["CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Ghi nhận số lượng bao gạo thực tế đưa vào container theo đúng phương án đã duyệt. Khấu trừ số dư bảo lưu."
+                businessRuleCodes={["BR-02", "BR-08", "BR-16"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -452,13 +726,15 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlaceholderPage
-              titleVi="Đóng Niêm Container (Container Closure)"
-              titleEn="Container Closure"
-              roles={["CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Xác nhận đủ 25.000 kg, kiểm tra không bị HOLD, gắn số seal niêm chì và tự động phát hành bộ hồ sơ tuân thủ bất biến."
-              businessRuleCodes={["BR-15", "BR-16"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Đóng Niêm Container (Container Closure)"
+                titleEn="Container Closure"
+                roles={["CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Xác nhận đủ 25.000 kg, kiểm tra không bị HOLD, gắn số seal niêm chì và tự động phát hành bộ hồ sơ tuân thủ bất biến."
+                businessRuleCodes={["BR-15", "BR-16"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -468,13 +744,15 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlaceholderPage
-              titleVi="Quản lý Chứng từ & Hồ sơ Tuân thủ (Compliance Dossiers)"
-              titleEn="Shipment Documents and Dossier"
-              roles={["CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Xuất chứng thư tuân thủ, bảng kê tỷ lệ nguồn gốc đóng góp và phụ lục kiểm định cho các container đã đóng niêm."
-              businessRuleCodes={["BR-13", "BR-16"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Quản lý Chứng từ & Hồ sơ Tuân thủ (Compliance Dossiers)"
+                titleEn="Shipment Documents and Dossier"
+                roles={["CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Xuất chứng thư tuân thủ, bảng kê tỷ lệ nguồn gốc đóng góp và phụ lục kiểm định cho các container đã đóng niêm."
+                businessRuleCodes={["BR-13", "BR-16"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -484,13 +762,15 @@ export const router = createBrowserRouter([
           <ProtectedRoute
             allowedRoles={["CUSTOMER_EXPORT_OFFICER", "MILL_ADMIN"]}
           >
-            <PlaceholderPage
-              titleVi="Hồ sơ Tuân thủ Container Chi tiết"
-              titleEn="Container Compliance Dossier"
-              roles={["CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Xem và xuất bản file hồ sơ tuân thủ chính thức của container kèm snapshot bằng chứng phòng lab."
-              businessRuleCodes={["BR-13", "BR-16"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Hồ sơ Tuân thủ Container Chi tiết"
+                titleEn="Container Compliance Dossier"
+                roles={["CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Xem và xuất bản file hồ sơ tuân thủ chính thức của container kèm snapshot bằng chứng phòng lab."
+                businessRuleCodes={["BR-13", "BR-16"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -506,13 +786,15 @@ export const router = createBrowserRouter([
               "MILL_ADMIN",
             ]}
           >
-            <PlaceholderPage
-              titleVi="Truy vết Hai chiều Đồ thị (Bidirectional Traceback)"
-              titleEn="Traceback"
-              roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}
-              descriptionVi="Truy vết xuôi từ kết quả xét nghiệm xấu đến đúng container bị ảnh hưởng; truy vết ngược từ container về danh sách các thửa ruộng và tỷ lệ đóng góp %."
-              businessRuleCodes={["BR-08", "BR-10", "BR-17"]}
-            />
+            <L>
+              <PlaceholderPage
+                titleVi="Truy vết Hai chiều Đồ thị (Bidirectional Traceback)"
+                titleEn="Traceback"
+                roles={["CUSTOMER_MANAGER", "CUSTOMER_EXPORT_OFFICER"]}
+                descriptionVi="Truy vết xuôi từ kết quả xét nghiệm xấu đến đúng container bị ảnh hưởng; truy vết ngược từ container về danh sách các thửa ruộng và tỷ lệ đóng góp %."
+                businessRuleCodes={["BR-08", "BR-10", "BR-17"]}
+              />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -520,7 +802,9 @@ export const router = createBrowserRouter([
         path: "/risk/holds/new",
         element: (
           <ProtectedRoute allowedRoles={["CUSTOMER_MANAGER", "MILL_ADMIN"]}>
-            <HoldManagementPage />
+            <L>
+              <HoldManagementPage />
+            </L>
           </ProtectedRoute>
         ),
       },
@@ -535,7 +819,9 @@ export const router = createBrowserRouter([
               "MILL_ADMIN",
             ]}
           >
-            <HoldManagementPage />
+            <L>
+              <HoldManagementPage />
+            </L>
           </ProtectedRoute>
         ),
       },

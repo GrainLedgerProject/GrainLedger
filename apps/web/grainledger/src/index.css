@@ -2,79 +2,103 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   APPLE-GRADE DESIGN TOKENS — GrainLedger
+   Phase 2: Ultra-clean canvas, Liquid Glass material, Spring Physics motion
+   ========================================================================== */
+
 :root {
-  /* Base surfaces — Light Mode (Warm Parchment) */
-  --color-surface-base:       #F4EFE6;  /* warm parchment — light mode bg */
-  --color-surface-raised:     #EDE8DC;  /* slightly darker card surface */
-  --color-surface-overlay:    #E5DFCF;  /* modal, dropdown */
-  --color-ink-primary:        #1B2420;  /* near-black, warm-tinted */
-  --color-ink-secondary:      #4A5C55;  /* secondary text */
-  --color-ink-tertiary:       #7A8F87;  /* captions, placeholders */
-  --color-ink-inverse:        #F4EFE6;  /* text on dark bg */
-  --color-canvas-dark:        #0E1411;  /* dark mode base */
+  /* ── Canvas Surfaces ── */
+  --color-surface-base:       #FFFFFF;
+  --color-surface-raised:     #F5F5F7;
+  --color-surface-overlay:    #EBEBEE;
+  --color-ink-primary:        #1D1D1F;
+  --color-ink-secondary:      #6E6E73;
+  --color-ink-tertiary:       #AEAEB2;
+  --color-ink-inverse:        #FFFFFF;
+  --color-canvas-dark:        #000000;
 
-  /* Semantic accents */
-  --color-accent-primary:     #2F6B3A;  /* paddy green — CTAs, active states */
-  --color-accent-primary-dim: #245430;  /* pressed state */
-  --color-accent-warning:     #D9A441;  /* straw gold — pending, near-limit */
-  --color-accent-danger:      #B5412B;  /* fired clay — rejection, HOLD, over-limit */
-  --color-accent-info:        #2C4A6B;  /* indigo — informational, neutral status */
-  --color-accent-success:     #3A7D44;  /* confirmed, balanced, compliant */
+  /* ── Semantic Accents ── */
+  --color-accent-primary:     #2F6B3A;
+  --color-accent-primary-dim: #245430;
+  --color-accent-warning:     #D9A441;
+  --color-accent-danger:      #B5412B;
+  --color-accent-info:        #2C4A6B;
+  --color-accent-success:     #3A7D44;
 
-  /* Company context colors (stable per company, colorblind-safe) */
+  /* ── Company Context Colors ── */
   --color-company-a:          #2563EB;
   --color-company-b:          #7C3AED;
   --color-company-c:          #0891B2;
   --color-company-d:          #D97706;
 
-  /* Functional surfaces */
-  --color-hold-bg:            #FEF2EE;  /* lot/container under HOLD */
+  /* ── Functional Surfaces ── */
+  --color-hold-bg:            #FEF2EE;
   --color-hold-border:        #B5412B;
-  --color-stale-bg:           #FEFCE8;  /* stale blend plan */
+  --color-stale-bg:           #FEFCE8;
   --color-stale-border:       #D9A441;
-  --color-balanced-bg:        #F0FDF4;  /* scale balanced */
+  --color-balanced-bg:        #F0FDF4;
   --color-balanced-border:    #2F6B3A;
   --color-rejected-bg:        #FEF2EE;
   --color-rejected-border:    #B5412B;
 
-  /* Typography */
-  --font-display:             'Be Vietnam Pro', Roboto, system-ui, sans-serif;
-  --font-body:                'Be Vietnam Pro', Roboto, system-ui, sans-serif;
-  --font-serif:               'Lora', 'Times New Roman', serif;
-  --font-mono:                'JetBrains Mono', 'Fira Mono', monospace;
+  /* ── Typography (Apple System Stack) ── */
+  --font-display:             -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-body:                -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-serif:               'Georgia', 'Times New Roman', serif;
+  --font-mono:                'SF Mono', 'JetBrains Mono', 'Fira Mono', ui-monospace, monospace;
 
-  /* Spacing */
+  /* ── Spacing Scale (Apple 8pt grid) ── */
   --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
   --space-4: 1rem;    --space-6: 1.5rem; --space-8: 2rem;
   --space-12: 3rem;   --space-16: 4rem;  --space-24: 6rem;
 
-  /* Border radius */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  /* ── Border Radius (Apple Continuous Curvature) ── */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
   --radius-full: 9999px;
 
-  /* Motion */
-  --duration-instant:  100ms;
+  /* ── Liquid Glass Material ── */
+  --glass-bg-light:    rgba(255, 255, 255, 0.72);
+  --glass-bg-dark:     rgba(18, 18, 20, 0.75);
+  --glass-backdrop:    blur(20px) saturate(180%);
+  --glass-border:      1px solid rgba(0, 0, 0, 0.06);
+  --glass-border-dark: 1px solid rgba(255, 255, 255, 0.08);
+
+  /* ── Apple Shadows ── */
+  --shadow-xs:    0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm:    0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-md:    0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg:    0 12px 40px rgba(0, 0, 0, 0.12);
+  --shadow-xl:    0 24px 64px rgba(0, 0, 0, 0.16);
+  --shadow-glow:  0 0 40px rgba(47, 107, 58, 0.15);
+
+  /* ── Motion (Spring Physics Tokens) ── */
+  --duration-instant:  80ms;
   --duration-fast:     150ms;
   --duration-normal:   250ms;
   --duration-slow:     400ms;
-  --duration-dramatic: 700ms;
+  --duration-dramatic: 600ms;
 
   --ease-spring:   cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out:      cubic-bezier(0.0, 0.0, 0.2, 1);
   --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);
   --ease-bounce:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-apple:    cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
+/* ── Dark Mode ── */
 .dark {
-  --color-surface-base:       #0E1411;  /* dark surface base */
-  --color-surface-raised:     #162019;  /* raised dark */
-  --color-surface-overlay:    #1C2820;  /* overlay dark */
-  --color-ink-primary:        #F4EFE6;  /* parchment text on dark */
-  --color-ink-secondary:      #A3B8AF;
-  --color-ink-tertiary:       #6E857C;
-  --color-ink-inverse:        #0E1411;
+  --color-surface-base:       #000000;
+  --color-surface-raised:     #1C1C1E;
+  --color-surface-overlay:    #2C2C2E;
+  --color-ink-primary:        #F5F5F7;
+  --color-ink-secondary:      #A1A1A6;
+  --color-ink-tertiary:       #636366;
+  --color-ink-inverse:        #1D1D1F;
 
   --color-accent-primary:     #429452;
   --color-accent-primary-dim: #2F6B3A;
@@ -93,17 +117,25 @@
   --color-rejected-border:    #D4563E;
 }
 
-/* Subtle parchment grain texture overlay */
-.bg-parchment-grain {
-  background-color: var(--color-surface-base);
-  background-image: radial-gradient(rgba(27, 36, 32, 0.03) 1px, transparent 0);
-  background-size: 24px 24px;
+/* ==========================================================================
+   APPLE GLASS MATERIAL UTILITIES
+   ========================================================================== */
+
+.bg-glass {
+  background: var(--glass-bg-light);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: var(--glass-border);
 }
 
-.dark .bg-parchment-grain {
+.dark .bg-glass {
+  background: var(--glass-bg-dark);
+  border: var(--glass-border-dark);
+}
+
+/* Subtle parchment grain texture overlay — now ultra-subtle dot grid */
+.bg-parchment-grain {
   background-color: var(--color-surface-base);
-  background-image: radial-gradient(rgba(244, 239, 230, 0.02) 1px, transparent 0);
-  background-size: 24px 24px;
 }
 
 /* Tabular nums rule for all ledger and numerical representations */
@@ -111,13 +143,20 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Accessible focus ring */
+/* ==========================================================================
+   ACCESSIBLE FOCUS RING (Apple-style)
+   ========================================================================== */
 :focus-visible {
-  outline: 2px solid var(--color-accent-primary);
+  outline: 3px solid var(--color-accent-primary);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
-/* Shake keyframes for ledger rejection moment */
+/* ==========================================================================
+   MICRO-INTERACTION KEYFRAMES
+   ========================================================================== */
+
+/* Ledger rejection shake */
 @keyframes ledgerShake {
   0%, 100% { transform: translateX(0); }
   20%, 60% { transform: translateX(-6px); }
@@ -128,7 +167,33 @@
   animation: ledgerShake 0.4s var(--ease-spring);
 }
 
-/* Custom scrollbars */
+/* Apple shimmer skeleton (for Suspense loading) */
+@keyframes apple-shimmer {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+@keyframes apple-shimmer-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Subtle pulse for status indicators */
+@keyframes apple-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.7; transform: scale(0.97); }
+}
+
+/* Floating glow ambient animation */
+@keyframes apple-glow-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.4; }
+  33%      { transform: translate(20px, -15px) scale(1.05); opacity: 0.6; }
+  66%      { transform: translate(-15px, 10px) scale(0.95); opacity: 0.5; }
+}
+
+/* ==========================================================================
+   CUSTOM SCROLLBARS (Thin, Apple-style)
+   ========================================================================== */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -139,4 +204,90 @@
 ::-webkit-scrollbar-thumb {
   background: var(--color-ink-tertiary);
   border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-secondary);
+}
+
+/* ==========================================================================
+   APPLE TYPOGRAPHY UTILITIES
+   ========================================================================== */
+
+/* Tight tracking for large display headings (Apple style) */
+.tracking-apple-tight {
+  letter-spacing: -0.03em;
+}
+
+/* Balanced text wrap for headings */
+.text-balance {
+  text-wrap: balance;
+}
+
+/* ==========================================================================
+   APPLE PRESS INTERACTION (Scale-down on active)
+   ========================================================================== */
+.apple-press {
+  transition: transform var(--duration-fast) var(--ease-spring),
+              opacity var(--duration-fast) var(--ease-out);
+}
+.apple-press:active {
+  transform: scale(0.975);
+  opacity: 0.85;
+}
+
+/* Apple card hover glow */
+.apple-card-hover {
+  transition: transform var(--duration-normal) var(--ease-spring),
+              box-shadow var(--duration-normal) var(--ease-out);
+}
+.apple-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* ==========================================================================
+   APPLE FORM INPUT FOCUS GLOW
+   ========================================================================== */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 107, 58, 0.22);
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.25);
+}
+
+/* ==========================================================================
+   REDUCED MOTION SUPPORT (Apple HIG Accessibility)
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
+@keyframes grain-breathe {
+  0%, 100% {
+    transform: scale(0.94);
+    filter: drop-shadow(0 0 0 rgba(213, 173, 67, 0));
+  }
+
+  50% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 7px rgba(213, 173, 67, 0.24));
+  }
+}
+
+.animate-grain-breathe {
+  animation: grain-breathe 1.8s ease-in-out infinite;
 }
