@@ -73,13 +73,13 @@ GitHub Actions runs backend tests, web tests/build, and a Docker image build for
 - [Setup and deployment](docs/setup-and-deployment.md): local provisioning, configuration, migrations, seeds, and production deployment
 - [Architecture and access control](docs/architecture.md): module boundaries, authorization, and data rules
 - [CI setup and operation](docs/ci-guide.md) · [CI implementation plan](docs/ci-plan.md)
-- [Email/password authentication and Scalar](docs/auth-email-password-scalar.md)
-- [Development accounts and demo Ledger data](docs/development-accounts.md)
-- [Farmer API](docs/farmer-api.md) · [Procurement API](docs/procurement-api.md)
-- [MRL CSV/Excel and YouTrack reference import](docs/mrl-file-import.md): substance setup, Vietnam draft limits, source provenance, and import safeguards
-- [Unified lot-code guide](docs/unified-lot-code-guide.md)
-- [Laboratory workflow guide](docs/lab-flow-guide.md) · [Samples and external laboratory API](docs/sample-api.md#laboratory-report-routes) · [Laboratory workflow policy boundaries](docs/lab-flow-plan.md)
-- [Residue bounds: policy gates, delivered API, workflow and verification](docs/residue-bounds-plan.md#9-delivered-residue-bounds-contracts)
+- [Email/password authentication and Scalar](docs/guides/auth-email-password-scalar.md)
+- [Development accounts and demo Ledger data](docs/guides/development-accounts.md)
+- [Farmer API](docs/api/farmer-api.md) · [Procurement API](docs/api/procurement-api.md)
+- [MRL CSV/Excel and YouTrack reference import](docs/guides/mrl-file-import.md): substance setup, Vietnam draft limits, source provenance, and import safeguards
+- [Unified lot-code guide](docs/guides/unified-lot-code-guide.md)
+- [Laboratory workflow guide](docs/guides/lab-flow-guide.md) · [Samples and external laboratory API](docs/api/sample-api.md#laboratory-report-routes) · [Laboratory workflow policy boundaries](docs/plans/lab-flow-plan.md)
+- [Residue bounds: policy gates, delivered API, workflow and verification](docs/plans/residue-bounds-plan.md#9-delivered-residue-bounds-contracts)
 - [PostgreSQL diagrams and data dictionary](docs/dbdiagram/README.md)
 
 For deployment, separate restricted runtime credentials from migration-owner credentials, use HTTPS behind a trusted reverse proxy, and protect persistent DataProtection keys. See [production deployment guidance](docs/setup-and-deployment.md#production-deployment).
