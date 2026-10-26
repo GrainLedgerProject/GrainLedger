@@ -36,7 +36,7 @@ Docker không build lại cho mọi chỉnh sửa source trên PR vào dev. Lỗ
 2. `backend`, `web`, `container`: chạy song song khi được chọn.
 3. `required`: luôn chạy; planning lỗi, job bắt buộc fail/cancel/skip hoặc output không hợp lệ đều chặn check.
 
-Backend dùng .NET từ global.json, Release build và PostgreSQL Testcontainers cô lập. Web dùng Node 24, npm ci, TypeScript/Vite build và Vitest. Giữ xUnit `MaxParallelThreads=2` và Vitest `maxWorkers=2`; không retry/skip test để làm xanh CI.
+Backend dùng .NET từ global.json, Release build và PostgreSQL Testcontainers cô lập. Web dùng Node 24, npm ci, TypeScript/Vite build và Vitest. Giữ xUnit `MaxParallelThreads=4` và Vitest `maxWorkers=2`; không retry/skip test để làm xanh CI.
 
 - npm cache đã có; vẫn chạy npm ci để cài theo lockfile.
 - NuGet cache chỉ chứa `~/.nuget/packages`, key theo OS/architecture và project/SDK/dependency config. Restore luôn chạy, kể cả cache hit. Đây không phải locked restore; NuGet lockfiles chưa được thêm.
@@ -51,7 +51,7 @@ Actions pin SHA, actionlint pin version/checksum; permissions là contents: read
 node --test .github/scripts/ci.test.mjs
 dotnet restore GrainLedger.slnx
 dotnet build GrainLedger.slnx --configuration Release --no-restore
-dotnet test GrainLedger.slnx --configuration Release --no-build --no-restore --logger trx --results-directory artifacts/test-results/backend -- xUnit.MaxParallelThreads=2
+dotnet test GrainLedger.slnx --configuration Release --no-build --no-restore --logger trx --results-directory artifacts/test-results/backend -- xUnit.MaxParallelThreads=4
 npm ci
 npm run build
 npm run test --workspace @grainledger/web -- --maxWorkers=2
