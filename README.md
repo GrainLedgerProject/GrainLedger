@@ -66,10 +66,13 @@ npm test
 npm run build
 ```
 
+GitHub Actions runs backend tests, web tests/build, and a Docker image build for pull requests and pushes to `dev` and `main`. Feature pull requests target `dev`; promotion from `dev` to `main` is checked too. The initial configuration runs all checks; optional path-based selection can be enabled after validating the first run. See [CI setup and operation](docs/ci-guide.md) for checks, troubleshooting, and the commit/push/branch-protection steps. CI does not deploy or use the shared database.
+
 ## Documentation
 
 - [Setup and deployment](docs/setup-and-deployment.md): local provisioning, configuration, migrations, seeds, and production deployment
 - [Architecture and access control](docs/architecture.md): module boundaries, authorization, and data rules
+- [CI setup and operation](docs/ci-guide.md) · [CI implementation plan](docs/ci-plan.md)
 - [Email/password authentication and Scalar](docs/auth-email-password-scalar.md)
 - [Development accounts and demo Ledger data](docs/development-accounts.md)
 - [Farmer API](docs/farmer-api.md) · [Procurement API](docs/procurement-api.md)

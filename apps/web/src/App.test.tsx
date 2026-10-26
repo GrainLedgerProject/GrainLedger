@@ -113,6 +113,7 @@ describe('Account experience', () => {
         const request = JSON.parse(String(init?.body));
         return json({ id: request.payload.entityId, farmerId: farmer.id, code: 'TR-TEST', areaHa: 1.25, geometry: request.payload.geometry }, 201);
       }
+      if (url === '/api/plots/duplicate-check') return json({ items: [], hasMore: false });
       if (String(url).startsWith('/api/plots/')) return json({ id: String(url).split('/').at(-1), farmerId: farmer.id, code: 'TR-TEST', areaHa: 1.25, geometry: { type: 'Point', coordinates: [106.35, 10.4] } });
       if (String(url).startsWith('/api/plot-seasons?')) return json({ items: [], page: 1, pageSize: 10, hasMore: false });
       if (String(url).startsWith('/api/crop-seasons?')) return json({ items: [], page: 1, pageSize: 100, hasMore: false });
@@ -131,6 +132,7 @@ describe('Account experience', () => {
     await browser.type(screen.getByLabelText(/Longitude/), '106.35');
     await browser.type(screen.getByLabelText(/Latitude/), '10.4');
     await browser.type(screen.getByLabelText(/Area \(hectares\)/), '1.25');
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/plots/duplicate-check')).toBe(true));
     await browser.click(screen.getByRole('button', { name: 'Save plot' }));
     expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
     await waitFor(() => expect(rejectFirst).toBeDefined());
