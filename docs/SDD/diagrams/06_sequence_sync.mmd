@@ -1,0 +1,45 @@
+sequenceDiagram
+ autonumber
+ actor P as Customer Procurement Officer
+ participant UI as :Field UI
+ participant Local as :LocalCaptureStore
+ participant Ctrl as :SynchronizationEndpoints (planned)
+ participant S as :SyncCoordinator (planned)
+ participant R as :Capture persistence port (planned)
+ participant DB as :Database
+ P->>UI: Capture receipt offline
+ UI->>Local: savePending(stableKey, originalPayload, metadata)
+ Local-->>UI: Pending operation retained
+ Note over UI,Local: Local capture does not imply server acceptance
+ UI->>+Ctrl: synchronize(stableKey, originalPayload)
+ Ctrl->>+S: submit(request, authenticatedActor)
+ S->>S: authorizeAndCanonicalize(request)
+ S->>+R: beginAndLockSubmissionKey(company, device, operationId)
+ R->>DB: BEGIN, serialize key and read previous outcome
+ DB-->>R: Previous submission or absent
+ R-->>-S: Submission snapshot
+ alt Existing key, identical canonical hash
+ S->>R: finishReadOnlyTransaction()
+ R->>DB: End without new business posting
+ S->>S: result = retainedOutcome
+ else Existing key, changed canonical hash
+ S->>R: appendConflict(originalKey, newImmutablePayload)
+ R->>DB: Persist conflict outcome, COMMIT
+ S->>S: result = CONFLICT
+ else New key
+ S->>S: validateConnectedReceiptContract(request)
+ alt Receipt valid
+ S->>R: appendSourceExpectationAndAppliedSubmission(request)
+ R->>DB: Procurement source expectation, source identities, event and pending receiving outcome
+ R->>DB: COMMIT one atomic source registration
+ S->>S: result = APPLIED(sourceEventId), PENDING_ARRIVAL, zero usable stock
+ else Receipt invalid
+ S->>R: retainRejectedSubmissionWithoutBusinessPosting(request)
+ R->>DB: Persist original payload and rejection only, COMMIT
+ S->>S: result = REJECTED(findings)
+ end
+ end
+ S-->>-Ctrl: SyncOutcome
+ Ctrl-->>-UI: Retained outcome or conflict details
+ UI-->>P: Show acceptance / pending / rejection / conflict
+ Note over UI,DB: Complete offline lifecycle is planned, source APPLIED never grants usable stock.

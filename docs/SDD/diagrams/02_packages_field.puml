@@ -1,0 +1,34 @@
+@startuml
+title Field Web Client — Planned Capability Design
+skinparam packageStyle folder
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 16
+skinparam packageBackgroundColor White
+skinparam packageBorderColor #5D6D7E
+skinparam rectangleBorderColor #5D6D7E
+skinparam ArrowColor #44566A
+skinparam nodesep 45
+skinparam ranksep 65
+skinparam linetype polyline
+' Hidden arrows below are layout constraints only, never dependencies.
+package "Target in mobile-friendly apps/web; apps/mobile is a placeholder" as Field #FFF2CC {
+folder "Local capture store (planned)" as F0
+folder "Stable operation identity" as F1
+folder "Sync coordinator (planned)" as F2
+folder "Reconciliation views (planned)" as F3
+folder "Capture API / existing idempotency" as F4
+folder "Receiving state integration" as F5
+F0 .right.> F1
+F1 .right.> F2
+F3 -[hidden]right-> F4
+F4 -[hidden]right-> F5
+F0 -[hidden]down-> F3
+F1 -[hidden]down-> F4
+F2 -[hidden]down-> F5
+}
+legend bottom
+APPLIED procurement source registration is distinct from accepted actual arrival and usable stock.
+No native app or complete offline client is claimed implemented.
+endlegend
+@enduml

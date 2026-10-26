@@ -2,7 +2,7 @@
 
 GrainLedger is a rice supply-chain traceability platform. It connects identity and access control, shared product catalogs, procurement source records, and a protected ledger for receiving, stock, processing, and history.
 
-Lot-to-lot tracing is available through Ledger → Traceability and the [audited trace API](docs/traceability-api.md). The [implementation plan](docs/traceability-implementation-plan.md) records current scope and deferred lab/export/container dependencies. New trace migration/runtime grants require explicit deployment; normal startup does not apply them.
+Lot-to-lot tracing is available through Ledger → Traceability and the [audited trace API](docs/api/traceability-api.md). The [implementation plan](docs/plans/traceability-implementation-plan.md) records current scope and deferred lab/export/container dependencies. New trace migration/runtime grants require explicit deployment; normal startup does not apply them.
 
 ## What it does
 
@@ -69,7 +69,7 @@ npm run build
 GitHub Actions runs backend tests, web tests/build, and a Docker image build for pull requests and pushes to `dev` and `main`. Feature pull requests target `dev`; promotion from `dev` to `main` is checked too. The initial configuration runs all checks; optional path-based selection can be enabled after validating the first run. See [CI setup and operation](docs/ci-guide.md) for checks, troubleshooting, and the commit/push/branch-protection steps. CI does not deploy or use the shared database.
 
 ## Documentation
-
+- [Documentation index](docs/README.md): index of architecture, APIs, guides, plans, and reports
 - [Setup and deployment](docs/setup-and-deployment.md): local provisioning, configuration, migrations, seeds, and production deployment
 - [Architecture and access control](docs/architecture.md): module boundaries, authorization, and data rules
 - [CI setup and operation](docs/ci-guide.md) · [CI implementation plan](docs/ci-plan.md)

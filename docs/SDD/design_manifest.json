@@ -1,0 +1,735 @@
+{
+  "features": [
+    {
+      "id": "05",
+      "title": "Administration and Versioned Reference Data",
+      "ucs": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "req": [
+        "FR-ADM-001",
+        "FR-ADM-002",
+        "FR-ADM-003"
+      ],
+      "overview": "Mill Administrator maintains customer/account grants, facilities/equipment/capacities, operational master data, balance policies and effective-dated published MRL versions. These are administrative commands with distinct validation policies.",
+      "classdiag": "05_class",
+      "seqs": [
+        [
+          "05_sequence_publish",
+          "Publish an effective MRL version"
+        ]
+      ],
+      "rules": [
+        "Reuse this command structure for UC-01\u2013UC-05 with entity-specific policies; publishing MRLs is not permission to set customer safety margins (UC-22).",
+        "Equipment locations belong to the same facility. Capacity always includes units; silo-compartment capacity is kg.",
+        "One compartment has at most one active owner occupancy. Clear only after zero stock and recorded clearance.",
+        "Changing grants does not permit editing accepted events or historical policy versions."
+      ]
+    },
+    {
+      "id": "06",
+      "title": "Procurement, Field Capture and Offline Synchronization",
+      "ucs": [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "req": [
+        "FR-CAP-001",
+        "FR-CAP-002",
+        "FR-CAP-003",
+        "FR-CAP-004",
+        "FR-CAP-005"
+      ],
+      "overview": "Capture company-scoped farmer/plot/season records, declarations, positive intake lines and sample/handover references. Offline capture retains records locally; the server independently accepts each submitted operation.",
+      "classdiag": "06_class",
+      "seqs": [
+        [
+          "06_sequence_receipt",
+          "Register procurement source expectation"
+        ],
+        [
+          "06_sequence_sync",
+          "Offline retention, retry and conflict"
+        ],
+        [
+          "06_sequence_arrival",
+          "Measure and review complete physical arrival"
+        ]
+      ],
+      "rules": [
+        "UC-07/08/10 reuse the scoped acceptance pattern with field-record/declaration/sample validation; only UC-09 creates receipt stock. Sampling is optional.",
+        "Submit dependencies in order (farmer/plot/season before dependent receipts; receipt before sample); a missing prerequisite remains visible for reconciliation.",
+        "A stable operation ID identifies one command, not a whole arbitrary offline batch. Same-key changed data never creates a second receipt.",
+        "The transaction adapter must use a savepoint or validate-before-write path to retain rejected submissions without retaining partial stock writes."
+      ]
+    },
+    {
+      "id": "07",
+      "title": "Physical Operations, Approved Execution and Stock Inspection",
+      "ucs": [
+        13,
+        15,
+        18,
+        19,
+        36
+      ],
+      "req": [
+        "FR-LED-001",
+        "FR-LED-002",
+        "FR-LED-003"
+      ],
+      "overview": "A shared ledger acceptance contract handles processing and unchanged-lot transfers. Plan execution additionally requires current scope and matching INPUT reservations. Stock and source composition are read models of committed history.",
+      "classdiag": "07_class",
+      "seqs": [
+        [
+          "07_sequence_post",
+          "Validate and atomically post conversion or transfer"
+        ],
+        [
+          "07_sequence_execute_plan",
+          "Execute approved plan scope with target reservations"
+        ]
+      ],
+      "rules": [
+        "For conversion inputs I, outputs O and declared loss L: v = I \u2212 O \u2212 L; allowed = I \u00d7 tolerance_value / 100. Require I > 0, positive inputs/outputs, L \u2265 0 and abs(v) \u2264 allowed. Nonzero v needs a Mill Manager reason/confirmation.",
+        "Variance is signed reconciliation information, never usable stock and never automatically reclassified as declared loss. Out-of-tolerance input is rejected.",
+        "Attribute output o to input i as output_kg(o) \u00d7 input_kg(i) / total_input_kg. Round down at the chosen kg precision and assign residual by largest fractional remainder, tie by input_id. Each output attribution sums exactly to its mass. No cycles.",
+        "Transfers preserve lot identity and equal mass at two allocations; physical mixing uses a conversion. A loss-only write-off is outside the baseline.",
+        "on_hand = sum committed movement deltas. outstanding = RESERVE \u2212 (CONSUME \u2212 REVERSE_CONSUME) \u2212 RELEASE. free = on_hand \u2212 outstanding. Stock inspection never grants posting authority.",
+        "Missing residue evidence alone does not invalidate a physically valid posting; confirmed risk restrictions and HOLD still apply. Plan execution uses current authority and exact INPUT reservations; standalone conversion may use only free stock."
+      ]
+    },
+    {
+      "id": "08",
+      "title": "Reconciled Operation Correction",
+      "ucs": [
+        14,
+        16,
+        17
+      ],
+      "req": [
+        "FR-LED-001",
+        "FR-LED-002"
+      ],
+      "overview": "Request, physical reconciliation and atomic compensation/replacement are separate interactions. A correction lock protects remaining original output stock while evidence is investigated.",
+      "classdiag": "08_class",
+      "seqs": [
+        [
+          "08_sequence_reconcile",
+          "Request and verify correction"
+        ],
+        [
+          "08_sequence_commit",
+          "Atomic compensation and replacement"
+        ]
+      ],
+      "rules": [
+        "No standalone compensation or automatic downstream rollback. BLOCKED_DOWNSTREAM keeps investigation and restrictions on relevant remaining stock.",
+        "Replacement and compensation are different IDs of the same company; both commit with projection/lineage changes. Historical lineage remains; current lineage uses replacement, without reverse physical edges.",
+        "REVERSE_CONSUME fully reverses one original INPUT CONSUME once; it is not RESERVE. Loading OUTPUT consumption is not reversed by this processing-correction workflow.",
+        "Reuse Section 3.3 validation. Retaining the original plan requires unchanged compatible content, current review and exact reservation quota; otherwise replace outside the old plan and require new export authority."
+      ]
+    },
+    {
+      "id": "09",
+      "title": "Laboratory Evidence, Residue Bounds and Current Compliance",
+      "ucs": [
+        20,
+        21,
+        22,
+        37
+      ],
+      "req": [
+        "FR-COM-001",
+        "FR-COM-002"
+      ],
+      "overview": "Maintain laboratory history and customer margin versions, select eligible evidence, propagate supported upper bounds and assess the current decision scope. Bound calculation is deterministic evidence processing, not AI prediction.",
+      "classdiag": "09_class",
+      "seqs": [
+        [
+          "09_sequence_assess",
+          "Current scope assessment"
+        ],
+        [
+          "09_sequence_late",
+          "Late evidence and affected unfinished authority"
+        ]
+      ],
+      "rules": [
+        "LAB follows the supplied Sample \u2192 PaddyLot model. Any direct laboratory sampling model for processed rice requires an explicit schema decision; it is not silently added here.",
+        "COHORT needs exact recorded membership and matching company/site/season/window, immutable membership snapshot and supported per-substance bound. An observed maximum alone is not a validated operational upper bound.",
+        "CONVERSION uses actual input quantities and bounds for every input, with supported substance/stage/output-commodity propagation. Never assume factor 1 or a milling reduction. Missing rule gives INCOMPLETE for compliance but need not prevent valid physical recording.",
+        "Compatible-basis blends with a supported rule use U(s) = sum(m_i \u00d7 U_i(s)) / sum(m_i). Quality aggregation is attribute-specific, not universally weighted.",
+        "RELATIVE threshold T = MRL \u00d7 (1 \u2212 r), 0 \u2264 r < 1. ABSOLUTE threshold T = MRL \u2212 a, a \u2265 0 in compatible units. A negative threshold cannot be passed by nonnegative residue bounds. No default operational margin is introduced.",
+        "Required panel is recorded explicitly; missing limit never means unlimited. MRL must be published, effective and known at decision time. Unresolved independent lab conflicts block PASS.",
+        "UC-22 reuses the versioned configuration pattern in Section 3.1 with Customer Manager scope. UC-21 reuses registration with same-context official supersession checks. Historical assessments are never rewritten."
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Export Orders, Blend Proposal and Plan Review",
+      "ucs": [
+        23,
+        29,
+        30
+      ],
+      "req": [
+        "FR-EXP-001",
+        "FR-EXP-002",
+        "FR-EXP-003"
+      ],
+      "overview": "Create owner-scoped orders/container targets and versioned specifications, search for a feasible proposal, and review the exact current execution scope. Proposal generation neither consumes stock nor grants loading authority.",
+      "classdiag": "10_class",
+      "seqs": [
+        [
+          "10_sequence_propose",
+          "Request feasible blend proposal"
+        ],
+        [
+          "10_sequence_review",
+          "Approve/reject or re-review plan scope"
+        ]
+      ],
+      "rules": [
+        "Approve only current PASS, with a new PlanReview referencing purpose REVIEW. If a non-PASS approval is refused, retain the assessment/findings; do not record a false APPROVE review.",
+        "Only one plan has active new execution/loading authority per container. Evidence/stock/HOLD changes stale unfinished authority and release unconsumed reservations without erasing committed execution.",
+        "OUTPUT_ONLY names existing output stock and never asks spent inputs to remain available. Re-review of unchanged P1 output stays on P1; new P2 content excludes already produced/loaded P1 output.",
+        "The chosen search implementation, budget and candidate-order strategy are implementation decisions still to be confirmed. No MILP, IIS or optimality guarantee is assumed.",
+        "Physical execution refers to Section 3.3, current assessment to Section 3.5 and reservation correction to Section 3.4."
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Container Loading, CLOSE and Shipment Documentation",
+      "ucs": [
+        31,
+        32,
+        33,
+        34,
+        35
+      ],
+      "req": [
+        "FR-EXP-004",
+        "FR-EXP-005"
+      ],
+      "overview": "Loading withdraws the exact approved output stock; CLOSE reassesses every committed loading across plan versions. Documentation preserves the unique successful whole-container closing snapshot.",
+      "classdiag": "11_class",
+      "seqs": [
+        [
+          "11_sequence_load",
+          "Record loading from the approved plan output"
+        ],
+        [
+          "11_sequence_close",
+          "Close the complete container across plan versions"
+        ],
+        [
+          "11_sequence_documents",
+          "Retrieve dossier and append later evidence"
+        ]
+      ],
+      "rules": [
+        "Loading, metadata and CLOSE are separate outcomes. Updating a seal number does not post stock or close a container.",
+        "CLOSE scope is container-wide: container_id required; plan_id and loading_id NULL. Its basis includes every committed loading and historical authorization, even when P1 no longer has new-loading authority.",
+        "Require total loaded mass exactly target_mass_kg and sum completed-container mass \u2264 order.required_mass_kg. No processing tolerance applies to shipment quantity.",
+        "Commit PASS CLOSE assessment, CLOSED state and unique dossier atomically. After CLOSE, new evidence becomes a supplement; retrieval never regenerates the closing snapshot.",
+        "Store immutable snapshot bytes transactionally for the initial design, or persist content durably before committing its database reference; unreferenced prepared content is harmless and cannot authorize CLOSE. No successful dossier may refer to missing content.",
+        "UC-33 shares DocumentService access/versioning structure; exports persist document type/version/file reference. This does not add a buyer portal, EPCIS integration or customs authorization."
+      ]
+    },
+    {
+      "id": "12",
+      "title": "Bidirectional Traceability, HOLD and Retained Alerts",
+      "ucs": [
+        24,
+        25,
+        26,
+        27,
+        28
+      ],
+      "req": [
+        "FR-TRC-001",
+        "FR-TRC-002"
+      ],
+      "overview": "Trace recorded contributions in both directions. Customer Manager explicitly chooses each lot/container HOLD; scoped in-app notices and operational handling retain the restriction.",
+      "classdiag": "12_class",
+      "seqs": [
+        [
+          "12_sequence_trace",
+          "Forward or backward traversal"
+        ],
+        [
+          "12_sequence_hold",
+          "Issue HOLD, retain notices and handle restriction"
+        ],
+        [
+          "12_sequence_hold_target",
+          "Issue lot or container HOLD with full target effects"
+        ]
+      ],
+      "rules": [
+        "Forward traversal visits every reachable recorded lot/plan/container; backward traversal sums contributions from all committed container loading. Results describe accounting shares, not identified grains.",
+        "UC-25 allows Customer Export Officer to trace affected targets; UC-24 is Customer Manager source-contribution trace. Trace results do not automatically issue HOLD.",
+        "HOLD blocks relevant planning/reservation/production consumption/loading/CLOSE; authorized ledgered isolation transfer remains allowed. Acknowledgement, response and read status do not release restrictions.",
+        "HOLD and correctly scoped in-app notices commit together; no email/SMS or independent notification service is introduced. Reservation RELEASE is unrelated to HOLD release."
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Business Event Search and History",
+      "ucs": [
+        38
+      ],
+      "req": [
+        "FR-TRC-003"
+      ],
+      "overview": "All six internal roles can inspect permitted immutable business events; this shared capability never broadens action grants or inventory visibility.",
+      "classdiag": "13_class",
+      "seqs": [
+        [
+          "13_sequence_history",
+          "Search and inspect permitted business history"
+        ]
+      ],
+      "rules": [
+        "Events cover procurement, operations/transfers/corrections, lab registration/supersession, review/reservations, loading/CLOSE, HOLD/handling, administration and traceback.",
+        "Retain actor or system cause, typed targets, occurred/recorded times, relevant source versions and deltas/basis. No edit/delete command exists.",
+        "Read access through Internal User does not imply stock inspection permission or logging every screen view."
+      ]
+    }
+  ],
+  "diagrams": [
+    "01_system_architecture",
+    "05_class",
+    "05_sequence_publish",
+    "06_class",
+    "06_sequence_receipt",
+    "06_sequence_sync",
+    "07_class",
+    "07_sequence_post",
+    "08_class",
+    "08_sequence_reconcile",
+    "08_sequence_commit",
+    "09_class",
+    "09_sequence_assess",
+    "09_sequence_late",
+    "10_class",
+    "10_sequence_propose",
+    "10_sequence_review",
+    "11_class",
+    "11_sequence_load",
+    "11_sequence_close",
+    "11_sequence_documents",
+    "12_class",
+    "12_sequence_trace",
+    "12_sequence_hold",
+    "13_class",
+    "13_sequence_history",
+    "02_packages_field",
+    "03_packages_workspace",
+    "04_packages_core",
+    "06_sequence_arrival",
+    "07_sequence_execute_plan",
+    "12_sequence_hold_target"
+  ],
+  "coverage": [
+    [
+      "UC-01",
+      "Manage customer companies",
+      "3.1",
+      "05_class.mmd",
+      "05_sequence_publish.mmd"
+    ],
+    [
+      "UC-02",
+      "Manage accounts, roles and facility grants",
+      "3.1",
+      "05_class.mmd",
+      "05_sequence_publish.mmd"
+    ],
+    [
+      "UC-03",
+      "Configure facilities, equipment and capacity",
+      "3.1",
+      "05_class.mmd",
+      "05_sequence_publish.mmd"
+    ],
+    [
+      "UC-04",
+      "Configure balance policy",
+      "3.1",
+      "05_class.mmd",
+      "05_sequence_publish.mmd"
+    ],
+    [
+      "UC-05",
+      "Manage operational master data",
+      "3.1",
+      "05_class.mmd",
+      "05_sequence_publish.mmd"
+    ],
+    [
+      "UC-06",
+      "Manage effective MRL table versions",
+      "3.1",
+      "05_class.mmd",
+      "05_sequence_publish.mmd"
+    ],
+    [
+      "UC-07",
+      "Register farmers and plots",
+      "3.2",
+      "06_class.mmd",
+      "06_sequence_receipt.mmd, 06_sequence_sync.mmd"
+    ],
+    [
+      "UC-08",
+      "Record pesticide declaration",
+      "3.2",
+      "06_class.mmd",
+      "06_sequence_receipt.mmd, 06_sequence_sync.mmd"
+    ],
+    [
+      "UC-09",
+      "Record procurement receipt",
+      "3.2",
+      "06_class.mmd",
+      "06_sequence_receipt.mmd, 06_sequence_sync.mmd"
+    ],
+    [
+      "UC-10",
+      "Capture procurement sample",
+      "3.2",
+      "06_class.mmd",
+      "06_sequence_receipt.mmd, 06_sequence_sync.mmd"
+    ],
+    [
+      "UC-11",
+      "Capture field and procurement records offline",
+      "3.2",
+      "06_class.mmd",
+      "06_sequence_receipt.mmd, 06_sequence_sync.mmd"
+    ],
+    [
+      "UC-12",
+      "Synchronize submitted records",
+      "3.2",
+      "06_class.mmd",
+      "06_sequence_receipt.mmd, 06_sequence_sync.mmd"
+    ],
+    [
+      "UC-13",
+      "Record physical operation",
+      "3.3",
+      "07_class.mmd",
+      "07_sequence_post.mmd"
+    ],
+    [
+      "UC-14",
+      "Request operation correction",
+      "3.4",
+      "08_class.mmd",
+      "08_sequence_reconcile.mmd, 08_sequence_commit.mmd"
+    ],
+    [
+      "UC-15",
+      "Execute approved plan scope",
+      "3.3",
+      "07_class.mmd",
+      "07_sequence_post.mmd, 07_sequence_execute_plan.mmd"
+    ],
+    [
+      "UC-16",
+      "Commit reconciled compensation and replacement",
+      "3.4",
+      "08_class.mmd",
+      "08_sequence_reconcile.mmd, 08_sequence_commit.mmd"
+    ],
+    [
+      "UC-17",
+      "Verify and reconcile physical evidence",
+      "3.4",
+      "08_class.mmd",
+      "08_sequence_reconcile.mmd, 08_sequence_commit.mmd"
+    ],
+    [
+      "UC-18",
+      "Confirm signed measurement variance",
+      "3.3",
+      "07_class.mmd",
+      "07_sequence_post.mmd"
+    ],
+    [
+      "UC-19",
+      "Inspect owner stock and source composition",
+      "3.3",
+      "07_class.mmd",
+      "07_sequence_post.mmd"
+    ],
+    [
+      "UC-20",
+      "Register laboratory evidence",
+      "3.5",
+      "09_class.mmd",
+      "09_sequence_assess.mmd, 09_sequence_late.mmd"
+    ],
+    [
+      "UC-21",
+      "Register superseding report",
+      "3.5",
+      "09_class.mmd",
+      "09_sequence_assess.mmd, 09_sequence_late.mmd"
+    ],
+    [
+      "UC-22",
+      "Configure safety margin policy",
+      "3.5",
+      "09_class.mmd",
+      "09_sequence_assess.mmd, 09_sequence_late.mmd"
+    ],
+    [
+      "UC-23",
+      "Review and approve or reject plan",
+      "3.6",
+      "10_class.mmd",
+      "10_sequence_propose.mmd, 10_sequence_review.mmd"
+    ],
+    [
+      "UC-24",
+      "Trace source contributions to and from containers",
+      "3.8",
+      "12_class.mmd",
+      "12_sequence_trace.mmd, 12_sequence_hold.mmd"
+    ],
+    [
+      "UC-25",
+      "Trace affected lots, plans and containers",
+      "3.8",
+      "12_class.mmd",
+      "12_sequence_trace.mmd, 12_sequence_hold.mmd"
+    ],
+    [
+      "UC-26",
+      "Issue lot or container HOLD",
+      "3.8",
+      "12_class.mmd",
+      "12_sequence_trace.mmd, 12_sequence_hold.mmd, 12_sequence_hold_target.mmd"
+    ],
+    [
+      "UC-27",
+      "View retained HOLD alerts",
+      "3.8",
+      "12_class.mmd",
+      "12_sequence_trace.mmd, 12_sequence_hold.mmd"
+    ],
+    [
+      "UC-28",
+      "Record HOLD handling",
+      "3.8",
+      "12_class.mmd",
+      "12_sequence_trace.mmd, 12_sequence_hold.mmd, 12_sequence_hold_target.mmd"
+    ],
+    [
+      "UC-29",
+      "Create export order and container target",
+      "3.6",
+      "10_class.mmd",
+      "10_sequence_propose.mmd, 10_sequence_review.mmd"
+    ],
+    [
+      "UC-30",
+      "Request blend plan",
+      "3.6",
+      "10_class.mmd",
+      "10_sequence_propose.mmd, 10_sequence_review.mmd"
+    ],
+    [
+      "UC-31",
+      "Record container loading and metadata",
+      "3.7",
+      "11_class.mmd",
+      "11_sequence_load.mmd, 11_sequence_close.mmd, 11_sequence_documents.mmd"
+    ],
+    [
+      "UC-32",
+      "Close container",
+      "3.7",
+      "11_class.mmd",
+      "11_sequence_load.mmd, 11_sequence_close.mmd, 11_sequence_documents.mmd"
+    ],
+    [
+      "UC-33",
+      "Export shipment documents",
+      "3.7",
+      "11_class.mmd",
+      "11_sequence_load.mmd, 11_sequence_close.mmd, 11_sequence_documents.mmd"
+    ],
+    [
+      "UC-34",
+      "Retrieve compliance dossier",
+      "3.7",
+      "11_class.mmd",
+      "11_sequence_load.mmd, 11_sequence_close.mmd, 11_sequence_documents.mmd"
+    ],
+    [
+      "UC-35",
+      "Add dossier evidence supplement",
+      "3.7",
+      "11_class.mmd",
+      "11_sequence_load.mmd, 11_sequence_close.mmd, 11_sequence_documents.mmd"
+    ],
+    [
+      "UC-36",
+      "Validate ledger operation",
+      "3.3",
+      "07_class.mmd",
+      "07_sequence_post.mmd"
+    ],
+    [
+      "UC-37",
+      "Assess current compliance",
+      "3.5",
+      "09_class.mmd",
+      "09_sequence_assess.mmd, 09_sequence_late.mmd"
+    ],
+    [
+      "UC-38",
+      "Search business events and history",
+      "3.9",
+      "13_class.mmd",
+      "13_sequence_history.mmd"
+    ]
+  ],
+  "revision": "0.3 \u2014 repository-informed full target design",
+  "class_groups": [
+    [
+      "CustomerCompany",
+      "UserAccount",
+      "Role",
+      "UserRole",
+      "MillAssignment",
+      "Facility",
+      "Equipment",
+      "BalancePolicyVersion",
+      "MRLTableVersion",
+      "MRLLimit"
+    ],
+    [
+      "Farmer",
+      "Plot",
+      "CropSeason",
+      "PlotSeason",
+      "PesticideDeclaration",
+      "PesticideDeclarationLine",
+      "Procurement",
+      "ProcurementLine",
+      "PaddyLot",
+      "Sample",
+      "OfflineSubmission"
+    ],
+    [
+      "Lot",
+      "LotAllocation",
+      "Conversion",
+      "ConversionInput",
+      "ConversionOutput",
+      "MassContribution",
+      "InventoryMovement",
+      "BalancePolicyVersion",
+      "StockReservation"
+    ],
+    [
+      "CorrectionRequest",
+      "Conversion",
+      "InventoryMovement",
+      "ReservationEvent",
+      "StockReservation"
+    ],
+    [
+      "Sample",
+      "LabReport",
+      "LabResult",
+      "Cohort",
+      "CohortMember",
+      "CohortSubstanceBound",
+      "LotResidueBoundVersion",
+      "ResidueEvidenceLink",
+      "PropagationPolicyVersion",
+      "ComplianceAssessment",
+      "SafetyMarginPolicyVersion"
+    ],
+    [
+      "ExportOrder",
+      "OrderSpecificationVersion",
+      "SpecificationLimit",
+      "Container",
+      "BlendPlan",
+      "BlendPlanAllocation",
+      "PlanReview",
+      "StockReservation",
+      "PlanOutputAllocation",
+      "PlanFinding"
+    ],
+    [
+      "Container",
+      "ContainerLoading",
+      "LoadingAllocation",
+      "PlanOutputAllocation",
+      "StockReservation",
+      "ComplianceAssessment",
+      "ComplianceDossier",
+      "DossierSupplement",
+      "ShipmentDocument"
+    ],
+    [
+      "Lot",
+      "MassContribution",
+      "Container",
+      "Hold",
+      "HoldNotification",
+      "HoldHandlingEvent"
+    ],
+    [
+      "BusinessEvent",
+      "StateTransition"
+    ]
+  ],
+  "diagram_count": 32,
+  "table_count": 12,
+  "presentation_source": "Sources.docx \u2014 IV. Software Design Description (user-specified pages 123\u2013166; headings used to identify section independently of cached pagination)",
+  "repository_context": "/home/phucpinku/Desktop/Git/GrainLedger",
+  "implementation_status": {
+    "1": "Repository-backed foundation: Identity/Catalogs administration, facility configuration and MRL publication exist. The complete target administration contract remains in scope.",
+    "2": "Mixed: field source registration, procurement idempotency and physical-arrival workflows exist; complete offline capture/sync and sample workflows remain planned. Registration and stock acceptance are separate outcomes.",
+    "3": "Mixed: physical processing, transfers, stock and source-share history exist through LedgerService/protected SQL; approved export-plan scope and reservations remain planned extensions.",
+    "4": "Repository-backed processing-correction flow with target accounting extensions. Current code binds reconciliation to current positions and exact replacement content/version. Export reservation reversal integration remains planned.",
+    "5": "Planned full compliance design. Published MRL maintenance/resolution exists in Catalogs; ledger.evidence is generic operational evidence. Neither implies completed lab/cohort/residue assessment.",
+    "6": "Planned full export planning/review/reservation design. ExportStaff is a persisted role; its presence does not imply completed order/planner APIs.",
+    "7": "Planned full container loading/CLOSE/dossier design, retaining all original quantity and assessment requirements.",
+    "8": "Mixed: explicit lot HOLD, scoped notices/handling and root-source contributions exist. Full source-to-container traversal, container HOLD and downstream authority invalidation remain planned.",
+    "9": "Mixed: existing scoped ledger.read history and module audit records; combined cross-module export/compliance history is the complete target extension."
+  },
+  "package_renderer": {
+    "tool": "PlantUML",
+    "version": "1.2026.8",
+    "layout_engine": "Graphviz dot",
+    "sources": [
+      "diagrams/04_packages_core.puml",
+      "diagrams/03_packages_workspace.puml",
+      "diagrams/02_packages_field.puml"
+    ],
+    "formats": [
+      "svg",
+      "png"
+    ]
+  }
+}

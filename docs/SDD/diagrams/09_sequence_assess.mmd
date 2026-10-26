@@ -1,0 +1,28 @@
+sequenceDiagram
+ autonumber
+ participant Caller as :Review / Loading / CLOSE coordinator
+ participant C as :ComplianceService
+ participant B as :BoundCalculator
+ participant Repo as :CompliancePersistence port (planned)
+ participant DB as :Database
+ Caller->>C: assess(exact scope, protected snapshot)
+ C->>+Repo: Resolve effective published MRL, margin, required substances and quality rules
+ Repo->>+DB: Resolve effective published MRL, margin, required substances and quality rules
+ DB-->>-Repo: Transaction result
+ Repo-->>-C: Result / transaction status
+ loop Every required source/substance and quality attribute
+ C->>B: Derive eligible current bound with source versions and units
+ B->>+Repo: Read LAB or eligible cohort or actual conversion input evidence
+ Repo->>+DB: Read LAB or eligible cohort or actual conversion input evidence
+ DB-->>-Repo: Transaction result
+ Repo-->>-B: Result / transaction status
+ B-->>C: Bound and immutable basis, or missing/conflicting evidence
+ end
+ alt Missing/conflicting evidence, limit or supported rule
+ C-->>Caller: INCOMPLETE and findings
+ else Complete basis
+ C->>C: Apply supported propagation/quality aggregation and per-substance threshold
+ C-->>Caller: PASS or FAIL, findings and exact versioned basis
+ end
+ Note over Caller,Repo: Caller atomically persists assessment and outcome after<br/>freshness checks
+ Note over DB: Full target design, not a claim of implemented export or residue APIs.

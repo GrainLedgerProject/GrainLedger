@@ -1,0 +1,25 @@
+classDiagram
+direction TB
+class BusinessEvent {
+ <<logical target>>
+ +UUID event_id
+ +UUID company_id
+ +UUID actor_id
+ +String event_type
+ +DateTime occurred_at
+ +DateTime recorded_at
+ +String correlation_id
+ +isVisibleTo(scope) Boolean
+}
+class StateTransition {
+ <<logical target>>
+ +UUID transition_id
+ +UUID event_id
+ +UUID plan_id
+ +UUID conversion_id
+ +UUID container_id
+ +String from_state
+ +String to_state
+ +hasExactlyOneTarget() Boolean
+}
+BusinessEvent "1" --> "0..*" StateTransition : changes

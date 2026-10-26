@@ -1,0 +1,58 @@
+from pathlib import Path
+# Reuse the native SVG / editable draw.io primitives; no repository writes.
+code=(Path(__file__).parent/'layout_sources_style.py').read_text().split('# Overall architecture')[0]
+exec(code)
+def planned(c,x,y,w,h,label):
+ c.box(x,y,w,h,label,'#fff5d9',19)
+ for j in range(len(c.s)-1,-1,-1):
+  if c.s[j].startswith('<rect '):c.s[j]=c.s[j].replace('/>',' stroke-dasharray="8 5"/>');break
+ c.root[-1].set('style',c.root[-1].get('style')+'dashed=1;')
+c=Canvas('01_system_architecture',1600,1160);c.text(800,35,'GrainLedger — Repository-Informed Full System Design',28,True)
+c.group(25,110,310,480,'React / TypeScript / Vite','#dbe8fb');c.box(50,175,260,110,'apps/web: administration, catalog, receiving and ledger UI')
+planned(c,50,325,260,110,'Offline field capture and compliance/export screens')
+c.text(180,478,'apps/mobile: placeholder only',17)
+c.group(475,100,660,670,'ASP.NET Core 10 — single process','#e5dfef');c.box(530,165,550,85,'GrainLedger.Api: Minimal API, auth, CSRF, static web host')
+for x,y,label in [(510,320,'Modules.Identity'),(825,320,'Modules.Catalogs'),(510,465,'Modules.Capture'),(825,465,'Modules.Ledger')]:c.box(x,y,275,95,label,'#e1efdf')
+planned(c,510,630,275,95,'Compliance: lab, bounds and assessment');planned(c,825,630,275,95,'Export: plans, reservations, CLOSE and dossiers')
+c.arrow([(660,250),(660,320)]);c.arrow([(940,250),(940,320)]);c.arrow([(530,210),(490,210),(490,510),(510,510)]);c.arrow([(1080,210),(1110,210),(1110,510),(1100,510)])
+c.arrow([(785,515),(825,515)])
+c.arrow([(335,210),(530,210)],'same-origin HTTPS');c.arrow([(530,260),(335,260)],'JSON / ProblemDetails',True)
+c.group(1220,110,350,330,'Identity adapters','#f8d8d3');c.box(1245,175,300,90,'Google OAuth / PKCE');c.box(1245,305,300,85,'Configured SMTP email')
+c.arrow([(660,320),(660,290),(1180,290),(1180,220),(1245,220)])
+c.arrow([(740,320),(740,305),(1195,305),(1195,350),(1245,350)])
+c.group(1220,520,350,300,'External information','#fff2cc');c.box(1245,585,300,95,'Lab reports / MRL publications')
+c.text(1395,735,'Authorized human entry',18);c.text(1395,770,'No lab/regulatory API implied',17)
+c.arrow([(1245,630),(1185,630),(1185,70),(180,70),(180,175)],'',True)
+c.group(25,715,310,295,'Delivery','#eeeeee');c.box(50,785,260,80,'Dockerfile: web + .NET build');planned(c,50,890,260,80,'CI/CD delivery pipeline')
+c.arrow([(335,870),(430,870),(430,700),(475,700)],'deploy',True)
+c.group(475,890,660,200,'PostgreSQL / shared Supabase context','#d6edf8');c.text(805,975,'identity | catalog | capture | ledger schemas',23)
+c.text(805,1025,'Protected SQL + EF Core; durable evidence and snapshots',21)
+c.arrow([(660,770),(660,890)],'same transaction');c.arrow([(970,890),(970,770)],'scoped reads',True)
+c.text(800,1138,'Solid boxes: observed foundation. Dashed boxes: planned capabilities. Full future design is retained; database diagrams are not redrawn.',18);c.save()
+# Existing projects, owned modules, and planned responsibilities.
+c=Canvas('04_packages_core',1700,1200);c.text(850,40,'GrainLedger Backend Package Diagram',29,True)
+c.package(30,85,1640,180,'GrainLedger.Api — composition root','#fff2cc',True)
+for j,l in enumerate(['Program.cs / module registration','Middleware / auth / CSRF','OpenAPI / static hosting']):c.package(70+j*530,165,480,75,l)
+blocks=[(30,335,'GrainLedger.Modules.Identity','#dbe8fb',['Domain','Features','Authorization / Infrastructure']),(880,335,'GrainLedger.Modules.Catalogs','#d5e8d4',['Endpoint classes','CatalogDbContext','Catalog entities / Migrations']),(30,680,'GrainLedger.Modules.Capture','#f8cecc',['Endpoint classes / DTOs','CaptureDbContext / entities','IProcurementLedgerPort']),(880,680,'GrainLedger.Modules.Ledger','#e5dfef',['LedgerEndpoints / LedgerService','ProcurementLedgerPort','Sql / protected routines'])]
+for x,y,title,color,children in blocks:
+ c.package(x,y,790,280,title,color,True)
+ for j,label in enumerate(children):c.package(x+30+j*250,y+115,230,120,label)
+c.arrow([(850,265),(850,310),(430,310),(430,335)],dash=True);c.arrow([(850,310),(1275,310),(1275,335)],dash=True)
+c.arrow([(820,820),(880,820)],dash=True)
+c.arrow([(30,220),(12,220),(12,820),(30,820)],dash=True)
+c.arrow([(1670,220),(1688,220),(1688,820),(1670,820)],dash=True)
+c.arrow([(1275,960),(1275,990),(430,990),(430,960)],'implements Capture contract',True)
+planned(c,90,1030,700,100,'Compliance capability: planned logical module / namespace not yet fixed')
+planned(c,910,1030,700,100,'Export capability: planned logical module / namespace not yet fixed')
+c.text(850,1172,'Module-owned schemas. Capture → Ledger contract shares caller transaction; EF entities do not cross module boundaries.',19);c.save()
+c=Canvas('03_packages_workspace',1500,860);c.text(750,40,'Frontend Package Diagram — apps/web',29,True);c.package(35,85,1430,600,'apps/web/src — existing flat source directory','#dbe8fb',True)
+labels=['main.tsx / App.tsx','api.ts / auth-errors.ts','LocalAuth.tsx / Administration.tsx','CatalogScreen.tsx','LedgerWorkspace.tsx','LedgerReceiving.tsx','LedgerOperations.tsx','LedgerSetup.tsx','LedgerStock.tsx / LedgerLotPicker.tsx','ledger-ui.tsx / styles.css']
+for j,l in enumerate(labels):c.package(70+j%4*350,200+j//4*155,320,105,l)
+planned(c,100,730,600,85,'Compliance / export screens: planned source groups');planned(c,800,730,600,85,'Offline capture / reconciliation: planned source groups');c.save()
+c=Canvas('02_packages_field',1500,840);c.text(750,40,'Field Web Client — Planned Capability Design',29,True);c.package(35,100,1430,585,'Target in mobile-friendly apps/web; apps/mobile is a placeholder','#fff2cc',True)
+for j,l in enumerate(['Local capture store (planned)','Stable operation identity','Sync coordinator (planned)','Reconciliation views (planned)','Capture API / existing idempotency','Receiving state integration']):c.package(90+j%3*470,235+j//3*190,380,125,l)
+c.arrow([(470,300),(560,300)],dash=True);c.arrow([(940,300),(1030,300)],dash=True)
+c.text(750,760,'APPLIED procurement source registration is distinct from accepted actual arrival and usable stock.',22)
+c.text(750,805,'No native app or complete offline client is claimed implemented.',19);c.save()
+E.ElementTree(mx).write(R/'GrainLedger_Architecture_Packages.drawio',encoding='utf-8',xml_declaration=True)
+print('Repository-context architecture / packages and editable draw.io updated.')

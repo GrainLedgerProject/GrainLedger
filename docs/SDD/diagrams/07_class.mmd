@@ -1,0 +1,109 @@
+classDiagram
+direction TB
+class Lot {
+ <<logical target>>
+ +UUID lot_id
+ +UUID company_id
+ +UUID commodity_id
+ +String lot_code
+ +String stage
+ +DateTime created_at
+ +belongsTo(companyId) Boolean
+ +isStageCompatible(operation) Boolean
+}
+class LotAllocation {
+ <<logical target>>
+ +UUID allocation_id
+ +UUID lot_id
+ +UUID location_id
+ +Decimal on_hand_kg
+ +freeMass(outstandingKg) Decimal
+}
+class Conversion {
+ <<logical target>>
+ +UUID conversion_id
+ +UUID company_id
+ +UUID plan_id
+ +String conversion_type
+ +String status
+ +Decimal declared_loss_kg
+ +Decimal measurement_variance_kg
+ +String variance_reason
+ +UUID variance_confirmed_by
+ +calculateVariance() Decimal
+ +validateBalance(policy) ValidationResult
+}
+class ConversionInput {
+ <<logical target>>
+ +UUID input_id
+ +UUID conversion_id
+ +UUID lot_id
+ +Decimal input_kg
+ +Decimal original_measured_value
+ +String original_unit
+ +validateWithdrawal(movements) ValidationResult
+}
+class ConversionOutput {
+ <<logical target>>
+ +UUID output_id
+ +UUID conversion_id
+ +UUID lot_id
+ +Decimal output_kg
+ +Decimal original_measured_value
+ +String original_unit
+ +validateProducedMass() ValidationResult
+}
+class MassContribution {
+ <<logical target>>
+ +UUID contribution_id
+ +UUID input_id
+ +UUID output_id
+ +Decimal attributed_output_kg
+ +validateAttribution(outputKg) ValidationResult
+}
+class InventoryMovement {
+ <<logical target>>
+ +UUID movement_id
+ +UUID event_id
+ +UUID allocation_id
+ +UUID reservation_id
+ +UUID reverses_movement_id
+ +Decimal delta_kg
+ +isExactReversalOf(original) Boolean
+}
+class BalancePolicyVersion {
+ <<logical target>>
+ +UUID balance_policy_id
+ +String conversion_type
+ +Integer version_no
+ +String tolerance_mode
+ +Decimal tolerance_value
+ +DateTime effective_from
+ +UUID confirmed_by
+ +allowedVariance(inputKg) Decimal
+}
+class StockReservation {
+ <<logical target>>
+ +UUID reservation_id
+ +UUID plan_allocation_id
+ +UUID plan_output_id
+ +Decimal reserved_kg
+ +Decimal consumed_kg
+ +Decimal released_kg
+ +outstandingMass() Decimal
+ +canConsume(massKg) Boolean
+}
+Lot "1" --> "0..*" LotAllocation : stored_as
+BalancePolicyVersion "1" --> "0..*" Conversion : governs
+Conversion "1" --> "0..*" ConversionInput : inputs
+Conversion "1" --> "0..*" ConversionOutput : outputs
+Lot "1" --> "0..*" ConversionInput : consumed
+Lot "1" --> "0..1" ConversionOutput : produced_once
+ConversionInput "1" --> "0..*" MassContribution : contributes
+ConversionOutput "1" --> "0..*" MassContribution : composed_of
+LotAllocation "1" --> "0..*" InventoryMovement : balance_history
+InventoryMovement "0..1" --> "0..1" InventoryMovement : reversed_by
+ConversionInput "0..1" --> "0..*" InventoryMovement : withdraws
+ConversionOutput "0..1" --> "0..*" InventoryMovement : deposits
+StockReservation "0..1" --> "0..*" InventoryMovement : consumes_reserved_mass
+Conversion "0..1" --> "0..*" Conversion : compensates_original

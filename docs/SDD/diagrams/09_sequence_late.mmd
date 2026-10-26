@@ -1,0 +1,34 @@
+sequenceDiagram
+ autonumber
+ actor M as Customer Manager
+ participant UI as :Compliance UI
+ participant Ctrl as :EvidenceEndpoints (planned)
+ participant E as :EvidenceService
+ participant B as :BoundCalculator
+ participant T as :TraceService
+ participant R as :EvidencePersistence port (planned)
+ participant DB as :Database
+ M->>UI: Register new or official superseding report
+ UI->>+Ctrl: registerEvidence(command)
+ Ctrl->>+E: registerReport(command, actor)
+ E->>E: validateSourceAndOfficialSupersessionContext(command)
+ E->>+R: beginAndLockEvidenceDecisionScope(command)
+ R->>DB: BEGIN, serialize evidence and dependent authority
+ DB-->>R: Current versions and decision revisions
+ R-->>-E: Protected evidence snapshot
+ E->>R: appendReportAndResultsPreservingHistory(command)
+ R->>DB: New immutable report/results and registration event
+ E->>B: deriveSupportedBoundVersions(actualSources)
+ B-->>E: New bound versions or incomplete findings
+ E->>T: forwardAffectedTargets(sourceLot)
+ T-->>E: Affected stock, plans and containers
+ E->>E: identifyInvalidUnfinishedAuthority(currentFindings)
+ E->>R: appendBoundsRiskAndAuthorityChanges(affectedScope)
+ R->>DB: New bounds, LAB_RISK_DETECTED, STALE authority, unused releases
+ E->>R: commitEvidenceAndProtectiveChanges()
+ R->>DB: COMMIT or rollback all on failure
+ E-->>-Ctrl: EvidenceOutcome(affectedTargets, findings)
+ Ctrl-->>-UI: Registered versions and risk findings
+ UI-->>M: Review affected targets for explicit HOLD decision
+ Note over E,DB: No automatic HOLD, no rewrite of prior decisions or CLOSED history
+ Note over DB: Full target design, not a claim of implemented export or residue APIs.

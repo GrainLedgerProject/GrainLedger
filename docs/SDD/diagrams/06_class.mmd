@@ -1,0 +1,165 @@
+classDiagram
+direction TB
+class Farmer {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +string Code
+ +string Name
+ +stringNullable Contact
+ +DateTimeOffset CreatedAt
+ +GuidNullable CreatedBy
+ +int Version
+ +bool IsDeleted
+}
+class Plot {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +Guid FarmerId
+ +string Code
+ +string BoundaryGeojson
+ +decimal AreaHa
+ +GuidNullable CreatedBy
+ +int Version
+ +bool IsDeleted
+}
+class CropSeason {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +string Name
+ +DateOnly StartsOn
+ +DateOnly EndsOn
+ +GuidNullable CreatedBy
+ +int Version
+ +bool IsDeleted
+}
+class PlotSeason {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +Guid PlotId
+ +Guid SeasonId
+ +string RiceVariety
+ +GuidNullable CreatedBy
+ +int Version
+ +bool IsDeleted
+}
+class SprayDeclaration {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +Guid PlotSeasonId
+ +DateOnly AppliedOn
+ +Guid RecordedBy
+ +DateTimeOffset RecordedAt
+ +stringNullable EvidenceRef
+}
+class SprayItem {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +Guid DeclarationId
+ +stringNullable ProductName
+ +GuidNullable SubstanceId
+ +decimal Rate
+ +string RateUnit
+}
+class Procurement {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +string Code
+ +Guid FarmerId
+ +Guid CollectionSiteId
+ +Guid ReceivedBy
+ +DateTimeOffset ReceivedAt
+ +string Status
+ +GuidNullable EventId
+}
+class ProcurementItem {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +Guid ProcurementId
+ +int LineNo
+ +Guid PlotSeasonId
+ +decimal NetMassKg
+ +decimal MeasuredValue
+ +string MeasuredUnit
+ +decimal MoisturePercent
+}
+class SourceLot {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +Guid LotId
+ +Guid ProcurementItemId
+}
+class CaptureOperation {
+ <<existing CLR>>
+ +Guid Id
+ +Guid CompanyId
+ +Guid SubmittedBy
+ +string DeviceId
+ +Guid ClientOperationId
+ +string PayloadHash
+ +string Payload
+ +DateTimeOffset CapturedAt
+ +stringNullable CaptureGeojson
+ +String Status
+ +Guid AppliedEventId
+ +String ResultPayload
+ +String ConflictReason
+}
+Farmer "1" --> "0..*" Plot
+Plot "1" --> "0..*" PlotSeason
+CropSeason "1" --> "0..*" PlotSeason
+PlotSeason "1" --> "0..*" SprayDeclaration
+SprayDeclaration "1" --> "0..*" SprayItem
+Procurement "1" --> "1..*" ProcurementItem
+ProcurementItem "1" --> "1" SourceLot : registered source identity
+class ReceivingState {
+ <<existing SQL model>>
+ +Guid ProcurementId
+ +String Status
+ +Integer Version
+ +Guid AcceptedMeasurementSetId
+ +Guid AcceptedReviewId
+}
+class ArrivalMeasurementSet {
+ <<existing SQL model>>
+ +Guid Id
+ +Guid ProcurementId
+ +Guid OperatorId
+ +DateTime CapturedAt
+}
+class ArrivalMeasurement {
+ <<existing SQL model>>
+ +Guid MeasurementSetId
+ +Guid ProcurementItemId
+ +Decimal ActualKg
+ +String MeasuredUnit
+}
+class ArrivalReview {
+ <<existing SQL model>>
+ +Guid Id
+ +Guid ProcurementId
+ +Guid MeasurementSetId
+ +String Action
+ +Guid EvidenceId
+ +Guid ManagerId
+}
+class Sample {
+ <<planned>>
+ +Guid SampleId
+ +Guid SourceLotId
+ +String SealCode
+ +DateTime CollectedAt
+}
+Procurement "1" --> "1" ReceivingState
+ReceivingState "1" --> "0..*" ArrivalMeasurementSet
+ArrivalMeasurementSet "1" --> "1..*" ArrivalMeasurement
+ArrivalMeasurementSet "1" --> "0..*" ArrivalReview
+SourceLot "1" --> "0..*" Sample : planned sample evidence
