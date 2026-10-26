@@ -2,7 +2,7 @@
 
 GrainLedger is a rice supply-chain traceability platform. It connects identity and access control, shared product catalogs, procurement source records, and a protected ledger for receiving, stock, processing, and history.
 
-Lot-to-lot tracing is available through Ledger → Traceability and the [audited trace API](docs/traceability-api.md). The [implementation plan](docs/traceability-implementation-plan.md) records current scope and deferred lab/export/container dependencies. New trace migration/runtime grants require explicit deployment; normal startup does not apply them.
+Lot-to-lot tracing is available through Ledger → Traceability and the [audited trace API](docs/api/traceability-api.md). The [implementation plan](docs/plans/traceability-implementation-plan.md) records current scope and deferred lab/export/container dependencies. New trace migration/runtime grants require explicit deployment; normal startup does not apply them.
 
 ## What it does
 
@@ -67,16 +67,16 @@ npm run build
 ```
 
 ## Documentation
-
+- [Documentation index](docs/README.md): index of architecture, APIs, guides, plans, and reports
 - [Setup and deployment](docs/setup-and-deployment.md): local provisioning, configuration, migrations, seeds, and production deployment
 - [Architecture and access control](docs/architecture.md): module boundaries, authorization, and data rules
-- [Email/password authentication and Scalar](docs/auth-email-password-scalar.md)
-- [Development accounts and demo Ledger data](docs/development-accounts.md)
-- [Farmer API](docs/farmer-api.md) · [Procurement API](docs/procurement-api.md)
-- [MRL CSV/Excel and YouTrack reference import](docs/mrl-file-import.md): substance setup, Vietnam draft limits, source provenance, and import safeguards
-- [Unified lot-code guide](docs/unified-lot-code-guide.md)
-- [Laboratory workflow guide](docs/lab-flow-guide.md) · [Samples and external laboratory API](docs/sample-api.md#laboratory-report-routes) · [Laboratory workflow policy boundaries](docs/lab-flow-plan.md)
-- [Residue bounds: policy gates, delivered API, workflow and verification](docs/residue-bounds-plan.md#9-delivered-residue-bounds-contracts)
+- [Email/password authentication and Scalar](docs/guides/auth-email-password-scalar.md)
+- [Development accounts and demo Ledger data](docs/guides/development-accounts.md)
+- [Farmer API](docs/api/farmer-api.md) · [Procurement API](docs/api/procurement-api.md)
+- [MRL CSV/Excel and YouTrack reference import](docs/guides/mrl-file-import.md): substance setup, Vietnam draft limits, source provenance, and import safeguards
+- [Unified lot-code guide](docs/guides/unified-lot-code-guide.md)
+- [Laboratory workflow guide](docs/guides/lab-flow-guide.md) · [Samples and external laboratory API](docs/api/sample-api.md#laboratory-report-routes) · [Laboratory workflow policy boundaries](docs/plans/lab-flow-plan.md)
+- [Residue bounds: policy gates, delivered API, workflow and verification](docs/plans/residue-bounds-plan.md#9-delivered-residue-bounds-contracts)
 - [PostgreSQL diagrams and data dictionary](docs/dbdiagram/README.md)
 
 For deployment, separate restricted runtime credentials from migration-owner credentials, use HTTPS behind a trusted reverse proxy, and protect persistent DataProtection keys. See [production deployment guidance](docs/setup-and-deployment.md#production-deployment).

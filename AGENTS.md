@@ -14,7 +14,7 @@ GrainLedger is a modular monolith: ASP.NET Core 10, PostgreSQL, and React/TypeSc
 - `backend/tests/GrainLedger.Api.IntegrationTests/`: backend integration tests using isolated Docker/Testcontainers PostgreSQL.
 - `apps/web/`: working web UI; `apps/mobile/` remains a placeholder.
 
-Read `README.md` for the project overview and `docs/setup-and-deployment.md` for environment, database-role, migration, seed, and deployment setup. Read `docs/architecture.md` for module, authorization, transaction, and numeric contracts, and `docs/ledger-implementation-plan.md` when changing ledger workflows. Authentication setup lives in `docs/auth-email-password-scalar.md`; seed-account instructions live in `docs/development-accounts.md`. Lot-code rules live in `docs/unified-lot-code-guide.md`. `docs/dbdiagram/README.md` indexes deployed-schema diagrams; these are dated snapshots, not migration sources or proof that unapplied migrations are installed.
+Read `README.md` for the project overview and `docs/setup-and-deployment.md` for environment, database-role, migration, seed, and deployment setup. Read `docs/architecture.md` for module, authorization, transaction, and numeric contracts, and `docs/plans/ledger-implementation-plan.md` when changing ledger workflows. Authentication setup lives in `docs/guides/auth-email-password-scalar.md`; seed-account instructions live in `docs/guides/development-accounts.md`. Lot-code rules live in `docs/guides/unified-lot-code-guide.md`. `docs/dbdiagram/README.md` indexes deployed-schema diagrams; these are dated snapshots, not migration sources or proof that unapplied migrations are installed.
 
 ## Development commands
 

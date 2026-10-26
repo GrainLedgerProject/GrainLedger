@@ -1,0 +1,136 @@
+[
+  [
+    "04_packages_core",
+    "Backend Package Diagram",
+    [
+      [
+        "GrainLedger.Api",
+        "Existing composition root: ASP.NET Core 10 Minimal API host, middleware/authentication, module registration, same-origin static web hosting and development OpenAPI/Scalar."
+      ],
+      [
+        "GrainLedger.Modules.Identity",
+        "Existing module. Owns identity schema, users/organizations, permissions, cookie/JWT sessions, local/Google authentication and administration."
+      ],
+      [
+        "Identity.Domain / Features / Authorization",
+        "Existing directories. Domain/User, Organization, LoginSession; Features/Authentication, Profile, Administration; persisted permission/scope resolution."
+      ],
+      [
+        "Identity.Infrastructure / Common",
+        "Existing directories. EF Core IdentityDbContext, cookie/JWT/CSRF adapters, SMTP email sender, request/error helpers."
+      ],
+      [
+        "GrainLedger.Modules.Catalogs",
+        "Existing module. Endpoint classes, catalog entities and CatalogDbContext in the module root; commodity/unit/substance/market/quality/variety and versioned MRL APIs."
+      ],
+      [
+        "GrainLedger.Modules.Capture",
+        "Existing module. Endpoint classes, EF entities, CaptureDbContext, request/response records and capture schema. Keeps immutable procurement source expectations distinct from accepted physical stock."
+      ],
+      [
+        "Capture.IProcurementLedgerPort",
+        "Existing in-process interface in ProcurementLedgerPort.cs; RegisterPendingAsync uses the caller connection/transaction. No EF entities cross the boundary."
+      ],
+      [
+        "GrainLedger.Modules.Ledger",
+        "Existing module. LedgerEndpoints and LedgerManagementEndpoints, LedgerService, ProcurementLedgerPort/CommodityLedgerPort, protected reads/commands and evidence handling."
+      ],
+      [
+        "Ledger.Sql",
+        "Existing SQL resource directory: Schema, Operations, Commands, Reads, PhysicalReceiving, CorrectionBinding and later migrations define protected state, postings and logical domain records."
+      ],
+      [
+        "Module migrations and DbContexts",
+        "Existing module-owned persistence/migration history. Identity, Catalogs and Capture use EF domain persistence; LedgerDbContext supports migrations while runtime LedgerService uses Npgsql/protected SQL."
+      ],
+      [
+        "Compliance capability (planned logical module)",
+        "Target design for lab/cohort/propagation/assessments; consumes Catalogs MRL references and actual accepted Ledger quantities/lineage. No corresponding project is present yet; final project/namespace split remains a design decision."
+      ],
+      [
+        "Export capability (planned logical module)",
+        "Target order/plan/review/reservation/loading/CLOSE/dossier coordination in the same host, sharing the protected transaction boundary. No corresponding project is present yet."
+      ],
+      [
+        "Trace/container-HOLD extensions (planned)",
+        "Extend Ledger lineage/HOLD/history to complete lab-to-container and container-to-plot workflows; current lot HOLD does not automatically cascade."
+      ]
+    ]
+  ],
+  [
+    "03_packages_workspace",
+    "Frontend Package Diagram (Website)",
+    [
+      [
+        "apps/web/src/main.tsx; App.tsx",
+        "Existing React/TypeScript entry point, restored session, scope-aware navigation and page composition; built using Vite."
+      ],
+      [
+        "src/api.ts; auth-errors.ts",
+        "Existing same-origin fetch wrapper: HttpOnly session cookies, X-CSRF-TOKEN on mutations, session-generation checks and ProblemDetails errors. No access token is stored in local storage."
+      ],
+      [
+        "src/LocalAuth.tsx; Administration.tsx",
+        "Existing local-auth/account and role/organization-access screens; Google login is brokered by backend Identity."
+      ],
+      [
+        "src/CatalogScreen.tsx",
+        "Existing catalog and versioned MRL screens."
+      ],
+      [
+        "src/LedgerWorkspace.tsx; LedgerReceiving.tsx",
+        "Existing task workspace and source-registration / actual-arrival measurement / manager-review interface."
+      ],
+      [
+        "src/LedgerOperations.tsx; LedgerSetup.tsx",
+        "Existing processing/draft/correction/transfer and configuration screens."
+      ],
+      [
+        "src/LedgerStock.tsx; LedgerLotPicker.tsx",
+        "Existing stock, HOLD/notices/history views and scoped lot selection."
+      ],
+      [
+        "src/ledger-ui.tsx; styles.css",
+        "Existing shared UI/numeric-input/pagination components and responsive styles. These are files in a flat src directory, not invented nested packages."
+      ],
+      [
+        "Compliance/export screens (planned)",
+        "Future evidence, bounds, plan review, loading, CLOSE and dossier views; retain the current API/session/error conventions."
+      ],
+      [
+        "Durable offline field capture (planned)",
+        "Future local pending storage/reconnection/reconciliation in the mobile-friendly web client. A server CaptureOperation record is present, but the complete offline client is not implemented."
+      ]
+    ]
+  ],
+  [
+    "02_packages_field",
+    "Frontend Package Diagram (Field Web Client)",
+    [
+      [
+        "apps/web mobile-friendly capture screens",
+        "Existing browser surface to extend; the repository apps/mobile package is a placeholder, not a running native client."
+      ],
+      [
+        "Local capture store (planned)",
+        "Persist original pending payload and capture metadata; use stable device/operation identity, dependency ordering and owner isolation."
+      ],
+      [
+        "Synchronization coordinator (planned)",
+        "Retry through authenticated Capture endpoint contracts. Procurement registration creates source expectation only; retries never authorize physical stock."
+      ],
+      [
+        "Reconciliation views (planned)",
+        "Present same-key changed payload conflict, missing dependencies, pending/rejected outcome and later receiving state without silently merging submissions."
+      ],
+      [
+        "CaptureOperation and existing idempotency contract",
+        "Existing capture entity and uniqueness for company/device/client operation. Current procurement endpoint replays same accepted canonical payload; conflict returns 409. General offline lifecycle remains target design."
+      ],
+      [
+        "Receiving projection integration",
+        "Use current Ledger receiving state after synchronization; PENDING_ARRIVAL or blocked discrepancy means zero usable stock, not a failed duplicate source record."
+      ]
+    ]
+  ]
+]

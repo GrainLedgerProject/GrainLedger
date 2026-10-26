@@ -1,0 +1,24 @@
+sequenceDiagram
+ autonumber
+ actor U as Authorized Customer Manager / Export Officer
+ participant View as :UI (Web / Field)
+ participant Ctrl as :LedgerEndpoints
+ participant T as :LedgerService
+ participant Repo as :Npgsql + protected SQL
+ participant DB as :Database
+ U->>View: Trace source forward or container backward
+ View->>Ctrl: Submit request
+ Ctrl->>T: Trace source forward or container backward
+ T->>T: Check permitted use case and company/facility scope
+ T->>+Repo: Read committed lineage, current correction view and loading links
+ Repo->>+DB: Read committed lineage, current correction view and loading links
+ DB-->>-Repo: Transaction result
+ Repo-->>-T: Result / transaction status
+ loop All reachable permitted contribution edges
+ T->>T: Accumulate source-attributed kg through each operation
+ end
+ T-->>Ctrl: Complete permitted targets, source kg, mass shares and history basis
+ Ctrl-->>View: Operation result and findings
+ View-->>U: Display outcome
+ Note over U,T: Export Officer participation is UC-25, no implied HOLD<br/>issuance grant
+ Note over Ctrl,DB: Existing entry uses LedgerService CommandAsync / ReadAsync / ReceivingAsync.<br/>Detailed logical steps show required protected behavior, including planned extensions.
