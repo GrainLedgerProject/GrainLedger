@@ -1,3 +1,7 @@
+# CI plan ? historical baseline
+
+The plan below records the original full-run rollout. The current optimized policy supersedes its trigger, routing and cache decisions: see [CI setup and operation](ci-guide.md) and [workflow](../.github/workflows/ci.yml). PRs into dev filter changes by default, pushes to dev no longer run CI, and NuGet/Docker layer caches are enabled. Protect dev with required PR checks before relying on this policy.
+
 # Kế hoạch CI cho GrainLedger bằng GitHub Actions
 
 Ngày khảo sát: 26/10/2026. Phạm vi: kiểm tra chất lượng và khả năng build khi tích hợp code; chưa triển khai CD. Đây là kế hoạch, chưa phải workflow đã chạy thành công trên GitHub.

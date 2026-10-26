@@ -14,10 +14,12 @@ export function classify(files) {
     if (/^(README\.md|AGENTS\.md|docs\/.*\.md)$/.test(file)) continue;
     if (file.startsWith('backend/') ||
         /^(global\.json|GrainLedger\.slnx|NuGet\.[Cc]onfig|nuget\.config|Directory\.(Build|Packages)\.(props|targets))$/.test(file)) {
-      flags.run_backend = flags.run_container = true;
+      flags.run_backend = true;
+      if (!file.endsWith('.cs')) flags.run_container = true;
     } else if (file.startsWith('apps/web/') ||
                ['package.json', 'package-lock.json', 'apps/mobile/package.json'].includes(file)) {
-      flags.run_web = flags.run_container = true;
+      flags.run_web = true;
+      if (!file.startsWith('apps/web/src/')) flags.run_container = true;
     } else if (['Dockerfile', '.dockerignore'].includes(file)) {
       flags.run_container = true;
     } else {
@@ -25,6 +27,13 @@ export function classify(files) {
     }
   }
   return flags;
+}
+
+export function selectJobs(files, eventName, baseRef, filters = '') {
+  // Unknown configuration fails safe; only an unset variable or true opts in.
+  if (eventName !== 'pull_request' || baseRef !== 'dev' ||
+      !['', 'true'].includes(filters)) return full();
+  return classify(files);
 }
 
 export function changedFiles(base, head, cwd = process.cwd()) {
@@ -89,8 +98,8 @@ function plan() {
     }
   }
   checkDocs(files ?? ['README.md', 'docs/ci-plan.md', 'docs/ci-guide.md']);
-  const flags = process.env.GITHUB_EVENT_NAME === 'pull_request' &&
-    process.env.CI_ENABLE_PATH_FILTERS === 'true' ? classify(files) : full();
+  const flags = selectJobs(files, process.env.GITHUB_EVENT_NAME,
+    event.pull_request?.base?.ref, process.env.CI_ENABLE_PATH_FILTERS ?? '');
   const output = Object.entries(flags).map(([key, value]) => `${key}=${value}`).join('\n');
   appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
   if (process.env.GITHUB_STEP_SUMMARY) {

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { changedFiles, checkDocs, classify, gate } from './ci.mjs';
+import { changedFiles, checkDocs, classify, gate, selectJobs } from './ci.mjs';
 
 const all = { run_backend: true, run_web: true, run_container: true };
 const none = { run_backend: false, run_web: false, run_container: false };
@@ -13,17 +13,17 @@ const script = fileURLToPath(new URL('./ci.mjs', import.meta.url));
 
 test('only known docs may skip builds; combined and unknown changes require coverage', () => {
   assert.deepEqual(classify(['README.md', 'docs/guide.md']), none);
-  assert.deepEqual(classify(['backend/src/Api.cs', 'docs/guide.md']), { ...all, run_web: false });
-  assert.deepEqual(classify(['apps/web/src/App.tsx']), { ...all, run_backend: false });
+  assert.deepEqual(classify(['backend/src/Api.cs', 'docs/guide.md']), { ...none, run_backend: true });
+  assert.deepEqual(classify(['apps/web/src/App.tsx']), { ...none, run_web: true });
   assert.deepEqual(classify(['apps/mobile/package.json']), { ...all, run_backend: false });
   assert.deepEqual(classify(['Dockerfile', '.dockerignore']), { ...none, run_container: true });
   assert.deepEqual(classify(['global.json']), { ...all, run_web: false });
   for (const files of [[], undefined, ['.github/workflows/ci.yml'], ['scripts/new.sh'], ['docs/script.sh'], ['new.config']]) {
     assert.deepEqual(classify(files), all);
   }
-  assert.deepEqual(classify(['backend/src/Api.cs', 'apps/web/src/App.tsx']), all);
+  assert.deepEqual(classify(['backend/src/Api.cs', 'apps/web/src/App.tsx']), { ...all, run_container: false });
   assert.deepEqual(classify(Array.from({ length: 4000 }, (_, i) => `docs/${i}.md`).concat('backend/new.cs')),
-    { ...all, run_web: false });
+    { ...none, run_backend: true });
 });
 
 test('gate rejects missing/invalid plans, failed/cancelled jobs and unexpected skips', () => {
@@ -76,8 +76,8 @@ test('Git diff covers the entire PR, renamed/deleted files and unusual filenames
 
   const eventPath = path.join(root, 'event.json');
   const outputPath = path.join(root, 'output');
-  writeFileSync(eventPath, JSON.stringify({ pull_request: { base: { sha: docsBase }, head: { sha: git('rev-parse', 'HEAD') } } }));
-  for (const [enabled, expected] of [['true', 'false'], ['', 'true'], ['false', 'true']]) {
+  writeFileSync(eventPath, JSON.stringify({ pull_request: { base: { sha: docsBase, ref: 'dev' }, head: { sha: git('rev-parse', 'HEAD') } } }));
+  for (const [enabled, expected] of [['true', 'false'], ['', 'false'], ['false', 'true'], ['invalid', 'true']]) {
     writeFileSync(outputPath, '');
     const result = spawnSync(process.execPath, [script, 'plan'], {
       cwd: root, encoding: 'utf8', env: { ...process.env, GITHUB_EVENT_NAME: 'pull_request',
@@ -120,4 +120,28 @@ test('actual plan/gate CLI defaults to full runs and fails closed', t => {
     env: { ...process.env, CI_NEEDS_JSON: '{}' }, encoding: 'utf8',
   });
   assert.equal(invalidGate.status, 1);
+});
+
+
+test('packaging changes and promotion require image validation; dev source edits avoid duplicate builds', () => {
+  for (const file of ['backend/src/Api.csproj', 'Directory.Build.props', 'global.json']) {
+    assert.deepEqual(classify([file]), { ...all, run_web: false });
+  }
+  for (const file of ['package-lock.json', 'apps/web/package.json', 'apps/web/vite.config.ts']) {
+    assert.deepEqual(classify([file]), { ...all, run_backend: false });
+  }
+  assert.deepEqual(classify(['backend/src/Migrations/20261026.cs']), { ...none, run_backend: true });
+  const docs = ['README.md'];
+  assert.deepEqual(selectJobs(docs, 'pull_request', 'dev'), none);
+  assert.deepEqual(selectJobs(docs, 'pull_request', 'dev', 'true'), none);
+  for (const filters of ['false', 'TRUE', 'invalid']) {
+    assert.deepEqual(selectJobs(docs, 'pull_request', 'dev', filters), all);
+  }
+  for (const base of ['main', undefined, 'release']) {
+    assert.deepEqual(selectJobs(docs, 'pull_request', base), all);
+  }
+  for (const event of ['push', 'merge_group', 'workflow_dispatch']) {
+    assert.deepEqual(selectJobs(docs, event, 'dev'), all);
+  }
+  assert.deepEqual(selectJobs(undefined, 'pull_request', 'dev'), all);
 });
