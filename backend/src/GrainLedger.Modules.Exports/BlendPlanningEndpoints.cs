@@ -9,12 +9,6 @@ namespace GrainLedger.Modules.Exports;
 
 public static partial class ExportModule
 {
-    private static readonly PlanningDependency[] PendingPlanningDependencies =
-    [
-        new("COMPLIANCE_NOT_IMPLEMENTED", "Residue bounds, quality evidence and market assessment are not available yet."),
-        new("PLANNER_NOT_IMPLEMENTED", "Deterministic greedy stock selection is available; compliance-aware feasibility and proposal are not yet available.")
-    ];
-
     private sealed class PlanningReadyFilter(ExportDbContext db) : IEndpointFilter
     {
         public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
@@ -49,6 +43,10 @@ public static partial class ExportModule
             .RequireAuthorization(Permissions.ExportOrdersRead).AddEndpointFilter<NoStoreFilter>()
             .AddEndpointFilter<ReadyFilter>().WithTags("Blend planning")
             .WithDescription("Requires facilityId and locationId; optional candidateRevision returns 409 if stale.");
+        endpoints.MapGet("/api/export-containers/{id:guid}/candidates/{lotId:guid}/residue-preview", CandidateResiduePreviewAsync)
+            .RequireAuthorization(Permissions.ResidueEvaluate).AddEndpointFilter<NoStoreFilter>()
+            .AddEndpointFilter<ReadyFilter>().WithTags("Blend planning")
+            .WithDescription("Requires facilityId, locationId, candidateRevision and substanceIds. Returns a read-only F12 lot interval, not a market assessment or plan.");
         var containers = endpoints.MapGroup("/api/export-containers/{id:guid}/blend-plans")
             .RequireAuthorization().AddEndpointFilter<NoStoreFilter>()
             .AddEndpointFilter<MutationAntiforgeryFilter>().AddEndpointFilter<ReadyFilter>()
@@ -60,6 +58,12 @@ public static partial class ExportModule
             .AddEndpointFilter<ReadyFilter>().AddEndpointFilter<PlanningReadyFilter>().WithTags("Blend planning");
         plans.MapGet("", GetPlanDraftAsync).RequireAuthorization(Permissions.ExportOrdersRead);
         plans.MapGet("/history", PlanHistoryAsync).RequireAuthorization(Permissions.ExportOrdersRead);
+        plans.MapPost("/residue-preview", PlanResiduePreviewAsync).RequireAuthorization(Permissions.ResidueEvaluate)
+            .WithDescription("Checks selected candidate positions and reads F12 intervals for all lots at one residue snapshot. This does not assess MRL or save a plan.");
+        plans.MapPost("/preview", PreviewBlendPlanAsync).RequireAuthorization(Permissions.BlendPropose)
+            .WithDescription("Runs bounded deterministic selection and fail-closed assessment. A PASS result receives a short-lived server-owned reference for proposal.");
+        plans.MapPost("/propose", ProposeBlendPlanAsync).RequireAuthorization(Permissions.BlendPropose);
+        plans.MapGet("/proposal", GetBlendPlanProposalAsync).RequireAuthorization(Permissions.ExportOrdersRead);
         plans.MapPost("/cancel", CancelPlanDraftAsync).RequireAuthorization(Permissions.BlendPropose);
     }
 
@@ -74,10 +78,11 @@ public static partial class ExportModule
         catch (JsonException) { return null; }
     }
 
-    private static BlendPlanDraftDto PlanDto(BlendPlanDraft p, bool canWrite, bool demandCurrent) => new(p.Id, p.OrderId,
+    private static BlendPlanDraftDto PlanDto(BlendPlanDraft p, bool canWrite, bool demandCurrent,
+        bool proposed = false) => new(p.Id, p.OrderId,
         p.ContainerId, p.SpecificationId, p.VersionNo, p.Version, p.Status, ExportRules.Text(p.TargetMassKg),
         TargetProductFromSnapshot(p.DemandSnapshot), p.DemandSnapshot, p.CreatedAt, p.CancelledAt,
-        demandCurrent, canWrite && p.Status == "DRAFT");
+        demandCurrent, canWrite && p.Status == "DRAFT" && !proposed);
 
     private static bool DemandIsCurrent(BlendPlanDraft plan, ExportOrder order, ExportContainer container)
     {
@@ -121,7 +126,14 @@ public static partial class ExportModule
             "Apply the reviewed Ledger candidate migration and restricted runtime grant."));
         if (!compatibilityReady) dependencies.Add(new("COMPATIBILITY_READ_NOT_READY",
             "Apply the reviewed Ledger compatibility migration and restricted runtime grant."));
-        dependencies.AddRange(PendingPlanningDependencies);
+        var qualityReady = await db.Database.SqlQueryRaw<bool>("""
+            SELECT COALESCE(has_function_privilege(current_user,
+                to_regprocedure('ledger.planning_quality_observations(uuid,uuid,uuid,uuid[],timestamptz)'), 'EXECUTE'), false) AS "Value"
+            """).SingleAsync(ct);
+        if (!qualityReady) dependencies.Add(new("QUALITY_EVIDENCE_NOT_READY",
+            "Apply the reviewed finished-lot quality observation migration and restricted runtime grant."));
+        if (!await ProposalReadyAsync(db, ct)) dependencies.Add(new("PROPOSAL_STORAGE_NOT_READY",
+            "Apply the reviewed Export proposal migration and runtime grants."));
         return Results.Ok(new BlendPlanningContextDto(id, order.Version, container.Version, ready,
             ready && container.Status == "PLANNED" && await access.HasPermissionAsync(Permissions.BlendPropose, ct),
             candidateReady, compatibilityReady, false, dependencies));
@@ -210,10 +222,15 @@ public static partial class ExportModule
         var total = await query.CountAsync(ct);
         var rows = await query.OrderByDescending(x => x.VersionNo).Skip((page - 1) * size).Take(size).ToListAsync(ct);
         var canWrite = await access.HasPermissionAsync(Permissions.BlendPropose, ct);
+        var rowIds = rows.Select(x => x.Id).ToArray();
+        var proposedIds = await ProposalReadyAsync(db, ct)
+            ? (await db.BlendPlanProposals.AsNoTracking().Where(x => x.CompanyId == scope.Value.Company &&
+                rowIds.Contains(x.PlanId)).Select(x => x.PlanId).ToArrayAsync(ct)).ToHashSet()
+            : new HashSet<Guid>();
         var container = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == id, ct);
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
         return Results.Ok(new ExportPage<BlendPlanDraftDto>(rows.Select(x => PlanDto(x, canWrite,
-            DemandIsCurrent(x, order, container))).ToArray(), page, size, total, (long)page * size < total));
+            DemandIsCurrent(x, order, container), proposedIds.Contains(x.Id))).ToArray(), page, size, total, (long)page * size < total));
     }
 
     private static async Task<IResult> GetPlanDraftAsync(Guid id, HttpContext http, IdentityDbContext identity,
@@ -226,8 +243,10 @@ public static partial class ExportModule
         var container = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == plan.ContainerId, ct);
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == plan.OrderId, ct);
         SetEtag(http, plan.Version);
+        var proposed = await ProposalReadyAsync(db, ct) && await db.BlendPlanProposals.AsNoTracking()
+            .AnyAsync(x => x.PlanId == id && x.CompanyId == scope.Value.Company, ct);
         return Results.Ok(PlanDto(plan, await access.HasPermissionAsync(Permissions.BlendPropose, ct),
-            DemandIsCurrent(plan, order, container)));
+            DemandIsCurrent(plan, order, container), proposed));
     }
 
     private static async Task<IResult> CancelPlanDraftAsync(Guid id, CancelBlendPlanDraftRequest request,
@@ -246,6 +265,9 @@ public static partial class ExportModule
         if (plan is null) return Results.NotFound();
         if (!Matches(http, plan.Version)) return Problem(412, "PLAN_VERSION_STALE", "Reload the plan before cancelling.");
         if (plan.Status != "DRAFT") return Problem(409, "PLAN_NOT_DRAFT", "Only an active draft can be cancelled.");
+        if (await ProposalReadyAsync(db, ct) && await db.BlendPlanProposals.AnyAsync(x =>
+            x.PlanId == id && x.CompanyId == scope.Value.Company, ct))
+            return Problem(409, "PLAN_ALREADY_PROPOSED", "A proposed plan cannot be cancelled as a draft.");
         plan.Status = "CANCELLED"; plan.Version++; plan.CancelledBy = scope.Value.Actor; plan.CancelledAt = clock.GetUtcNow();
         PlanEvent(db, plan, scope.Value.Actor, "DRAFT_CANCELLED", plan.CancelledAt.Value);
         var order = await db.Orders.SingleAsync(x => x.Id == plan.OrderId, ct);

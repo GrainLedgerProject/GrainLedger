@@ -14,6 +14,199 @@ namespace GrainLedger.Api.IntegrationTests;
 public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     [Fact]
+    public async Task Draft_residue_preview_uses_selected_stock_without_reserving_it()
+    {
+        using var scenario = await LedgerScenario.CreateAsync(factory);
+        var receipt = await scenario.ReceiptAsync("20");
+        var raw = LedgerScenario.Lots(receipt)[0];
+        var drying = await scenario.DraftAsync("DRYING", [(raw, "20")], [("DRIED_PADDY", "20")]);
+        await scenario.CommitAsync(drying);
+        var milling = await scenario.DraftAsync("MILLING", [(LedgerScenario.Output(drying), "20")],
+            [("HEAD_RICE", "10"), ("BROKEN_RICE", "10")]);
+        await scenario.CommitAsync(milling);
+        var head = LedgerScenario.Output(milling, 0);
+        var (staff, session) = await factory.SeedUserAsync(Roles.ExportStaff, scenario.OwnerId);
+        using var writer = factory.CreateRealCookieClient(staff, session);
+        writer.DefaultRequestHeaders.Add("X-CSRF-TOKEN", (await writer.GetFromJsonAsync<JsonElement>("/api/auth/csrf"))
+            .GetProperty("token").GetString());
+        var (market, _, attribute) = await CatalogAsync();
+        var substanceId = Guid.NewGuid();
+        var mrlVersionId = Guid.NewGuid();
+        using (var catalogScope = factory.Services.CreateScope())
+        {
+            var catalog = catalogScope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            catalog.ActiveSubstances.Add(new ActiveSubstance
+            { Id = substanceId, Code = $"F14-{substanceId:N}", Name = "Synthetic F14 analyte" });
+            catalog.MrlVersions.Add(new MrlVersion
+            {
+                Id = mrlVersionId, MarketId = market, CommodityId = scenario.CatalogCommodityId,
+                VersionNo = 1, Status = "PUBLISHED", SourceRef = "Synthetic F14 rule",
+                PublishedBy = staff.Id, PublishedAt = DateTimeOffset.UtcNow.AddDays(-2),
+                EffectiveFrom = DateTimeOffset.UtcNow.AddDays(-1)
+            });
+            await catalog.SaveChangesAsync();
+            catalog.MrlLimits.Add(new MrlLimit
+            { Id = Guid.NewGuid(), MrlVersionId = mrlVersionId, SubstanceId = substanceId,
+                LimitValue = 0.01m, Unit = "mg/kg" });
+            await catalog.SaveChangesAsync();
+        }
+        var orderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
+        {
+            operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
+            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
+            containers = new[] { new { targetMass = "10", unit = "KG" } }
+        });
+        Assert.Equal(HttpStatusCode.Created, orderResponse.StatusCode);
+        var order = (await orderResponse.Content.ReadFromJsonAsync<ExportOrderDto>())!;
+        var container = Assert.Single((await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>(
+            $"/api/export-orders/{order.Id}/containers"))!.Items);
+        var draftResponse = await writer.PostAsJsonAsync(
+            $"/api/export-containers/{container.Id}/blend-plans/drafts",
+            new CreateBlendPlanDraftRequest(Guid.NewGuid(), order.Version, container.Version, "HEAD_RICE"));
+        Assert.Equal(HttpStatusCode.Created, draftResponse.StatusCode);
+        var draft = (await draftResponse.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
+        var candidatesRoute = $"/api/export-containers/{container.Id}/candidates?facilityId={scenario.FacilityId}&planId={draft.Id}";
+        var before = await writer.GetFromJsonAsync<JsonElement>(candidatesRoute);
+        var position = Assert.Single(before.GetProperty("items").EnumerateArray().ToArray(),
+            x => x.GetProperty("lotId").GetGuid() == head);
+        var previewRoute = $"/api/blend-plans/{draft.Id}/residue-preview";
+        var previewBody = new
+        {
+            facilityId = scenario.FacilityId, scopeRevision = before.GetProperty("scopeRevision").GetString(),
+            mode = "DIRECT_STOCK", compatibilityPolicyId = (Guid?)null,
+            selected = new[] { new { lotId = head, locationId = position.GetProperty("locationId").GetGuid(),
+                quantityKg = "10", candidateRevision = position.GetProperty("candidateRevision").GetString() } },
+            substanceIds = new[] { substanceId }
+        };
+        var previewResponse = await writer.PostAsJsonAsync(previewRoute, previewBody);
+        Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
+        var preview = (await previewResponse.Content.ReadFromJsonAsync<JsonElement>());
+        Assert.Equal("VALID", preview.GetProperty("status").GetString());
+        Assert.Equal("INCOMPLETE", preview.GetProperty("assessmentStatus").GetString());
+        Assert.Contains(preview.GetProperty("assessmentFindings").EnumerateArray(),
+            x => x.GetProperty("code").GetString() == "ASSESSMENT_POLICY_MISSING");
+        var applicable = preview.GetProperty("applicableMrl");
+        Assert.Equal("FOUND", applicable.GetProperty("status").GetString());
+        Assert.Equal(mrlVersionId, applicable.GetProperty("versionId").GetGuid());
+        Assert.Equal("Synthetic F14 rule", applicable.GetProperty("sourceRef").GetString());
+        Assert.Equal("0.01", Assert.Single(applicable.GetProperty("requestedLimits").EnumerateArray().ToArray())
+            .GetProperty("limitValue").GetString());
+        Assert.Equal(JsonValueKind.Null, preview.GetProperty("hypotheticalBlend").ValueKind);
+        Assert.Equal(head, Assert.Single(preview.GetProperty("residue").EnumerateArray().ToArray())
+            .GetProperty("lotId").GetGuid());
+        var after = await writer.GetFromJsonAsync<JsonElement>(candidatesRoute);
+        Assert.Equal(before.GetProperty("scopeRevision").GetString(), after.GetProperty("scopeRevision").GetString());
+        var stale = await writer.PostAsJsonAsync(previewRoute, new
+        {
+            previewBody.facilityId, scopeRevision = "outdated", previewBody.mode,
+            previewBody.compatibilityPolicyId, previewBody.selected, previewBody.substanceIds
+        });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+    }
+
+    [Fact]
+    public async Task Blend_preview_uses_policy_output_commodity_and_stays_incomplete_without_yield_and_evidence()
+    {
+        using var scenario = await LedgerScenario.CreateAsync(factory);
+        var receipt = await scenario.ReceiptAsync("20");
+        var drying = await scenario.DraftAsync("DRYING", [(LedgerScenario.Lots(receipt)[0], "20")],
+            [("DRIED_PADDY", "20")]);
+        await scenario.CommitAsync(drying);
+        var milling = await scenario.DraftAsync("MILLING", [(LedgerScenario.Output(drying), "20")],
+            [("HEAD_RICE", "10"), ("BROKEN_RICE", "10")]);
+        await scenario.CommitAsync(milling);
+        var policyId = Guid.NewGuid();
+        await LedgerScenario.SendAsync(scenario.Admin, HttpMethod.Post, "/api/ledger/compatibilities", new
+        {
+            id = policyId, facilityId = scenario.FacilityId,
+            inputProducts = new[] { $"{scenario.CommodityId}:HEAD_RICE", $"{scenario.CommodityId}:BROKEN_RICE" },
+            outputCommodityId = scenario.CommodityId,
+            effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1), evidenceId = scenario.EvidenceId
+        });
+        var (staff, session) = await factory.SeedUserAsync(Roles.ExportStaff, scenario.OwnerId);
+        using var writer = factory.CreateRealCookieClient(staff, session);
+        writer.DefaultRequestHeaders.Add("X-CSRF-TOKEN", (await writer.GetFromJsonAsync<JsonElement>("/api/auth/csrf"))
+            .GetProperty("token").GetString());
+        var (market, _, attribute) = await CatalogAsync();
+        var orderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
+        {
+            operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
+            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
+            containers = new[] { new { targetMass = "10", unit = "KG" } }
+        });
+        Assert.Equal(HttpStatusCode.Created, orderResponse.StatusCode);
+        var order = (await orderResponse.Content.ReadFromJsonAsync<ExportOrderDto>())!;
+        var container = Assert.Single((await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>(
+            $"/api/export-orders/{order.Id}/containers"))!.Items);
+        var draftResponse = await writer.PostAsJsonAsync(
+            $"/api/export-containers/{container.Id}/blend-plans/drafts",
+            new CreateBlendPlanDraftRequest(Guid.NewGuid(), order.Version, container.Version, "BLENDED_RICE"));
+        Assert.Equal(HttpStatusCode.Created, draftResponse.StatusCode);
+        var draft = (await draftResponse.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
+        var candidates = await writer.GetFromJsonAsync<JsonElement>(
+            $"/api/export-containers/{container.Id}/candidates?facilityId={scenario.FacilityId}&planId={draft.Id}");
+        var positions = candidates.GetProperty("items").EnumerateArray().ToArray();
+        var selected = new[] { LedgerScenario.Output(milling, 0), LedgerScenario.Output(milling, 1) }
+            .Select(lotId =>
+            {
+                var item = Assert.Single(positions, x => x.GetProperty("lotId").GetGuid() == lotId);
+                return new { lotId, locationId = item.GetProperty("locationId").GetGuid(),
+                    quantityKg = "10", candidateRevision = item.GetProperty("candidateRevision").GetString() };
+            }).ToArray();
+        var previewRequest = new
+        {
+            facilityId = scenario.FacilityId, scopeRevision = candidates.GetProperty("scopeRevision").GetString(),
+            mode = "BLEND_INPUT_STOCK", compatibilityPolicyId = policyId, selected,
+            substanceIds = new[] { Guid.NewGuid() }
+        };
+        var response = await writer.PostAsJsonAsync($"/api/blend-plans/{draft.Id}/residue-preview", previewRequest);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var preview = (await response.Content.ReadFromJsonAsync<JsonElement>());
+        Assert.Equal("INCOMPLETE", preview.GetProperty("status").GetString());
+        Assert.Contains(preview.GetProperty("findings").EnumerateArray(),
+            x => x.GetString() == "OUTPUT_YIELD_POLICY_MISSING");
+        Assert.NotEqual(JsonValueKind.Null, preview.GetProperty("hypotheticalBlend").ValueKind);
+        Assert.Equal("INCOMPLETE", preview.GetProperty("hypotheticalBlendStatus").GetString());
+        Assert.Equal("INCOMPLETE", preview.GetProperty("assessmentStatus").GetString());
+        Assert.Contains(preview.GetProperty("assessmentFindings").EnumerateArray(),
+            x => x.GetProperty("code").GetString() == "OUTPUT_YIELD_POLICY_MISSING");
+        Assert.Equal(preview.GetProperty("residueSnapshotAt").GetString(),
+            preview.GetProperty("hypotheticalBlend").GetProperty("snapshotAt").GetString());
+        var yieldId = Guid.NewGuid();
+        await LedgerScenario.SendAsync(scenario.Manager, HttpMethod.Post,
+            "/api/ledger/planning-yield-rules", new
+            {
+                id = yieldId, facilityId = scenario.FacilityId,
+                compatibilityPolicyId = policyId, versionNo = 1,
+                outputFraction = "0.5", effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                evidenceId = scenario.EvidenceId, reviewedBy = "Synthetic reviewer",
+                reviewAuthority = "Synthetic authority", reviewedAt = DateTimeOffset.UtcNow.AddDays(-1)
+            });
+        var afterYield = await writer.PostAsJsonAsync($"/api/blend-plans/{draft.Id}/residue-preview", previewRequest);
+        Assert.Equal(HttpStatusCode.OK, afterYield.StatusCode);
+        var withYield = await afterYield.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("VALID", withYield.GetProperty("status").GetString());
+        Assert.Equal(yieldId, withYield.GetProperty("outputYieldPolicy").GetProperty("id").GetGuid());
+        Assert.Equal("INCOMPLETE", withYield.GetProperty("assessmentStatus").GetString());
+        Assert.DoesNotContain(withYield.GetProperty("findings").EnumerateArray(),
+            x => x.GetString() == "OUTPUT_YIELD_POLICY_MISSING");
+        var assessedResponse = await writer.PostAsJsonAsync($"/api/blend-plans/{draft.Id}/preview",
+            new PreviewBlendPlanRequest(scenario.FacilityId,
+                candidates.GetProperty("scopeRevision").GetString()!, 4));
+        Assert.Equal(HttpStatusCode.OK, assessedResponse.StatusCode);
+        var assessed = await assessedResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("INCOMPLETE", assessed.GetProperty("assessmentStatus").GetString());
+        Assert.False(assessed.GetProperty("canPropose").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, assessed.GetProperty("previewReference").ValueKind);
+        var selectedBySearch = assessed.GetProperty("selection").GetProperty("allocations")
+            .EnumerateArray().ToArray();
+        Assert.Equal(20m, selectedBySearch.Sum(x => decimal.Parse(
+            x.GetProperty("quantityKg").GetString()!, System.Globalization.CultureInfo.InvariantCulture)));
+    }
+
+    [Fact]
     public async Task Candidate_product_status_uses_draft_target_and_effective_Ledger_blend_sets()
     {
         using var scenario = await LedgerScenario.CreateAsync(factory);
@@ -364,7 +557,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var context = (await writer.GetFromJsonAsync<BlendPlanningContextDto>($"/api/export-containers/{target.Id}/planning-context"))!;
         Assert.True(context.StorageReady); Assert.True(context.CanCreateDraft);
         Assert.True(context.CandidateReadReady); Assert.False(context.CanPropose);
-        Assert.Contains(context.MissingDependencies, x => x.Code == "COMPLIANCE_NOT_IMPLEMENTED");
+        Assert.Empty(context.MissingDependencies);
         var body = new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1, "HEAD_RICE");
         var route = $"/api/export-containers/{target.Id}/blend-plans";
         Assert.Equal(HttpStatusCode.BadRequest,

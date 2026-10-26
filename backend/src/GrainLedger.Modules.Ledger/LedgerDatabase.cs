@@ -171,11 +171,13 @@ public static class LedgerDatabase
             GRANT SELECT ON ALL TABLES IN SCHEMA ledger TO {role};
             REVOKE ALL ON TABLE ledger.mixed_bulk_policies,ledger.mixed_bulk_pools,ledger.custody_events,
                 ledger.custody_edges,ledger.custody_allocations,ledger.custody_processing_allocations,
-                ledger.mixed_bulk_command_results FROM {role};
+                ledger.mixed_bulk_command_results,ledger.planning_yield_rules,
+                ledger.planning_quality_observations FROM {role};
             REVOKE ALL ON TABLE ledger.receiving_threshold_default,ledger.receiving_threshold_overrides,ledger.receiving_threshold_history FROM {role};
             REVOKE ALL ON TABLE ledger.residue_evaluations FROM {role};
             GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
             REVOKE INSERT,UPDATE,DELETE ON TABLE catalog.residue_rule_versions,catalog.residue_policy_setting_versions,
+                catalog.blend_assessment_policies,
                 capture.residue_source_group_versions,capture.residue_report_selections FROM {role};
             REVOKE UPDATE,DELETE,REFERENCES ON TABLE capture.lab_report_retirements FROM {role};
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
@@ -188,12 +190,16 @@ public static class LedgerDatabase
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
                 ledger.procurement_stock(uuid,uuid),ledger.procurement_stock_bulk(uuid,uuid[]),
                 ledger.planning_candidates(uuid,uuid,uuid),ledger.planning_compatibilities(uuid,uuid,uuid),
+                ledger.publish_planning_yield_rule(uuid,jsonb),ledger.planning_yield_rule(uuid,uuid,uuid,uuid,timestamptz),
+                ledger.confirm_planning_quality_observation(uuid,jsonb),
+                ledger.planning_quality_observations(uuid,uuid,uuid,uuid[],timestamptz),
                 ledger.procurement_source_lineage(uuid,uuid),
                 ledger.arrival_command(uuid,uuid,text,jsonb),
                 ledger.receiving_threshold_read(uuid,text,jsonb),ledger.receiving_threshold_command(uuid,text,jsonb),
                 ledger.residue_graph(uuid,uuid),ledger.residue_history(uuid,uuid,uuid),
                 ledger.residue_replay(uuid,uuid,uuid,jsonb),ledger.residue_append(uuid,uuid,uuid,jsonb,jsonb),
                 catalog.publish_residue_rule(uuid,jsonb),catalog.publish_residue_policy_setting(uuid,jsonb),capture.publish_residue_group(uuid,jsonb),
+                catalog.publish_blend_assessment_policy(uuid,jsonb),
                 capture.publish_residue_selection(uuid,jsonb),
                 ledger.can_read_lot(uuid,uuid),ledger.assigned(uuid,uuid),
                 ledger.own(uuid,uuid),ledger.role(uuid)
@@ -253,7 +259,8 @@ public static class LedgerDatabase
                   SELECT 1 FROM (VALUES
                       ('ledger.mixed_bulk_policies'),('ledger.mixed_bulk_pools'),('ledger.custody_events'),
                       ('ledger.custody_edges'),('ledger.custody_allocations'),('ledger.custody_processing_allocations'),
-                      ('ledger.mixed_bulk_command_results'),('ledger.residue_evaluations')
+                      ('ledger.mixed_bulk_command_results'),('ledger.residue_evaluations'),
+                      ('ledger.planning_yield_rules'),('ledger.planning_quality_observations')
                   ) protected(table_name)
                   WHERE has_table_privilege($1,protected.table_name::regclass,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
                      OR has_any_column_privilege($1,protected.table_name,'SELECT')

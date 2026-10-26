@@ -1,6 +1,29 @@
-# F14 blend planning: draft and candidate-read slices
+# F14 blend planning backend
 
-## Implementation status (22 October 2026)
+Track the remaining backend implementation and acceptance gates in the
+[F14 completion plan](f14-completion-plan.md). This document describes the
+current API slices; it does not establish completion of F14.
+
+## Implementation status (26 October 2026)
+
+The backend now supports draft demand, scoped stock candidates and lineage,
+published assessment/yield policies, confirmed finished-lot quality observations,
+bounded greedy assessment, a ten-minute preview reference, and an immutable
+proposal. Proposal persistence rechecks demand, stock, HOLD, pool, evidence and
+policy under the shared writer lock. Exact operation retries replay; a changed
+request with the same operation ID conflicts. The proposal does not reserve,
+HOLD, post or deduct stock. `GET /proposal` reports CURRENT or STALE against
+the saved snapshot. A new quality version or stock HOLD invalidates a preview.
+
+Missing approved policy or evidence yields INCOMPLETE, so only a PASS preview
+can be proposed. There is no F14 frontend, and the new owner migrations and
+runtime grants have not been applied to the shared database. F15 must recheck
+and reserve stock before approval or execution.
+Finished-lot quality is confirmed explicitly by a Customer Manager against a
+Ledger lot and evidence file; Capture source-sample results are not silently
+promoted to finished-product measurements.
+
+The sections below retain details of the candidate and diagnostic APIs.
 
 The candidate read now separates physical eligibility from product compatibility.
 A mapped input commodity can remain visible when it differs from the order's
@@ -14,15 +37,17 @@ search and write-time rechecking. It validates selected positions, exact kg,
 revisions and one Ledger compatibility set. A blend remains INCOMPLETE without
 an approved output-yield rule. Capture now offers a company-scoped bulk read of
 confirmed Lab evidence; Catalog offers the same point-in-time MRL resolver to
-API and future assessment code. Neither read supplies residue interpretation,
+API and future assessment code. The validator rejects a blend whose selected
+input mass is below the container target, since physical output cannot exceed
+input mass. Sufficient input mass alone remains INCOMPLETE: Ledger's balance
+tolerance is not a prospective output-yield rule.
+Neither read supplies residue interpretation,
 cohort/propagation bounds, quality observations, margin or an F14 verdict.
 
-There is still no proposal endpoint, assessment, reservation or F14 frontend.
-The dormant `GreedyStockSelection` source is not called by HTTP routes. Do not
-publish an F14 plan from physical stock alone. No shared database migration was
-performed for this implementation slice.
-
-F14 stores versioned demand drafts for a planned export container and reads physical stock candidates with mixed-bulk ancestry. A draft pins the order, specification and target. The candidate reads do not supply a compliance verdict, reservation or execution authority. F12 bounds and the planner are subsequent slices.
+F14 stores versioned demand drafts for a planned export container and reads
+physical stock candidates with mixed-bulk ancestry. A draft pins the order,
+specification and target. Candidate reads alone do not supply a compliance
+verdict or execution authority.
 
 ## Current HTTP contract
 
@@ -35,11 +60,55 @@ All routes use persisted active-role and customer-company scope. Reads use `expo
 | GET /api/export-containers/{id}/inventory-scope?facilityId={id} | Scans the complete own-company/facility inventory in one repeatable-read transaction. Returns lot count, available mass and restricted-lot count. It explicitly reports `revisioned=false` and `complianceQualified=false`. |
 | GET /api/export-containers/{id}/candidates?facilityId={id}&includeExcluded=true&page=1&pageSize=25&planId={id} | Owner/facility candidate positions, exact physical mass, pool revision, source count, reasons and scope/candidate fingerprints. Optional `planId` reads a current draft's target and effective Ledger blend policies to annotate product compatibility. `scopeRevision` may be sent on later pages; a changed scope returns 409. The summary covers the whole facility before paging. |
 | GET /api/export-containers/{id}/candidates/{lotId}/lineage?facilityId={id}&locationId={id} | Full reachable custody/processing graph, source composition and Capture source mapping for one lot/location. Optional `candidateRevision` detects a changed snapshot. |
+| GET /api/export-containers/{id}/candidates/{lotId}/residue-preview?facilityId={id}&locationId={id}&candidateRevision={revision}&substanceIds={comma-separated-UUIDs} | Read-only F12 residue intervals for a physically eligible candidate. Requires both `export-orders.read` and `residue.evaluate`. A changed candidate returns 409; F12 validates 1–200 distinct substances. The response is diagnostic and `assessmentStatus` remains `NOT_ASSESSED`. |
+| POST /api/blend-plans/{id}/residue-preview | Reads 1–100 selected positions for a current draft and 1–200 substances. Validates physical selection, exact compatibility set and revisions, then computes input intervals and, for a blend with an effective output commodity, a hypothetical BLENDING interval in one F12 repeatable-read snapshot. Rechecks candidate scope after the F12 read. Returns fail-closed F14 assessment findings; absent approved policy remains `INCOMPLETE`. Does not save a proposal or reserve stock. Requires `residue.evaluate` plus own-company export read scope. |
 | POST /api/export-containers/{id}/blend-plans/drafts | Creates an immutable demand snapshot and the next draft version. Body: operationId, orderVersion, containerVersion, targetProductIdentity. |
 | GET /api/export-containers/{id}/blend-plans | Paged drafts, newest version first. |
 | GET /api/blend-plans/{id} | Draft demand, status, ETag and canCancel. |
 | GET /api/blend-plans/{id}/history | Paged actor-labelled history. |
+| POST /api/blend-plans/{id}/preview | Runs bounded greedy search and fail-closed assessment. A PASS returns an expiring `previewReference`; no stock changes. |
+| POST /api/blend-plans/{id}/propose | Body: `operationId`, `previewReference`. Rechecks the preview under the writer lock and atomically stores an immutable proposal and history. Stale inputs return 409. |
+| GET /api/blend-plans/{id}/proposal | Saved assessment, allocations and CURRENT/STALE freshness result. Does not authorize execution. |
 | POST /api/blend-plans/{id}/cancel | Body: operationId. Requires current plan ETag in If-Match. DRAFT becomes CANCELLED. |
+| POST /api/blend-assessment-policies | Customer Manager publishes an immutable company/market/commodity policy with required substance IDs, explicit MRL margin fraction, residue basis, per-attribute quality calculation rules, effective period and review evidence. No default policy is seeded. |
+| GET /api/blend-assessment-policies/applicable?marketId={id}&commodityId={id}&at={instant} | Read latest applicable own-company policy. `at` is optional; omission uses database time. |
+| POST /api/ledger/planning-yield-rules | Assigned Mill Manager publishes an immutable prospective output fraction for one facility/compatibility rule, backed by Ledger evidence. No default yield is seeded. |
+| GET /api/ledger/planning-yield-rules/applicable?ownerId={id}&facilityId={id}&compatibilityPolicyId={id}&at={instant} | Export reader resolves a rule for an owned company; `at` is optional. |
+| POST /api/ledger/planning-quality-observations | Customer Manager confirms an immutable versioned observation for a finished Ledger lot, quality attribute, value/unit and Ledger evidence file. |
+| GET /api/ledger/planning-quality-observations?ownerId={id}&facilityId={id}&lotIds={id}&at={instant} | Scoped point-in-time read of confirmed observations. |
+
+The group residue preview accepts a body such as:
+
+```json
+{"facilityId":"6c656467-6572-4000-8000-000000000001","scopeRevision":"<from candidates read>","mode":"BLEND_INPUT_STOCK","compatibilityPolicyId":"<effective policy UUID>","selected":[{"lotId":"<lot UUID>","locationId":"<location UUID>","quantityKg":"1000","candidateRevision":"<from candidates read>"}],"substanceIds":["<substance UUID>"]}
+```
+
+The preview reads residue for each distinct selected lot. The input intervals,
+policy, evidence and any hypothetical output share one F12 snapshot. The stock
+and F12 reads remain separate snapshots; a proposal write must recheck both.
+For `BLEND_INPUT_STOCK`, a policy read that includes `outputLedgerCommodityId`
+also enables `hypotheticalBlend`: F12 evaluates a temporary BLENDING node using
+the selected kg, approved F12 process factors and the policy's output commodity.
+This is a read-only concentration calculation. It does not establish output kg,
+market PASS or a physical Ledger operation. A missing approved rule produces an
+unresolved F12 result. The output-commodity field is added by forward-only Ledger
+migration `20261024000000_PlanningCompatibilityOutput`.
+The response reports one `residueSnapshotAt`, `evidenceStatus` and per-lot
+`unresolved` substances. `INPUT_BOUNDS_AVAILABLE` means only that all requested
+input-lot intervals are finite; it is not a hypothetical blend result or MRL
+decision. `INCOMPLETE` preserves F12 reasons instead of inventing a PASS.
+It also resolves the published MRL version for the order's market and commodity
+at `residueSnapshotAt`. `applicableMrl` contains its status, version, effective
+period, legal source, published limit count and limits for the requested
+substances. This is source information for a future assessment: client-selected
+substances do not establish required panel coverage, and F12 basis-to-MRL
+comparability and safety margin rules have not been approved. The response
+therefore returns `assessmentStatus=INCOMPLETE` with explicit
+`assessmentFindings` (including missing yield, coverage/margin and quality
+rules). A proven violation is `FAIL` even when other checks remain incomplete.
+`assessmentPolicy` and `outputYieldPolicy` identify the published rules used
+when present. Neither rule is inferred from Ledger's posting tolerance or F12
+concentration factors. This diagnostic endpoint cannot propose a plan.
 
 Example draft body:
 
@@ -53,9 +122,40 @@ The server derives company, actor, target mass, specification and next version. 
 
 The same operation ID and request replay the stored response, including its original status/ETag/Location. A changed payload or route with that operation ID returns 409. Replay occurs before current-state checks. After replay, GET detail for current status/capabilities. Missing or stale If-Match on cancellation returns 412; creation checks both expected parent versions. All writes use the existing per-company Export transaction advisory lock, including F13 writes.
 
-Draft creation does not freeze F13 order, specification, or container-target edits. The draft's saved demand remains immutable; `demandCurrent` is computed from its saved order/container/specification versions and current target. A demand edit makes an older draft non-current. Creating a fresh draft requires the latest order and container versions. Cancellation retains history but does not lock F13. A future `PROPOSED` plan will require a separate atomic edit guard and stale/freshness rules.
+Draft creation does not freeze F13 order, specification, or container-target edits. The draft's saved demand remains immutable; `demandCurrent` is computed from its saved order/container/specification versions and current target. A demand edit makes an older draft non-current. Creating a fresh draft requires the latest order and container versions. A proposal is immutable; cancellation of a proposed draft is rejected. Proposal freshness is checked on read and at creation.
 
-`canPropose` is always false in this slice. `candidateReadReady` only confirms the reviewed Ledger routine and restricted grant exist; it does not mean any lot is eligible. Missing dependencies still identify Compliance and the planner. No search or assessment is fabricated. There is no POST proposal/approval endpoint and no new frontend screen yet.
+The container planning-context `canPropose` remains false because it has no selected draft, facility or assessed candidate set. The plan preview response supplies the actionable `canPropose` value. `candidateReadReady` only confirms the reviewed Ledger routine and restricted grant exist; it does not mean any lot is eligible. There is no approval endpoint or F14 frontend screen yet.
+
+`POST /api/blend-plans/{id}/preview` accepts `facilityId`, the current plan-specific
+`scopeRevision` from `GET /api/export-containers/{containerId}/candidates?facilityId=...&planId=...`,
+and `maxIterations` (1–256, default 32). It uses a bounded deterministic
+candidate search, exact Ledger product-set validation, published yield and
+assessment policies, F12 hypothetical residue bounds and applicable MRL.
+For a 50% yield rule and a 10 kg container, the blend selector requests 20 kg
+of input stock. The response includes `outcome`, `iterations`, `selection`,
+`assessmentStatus`, findings and `predictedOutputKg`. A changed candidate or
+demand revision returns 409. A PASS with all required confirmed evidence
+returns a ten-minute `previewReference` and `canPropose=true`. Missing evidence
+returns INCOMPLETE with no reference. Preview does not reserve stock.
+The saved assessment includes `calculationVersion=F14_ASSESSMENT_V1`, selected
+allocations, findings, applicable MRL version and limits, assessment/yield
+policies, F12 residue bounds with provenance, and quality observation IDs and
+versions. The proposal copies this assessment unchanged.
+
+Example calls after creating a draft and loading its plan-specific candidates:
+
+```json
+POST /api/blend-plans/{planId}/preview
+{"facilityId":"<facility UUID>","scopeRevision":"<candidates.scopeRevision>","maxIterations":32}
+
+POST /api/blend-plans/{planId}/propose
+{"operationId":"<new UUID>","previewReference":"<PASS preview.previewReference>"}
+```
+
+The proposal response contains `assessment.selection.allocations`,
+`assessment.assessmentFindings`, `assessment.evidence`, `freshness` and
+`stockReserved=false`. GET the proposal again for current freshness; a quality
+revision, HOLD, stock or policy change can make the stored proposal stale.
 
 ## Candidate-read contract
 
@@ -65,7 +165,7 @@ Draft creation does not freeze F13 order, specification, or container-target edi
 
 The Ledger-owned `planning_candidates` read returns the complete owner/facility position scope, exact source contributions, Capture source IDs, custody and processing edges, and operation context in one read-only repeatable-read transaction. `(lotId,locationId)` is the candidate key. A current pool reports a string `poolRevision`; ordinary or withdrawn stock reports null. A withdrawn aliquot is not excluded merely because it is no longer the current pool. `location.cleared` is a sanitation state, not an active/inactive flag. Position attribution for a multi-source lot in multiple positive locations is not proven by lot-level contributions, so that candidate is excluded with `POSITION_ATTRIBUTION_UNRESOLVED`. Pre-mixed-bulk processing has an ancestry edge but may lack exact input-to-source allocation; it is explicitly unproven rather than silently treated as complete.
 
-`scopeRevision` detects a changed candidate scope when reading subsequent pages. `candidateRevision` detects changes before reading a candidate's lineage. These fingerprints are not reservations or monotonic event counters. The future proposal write must check current demand, eligibility, quantity and revisions again before saving; F15 reservation must recheck under the Ledger write lock.
+`scopeRevision` detects a changed candidate scope when reading subsequent pages. `candidateRevision` detects changes before reading a candidate's lineage. These fingerprints are not reservations or monotonic event counters. The proposal write rechecks current demand, eligibility, quantity and revisions before saving; F15 reservation must recheck under the Ledger write lock.
 
 The candidate read has forward-only Ledger migration `20261021000000_PlanningCandidates`. Plan-specific product hints add forward-only migration `20261022000000_PlanningCompatibility`, which exposes only effective facility policies through an owner-scoped protected read. Missing routine/grant returns 503 `CANDIDATE_SCHEMA_NOT_READY`; missing draft storage with `planId` returns 503 `PLANNING_SCHEMA_NOT_READY`. F13 and the existing F14 draft routes remain separate. No shared database migration was applied. Apply reviewed owner migrations and rerun the restricted runtime-role configuration only after separate approval.
 
@@ -81,16 +181,13 @@ F13 remains usable before this optional migration. Planning mutations return 503
 
 Do not run a shared-database migration as part of startup or tests. Shared deployment requires separate explicit approval, owner migration and runtime-role configuration. No shared migration was applied as part of this slice.
 
-## Contracts to implement next
+## Remaining deployment and downstream work
 
-1. **Candidate follow-up:** the read-only candidate adapter, composition, reachable ancestry and per-lot product-match hints are implemented. Add exact selected-set compatibility and a true write-time freshness check before any proposal. Candidates with unproven position allocation or legacy processing attribution remain excluded.
-2. **Lab evidence adapter:** confirmed source associations, raw results, linked amendments/retests, revisions and change notifications. Lab's read-time VN comparison is not the export assessment.
-3. **Compliance/F12:** versioned interpretation/cohort/propagation policies, conservative residue bounds through operations, quality measurements and per-attribute propagation, manager-owned margin and coverage policy. Missing policy/data returns INCOMPLETE. No default margin or implicit concentration reduction.
-4. **Assessment:** resolve Catalog MRL for market/commodity/server decision time; preserve the published version, limits, policies, evidence and exact calculations in a snapshot. Return PASS/FAIL/INCOMPLETE with reasons.
-5. **Planner:** single-container bounded deterministic search; exact mass allocations, final assessment and recheck of dependency revisions before saving a PROPOSED version. SEARCH_EXHAUSTED does not prove global infeasibility.
-6. **Invalidation/Trace:** complete affected plans from changed stock/evidence/policies; durable change events and synchronous freshness recheck. F15 adds atomic approval/reservation. F14 never grants execution authority.
+1. Apply reviewed Catalog, Ledger and Export owner migrations and restricted runtime-role configuration to the shared database only with separate approval.
+2. Add F14 frontend when that scope begins. The current backend can be tested through HTTP on isolated PostgreSQL.
+3. F15 must synchronously recheck proposal freshness and atomically reserve approved allocations under the Ledger writer lock. F14 never grants execution authority.
 
-Do not introduce competing Lab/Ledger models before reviewing the owning teammate's branch. Business inputs still needed are evidence conflict/freshness rules, required substance coverage, cohort applicability, drying/milling propagation, per-attribute calculations and commodity/product compatibility. They are explicit policy inputs, not guessed constants.
+Business inputs remain explicit reviewed policies. Unsupported combinations and absent evidence fail closed.
 
 ## Verification
 

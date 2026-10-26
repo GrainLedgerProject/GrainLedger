@@ -73,6 +73,25 @@ public static class LedgerEndpoints
             return Results.Ok(new { request.Id, sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) });
         });
         group.MapGet("/evidence/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => { var evidence = await ledger.ReadEvidenceAsync(id, ct); return Results.File(evidence.Content, evidence.ContentType, evidence.FileName); });
+        group.MapPost("/planning-yield-rules", async (JsonObject request, LedgerService ledger, CancellationToken ct) =>
+            Results.Ok(await ledger.PublishPlanningYieldRuleAsync(request, ct)))
+            .RequireAuthorization(Permissions.BlendYieldPolicyManage);
+        group.MapPost("/planning-quality-observations", async (JsonObject request,
+            LedgerService ledger, CancellationToken ct) =>
+            Results.Ok(await ledger.ConfirmPlanningQualityObservationAsync(request, ct)))
+            .RequireAuthorization(Permissions.BlendQualityEvidenceManage);
+        group.MapGet("/planning-quality-observations", async (Guid ownerId, Guid facilityId,
+            Guid[] lotIds, DateTimeOffset? at, LedgerService ledger, CancellationToken ct) =>
+            Results.Ok(await ledger.ReadPlanningQualityObservationsAsync(ownerId,
+                facilityId, lotIds, at, ct))).RequireAuthorization(Permissions.BlendPropose);
+        group.MapGet("/planning-yield-rules/applicable", async (Guid ownerId, Guid facilityId,
+            Guid compatibilityPolicyId, DateTimeOffset? at, LedgerService ledger,
+            CancellationToken ct) =>
+        {
+            var rule = await ledger.ReadPlanningYieldRuleAsync(ownerId, facilityId,
+                compatibilityPolicyId, at, ct);
+            return rule is null ? Results.NotFound() : Results.Ok(rule);
+        }).RequireAuthorization(Permissions.ExportOrdersRead);
         LedgerManagementEndpoints.MapManagementRoutes(group);
         ResidueEvaluationEndpoints.MapResidueEvaluationRoutes(group);
         ResidueEvaluationEndpoints.MapResiduePreviewRoute(endpoints);

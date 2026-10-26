@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using GrainLedger.Modules.Catalogs;
 using GrainLedger.Modules.Identity;
 using GrainLedger.Modules.Ledger;
 using Microsoft.AspNetCore.Http;
@@ -33,10 +34,157 @@ internal sealed record PlanningCandidateSnapshot(Guid ContainerId, Guid Facility
 
 internal sealed class CandidateDemandChangedException : Exception;
 
+internal sealed record PlanResiduePosition(Guid LotId, Guid LocationId, string QuantityKg,
+    string CandidateRevision);
+internal sealed record PlanResiduePreviewRequest(Guid FacilityId, string ScopeRevision,
+    string Mode, Guid? CompatibilityPolicyId, PlanResiduePosition[] Selected, Guid[] SubstanceIds);
+
 public static partial class ExportModule
 {
+    private static async Task<IResult> PlanResiduePreviewAsync(Guid id, PlanResiduePreviewRequest request,
+        HttpContext http, IdentityDbContext identity, ICurrentAccess access, ExportDbContext db,
+        LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead applicableMrl,
+        BlendAssessmentPolicyRead assessmentPolicies,
+        CancellationToken ct)
+    {
+        var scope = await ScopeAsync(http, identity, access, Permissions.ExportOrdersRead, ct);
+        if (scope is null) return Results.Forbid();
+        if (request.FacilityId == Guid.Empty || request.Selected is null or { Length: < 1 or > 100 } ||
+            request.SubstanceIds is null or { Length: < 1 or > 200 } ||
+            request.SubstanceIds.Contains(Guid.Empty) ||
+            request.SubstanceIds.Distinct().Count() != request.SubstanceIds.Length)
+            return Invalid(new() { ["request"] = ["Choose a facility, 1–100 positions and 1–200 distinct substances."] });
+        var selected = new List<CandidateGroupItem>(request.Selected.Length);
+        foreach (var item in request.Selected)
+        {
+            if (item.LotId == Guid.Empty || item.LocationId == Guid.Empty ||
+                !ExportRules.TryMass(item.QuantityKg, "KG", out var kg))
+                return Invalid(new() { ["selected"] = ["Each position needs a lot, location and exact positive kg string."] });
+            selected.Add(new CandidateGroupItem(item.LotId, item.LocationId, kg, item.CandidateRevision));
+        }
+        var plan = await db.BlendPlanDrafts.AsNoTracking().SingleOrDefaultAsync(x =>
+            x.Id == id && x.CompanyId == scope.Value.Company, ct);
+        if (plan is null) return Results.NotFound();
+        var container = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == plan.ContainerId, ct);
+        var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == plan.OrderId, ct);
+        if (plan.Status != "DRAFT" || !DemandIsCurrent(plan, order, container))
+            return Problem(409, "PLAN_DEMAND_STALE", "Create a current draft before previewing candidates.");
+        PlanningCandidateSnapshot snapshot;
+        try { snapshot = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
+            request.FacilityId, db, ledger, ct, withCompatibility: true); }
+        catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
+        { return CandidateFailure(ex); }
+        var target = TargetProductFromSnapshot(plan.DemandSnapshot);
+        if (string.IsNullOrWhiteSpace(target))
+            return Problem(409, "PLAN_TARGET_MISSING", "Create a draft with a target product.");
+        var planRevision = PlanScopeRevision(snapshot, plan, target);
+        var group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = planRevision }, selected, target,
+            request.Mode, request.ScopeRevision, request.CompatibilityPolicyId);
+        if (group.Findings.Contains("CANDIDATE_SNAPSHOT_STALE"))
+            return Problem(409, "CANDIDATE_SNAPSHOT_STALE", "Candidate inventory or blend policy changed. Reload candidates.");
+        if (group.Status == "INVALID")
+            return Results.Ok(new { status = group.Status, group.Findings, residue = Array.Empty<object>(),
+                assessmentStatus = "NOT_ASSESSED" });
+        Guid? outputLedgerCommodityId = null;
+        if (request.Mode == "BLEND_INPUT_STOCK" && request.CompatibilityPolicyId is { } policyId &&
+            snapshot.Compatibilities is { } policies)
+        {
+            var policy = policies.EnumerateArray().SingleOrDefault(x => x.GetProperty("id").GetGuid() == policyId);
+            if (policy.ValueKind != JsonValueKind.Undefined &&
+                policy.TryGetProperty("outputLedgerCommodityId", out var output) &&
+                output.ValueKind == JsonValueKind.String && output.TryGetGuid(out var outputId))
+                outputLedgerCommodityId = outputId;
+        }
+        var residueSelection = await residue.PreviewSelectionAsync(
+            selected.GroupBy(x => x.LotId).Select(x => new HypotheticalBlendInput(
+                x.Key, ExportRules.Text(x.Sum(y => y.QuantityKg)))).ToArray(),
+            outputLedgerCommodityId, request.SubstanceIds, ct);
+        PlanningYieldRule? publishedYield = null;
+        if (request.Mode == "BLEND_INPUT_STOCK" && request.CompatibilityPolicyId is { } yieldCompatibility)
+        {
+            try { publishedYield = await ledger.ReadPlanningYieldRuleAsync(scope.Value.Company,
+                request.FacilityId, yieldCompatibility, residueSelection.SnapshotAt, ct); }
+            catch (LedgerException ex) when (ex.StatusCode == 503) { /* Unapplied optional policy schema. */ }
+        }
+        if (publishedYield is not null)
+            group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = planRevision },
+                selected, target, request.Mode, request.ScopeRevision,
+                request.CompatibilityPolicyId, outputYieldPolicyAvailable: true);
+        var previews = residueSelection.Inputs;
+        var hypothetical = residueSelection.HypotheticalBlend;
+        var mrl = await applicableMrl.ResolveAsync(order.MarketId, order.CommodityId,
+            residueSelection.SnapshotAt, ct);
+        PublishedBlendAssessmentPolicy? publishedPolicy;
+        try { publishedPolicy = await assessmentPolicies.ResolveAsync(scope.Value.Company,
+            order.MarketId, order.CommodityId, residueSelection.SnapshotAt, ct); }
+        catch (BlendAssessmentPolicyUnavailableException) { publishedPolicy = null; }
+        PlanningCandidateSnapshot refreshed;
+        try { refreshed = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
+            request.FacilityId, db, ledger, ct, withCompatibility: true); }
+        catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
+        { return CandidateFailure(ex); }
+        if (PlanScopeRevision(refreshed, plan, target) != planRevision)
+            return Problem(409, "CANDIDATE_SNAPSHOT_STALE", "Candidate inventory changed. Reload candidates.");
+        var currentPlan = await db.BlendPlanDrafts.AsNoTracking().SingleAsync(x => x.Id == plan.Id, ct);
+        var currentContainer = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == plan.ContainerId, ct);
+        var currentOrder = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == plan.OrderId, ct);
+        if (currentPlan.Status != "DRAFT" || currentPlan.Version != plan.Version ||
+            !DemandIsCurrent(currentPlan, currentOrder, currentContainer))
+            return Problem(409, "PLAN_DEMAND_STALE", "Draft or demand changed during the preview.");
+        var unresolved = previews.SelectMany(x => x.Results.Where(r => r.Status != "COMPLETE")
+            .Select(r => new { x.LotId, r.SubstanceId, r.Reasons })).ToArray();
+        var blendUnresolved = hypothetical?.Results.Where(x => x.Status != "COMPLETE")
+            .Select(x => new { x.SubstanceId, x.Reasons }).ToArray();
+        var requestedLimits = mrl.Limits.Where(x => request.SubstanceIds.Contains(x.SubstanceId))
+            .Select(x => new { x.SubstanceId, limitValue = ExportRules.Text(x.LimitValue), x.Unit }).ToArray();
+        var specification = await db.Limits.AsNoTracking().Where(x =>
+            x.SpecificationId == plan.SpecificationId).ToArrayAsync(ct);
+        var margin = publishedPolicy is null ? (decimal?)null :
+            decimal.Parse(publishedPolicy.MrlMarginFraction, CultureInfo.InvariantCulture);
+        var assessmentRule = publishedPolicy is null ? null : new BlendAssessmentRule(
+            publishedPolicy.Id, publishedPolicy.VersionNo, publishedPolicy.MarketId,
+            publishedPolicy.CommodityId, publishedPolicy.RequiredSubstanceIds,
+            margin!.Value, publishedPolicy.ResidueBasis, publishedPolicy.EvidenceReference);
+        var qualityRules = publishedPolicy?.QualityRules.Select(x => new BlendQualityRule(
+            publishedPolicy.Id, publishedPolicy.VersionNo, x.AttributeId, x.Unit,
+            x.Calculation, publishedPolicy.EvidenceReference)).ToArray() ?? [];
+        var yieldRule = publishedYield is null ? null : new BlendYieldRule(publishedYield.Id,
+            publishedYield.VersionNo, decimal.Parse(publishedYield.OutputFraction,
+                CultureInfo.InvariantCulture), publishedYield.EvidenceId.ToString());
+        // Confirmed per-lot quality observations remain unavailable. Even
+        // published yield and coverage policies cannot authorize PASS alone.
+        var assessment = BlendAssessment.Evaluate(request.Mode, plan.TargetMassKg, selected,
+            yieldRule, assessmentRule, mrl, hypothetical?.Results, specification, qualityRules, []);
+        return Results.Ok(new { status = group.Status, group.Findings,
+            inputMassKg = ExportRules.Text(group.InputMassKg), scopeRevision = planRevision,
+            residueSnapshotAt = residueSelection.SnapshotAt, residue = previews,
+            evidenceStatus = unresolved.Length == 0 ? "INPUT_BOUNDS_AVAILABLE" : "INCOMPLETE",
+            unresolved, hypotheticalBlend = hypothetical,
+            hypotheticalBlendStatus = hypothetical is null ? "INCOMPLETE" :
+                blendUnresolved!.Length == 0 ? "BOUNDS_AVAILABLE" : "INCOMPLETE",
+            blendUnresolved,
+            applicableMrl = new { mrl.Status, mrl.VersionId, mrl.VersionNo,
+                mrl.PublishedAt, mrl.EffectiveFrom, mrl.EffectiveTo,
+                mrl.SourceRef, mrl.VersionToken, decisionAt = residueSelection.SnapshotAt,
+                publishedLimitCount = mrl.Limits.Count, requestedLimits },
+            assessmentPolicy = publishedPolicy is null ? null : new {
+                publishedPolicy.Id, publishedPolicy.VersionNo, publishedPolicy.EffectiveFrom,
+                publishedPolicy.EffectiveTo, publishedPolicy.EvidenceReference },
+            outputYieldPolicy = publishedYield is null ? null : new {
+                publishedYield.Id, publishedYield.VersionNo, publishedYield.OutputFraction,
+                publishedYield.EvidenceId, publishedYield.EffectiveFrom, publishedYield.EffectiveTo },
+            assessmentStatus = assessment.Status, assessmentFindings = assessment.Findings,
+            predictedOutputKg = assessment.PredictedOutputKg is { } outputKg ?
+                ExportRules.Text(outputKg) : null });
+    }
+
     private static string CandidateHash(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static string PlanScopeRevision(PlanningCandidateSnapshot snapshot,
+        BlendPlanDraft plan, string targetProductIdentity) => CandidateHash(
+            snapshot.ScopeRevision + ":" + plan.Id + ":" + targetProductIdentity + ":" +
+            snapshot.Compatibilities!.Value.GetRawText());
 
     private static decimal LedgerMass(JsonElement value) =>
         decimal.Parse(value.GetString()!, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
@@ -193,8 +341,13 @@ public static partial class ExportModule
                 CandidateHash(revision + ":" + lotId + ":" + locationId), composition.Length,
                 lineageComplete, reasons.Count == 0, restrictions, reasons.Distinct().ToArray()));
         }
+        // Use the database clock for point-in-time evidence reads. An API host
+        // clock a few milliseconds behind PostgreSQL can otherwise miss a
+        // quality confirmation committed immediately before this request.
+        var observedAt = await db.Database.SqlQueryRaw<DateTimeOffset>(
+            "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
         return new PlanningCandidateSnapshot(id, facilityId, order.Version, container.Version, container.Status,
-            order.CommodityId, container.TargetMassKg, DateTimeOffset.UtcNow, revision, data,
+            order.CommodityId, container.TargetMassKg, observedAt, revision, data,
             compatibilities, candidates);
     }
 
@@ -252,9 +405,8 @@ public static partial class ExportModule
             if (currentPlan.Status != "DRAFT" || !DemandIsCurrent(currentPlan, currentOrder, currentContainer))
                 return Problem(409, "PLAN_DEMAND_STALE", "Draft or demand changed during the inventory read.");
         }
-        var revision = plan is null ? snapshot.ScopeRevision : CandidateHash(
-            snapshot.ScopeRevision + ":" + plan.Id + ":" + targetProductIdentity + ":" +
-            snapshot.Compatibilities!.Value.GetRawText());
+        var revision = plan is null ? snapshot.ScopeRevision :
+            PlanScopeRevision(snapshot, plan, targetProductIdentity!);
         var expected = http.Request.Query["scopeRevision"].ToString();
         if (expected.Length > 0 && expected != revision)
             return Problem(409, "CANDIDATE_SNAPSHOT_STALE", "Candidate inventory changed. Reload candidates.");
@@ -325,6 +477,32 @@ public static partial class ExportModule
             lineage = new { complete = candidate.LineageComplete, nodes,
                 edges = ancestry.Edges, operations, reasons = candidate.Reasons },
             complianceStatus = "NOT_ASSESSED" });
+    }
+
+    private static async Task<IResult> CandidateResiduePreviewAsync(Guid id, Guid lotId, HttpContext http,
+        IdentityDbContext identity, ICurrentAccess access, ExportDbContext db, LedgerService ledger,
+        ResidueEvaluationService residue, CancellationToken ct)
+    {
+        var scope = await ScopeAsync(http, identity, access, Permissions.ExportOrdersRead, ct);
+        if (scope is null) return Results.Forbid();
+        if (!Guid.TryParse(http.Request.Query["facilityId"], out var facilityId) || facilityId == Guid.Empty ||
+            !Guid.TryParse(http.Request.Query["locationId"], out var locationId) || locationId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(http.Request.Query["candidateRevision"]) ||
+            string.IsNullOrWhiteSpace(http.Request.Query["substanceIds"]))
+            return Invalid(new() { ["query"] = ["Choose a facility, location, candidate revision and substances."] });
+        PlanningCandidateSnapshot snapshot;
+        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, ledger, ct); }
+        catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException) { return CandidateFailure(ex); }
+        var candidate = snapshot.Candidates.SingleOrDefault(x => x.LotId == lotId && x.LocationId == locationId);
+        if (candidate is null || candidate.CandidateRevision != http.Request.Query["candidateRevision"])
+            return Problem(409, "CANDIDATE_SNAPSHOT_STALE", "Candidate inventory changed. Reload candidates.");
+        if (!candidate.InventoryEligible || !candidate.LineageComplete)
+            return Problem(409, "CANDIDATE_NOT_ELIGIBLE", "Candidate is not physically eligible. Reload candidates.");
+        var preview = await residue.PreviewLotAsync(lotId, http.Request.Query["substanceIds"], ct);
+        // The residue read owns its own repeatable-read snapshot; this is a diagnostic
+        // view. A future proposal must recheck stock and evidence in its write path.
+        return Results.Ok(new { id, lotId, locationId, candidate.CandidateRevision,
+            assessmentStatus = "NOT_ASSESSED", residue = preview });
     }
 
 }

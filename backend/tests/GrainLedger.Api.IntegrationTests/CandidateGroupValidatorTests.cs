@@ -40,6 +40,12 @@ public sealed class CandidateGroupValidatorTests
         Assert.Equal(["OUTPUT_YIELD_POLICY_MISSING"], result.Findings);
         Assert.Contains("COMPATIBILITY_SET_MISMATCH", CandidateGroupValidator.Validate(snapshot,
             selected[..1], "BLENDED_RICE", "BLEND_INPUT_STOCK", "scope-r1", Policy).Findings);
+        var insufficient = CandidateGroupValidator.Validate(snapshot,
+            [new CandidateGroupItem(Head, Location, 3m, "candidate-r1"),
+             new CandidateGroupItem(Broken, Location, 6m, "candidate-r1")],
+            "BLENDED_RICE", "BLEND_INPUT_STOCK", "scope-r1", Policy);
+        Assert.Equal("INVALID", insufficient.Status);
+        Assert.Contains("TARGET_MASS_EXCEEDS_INPUT", insufficient.Findings);
     }
 
     [Fact]

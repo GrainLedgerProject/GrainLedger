@@ -141,6 +141,37 @@ namespace GrainLedger.Modules.Exports.Migrations
                     b.ToTable("blend_plan_events", "exports");
                 });
 
+            modelBuilder.Entity("GrainLedger.Modules.Exports.BlendPlanPreview", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid").HasColumnName("id");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid").HasColumnName("company_id");
+                    b.Property<Guid>("PlanId").HasColumnType("uuid").HasColumnName("plan_id");
+                    b.Property<Guid>("ActorId").HasColumnType("uuid").HasColumnName("actor_id");
+                    b.Property<string>("RequestJson").IsRequired().HasColumnType("jsonb").HasColumnName("request_json");
+                    b.Property<string>("SnapshotJson").IsRequired().HasColumnType("jsonb").HasColumnName("snapshot_json");
+                    b.Property<string>("Fingerprint").IsRequired().HasColumnType("text").HasColumnName("fingerprint");
+                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone").HasColumnName("created_at");
+                    b.Property<DateTimeOffset>("ExpiresAt").HasColumnType("timestamp with time zone").HasColumnName("expires_at");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "PlanId", "ExpiresAt");
+                    b.ToTable("blend_plan_previews", "exports");
+                });
+
+            modelBuilder.Entity("GrainLedger.Modules.Exports.BlendPlanProposal", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid").HasColumnName("id");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid").HasColumnName("company_id");
+                    b.Property<Guid>("PlanId").HasColumnType("uuid").HasColumnName("plan_id");
+                    b.Property<Guid>("PreviewId").HasColumnType("uuid").HasColumnName("preview_id");
+                    b.Property<Guid>("ActorId").HasColumnType("uuid").HasColumnName("actor_id");
+                    b.Property<string>("SnapshotJson").IsRequired().HasColumnType("jsonb").HasColumnName("snapshot_json");
+                    b.Property<DateTimeOffset>("ProposedAt").HasColumnType("timestamp with time zone").HasColumnName("proposed_at");
+                    b.HasKey("Id");
+                    b.HasIndex("PlanId").IsUnique();
+                    b.HasIndex("CompanyId", "Id").IsUnique();
+                    b.ToTable("blend_plan_proposals", "exports");
+                });
+
             modelBuilder.Entity("GrainLedger.Modules.Exports.ExportCodeCounter", b =>
                 {
                     b.Property<Guid>("CompanyId")

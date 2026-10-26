@@ -31,6 +31,30 @@ public sealed class BlendPlanEvent
     public DateTimeOffset RecordedAt { get; set; }
 }
 
+public sealed class BlendPlanPreview
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid PlanId { get; set; }
+    public Guid ActorId { get; set; }
+    public string RequestJson { get; set; } = "{}";
+    public string SnapshotJson { get; set; } = "{}";
+    public string Fingerprint { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+}
+
+public sealed class BlendPlanProposal
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid PlanId { get; set; }
+    public Guid PreviewId { get; set; }
+    public Guid ActorId { get; set; }
+    public string SnapshotJson { get; set; } = "{}";
+    public DateTimeOffset ProposedAt { get; set; }
+}
+
 internal static class BlendPlanModel
 {
     public static void Configure(ModelBuilder m)
@@ -72,6 +96,33 @@ internal static class BlendPlanModel
             b.Property(x => x.Action).HasColumnName("action");
             b.Property(x => x.RecordedAt).HasColumnName("recorded_at");
             b.HasIndex(x => new { x.PlanId, x.RecordedAt, x.Id });
+        });
+        m.Entity<BlendPlanPreview>(b =>
+        {
+            b.ToTable("blend_plan_previews"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.PlanId).HasColumnName("plan_id");
+            b.Property(x => x.ActorId).HasColumnName("actor_id");
+            b.Property(x => x.RequestJson).HasColumnName("request_json").HasColumnType("jsonb");
+            b.Property(x => x.SnapshotJson).HasColumnName("snapshot_json").HasColumnType("jsonb");
+            b.Property(x => x.Fingerprint).HasColumnName("fingerprint");
+            b.Property(x => x.CreatedAt).HasColumnName("created_at");
+            b.Property(x => x.ExpiresAt).HasColumnName("expires_at");
+            b.HasIndex(x => new { x.CompanyId, x.PlanId, x.ExpiresAt });
+        });
+        m.Entity<BlendPlanProposal>(b =>
+        {
+            b.ToTable("blend_plan_proposals"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id");
+            b.Property(x => x.CompanyId).HasColumnName("company_id");
+            b.Property(x => x.PlanId).HasColumnName("plan_id");
+            b.Property(x => x.PreviewId).HasColumnName("preview_id");
+            b.Property(x => x.ActorId).HasColumnName("actor_id");
+            b.Property(x => x.SnapshotJson).HasColumnName("snapshot_json").HasColumnType("jsonb");
+            b.Property(x => x.ProposedAt).HasColumnName("proposed_at");
+            b.HasIndex(x => x.PlanId).IsUnique();
+            b.HasIndex(x => new { x.CompanyId, x.Id }).IsUnique();
         });
     }
 }

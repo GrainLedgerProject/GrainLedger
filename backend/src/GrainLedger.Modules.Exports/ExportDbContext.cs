@@ -100,6 +100,8 @@ public sealed class ExportDbContext(DbContextOptions<ExportDbContext> options) :
     public DbSet<ExportCodeCounter> Counters => Set<ExportCodeCounter>();
     public DbSet<BlendPlanDraft> BlendPlanDrafts => Set<BlendPlanDraft>();
     public DbSet<BlendPlanEvent> BlendPlanEvents => Set<BlendPlanEvent>();
+    public DbSet<BlendPlanPreview> BlendPlanPreviews => Set<BlendPlanPreview>();
+    public DbSet<BlendPlanProposal> BlendPlanProposals => Set<BlendPlanProposal>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {

@@ -61,11 +61,13 @@ internal static class GreedyStockSelection
     }
 
     internal static Result Select(IReadOnlyList<PlanningCandidate> candidates, decimal targetKg,
-        string targetProductIdentity, Guid catalogCommodityId, JsonElement policies)
+        string targetProductIdentity, Guid catalogCommodityId, JsonElement policies,
+        Func<Guid, decimal?>? blendInputTarget = null)
     {
         if (targetKg <= 0) throw new ArgumentOutOfRangeException(nameof(targetKg));
         var eligible = candidates.Where(x => x.InventoryEligible && x.AvailableKg > 0).ToArray();
-        var direct = Fill(targetKg, eligible.Where(x => x.ProductIdentity == targetProductIdentity),
+        var direct = Fill(targetKg, eligible.Where(x => x.ProductIdentity == targetProductIdentity &&
+                x.CatalogCommodityId == catalogCommodityId),
             "DIRECT_STOCK", null);
         if (direct.Outcome == "MASS_COVERED") return direct;
         if (targetProductIdentity != "BLENDED_RICE")
@@ -85,7 +87,9 @@ internal static class GreedyStockSelection
                 .Select(x => x.GetString()!).Distinct(StringComparer.Ordinal)
                 .OrderBy(x => x, StringComparer.Ordinal).ToArray();
             if (keys.Length == 0) continue;
-            if (targetKg < keys.Length * MassUnitKg)
+            var policyId = policy.GetProperty("id").GetGuid();
+            var inputTargetKg = blendInputTarget?.Invoke(policyId) ?? targetKg;
+            if (inputTargetKg < keys.Length * MassUnitKg)
             {
                 targetBelowInputPrecision = true;
                 continue;
@@ -105,8 +109,8 @@ internal static class GreedyStockSelection
             var anchors = keys.Select(key => Ordered(inputs.Where(x => ProductKey(x) == key)).First())
                 .Select(x => new Allocation(x.LotId, x.LocationId, x.LotCode,
                     MassUnitKg, x.CandidateRevision)).ToArray();
-            var selection = Fill(targetKg, inputs, "BLEND_INPUT_STOCK",
-                policy.GetProperty("id").GetGuid(), anchors);
+            var selection = Fill(inputTargetKg, inputs, "BLEND_INPUT_STOCK",
+                policyId, anchors);
             if (selection.Outcome == "MASS_COVERED") return selection;
             if (closest is null || selection.SelectedMassKg > closest.SelectedMassKg)
                 closest = selection;

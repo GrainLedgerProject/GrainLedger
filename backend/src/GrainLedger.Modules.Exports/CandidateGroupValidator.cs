@@ -16,7 +16,8 @@ internal static class CandidateGroupValidator
 
     internal static CandidateGroupResult Validate(PlanningCandidateSnapshot snapshot,
         IReadOnlyList<CandidateGroupItem> selected, string targetProductIdentity,
-        string mode, string expectedScopeRevision, Guid? compatibilityPolicyId = null)
+        string mode, string expectedScopeRevision, Guid? compatibilityPolicyId = null,
+        bool outputYieldPolicyAvailable = false)
     {
         var findings = new List<string>();
         if (expectedScopeRevision != snapshot.ScopeRevision)
@@ -64,6 +65,11 @@ internal static class CandidateGroupValidator
         if (mode == "BLEND_INPUT_STOCK")
         {
             if (targetProductIdentity != "BLENDED_RICE") findings.Add("BLEND_OUTPUT_MISMATCH");
+            // Ledger records actual output and declared loss at commit. Its balance
+            // tolerance is not an approved prospective yield. Conservation still
+            // proves that output cannot exceed the selected input mass.
+            if (total < snapshot.TargetMassKg)
+                findings.Add("TARGET_MASS_EXCEEDS_INPUT");
             if (compatibilityPolicyId is null || snapshot.Compatibilities is null)
                 findings.Add("COMPATIBILITY_POLICY_MISSING");
             else
@@ -77,9 +83,9 @@ internal static class CandidateGroupValidator
                         .Select(x => x.GetString()!).ToHashSet(StringComparer.Ordinal).SetEquals(products))
                     findings.Add("COMPATIBILITY_SET_MISMATCH");
             }
-            // Input kg cannot stand in for output kg. The currently exposed Ledger
-            // compatibility read does not include a versioned output-yield rule.
-            findings.Add("OUTPUT_YIELD_POLICY_MISSING");
+            // Enough input is necessary but not sufficient: an approved yield/loss
+            // rule is needed before promising this container's output quantity.
+            if (!outputYieldPolicyAvailable) findings.Add("OUTPUT_YIELD_POLICY_MISSING");
         }
         var distinct = findings.Distinct(StringComparer.Ordinal).ToArray();
         var status = distinct.Length == 0 ? "VALID" : distinct.All(x => x is

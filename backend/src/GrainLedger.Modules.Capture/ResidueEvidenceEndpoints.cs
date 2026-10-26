@@ -87,7 +87,9 @@ public static class ResidueEvidenceEndpoints
             request.SupersedesId is { } old && !prior.Any(x => x.Id == old && x.SubstanceId == request.SubstanceId) ||
             request.SupersedesId is not null && prior.Any(x => x.SupersedesId == request.SupersedesId))
             return Conflict("Group ID/version or reviewed supersession conflicts with history.");
-        var itemToPublish = request with { PublishedBy = actor, PublishedAt = now,
+        var databaseNow = await db.Database.SqlQueryRaw<DateTimeOffset>(
+            "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
+        var itemToPublish = request with { PublishedBy = actor, PublishedAt = databaseNow,
             SourceIds = request.SourceIds.Order().ToArray(), SupportingResultIds = request.SupportingResultIds.Order().ToArray() };
         try
         {
@@ -140,7 +142,9 @@ public static class ResidueEvidenceEndpoints
                 x.SourceId == request.SourceId && x.SubstanceId == request.SubstanceId) ||
             request.SupersedesId is not null && history.Any(x => x.SupersedesId == request.SupersedesId))
             return Conflict("Selection ID or reviewed supersession conflicts with history.");
-        var item = request with { PublishedBy = actor, PublishedAt = now, SupersededResultIds = request.SupersededResultIds.Order().ToArray(),
+        var databaseNow = await db.Database.SqlQueryRaw<DateTimeOffset>(
+            "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
+        var item = request with { PublishedBy = actor, PublishedAt = databaseNow, SupersededResultIds = request.SupersededResultIds.Order().ToArray(),
             BindingReportId = null, ProfileRuleId = null, ProfileSettingId = null,
             BindingRequest = null, BindingFingerprint = null, BindingNote = null };
         try
