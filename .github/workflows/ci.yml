@@ -76,17 +76,41 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/*.csproj', '**/Directory.*.props', '**/Directory.*.targets', '**/NuGet.Config', '**/nuget.config', '**/packages.lock.json') }}
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', 'dotnet-tools.json', '**/*.csproj', '**/Directory.*.props', '**/Directory.*.targets', '**/NuGet.Config', '**/nuget.config', '**/packages.lock.json') }}
           restore-keys: nuget-${{ runner.os }}-${{ runner.arch }}-
       - name: Restore
         run: dotnet restore GrainLedger.slnx
       - name: Build Release
         run: dotnet build GrainLedger.slnx --configuration Release --no-restore
       - name: Test against disposable PostgreSQL
+        id: backend_tests
         run: >-
           dotnet test GrainLedger.slnx --configuration Release --no-build --no-restore
           --logger trx --results-directory artifacts/test-results/backend
+          --collect:"XPlat Code Coverage" --settings backend/coverage.runsettings
           -- xUnit.MaxParallelThreads=4
+      - name: Generate backend HTML coverage and Summary
+        if: always() && (steps.backend_tests.outcome == 'success' || steps.backend_tests.outcome == 'failure')
+        env:
+          TEST_OUTCOME: ${{ steps.backend_tests.outcome }}
+        run: |
+          echo "### Backend coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo "Test outcome: $TEST_OUTCOME. Coverage may be partial if tests did not pass." >> "$GITHUB_STEP_SUMMARY"
+          dotnet tool restore
+          dotnet tool run reportgenerator \
+            '-reports:artifacts/test-results/backend/**/coverage.cobertura.xml' \
+            '-targetdir:artifacts/coverage/backend' \
+            '-reporttypes:Html;MarkdownSummaryGithub'
+          cat artifacts/coverage/backend/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          echo 'Download **backend-coverage**, extract it and open **index.html** for file/line details. No coverage threshold is enforced.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-coverage
+          path: artifacts/coverage/backend/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -120,8 +144,23 @@ jobs:
       - name: Build production web assets and check TypeScript
         run: npm run build
       - name: Test
+        id: web_tests
         # Avoid spawning one expensive jsdom worker per available CPU/file.
-        run: npm run test --workspace @grainledger/web -- --maxWorkers=2
+        # Coverage instrumentation adds overhead; normal test runs retain Vitest's default timeout.
+        run: npm run test --workspace @grainledger/web -- --maxWorkers=2 --coverage --testTimeout=10000
+      - name: Write web coverage Summary
+        if: always() && (steps.web_tests.outcome == 'success' || steps.web_tests.outcome == 'failure')
+        env:
+          COVERAGE_TEST_OUTCOME: ${{ steps.web_tests.outcome }}
+        run: node .github/scripts/coverage-summary.mjs artifacts/coverage/web/coverage-summary.json
+      - name: Upload web coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-coverage
+          path: artifacts/coverage/web/
+          if-no-files-found: warn
+          retention-days: 7
 
   container:
     name: container

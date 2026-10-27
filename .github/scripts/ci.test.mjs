@@ -10,6 +10,29 @@ import { changedFiles, checkDocs, classify, gate, selectJobs } from './ci.mjs';
 const all = { run_backend: true, run_web: true, run_container: true };
 const none = { run_backend: false, run_web: false, run_container: false };
 const script = fileURLToPath(new URL('./ci.mjs', import.meta.url));
+const coverageScript = fileURLToPath(new URL('./coverage-summary.mjs', import.meta.url));
+
+test('coverage Summary reports counts, empty metrics and partial results; invalid input fails', t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grainledger-coverage-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const input = path.join(root, 'coverage.json');
+  const output = path.join(root, 'summary.md');
+  const total = Object.fromEntries(['lines', 'branches', 'functions', 'statements']
+    .map(metric => [metric, { total: 4, covered: 3 }]));
+  total.branches = { total: 0, covered: 0 };
+  writeFileSync(input, JSON.stringify({ total }));
+  const run = outcome => spawnSync(process.execPath, [coverageScript, input], {
+    encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: output, COVERAGE_TEST_OUTCOME: outcome },
+  });
+  assert.equal(run('success').status, 0);
+  assert.match(readFileSync(output, 'utf8'), /lines \| 75.00% \| 3\/4/);
+  assert.match(readFileSync(output, 'utf8'), /branches \| N\/A \| 0\/0/);
+  assert.equal(run('failure').status, 0);
+  assert.match(readFileSync(output, 'utf8'), /coverage may be partial/);
+  total.lines.covered = 5;
+  writeFileSync(input, JSON.stringify({ total }));
+  assert.notEqual(run('success').status, 0);
+});
 
 test('only known docs may skip builds; combined and unknown changes require coverage', () => {
   assert.deepEqual(classify(['README.md', 'docs/guide.md']), none);

@@ -87,3 +87,30 @@ Nếu không thể bảo vệ dev, khôi phục push dev trong workflow để ki
 ## Giới hạn
 
 Docs check chỉ xác minh file đích của inline Markdown links, không kiểm tra anchors/URL ngoài. Chưa có browser E2E, shared-database smoke, NuGet locked restore hoặc deployment. Việc giảm Docker/source runs và bỏ push dev là đánh đổi có chủ đích; giữ full-run ở main và merge queue. Kế hoạch rollout ban đầu được lưu tại [ci-plan.md](ci-plan.md).
+
+## Coverage: Summary và HTML artifact
+
+Khi backend/web được chọn, CI thu coverage trong cùng lượt test (không chạy test lần thứ hai). Không đặt ngưỡng phần trăm bắt buộc; lỗi test hoặc lỗi tạo báo cáo vẫn làm job thất bại.
+
+- Backend: Coverlet collector, Cobertura → ReportGenerator HTML và Markdown Summary. Tool được pin tại [dotnet-tools.json](../dotnet-tools.json); cấu hình tại [coverage.runsettings](../backend/coverage.runsettings).
+- Web: Vitest V8, HTML và JSON Summary; cấu hình tại [vite.config.ts](../apps/web/vite.config.ts). Dùng cùng phiên bản coverage provider và Vitest.
+- Coverage chỉ xuất hiện cho job thực sự chạy. Job skip không có coverage mới. Không cộng coverage giữa các run hoặc suy ra coverage toàn repo từ một job.
+- Backend đo C# của các assembly GrainLedger, loại test assembly; không đo các nhánh SQL/PLpgSQL hay chứng minh nghiệp vụ trong database đã được bao phủ. Frontend đo src TS/TSX, gồm cả file chưa được test, loại tests/setup/type declarations.
+- Báo cáo sau test lỗi có thể chỉ là một phần; Summary ghi test outcome. Không có coverage được tạo thì step báo cáo fail rõ ràng, không hiển thị 0% giả.
+- Coverage có thêm overhead CPU/RAM và thời gian. So sánh duration mới trên GitHub; cache không thay thế việc chạy tests.
+
+Cách xem: **Actions → chọn run → Summary** để xem bảng tổng hợp. Trong **Artifacts**, tải `backend-coverage` hoặc `web-coverage`, giải nén toàn bộ rồi mở **index.html** bằng trình duyệt. Giữ các file CSS/JS cạnh HTML. Artifacts giữ 7 ngày và không được publish thành website công khai.
+
+Chạy local từ repository root:
+
+```bash
+dotnet test GrainLedger.slnx --configuration Release --collect:"XPlat Code Coverage" --settings backend/coverage.runsettings --results-directory artifacts/test-results/backend -- xUnit.MaxParallelThreads=4
+dotnet tool restore
+dotnet tool run reportgenerator "-reports:artifacts/test-results/backend/**/coverage.cobertura.xml" "-targetdir:artifacts/coverage/backend" "-reporttypes:Html;MarkdownSummaryGithub"
+npm run test --workspace @grainledger/web -- --maxWorkers=2 --coverage --testTimeout=10000
+node .github/scripts/coverage-summary.mjs artifacts/coverage/web/coverage-summary.json
+```
+
+HTML local nằm tại `artifacts/coverage/backend/index.html` và `artifacts/coverage/web/index.html`. Các báo cáo không được commit. Chạy tests bình thường không có cờ coverage vẫn giữ hành vi cũ.
+
+Khi thu coverage, CI cho m?i web test t?i ?a 10 gi?y v? instrumentation l?m t?ng chi ph? th?c thi (?? t?i hi?n test v??t 5 gi?y khi coverage b?t tr?n container 2 CPU). Ch?y test th??ng v?n gi? timeout m?c ??nh 5 gi?y; kh?ng retry ho?c b? test. Backend lo?i source sinh trong obj/bin kh?i s? ?o.
