@@ -12,5 +12,15 @@ export default defineConfig({
       '/signin-google': { target: 'http://localhost:5080', changeOrigin: false },
     },
   },
-  test: { environment: 'jsdom', setupFiles: ['./src/test-setup.ts'], clearMocks: true },
+  test: {
+    environment: 'jsdom', setupFiles: ['./src/test-setup.ts'], clearMocks: true,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/test-setup.ts', 'src/**/*.d.ts'],
+      reporter: ['text-summary', 'html', 'json-summary'],
+      reportsDirectory: '../../artifacts/coverage/web',
+      reportOnFailure: true,
+    },
+  },
 });

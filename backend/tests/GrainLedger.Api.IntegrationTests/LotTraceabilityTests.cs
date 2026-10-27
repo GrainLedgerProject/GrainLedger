@@ -223,10 +223,20 @@ public sealed class LotTraceabilityTests(ApiFactory factory) : IClassFixture<Api
         using var s = await CreateAsync(factory); var source = Lots(await s.ReceiptAsync("5000"))[0];
         // Large synthetic graph fixture in the isolated owner database. Real posting paths are
         // exercised above; this fixture targets response completeness at the interactive guard.
-        var draft = await s.DraftAsync("DRYING", [(source, "5000")], Enumerable.Range(0, 5000).Select(_ => ("DRIED_PADDY", "1")).ToArray());
+        // Create one normal draft, then expand the synthetic graph in bulk. Sending 5000
+        // outputs through draft validation/code allocation tests setup throughput instead
+        // of the trace guard and can hit the API database command timeout on CI runners.
+        var draft = await s.DraftAsync("DRYING", [(source, "5000")], [("DRIED_PADDY", "5000")]);
         await using var connection = new NpgsqlConnection(factory.OwnerConnectionString); await connection.OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
-        await using (var update = new NpgsqlCommand("UPDATE ledger.operations SET status='COMMITTED' WHERE id=$1", connection, transaction))
+        await using (var update = new NpgsqlCommand("""
+            UPDATE ledger.operations op SET status='COMMITTED', content=jsonb_set(content,'{outputs}',(
+                SELECT jsonb_agg((op.content->'outputs'->0) || jsonb_build_object(
+                    'id',gen_random_uuid(),'code',(op.content->'outputs'->0->>'code') || '-fixture-' || n,
+                    'quantityKg','1'))
+                FROM generate_series(1,5000) n
+            )) WHERE id=$1
+            """, connection, transaction))
         { update.Parameters.AddWithValue(draft.GetProperty("id").GetGuid()); await update.ExecuteNonQueryAsync(); }
         await using (var lots = new NpgsqlCommand("""
             INSERT INTO ledger.lots(id,code,code_origin_id,owner_id,commodity_id,stage,product_identity,operation_id)
@@ -234,7 +244,7 @@ public sealed class LotTraceabilityTests(ApiFactory factory) : IClassFixture<Api
                 op.owner_id,(o->>'commodityId')::uuid,o->>'stage',o->>'productIdentity',op.id
             FROM ledger.operations op CROSS JOIN LATERAL jsonb_array_elements(op.content->'outputs') o WHERE op.id=$1
             """, connection, transaction))
-        { lots.Parameters.AddWithValue(draft.GetProperty("id").GetGuid()); await lots.ExecuteNonQueryAsync(); }
+        { lots.Parameters.AddWithValue(draft.GetProperty("id").GetGuid()); Assert.Equal(5000, await lots.ExecuteNonQueryAsync()); }
         await transaction.CommitAsync();
         using var response = await s.Customer.PostAsJsonAsync("/api/ledger/trace", new { lotId = source });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);

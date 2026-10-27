@@ -66,10 +66,13 @@ npm test
 npm run build
 ```
 
+GitHub Actions selects checks by changed files for pull requests into `dev`. Backend source changes run backend tests; web source changes run web tests/build; packaging and dependency changes also validate the Docker image. PRs into `main`, pushes to `main`, merge queues and manual runs require all checks. There is no push run on `dev`: protect that branch and require PR check `required`. See [CI setup and operation](docs/ci-guide.md) for routing, caches and setup. CI does not deploy or use the shared database.
+
 ## Documentation
 - [Documentation index](docs/README.md): index of architecture, APIs, guides, plans, and reports
 - [Setup and deployment](docs/setup-and-deployment.md): local provisioning, configuration, migrations, seeds, and production deployment
 - [Architecture and access control](docs/architecture.md): module boundaries, authorization, and data rules
+- [CI setup and operation](docs/ci-guide.md) · [CI implementation plan](docs/ci-plan.md)
 - [Email/password authentication and Scalar](docs/guides/auth-email-password-scalar.md)
 - [Development accounts and demo Ledger data](docs/guides/development-accounts.md)
 - [Farmer API](docs/api/farmer-api.md) · [Procurement API](docs/api/procurement-api.md)
