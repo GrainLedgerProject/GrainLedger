@@ -29,7 +29,7 @@ Do not modify the teammate's export files, contracts or migrations unilaterally.
 
 ## 2. Requirements confirmed by the proposal
 
-Source: [GrainLedger_V2.pdf](../GrainLedger_V2.pdf), September 30, 2026.
+Source: `GrainLedger_V2.pdf` (September 30, 2026; supplied separately).
 
 | Area | Confirmed requirement | Proposal reference |
 | --- | --- | --- |

@@ -70,7 +70,19 @@ export function checkDocs(files, root = process.cwd()) {
       const destination = relative.startsWith('/')
         ? path.resolve(root, `.${relative}`)
         : path.resolve(path.dirname(source), relative);
-      if (!existsSync(destination)) errors.push(`${file}: missing local link ${target}`);
+      if (!existsSync(destination)) {
+        // SDD figures are generated from tracked diagram sources and deliberately
+        // excluded from Git. Check the source instead of requiring build outputs.
+        const rendered = path.relative(path.join(root, 'docs/SDD/diagrams/rendered'), destination);
+        const isSddFigure = file === 'docs/SDD/GrainLedger_SDD.md' &&
+          rendered !== '..' && !rendered.startsWith(`..${path.sep}`) &&
+          path.extname(destination) === '.svg';
+        const name = path.basename(destination, '.svg');
+        const source = name === '01_system_architecture'
+          ? path.join(root, 'docs/SDD/GrainLedger_Architecture.drawio')
+          : path.join(root, 'docs/SDD/diagrams', `${name}${name.includes('packages_') ? '.puml' : '.mmd'}`);
+        if (!isSddFigure || !existsSync(source)) errors.push(`${file}: missing local link ${target}`);
+      }
     }
   }
   if (errors.length) throw new Error(errors.join('\n'));

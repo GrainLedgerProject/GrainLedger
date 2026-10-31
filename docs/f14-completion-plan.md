@@ -62,7 +62,7 @@ Shared-database migrations require separate explicit approval under AGENTS.md.
 - Existing greedy code is physical-stock scaffolding, not the finished planner.
 
 Existing contracts: [F14 current API](f14-blend-planning.md),
-[F13 API](export-order-api.md), [F12 scope](residue-bounds-plan.md).
+[F13 API](export-order-api.md), [F12 scope](plans/residue-bounds-plan.md).
 
 ## Module responsibilities
 

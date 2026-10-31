@@ -15,7 +15,7 @@ Use explicitly enabled mixed-bulk locations with one current pool generation per
 
 ## Proposal basis
 
-Source: [GrainLedger_V2.pdf](../GrainLedger_V2.pdf), especially pp. 3–6 and 9.
+Source: `GrainLedger_V2.pdf` (supplied separately), especially pp. 3–6 and 9.
 
 - p. 6 explicitly describes multiple farmers' stock combined in one silo **for one customer**, never across customers. Example starts with contributions of 50, 30 and 20 tonnes.
 - pp. 4–5 demonstrate immutable transformations retaining proportional origin; later withdrawals reduce remaining balance, and a bad source can be traced into downstream stock.
