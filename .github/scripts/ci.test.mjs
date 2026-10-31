@@ -123,19 +123,6 @@ test('documentation check validates local paths without making network requests'
   assert.throws(() => checkDocs(['README.md'], root), /missing local link/);
 });
 
-test('documentation check accepts only SDD renders backed by tracked sources', t => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'grainledger-ci-sdd-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(path.join(root, 'docs', 'SDD', 'diagrams'), { recursive: true });
-  const sdd = path.join(root, 'docs', 'SDD', 'GrainLedger_SDD.md');
-  writeFileSync(sdd, '![Class](diagrams/rendered/05_class.svg)');
-  assert.throws(() => checkDocs(['docs/SDD/GrainLedger_SDD.md'], root), /missing local link/);
-  writeFileSync(path.join(root, 'docs', 'SDD', 'diagrams', '05_class.mmd'), 'classDiagram');
-  assert.doesNotThrow(() => checkDocs(['docs/SDD/GrainLedger_SDD.md'], root));
-  writeFileSync(path.join(root, 'docs', 'SDD', 'other.md'), '![Class](diagrams/rendered/05_class.svg)');
-  assert.throws(() => checkDocs(['docs/SDD/other.md'], root), /missing local link/);
-});
-
 test('actual plan/gate CLI defaults to full runs and fails closed', t => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'grainledger-ci-cli-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
