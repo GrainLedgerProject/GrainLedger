@@ -1,0 +1,18 @@
+sequenceDiagram
+ autonumber
+ actor U as Authorized internal user
+ participant UI as :LedgerStock / Workspace
+ participant E as :LedgerEndpoints
+ participant S as :LedgerService
+ participant DB as :PostgreSQL
+ U->>UI: Search permitted business history
+ UI->>E: GET /api/ledger/history with allowed filters/page
+ E->>S: ReadAsync(history, query)
+ S->>DB: ledger.read(actor, history, payload)
+ DB->>DB: Validate persisted active role and owner/facility scope
+ DB->>DB: Filter, order and page before scoped detail projection
+ DB-->>S: Authorized history page with role-based redaction
+ S-->>E: JSON page or ProblemDetails
+ E-->>UI: ProblemDetails / result
+ UI-->>U: Show retained event detail and history
+ Note over S,DB: Identity/Catalog/Capture keep their own audit records.<br/>Unified export/compliance history is planned, not an existing combined endpoint.

@@ -123,6 +123,14 @@ public sealed class CaptureCutoverMigrationTests
         await LedgerDatabase.ConfigureRuntimeRoleAsync(connectionString, "cutover_runtime");
         var runtimeConnection = new NpgsqlConnectionStringBuilder(connectionString) { Username = "cutover_runtime", Password = "test-runtime" }.ConnectionString;
         await LedgerDatabase.ValidateRuntimeAsync(runtimeConnection);
+        // A later deployment may revoke routine grants without removing the migration.
+        // Detect this at startup rather than misreporting it as a user's business-role denial.
+        await using (var revokeTrace = new NpgsqlCommand("REVOKE EXECUTE ON FUNCTION ledger.trace_lot(uuid,uuid,text,text) FROM cutover_runtime", owner))
+            await revokeTrace.ExecuteNonQueryAsync();
+        var missingTrace = await Assert.ThrowsAsync<InvalidOperationException>(() => LedgerDatabase.ValidateRuntimeAsync(runtimeConnection));
+        Assert.Contains("Traceability runtime function or EXECUTE grant missing", missingTrace.Message);
+        await LedgerDatabase.ConfigureRuntimeRoleAsync(connectionString, "cutover_runtime");
+        await LedgerDatabase.ValidateRuntimeAsync(runtimeConnection);
         await using var runtime = new NpgsqlConnection(runtimeConnection); await runtime.OpenAsync();
         foreach (var sql in new[] { "UPDATE ledger.receiving_blocks SET blocked=false", "DELETE FROM ledger.receipt_correction_blocks",
             "DELETE FROM ledger.contributions", "SELECT * FROM capture_mock.retained_history" })

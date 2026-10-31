@@ -22,10 +22,12 @@ public sealed class BrowserWorkflowHost
     {
         var sessionFile = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_SESSION_FILE");
         if (string.IsNullOrWhiteSpace(sessionFile)) return;
-        var port = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_PORT") ?? "5080";
         var webRoot = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_UI_DIST");
-        var apiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_URL") ?? "http://localhost:5080");
-        var uiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_UI_URL") ?? "http://localhost:5173");
+        var apiPort = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_PORT") ??
+            Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_PORT") ?? "5080";
+        var webPort = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_WEB_PORT") ?? "5173";
+        var apiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_URL") ?? $"http://localhost:{apiPort}");
+        var uiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_UI_URL") ?? $"http://localhost:{webPort}");
         if (new[] { apiOrigin, uiOrigin }.Any(uri => !uri.IsLoopback || uri.Scheme != "http" || uri.AbsolutePath != "/" || uri.Query != "" || uri.Fragment != ""))
             throw new InvalidOperationException("Browser test origins must be loopback HTTP origins.");
         var apiUrl = apiOrigin.GetLeftPart(UriPartial.Authority);
@@ -53,7 +55,10 @@ public sealed class BrowserWorkflowHost
         var exportClient = factory.CreateRealCookieClient(exportUser, exportSession);
         await LedgerScenario.CsrfAsync(exportClient);
         scenario.Accounts.Add("export", (exportUser, exportSession, exportClient));
-        await scenario.ReceiptAsync("10");
+        var received = await scenario.ReceiptAsync("10");
+        var traceSourceLotId = LedgerScenario.Lots(received)[0];
+        var processed = await scenario.CommitAsync(await scenario.DraftAsync("DRYING", [(traceSourceLotId, "10")], [("DRIED_PADDY", "8")], "2"));
+        var traceOutputLotId = LedgerScenario.Output(processed);
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
         using (var scope = factory.Services.CreateScope())
         {
@@ -135,6 +140,24 @@ public sealed class BrowserWorkflowHost
              companyPolicy.Result("0.2", uncertainty: null, substanceId: companyPolicy.OtherSubstanceId)], confirm: false);
         var latePublished = false;
         using var lateGate = new SemaphoreSlim(1, 1);
+        // Reproducible custody trace fixture; all writes stay in this disposable database.
+        var traceMixedLocation = Guid.NewGuid();
+        await LedgerScenario.SendAsync(scenario.Admin, HttpMethod.Post, "/api/ledger/locations", new
+        { id = traceMixedLocation, facilityId = scenario.FacilityId, name = "Trace mixed store", kind = "STORE", mixedBulk = true });
+        await LedgerScenario.SendAsync(scenario.Admin, HttpMethod.Post, "/api/ledger/mixed-bulk-policies", new
+        {
+            id = Guid.NewGuid(), locationId = traceMixedLocation, ownerId = scenario.OwnerId, commodityId = scenario.CommodityId,
+            stage = "RAW_PADDY", productIdentity = "RAW_PADDY", effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            evidenceId = scenario.EvidenceId, identityScopeConfirmed = true
+        });
+        var mixedReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements",
+            scenario.ReceiptBody(Guid.NewGuid(), ["10"], traceMixedLocation));
+        await scenario.ConfirmArrivalAsync(mixedReceipt);
+        var mixedRoot = LedgerScenario.Lots(mixedReceipt)[0];
+        var traceSource = await scenario.Purchaser.GetFromJsonAsync<GrainLedger.Modules.Capture.SourceLotResponse>(
+            $"/api/source-lots/{mixedReceipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()}");
+        var mixedPool = traceSource!.CurrentStock.Single().CurrentStockLotId;
+        await scenario.HoldAsync(mixedRoot);
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -315,7 +338,8 @@ public sealed class BrowserWorkflowHost
                     normalizedSampleId = normalizedSample.Id,
                     uncoveredSubstanceId = companyPolicy.OtherSubstanceId
                 },
-                evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(), accounts
+                evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(),
+                traceSourceLotId, traceOutputLotId, mixedRoot, mixedPool, accounts
             }, new JsonSerializerOptions { WriteIndented = true });
         try { await bridge.StartAsync(); await bridge.WaitForShutdownAsync(); }
         finally { File.Delete(sessionFile); await factory.DisposeAsync(); }

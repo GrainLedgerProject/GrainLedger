@@ -39,7 +39,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>(tabForPath(window.location.pathname));
-  const [path, setPath] = useState(window.location.pathname);
+  const [path, setPath] = useState(window.location.pathname + window.location.search);
   const [signingOut, setSigningOut] = useState(false);
   const [exportReady, setExportReady] = useState(false);
   const [exportListState, setExportListState] = useState<ExportListState>(initialExportListState);
@@ -59,7 +59,7 @@ export function App() {
     const expired = () => { setUser(null); setExportListState(initialExportListState); setTab('profile'); setPath('/'); window.history.replaceState({}, '', '/'); };
     window.addEventListener('session-ended', expired);
     const popped = () => {
-      setPath(window.location.pathname);
+      setPath(window.location.pathname + window.location.search);
       setTab(tabForPath(window.location.pathname));
     };
     window.addEventListener('popstate', popped);
@@ -164,6 +164,9 @@ export function App() {
   const selectedSprayId = path.match(/^\/capture\/spray-declarations\/([^/]+)\/?$/)?.[1] ?? null;
   const procurementPathId = path.match(/^\/capture\/procurements\/([^/]+)\/?$/)?.[1] ?? null;
   const selectedSourceLotId = path.match(/^\/capture\/source-lots\/([^/]+)\/?$/)?.[1] ?? null;
+  const traceQuery = new URLSearchParams(path.split('?')[1] || '');
+  const labTraceOrigin = path.startsWith('/ledger/trace?') && traceQuery.get('reportId') && traceQuery.get('resultId')
+    ? { reportId: traceQuery.get('reportId')!, resultId: traceQuery.get('resultId')! } : undefined;
   const samplePathId = path.match(/^\/capture\/samples\/([^/]+)\/?$/)?.[1] ?? null;
   const adminSection: AdminSection = path.startsWith('/admin/mrl-lookup') ? 'mrl-lookup' : path.startsWith('/admin/mrl') ? 'mrl' : path.startsWith('/admin/catalogs') ? 'catalogs' : path.startsWith('/admin/crop-seasons') ? 'crop-seasons' : 'people';
   const canOpenLedger = ledgerSections.some(section => section.permissions.some(permission => user.permissions.includes(permission)));
@@ -197,9 +200,9 @@ export function App() {
             : <div className="notice">Export orders are not available until the database update is deployed.</div>)
           : tab === 'mrl' && user.permissions.includes('mrl.read') ? <MrlLookup />
           : tab === 'administration' && user.role === 'Administrator' ? <AdminWorkspace user={user} section={adminSection} onSelect={openAdminSection} />
-          : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} initialLotId={path.match(/^\/ledger\/lots\/([^/]+)$/)?.[1]} />
+          : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} initialLabOrigin={labTraceOrigin} initialLotId={path.match(/^\/ledger\/lots\/([^/]+)$/)?.[1]} />
           : tab === 'residue-policies' && user.role === 'CustomerManager' && user.permissions.includes('residue.company-policy.manage') ? <CompanyResiduePolicies active allowed companyId={user.organizationId || ''} />
-          : tab === 'lab' && (user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) ? <LabReports canWrite={user.permissions.includes('lab.write')} canManageResidueEvidence={user.permissions.includes('residue.evidence.manage')} companyId={user.organizationId || ''} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={canReadPurchases ? id => openCapturePath(`/capture/source-lots/${id}`, 'procurements') : undefined} />
+          : tab === 'lab' && (user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) ? <LabReports canWrite={user.permissions.includes('lab.write')} canManageResidueEvidence={user.permissions.includes('residue.evidence.manage')} companyId={user.organizationId || ''} onTraceResult={user.permissions.includes('trace.read.tenant') ? origin => openCapturePath(`/ledger/trace?reportId=${encodeURIComponent(origin.reportId)}&resultId=${encodeURIComponent(origin.resultId)}`, 'ledger') : undefined} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={canReadPurchases ? id => openCapturePath(`/capture/source-lots/${id}`, 'procurements') : undefined} />
           : tab === 'procurements' && selectedSourceLotId ? (canReadPurchases
             ? <SourceLotDetail id={selectedSourceLotId} canWriteSamples={canWritePurchases} canReadLab={user.permissions.includes('lab.read') || user.permissions.includes('lab.write')} userId={user.id} companyId={user.organizationId || ''} onBack={id => id ? openCapturePath(`/capture/procurements/${id}`, 'procurements') : openTab('procurements')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={id => openCapturePath(`/capture/source-lots/${id}`, 'procurements')} onOpenLedgerLot={canReadLedgerStock ? id => openCapturePath(`/ledger/lots/${encodeURIComponent(id)}`, 'ledger') : undefined} onOpenFarmer={canReadFarmers ? id => selectFarmer(id) : undefined} onOpenPlot={canReadFarmers ? selectPlot : undefined} onOpenPlotSeason={canReadFarmers ? selectPlotSeason : undefined} />
             : <div className="notice error" role="alert">Your account cannot view source lots.</div>)

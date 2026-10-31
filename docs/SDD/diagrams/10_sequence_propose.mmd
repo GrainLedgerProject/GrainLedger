@@ -1,0 +1,31 @@
+sequenceDiagram
+ autonumber
+ actor X as Customer Export Officer
+ participant View as :UI (Web / Field)
+ participant Ctrl as :PlanningEndpoints (planned)
+ participant P as :PlanningService
+ participant S as :FeasibilitySearch
+ participant C as :ComplianceService
+ participant Repo as :PlanningPersistence port (planned)
+ participant DB as :Database
+ X->>View: Request proposal for order/container
+ View->>Ctrl: Submit request
+ Ctrl->>P: Request proposal for order/container
+ P->>+Repo: Read permitted eligible stock and current order specification
+ Repo->>+DB: Read permitted eligible stock and current order specification
+ DB-->>-Repo: Transaction result
+ Repo-->>-P: Result / transaction status
+ P->>S: Search stock, owner, quantity, quality and residue constraints
+ loop Candidate compositions within documented search budget
+ S->>C: Assess candidate with PROPOSE scope
+ C-->>S: PASS/FAIL/INCOMPLETE and findings
+ end
+ S-->>P: Candidate or explicit search outcome/findings
+ P->>+Repo: Retain plan version, allocations, proposal assessment and findings
+ Repo->>+DB: Retain plan version, allocations, proposal assessment and findings
+ DB-->>-Repo: Transaction result
+ Repo-->>-P: Result / transaction status
+ P-->>Ctrl: Proposal or reasons, no stock withdrawal or approval
+ Ctrl-->>View: Operation result and findings
+ View-->>X: Display outcome
+ Note over DB: Full target design, not a claim of implemented export or residue APIs.

@@ -22,11 +22,17 @@ let rules: typeof oldRule[];
 let failure: number;
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const posts = () => fetchMock.mock.calls.filter(([url, init]) => String(url) === '/api/residue-rules' && init?.method === 'POST');
+// These fixtures exercise publication, not per-keystroke editing. Paste text to
+// avoid re-rendering the full scientific profile for every fixture character.
+async function fillText(user: UserEvent, label: string, value: string) {
+  const input = screen.getByLabelText(label);
+  await user.clear(input);
+  await user.click(input);
+  await user.paste(value);
+}
 async function review(user: UserEvent) {
-  await user.clear(screen.getByLabelText('Scientific reviewer'));
-  await user.type(screen.getByLabelText('Scientific reviewer'), 'Dr Current');
-  await user.clear(screen.getByLabelText('Review authority'));
-  await user.type(screen.getByLabelText('Review authority'), 'Current QA');
+  await fillText(user, 'Scientific reviewer', 'Dr Current');
+  await fillText(user, 'Review authority', 'Current QA');
   fireEvent.change(screen.getByLabelText('Effective from'), { target: { value: '2027-01-01T00:00' } });
   fireEvent.change(screen.getByLabelText('Reviewed at'), { target: { value: '2026-10-01T00:00' } });
   const confirmation = screen.getByLabelText('I reviewed the complete scientific profile, evidence and effective period.');
@@ -40,25 +46,25 @@ async function fillNew(user: UserEvent, process = false) {
   await startNew(user, process ? 'Define processing factors' : 'Interpret laboratory results');
   await user.selectOptions(screen.getByLabelText('Substance'), substanceId);
   await user.selectOptions(screen.getByLabelText('Commodity'), commodityId);
-  await user.type(screen.getByLabelText('Residue definition'), 'parent compound');
+  await fillText(user, 'Residue definition', 'parent compound');
   if (process) {
     await user.selectOptions(screen.getByLabelText('Factor semantics'), 'STEP_CONCENTRATION');
     await user.selectOptions(screen.getByLabelText('Operation'), 'MILLING');
     await user.selectOptions(screen.getByLabelText('Operation material path'), 'DRIED_PADDY:HEAD_RICE:HEAD_RICE');
-    await user.type(screen.getByLabelText('Input analytical basis'), 'WHOLE');
-    await user.type(screen.getByLabelText('Output analytical basis'), 'EDIBLE');
+    await fillText(user, 'Input analytical basis', 'WHOLE');
+    await fillText(user, 'Output analytical basis', 'EDIBLE');
     await user.selectOptions(screen.getByLabelText('Conditions'), 'CONDITIONAL');
-    await user.type(screen.getByLabelText('Applicable conditions'), 'dry milling');
-    await user.type(screen.getByLabelText('Concentration factor (decimal)'), '0.200');
+    await fillText(user, 'Applicable conditions', 'dry milling');
+    await fillText(user, 'Concentration factor (decimal)', '0.200');
   } else {
     await user.selectOptions(screen.getByLabelText('Material stage'), 'RAW_PADDY');
-    await user.type(screen.getByLabelText('Analytical basis'), 'WHOLE');
+    await fillText(user, 'Analytical basis', 'WHOLE');
     await user.selectOptions(screen.getByLabelText('Interpretation'), 'NUMERIC_ABSOLUTE_UNCERTAINTY');
-    await user.type(screen.getByLabelText('Analytical method'), 'LC-MS/MS');
+    await fillText(user, 'Analytical method', 'LC-MS/MS');
   }
   await user.type(screen.getByLabelText('Reviewed outward precision (decimal places)'), '3');
-  await user.type(screen.getByLabelText('Evidence reference'), 'reviewed-study');
-  await user.type(screen.getByLabelText('Applicability statement'), 'Reviewed rice scope');
+  await fillText(user, 'Evidence reference', 'reviewed-study');
+  await fillText(user, 'Applicability statement', 'Reviewed rice scope');
   await review(user);
 }
 beforeEach(() => {

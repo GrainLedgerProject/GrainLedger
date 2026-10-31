@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  changes:
+    name: plan and validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run_backend: ${{ steps.plan.outputs.run_backend }}
+      run_web: ${{ steps.plan.outputs.run_web }}
+      run_container: ${{ steps.plan.outputs.run_container }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify CI routing and failure handling
+        run: node --test .github/scripts/ci.test.mjs
+      - name: Validate workflow with actionlint
+        run: |
+          tools_dir="$(mktemp -d)"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$tools_dir/actionlint.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $tools_dir/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$tools_dir/actionlint.tar.gz" -C "$tools_dir" actionlint
+          "$tools_dir/actionlint" -color
+      - name: Select required jobs and check local documentation links
+        id: plan
+        env:
+          # Default: filter PRs into dev. Set false to force full PR checks.
+          CI_ENABLE_PATH_FILTERS: ${{ vars.CI_ENABLE_PATH_FILTERS }}
+        run: node .github/scripts/ci.mjs plan
+
+  backend:
+    name: backend
+    needs: changes
+    if: needs.changes.outputs.run_backend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      ASPNETCORE_ENVIRONMENT: Testing
+      DOTNET_ENVIRONMENT: Testing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Check SDK and Docker
+        run: |
+          dotnet --version
+          docker info
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', 'dotnet-tools.json', '**/*.csproj', '**/Directory.*.props', '**/Directory.*.targets', '**/NuGet.Config', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: nuget-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore
+        run: dotnet restore GrainLedger.slnx
+      - name: Build Release
+        run: dotnet build GrainLedger.slnx --configuration Release --no-restore
+      - name: Test against disposable PostgreSQL
+        id: backend_tests
+        run: >-
+          dotnet test GrainLedger.slnx --configuration Release --no-build --no-restore
+          --logger trx --results-directory artifacts/test-results/backend
+          --collect:"XPlat Code Coverage" --settings backend/coverage.runsettings
+          -- xUnit.MaxParallelThreads=4
+      - name: Generate backend HTML coverage and Summary
+        if: always() && (steps.backend_tests.outcome == 'success' || steps.backend_tests.outcome == 'failure')
+        env:
+          TEST_OUTCOME: ${{ steps.backend_tests.outcome }}
+        run: |
+          echo "### Backend coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo "Test outcome: $TEST_OUTCOME. Coverage may be partial if tests did not pass." >> "$GITHUB_STEP_SUMMARY"
+          dotnet tool restore
+          dotnet tool run reportgenerator \
+            '-reports:artifacts/test-results/backend/**/coverage.cobertura.xml' \
+            '-targetdir:artifacts/coverage/backend' \
+            '-reporttypes:Html;MarkdownSummaryGithub'
+          cat artifacts/coverage/backend/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          echo 'Download **backend-coverage**, extract it and open **index.html** for file/line details. No coverage threshold is enforced.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-coverage
+          path: artifacts/coverage/backend/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-test-results
+          path: artifacts/test-results/backend/**/*.trx
+          if-no-files-found: warn
+          retention-days: 7
+
+  web:
+    name: web
+    needs: changes
+    if: needs.changes.outputs.run_web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Check Node and npm
+        run: |
+          node --version
+          npm --version
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build production web assets and check TypeScript
+        run: npm run build
+      - name: Test
+        id: web_tests
+        # Avoid spawning one expensive jsdom worker per available CPU/file.
+        # Coverage instrumentation adds overhead; normal test runs retain Vitest's default timeout.
+        run: npm run test --workspace @grainledger/web -- --maxWorkers=2 --coverage --testTimeout=10000
+      - name: Write web coverage Summary
+        if: always() && (steps.web_tests.outcome == 'success' || steps.web_tests.outcome == 'failure')
+        env:
+          COVERAGE_TEST_OUTCOME: ${{ steps.web_tests.outcome }}
+        run: node .github/scripts/coverage-summary.mjs artifacts/coverage/web/coverage-summary.json
+      - name: Upload web coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-coverage
+          path: artifacts/coverage/web/
+          if-no-files-found: warn
+          retention-days: 7
+
+  container:
+    name: container
+    needs: changes
+    if: needs.changes.outputs.run_container == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build application image without publishing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          tags: grainledger:ci
+          cache-from: type=gha,scope=grainledger-ci
+          cache-to: type=gha,scope=grainledger-ci,mode=max,ignore-error=true,timeout=2m
+
+  required:
+    name: required
+    if: always()
+    needs: [changes, backend, web, container]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require all selected checks to succeed
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node .github/scripts/ci.mjs gate
