@@ -61,6 +61,15 @@ public sealed class PlanningQualityObservationTests(ApiFactory factory) : IClass
         var current = Assert.Single(rows.EnumerateArray().ToArray());
         Assert.Equal(2, current.GetProperty("versionNo").GetInt32());
         Assert.Equal("13", current.GetProperty("measuredValue").GetString());
+        var managerRows = await scenario.Customer.GetFromJsonAsync<JsonElement>(
+            $"/api/ledger/planning-quality-observations?ownerId={scenario.OwnerId}" +
+            $"&facilityId={scenario.FacilityId}&lotIds={lotId}");
+        Assert.Equal(2, Assert.Single(managerRows.EnumerateArray().ToArray())
+            .GetProperty("versionNo").GetInt32());
+        var foreignManagerRead = await scenario.ForeignCustomer.GetAsync(
+            $"/api/ledger/planning-quality-observations?ownerId={scenario.OwnerId}" +
+            $"&facilityId={scenario.FacilityId}&lotIds={lotId}");
+        Assert.Equal(HttpStatusCode.Forbidden, foreignManagerRead.StatusCode);
         var (foreign, foreignSession) = await factory.SeedUserAsync(Roles.ExportStaff,
             scenario.ForeignOwnerId);
         using var foreignReader = factory.CreateRealCookieClient(foreign, foreignSession);

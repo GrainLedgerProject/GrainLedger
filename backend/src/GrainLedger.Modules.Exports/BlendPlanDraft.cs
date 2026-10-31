@@ -132,8 +132,8 @@ public sealed record CreateBlendPlanDraftRequest(Guid OperationId, int OrderVers
 public sealed record CancelBlendPlanDraftRequest(Guid OperationId);
 public sealed record BlendPlanDraftDto(Guid Id, Guid OrderId, Guid ContainerId, Guid SpecificationId,
     int VersionNo, int Version, string Status, string TargetMassKg, string? TargetProductIdentity, string DemandSnapshot,
-    DateTimeOffset CreatedAt, DateTimeOffset? CancelledAt, bool DemandCurrent, bool CanCancel);
+    DateTimeOffset CreatedAt, DateTimeOffset? CancelledAt, bool DemandCurrent, bool CanCancel, bool HasProposal);
 public sealed record PlanningDependency(string Code, string Description);
 public sealed record BlendPlanningContextDto(Guid ContainerId, int OrderVersion, int ContainerVersion,
     bool StorageReady, bool CanCreateDraft, bool CandidateReadReady, bool CompatibilityReadReady, bool CanPropose,
-    IReadOnlyList<PlanningDependency> MissingDependencies);
+    IReadOnlyList<PlanningDependency> MissingDependencies, IReadOnlyList<string> AllowedTargetProducts);

@@ -127,6 +127,10 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             $"/api/blend-plans/{draft.Id}/propose", proposeBody);
         Assert.Equal(HttpStatusCode.Created, proposeResponse.StatusCode);
         var proposal = await proposeResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var proposedDraft = await writer.GetFromJsonAsync<BlendPlanDraftDto>(
+            $"/api/blend-plans/{draft.Id}");
+        Assert.True(proposedDraft!.HasProposal);
+        Assert.False(proposedDraft.CanCancel);
         var assessment = proposal.GetProperty("assessment");
         Assert.Equal("F14_ASSESSMENT_V1",
             assessment.GetProperty("calculationVersion").GetString());

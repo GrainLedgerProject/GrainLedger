@@ -81,9 +81,14 @@ public static class LedgerEndpoints
             Results.Ok(await ledger.ConfirmPlanningQualityObservationAsync(request, ct)))
             .RequireAuthorization(Permissions.BlendQualityEvidenceManage);
         group.MapGet("/planning-quality-observations", async (Guid ownerId, Guid facilityId,
-            Guid[] lotIds, DateTimeOffset? at, LedgerService ledger, CancellationToken ct) =>
-            Results.Ok(await ledger.ReadPlanningQualityObservationsAsync(ownerId,
-                facilityId, lotIds, at, ct))).RequireAuthorization(Permissions.BlendPropose);
+            Guid[] lotIds, DateTimeOffset? at, LedgerService ledger, ICurrentAccess access, CancellationToken ct) =>
+        {
+            if (!await access.HasPermissionAsync(Permissions.BlendPropose, ct) &&
+                !await access.HasPermissionAsync(Permissions.BlendQualityEvidenceManage, ct))
+                return Results.Forbid();
+            return Results.Ok(await ledger.ReadPlanningQualityObservationsAsync(ownerId,
+                facilityId, lotIds, at, ct));
+        }).RequireAuthorization();
         group.MapGet("/planning-yield-rules/applicable", async (Guid ownerId, Guid facilityId,
             Guid compatibilityPolicyId, DateTimeOffset? at, LedgerService ledger,
             CancellationToken ct) =>

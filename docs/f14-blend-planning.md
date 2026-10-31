@@ -4,7 +4,7 @@ Track the remaining backend implementation and acceptance gates in the
 [F14 completion plan](f14-completion-plan.md). This document describes the
 current API slices; it does not establish completion of F14.
 
-## Implementation status (26 October 2026)
+## Implementation status (27 October 2026)
 
 The backend now supports draft demand, scoped stock candidates and lineage,
 published assessment/yield policies, confirmed finished-lot quality observations,
@@ -16,9 +16,10 @@ HOLD, post or deduct stock. `GET /proposal` reports CURRENT or STALE against
 the saved snapshot. A new quality version or stock HOLD invalidates a preview.
 
 Missing approved policy or evidence yields INCOMPLETE, so only a PASS preview
-can be proposed. There is no F14 frontend, and the new owner migrations and
-runtime grants have not been applied to the shared database. F15 must recheck
-and reserve stock before approval or execution.
+can be proposed. The F14 frontend is implemented in the working tree. The
+reviewed F14 Catalog, Ledger and Export migrations and restricted runtime grants
+were applied to the configured shared database on 27 October 2026 at the user's
+request. F15 must recheck and reserve stock before approval or execution.
 Finished-lot quality is confirmed explicitly by a Customer Manager against a
 Ledger lot and evidence file; Capture source-sample results are not silently
 promoted to finished-product measurements.
@@ -27,7 +28,12 @@ The sections below retain details of the candidate and diagnostic APIs.
 
 The candidate read now separates physical eligibility from product compatibility.
 A mapped input commodity can remain visible when it differs from the order's
-output commodity. With a draft, direct match checks both commodity and product.
+output commodity. With a draft, direct match checks the product identity and
+commodity. Ledger retains PADDY as the Catalog commodity after milling; a
+lineage-complete HEAD_RICE, BROKEN_RICE or BLENDED_RICE lot from PADDY can
+therefore directly match a RICE order. RAW_PADDY and DRIED_PADDY cannot.
+This product mapping does not establish available mass or compliance. Candidate
+revisions include the Catalog codes used by the mapping.
 The GET route no longer returns a greedy mass selection. `candidateReadReady`
 and `compatibilityReadReady` are separate; a plan-specific read checks draft
 storage before accessing it.
@@ -58,7 +64,7 @@ All routes use persisted active-role and customer-company scope. Reads use `expo
 | GET /api/export-containers/{id}/planning-context | Order/container versions, storage and candidate-read readiness, canCreateDraft, canPropose and missing integration reasons. Does not require planning tables to be installed. |
 | GET /api/export-containers/{id}/stock-preview?facilityId={id}&page=1&pageSize=25 | Current own-company Ledger lots at the selected facility, positions, available kg and restrictions; paged display only. Works with the existing Ledger schema. |
 | GET /api/export-containers/{id}/inventory-scope?facilityId={id} | Scans the complete own-company/facility inventory in one repeatable-read transaction. Returns lot count, available mass and restricted-lot count. It explicitly reports `revisioned=false` and `complianceQualified=false`. |
-| GET /api/export-containers/{id}/candidates?facilityId={id}&includeExcluded=true&page=1&pageSize=25&planId={id} | Owner/facility candidate positions, exact physical mass, pool revision, source count, reasons and scope/candidate fingerprints. Optional `planId` reads a current draft's target and effective Ledger blend policies to annotate product compatibility. `scopeRevision` may be sent on later pages; a changed scope returns 409. The summary covers the whole facility before paging. |
+| GET /api/export-containers/{id}/candidates?facilityId={id}&includeExcluded=true&page=1&pageSize=25&planId={id}&productMatchOnly=true | Owner/facility candidate positions, exact physical mass, pool revision, source count, reasons and scope/candidate fingerprints. Optional `planId` reads a current draft's target and effective Ledger blend policies to annotate product compatibility. With a plan, optional `productMatchOnly=true` hides `PRODUCT_MISMATCH` positions before paging; omitting it retains the full physical view. `scopeRevision` may be sent on later pages; a changed scope returns 409. The summary covers the whole facility before paging. |
 | GET /api/export-containers/{id}/candidates/{lotId}/lineage?facilityId={id}&locationId={id} | Full reachable custody/processing graph, source composition and Capture source mapping for one lot/location. Optional `candidateRevision` detects a changed snapshot. |
 | GET /api/export-containers/{id}/candidates/{lotId}/residue-preview?facilityId={id}&locationId={id}&candidateRevision={revision}&substanceIds={comma-separated-UUIDs} | Read-only F12 residue intervals for a physically eligible candidate. Requires both `export-orders.read` and `residue.evaluate`. A changed candidate returns 409; F12 validates 1–200 distinct substances. The response is diagnostic and `assessmentStatus` remains `NOT_ASSESSED`. |
 | POST /api/blend-plans/{id}/residue-preview | Reads 1–100 selected positions for a current draft and 1–200 substances. Validates physical selection, exact compatibility set and revisions, then computes input intervals and, for a blend with an effective output commodity, a hypothetical BLENDING interval in one F12 repeatable-read snapshot. Rechecks candidate scope after the F12 read. Returns fail-closed F14 assessment findings; absent approved policy remains `INCOMPLETE`. Does not save a proposal or reserve stock. Requires `residue.evaluate` plus own-company export read scope. |
@@ -118,7 +124,9 @@ Example draft body:
 
 The server derives company, actor, target mass, specification and next version. `targetProductIdentity` states the intended product for this container's plan. It is required when creating a new draft and is pinned in the immutable `demandSnapshot` and exposed on draft reads. Supported Ledger identities are `RAW_PADDY`, `DRIED_PADDY`, `HEAD_RICE`, `BROKEN_RICE`, `BRAN`, `HUSK` and `BLENDED_RICE`. Bagging retains the underlying identity, so `BAGGED_RICE` is a stage, not a target product identity. Existing drafts without this field read as null and cannot establish a product target. Commodity remains on the F13 order; one order can have containers with different draft targets. The candidate read now reports product-match hints for a current draft, but does not approve any cross-product substitution.
 
-`versionNo` is the draft sequence within a container; `version` is the concurrency token for that draft. A new request makes a new version, including after cancellation. There is no edit/delete endpoint for historical demand. `demandSnapshot` is a JSON string containing market/commodity, shipping dates, order/container versions, target product identity, target mass and quality specification. Mass is a decimal string with up to six fractional digits; quality values retain up to twelve.
+The planning context returns `allowedTargetProducts` for the order's Catalog commodity, and draft creation checks the same set on the server. `RICE` and `RICE_POLISHED` allow `HEAD_RICE`, `BROKEN_RICE` and `BLENDED_RICE`; `RICE_BRAN` allows `BRAN`; `HUSK` and `RICE_HUSK` allow `HUSK`. Ledger currently retains `PADDY` as the Catalog commodity through processing, so `PADDY` permits its raw, dried and derived fractions. Unmapped commodity codes, including `RICE_HUSKED` until Ledger has a matching product identity, offer no F14 draft target. The FE does not invent a fallback list. This check prevents a mismatched draft target; actual stock and blend compatibility are still assessed later in the plan.
+
+`versionNo` is the draft sequence within a container; `version` is the concurrency token for that draft. A new request makes a new version, including after cancellation. There is no edit/delete endpoint for historical demand. Draft list and detail return `hasProposal`; a proposal is stored separately while demand status remains `DRAFT`. `demandSnapshot` is a JSON string containing market/commodity, shipping dates, order/container versions, target product identity, target mass and quality specification. Mass is a decimal string with up to six fractional digits; quality values retain up to twelve.
 
 The same operation ID and request replay the stored response, including its original status/ETag/Location. A changed payload or route with that operation ID returns 409. Replay occurs before current-state checks. After replay, GET detail for current status/capabilities. Missing or stale If-Match on cancellation returns 412; creation checks both expected parent versions. All writes use the existing per-company Export transaction advisory lock, including F13 writes.
 
@@ -167,7 +175,7 @@ The Ledger-owned `planning_candidates` read returns the complete owner/facility 
 
 `scopeRevision` detects a changed candidate scope when reading subsequent pages. `candidateRevision` detects changes before reading a candidate's lineage. These fingerprints are not reservations or monotonic event counters. The proposal write rechecks current demand, eligibility, quantity and revisions before saving; F15 reservation must recheck under the Ledger write lock.
 
-The candidate read has forward-only Ledger migration `20261021000000_PlanningCandidates`. Plan-specific product hints add forward-only migration `20261022000000_PlanningCompatibility`, which exposes only effective facility policies through an owner-scoped protected read. Missing routine/grant returns 503 `CANDIDATE_SCHEMA_NOT_READY`; missing draft storage with `planId` returns 503 `PLANNING_SCHEMA_NOT_READY`. F13 and the existing F14 draft routes remain separate. No shared database migration was applied. Apply reviewed owner migrations and rerun the restricted runtime-role configuration only after separate approval.
+The candidate read has forward-only Ledger migration `20261021000000_PlanningCandidates`. Plan-specific product hints add forward-only migration `20261022000000_PlanningCompatibility`, which exposes only effective facility policies through an owner-scoped protected read. Missing routine/grant returns 503 `CANDIDATE_SCHEMA_NOT_READY`; missing draft storage with `planId` returns 503 `PLANNING_SCHEMA_NOT_READY`. F13 and the existing F14 draft routes remain separate. Apply owner migrations and rerun the restricted runtime-role configuration only after separate approval in each environment.
 
 The stock preview calls Ledger's existing scoped `lots` read. It includes rows that have stock in the selected facility, even when HOLD or another restriction makes available mass zero. It does not filter by commodity, product identity, compatibility, laboratory evidence or quality. It is not a feasible candidate list and a paged preview cannot be used as solver input. No stock changes result from this read.
 
@@ -179,11 +187,11 @@ Migration `20261021035744_BlendPlanningDrafts` adds `exports.blend_plan_drafts` 
 
 F13 remains usable before this optional migration. Planning mutations return 503 `PLANNING_SCHEMA_NOT_READY` until tables and runtime privileges exist. If planning tables exist but their read grants are missing, demand guards fail closed. The existing runtime-role configuration grants the new tables after migration.
 
-Do not run a shared-database migration as part of startup or tests. Shared deployment requires separate explicit approval, owner migration and runtime-role configuration. No shared migration was applied as part of this slice.
+Do not run a shared-database migration as part of startup or tests. Shared deployment requires separate explicit approval, owner migration and runtime-role configuration. On 27 October 2026 the user confirmed a restorable Supabase backup and approved the shared F14 deployment. Catalog `20261025000000_BlendAssessmentPolicies`, five Ledger planning migrations through `20261026000000_PlanningQualityObservations`, and the two Export blend-plan migrations through `20261026000000_BlendPlanProposals` were applied. Runtime grants and an API startup using the restricted role were verified. No data-changing smoke scenario ran against the shared database.
 
 ## Remaining deployment and downstream work
 
-1. Apply reviewed Catalog, Ledger and Export owner migrations and restricted runtime-role configuration to the shared database only with separate approval.
+1. For any other database, apply reviewed Catalog, Ledger and Export owner migrations and restricted runtime-role configuration only with separate approval. The configured shared database received them on 27 October 2026.
 2. Add F14 frontend when that scope begins. The current backend can be tested through HTTP on isolated PostgreSQL.
 3. F15 must synchronously recheck proposal freshness and atomically reserve approved allocations under the Ledger writer lock. F14 never grants execution authority.
 

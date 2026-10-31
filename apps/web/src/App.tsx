@@ -16,8 +16,10 @@ import { MrlLookup } from './MrlLookup';
 import { ExportOrders, initialExportListState, type ExportListState } from './ExportOrders';
 
 import { CompanyResiduePolicies } from './CompanyResiduePolicies';
-type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'lab' | 'mrl' | 'sprays' | 'export' | 'residue-policies';
+import { ExportAssessment } from './ExportAssessment';
+type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'lab' | 'mrl' | 'sprays' | 'export' | 'residue-policies' | 'export-assessment';
 function tabForPath(path: string): Tab {
+  if (path.startsWith('/export-assessment')) return 'export-assessment';
   if (path.startsWith('/export/')) return 'export';
   if (path.startsWith('/mrl')) return 'mrl';
   if (path.startsWith('/lab-reports')) return 'lab';
@@ -74,7 +76,7 @@ export function App() {
   }, [user]);
 
   function openTab(next: Tab) {
-    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'lab' ? '/lab-reports' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : next === 'export' ? '/export/orders' : next === 'residue-policies' ? '/residue-policies' : '/';
+    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'lab' ? '/lab-reports' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : next === 'export' ? '/export/orders' : next === 'residue-policies' ? '/residue-policies' : next === 'export-assessment' ? '/export-assessment' : '/';
     window.history.pushState({}, '', nextPath);
     setPath(nextPath);
     setTab(next);
@@ -113,7 +115,7 @@ export function App() {
   function openCapturePath(nextPath: string, nextTab: Tab) {
     window.history.pushState({}, '', nextPath); setPath(nextPath); setTab(nextTab);
   }
-  function openExportPath(nextPath: string) { openCapturePath(nextPath, 'export'); }
+  function openExportPath(nextPath: string) { openCapturePath(nextPath, tabForPath(nextPath)); }
   function openAdminSection(section: AdminSection) {
     openCapturePath(section === 'people' ? '/admin' : `/admin/${section}`, 'administration');
   }
@@ -181,15 +183,17 @@ export function App() {
         {exportReady && <button aria-current={tab === 'export' ? 'page' : undefined} onClick={() => openTab('export')}><span aria-hidden="true">▧</span> Export orders</button>}
         {(user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) && <button aria-current={tab === 'lab' ? 'page' : undefined} onClick={() => openTab('lab')}><span aria-hidden="true">▤</span> Laboratory reports</button>}
         {user.role === 'CustomerManager' && user.permissions.includes('residue.company-policy.manage') && <button aria-current={tab === 'residue-policies' ? 'page' : undefined} onClick={() => openTab('residue-policies')}><span aria-hidden="true">▧</span> Residue profiles</button>}
+        {user.role === 'CustomerManager' && user.permissions.includes('blend.assessment-policy.manage') && user.permissions.includes('blend.quality-evidence.manage') && <button aria-current={tab === 'export-assessment' ? 'page' : undefined} onClick={() => openTab('export-assessment')}><span aria-hidden="true">▧</span> Export assessment</button>}
       </nav>
       <div className="sidebar-bottom"><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span>{roleLabel(user.role)}</span></div></div>
     </aside>
     <div className="workspace-body">
-      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : tab === 'lab' ? 'Laboratory reports' : tab === 'export' ? 'Export orders' : tab === 'residue-policies' ? 'Residue profiles' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
+      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : tab === 'lab' ? 'Laboratory reports' : tab === 'export' ? 'Export orders' : tab === 'residue-policies' ? 'Residue profiles' : tab === 'export-assessment' ? 'Export assessment' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
       <main className="content">
         {error && <div className="notice error" role="alert">{error}</div>}
-        {tab === 'export' && user.permissions.includes('export-orders.read') ? (exportReady
-            ? <ExportOrders userId={user.id} canWrite={user.permissions.includes('export-orders.write')} path={path} onNavigate={openExportPath} listState={exportListState} onListStateChange={setExportListState} />
+        {tab === 'export-assessment' && user.role === 'CustomerManager' && user.permissions.includes('blend.assessment-policy.manage') && user.permissions.includes('blend.quality-evidence.manage') ? <ExportAssessment companyId={user.organizationId || ''} />
+          : tab === 'export' && user.permissions.includes('export-orders.read') ? (exportReady
+            ? <ExportOrders userId={user.id} canWrite={user.permissions.includes('export-orders.write')} canPropose={user.permissions.includes('blend.propose') && user.permissions.includes('residue.evaluate')} canReadLedger={user.permissions.includes('lots.read.tenant')} path={path} onNavigate={openExportPath} listState={exportListState} onListStateChange={setExportListState} />
             : <div className="notice">Export orders are not available until the database update is deployed.</div>)
           : tab === 'mrl' && user.permissions.includes('mrl.read') ? <MrlLookup />
           : tab === 'administration' && user.role === 'Administrator' ? <AdminWorkspace user={user} section={adminSection} onSelect={openAdminSection} />

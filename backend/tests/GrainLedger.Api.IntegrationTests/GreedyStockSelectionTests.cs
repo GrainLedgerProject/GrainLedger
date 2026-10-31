@@ -47,4 +47,27 @@ public sealed class GreedyStockSelectionTests
         Assert.Equal(4, result.SelectedMassKg);
         Assert.Equal(correct.LotId, Assert.Single(result.Allocations).LotId);
     }
+
+    [Fact]
+    public void Rice_order_accepts_milled_paddy_output_but_not_raw_or_unrelated_commodity()
+    {
+        var riceId = Guid.NewGuid();
+        var paddyId = Guid.NewGuid();
+        PlanningCandidate Stock(string stage, string commodityCode, Guid catalogId, decimal kg) => new(
+            Guid.NewGuid(), "TEST-LOT", Guid.NewGuid(), "Test location", Guid.NewGuid(), catalogId,
+            stage, stage, kg, kg, "ORDINARY", false, false, null,
+            Guid.NewGuid().ToString(), 1, true, true, [], [], commodityCode);
+        var raw = Stock("RAW_PADDY", "PADDY", paddyId, 100);
+        var unrelated = Stock("HEAD_RICE", "RICE_BRAN", Guid.NewGuid(), 100);
+        var head = Stock("HEAD_RICE", "PADDY", paddyId, 12);
+
+        var result = GreedyStockSelection.Select([raw, unrelated, head], 10, "HEAD_RICE",
+            riceId, JsonSerializer.SerializeToElement(Array.Empty<object>()),
+            orderCommodityCode: "RICE");
+
+        Assert.Equal("MASS_COVERED", result.Outcome);
+        Assert.Equal(head.LotId, Assert.Single(result.Allocations).LotId);
+        Assert.False(ExportProductMatch.IsDirect(head with { LineageComplete = false },
+            "HEAD_RICE", riceId, "RICE"));
+    }
 }

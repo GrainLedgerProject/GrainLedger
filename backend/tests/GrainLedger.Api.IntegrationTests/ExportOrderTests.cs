@@ -271,9 +271,32 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var otherDraft = (await otherDraftResponse.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
         var otherHints = await writer.GetFromJsonAsync<JsonElement>(
             $"/api/export-containers/{otherContainer.Id}/candidates?facilityId={scenario.FacilityId}&planId={otherDraft.Id}");
+        var riceHead = Assert.Single(otherHints.GetProperty("items").EnumerateArray().ToArray(),
+            x => x.GetProperty("lotId").GetGuid() == head);
+        Assert.Equal("DIRECT_MATCH", riceHead.GetProperty("productCompatibility").GetString());
         Assert.Equal("PRODUCT_MISMATCH", Assert.Single(otherHints.GetProperty("items").EnumerateArray().ToArray(),
-            x => x.GetProperty("lotId").GetGuid() == head).GetProperty("productCompatibility").GetString());
-        Assert.Equal("0", otherHints.GetProperty("summary").GetProperty("directProductAvailableMassKg").GetString());
+            x => x.GetProperty("lotId").GetGuid() == broken).GetProperty("productCompatibility").GetString());
+        Assert.True(decimal.Parse(otherHints.GetProperty("summary").GetProperty("directProductAvailableMassKg")
+            .GetString()!, System.Globalization.CultureInfo.InvariantCulture) >= 12m);
+        var matchingOnly = await writer.GetFromJsonAsync<JsonElement>(
+            $"/api/export-containers/{otherContainer.Id}/candidates?facilityId={scenario.FacilityId}&planId={otherDraft.Id}&productMatchOnly=true&pageSize=1");
+        Assert.Equal(1, matchingOnly.GetProperty("totalCount").GetInt32());
+        Assert.Equal(head, Assert.Single(matchingOnly.GetProperty("items").EnumerateArray().ToArray())
+            .GetProperty("lotId").GetGuid());
+        Assert.False(matchingOnly.GetProperty("hasMore").GetBoolean());
+        var ricePreview = await writer.PostAsJsonAsync($"/api/blend-plans/{otherDraft.Id}/residue-preview", new
+        {
+            facilityId = scenario.FacilityId,
+            scopeRevision = otherHints.GetProperty("scopeRevision").GetString(),
+            mode = "DIRECT_STOCK", compatibilityPolicyId = (Guid?)null,
+            selected = new[] { new { lotId = head,
+                locationId = riceHead.GetProperty("locationId").GetGuid(),
+                quantityKg = "10", candidateRevision = riceHead.GetProperty("candidateRevision").GetString() } },
+            substanceIds = new[] { Guid.NewGuid() }
+        });
+        Assert.Equal(HttpStatusCode.OK, ricePreview.StatusCode);
+        Assert.Equal("VALID", (await ricePreview.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("status").GetString());
         var direct = await writer.GetFromJsonAsync<JsonElement>(route + $"&planId={headDraft.Id}");
         var directItems = direct.GetProperty("items").EnumerateArray().ToArray();
         Assert.Equal("HEAD_RICE", direct.GetProperty("targetProductIdentity").GetString());
@@ -793,6 +816,27 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         return (writer, (await created.Content.ReadFromJsonAsync<ExportOrderDto>())!, market, commodity);
     }
 
+    [Fact]
+    public async Task Rice_order_only_offers_finished_rice_products_and_rejects_paddy_draft()
+    {
+        var (writer, order, _, _) = await EditableOrderAsync();
+        using var client = writer;
+        var container = Assert.Single((await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>(
+            $"/api/export-orders/{order.Id}/containers"))!.Items);
+        var context = await writer.GetFromJsonAsync<BlendPlanningContextDto>(
+            $"/api/export-containers/{container.Id}/planning-context");
+        Assert.NotNull(context);
+        Assert.Equal(new[] { "HEAD_RICE", "BROKEN_RICE", "BLENDED_RICE" }, context.AllowedTargetProducts);
+
+        var route = $"/api/export-containers/{container.Id}/blend-plans/drafts";
+        var invalid = await writer.PostAsJsonAsync(route,
+            new CreateBlendPlanDraftRequest(Guid.NewGuid(), order.Version, container.Version, "RAW_PADDY"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var plans = await writer.GetFromJsonAsync<ExportPage<BlendPlanDraftDto>>(
+            $"/api/export-containers/{container.Id}/blend-plans");
+        Assert.Empty(plans!.Items);
+    }
+
     private async Task<(long Positions, decimal Mass, long Postings)> StockSnapshotAsync()
     {
         await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
@@ -977,9 +1021,11 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var market = new Market { Id = Guid.NewGuid(), Code = "TEST-MKT-" + suffix, Name = "Test market" };
-        var commodity = new Commodity { Id = Guid.NewGuid(), Code = "TEST-RICE-" + suffix, Name = "Test rice" };
+        var commodity = await db.Commodities.SingleOrDefaultAsync(x => x.Code == "RICE")
+            ?? new Commodity { Id = Guid.NewGuid(), Code = "RICE", Name = "Rice" };
         var attribute = new QualityAttribute { Id = Guid.NewGuid(), Code = "TEST-MOIST-" + suffix, Name = "Moisture", Unit = "%" };
-        db.AddRange(market, commodity, attribute);
+        db.AddRange(market, attribute);
+        if (db.Entry(commodity).State == EntityState.Detached) db.Commodities.Add(commodity);
         if (!await db.MeasurementUnits.AnyAsync(x => x.Code == "T"))
             db.MeasurementUnits.Add(new MeasurementUnit { Id = Guid.NewGuid(), Code = "T", Name = "Tonne", QuantityKind = "MASS" });
         await db.SaveChangesAsync();

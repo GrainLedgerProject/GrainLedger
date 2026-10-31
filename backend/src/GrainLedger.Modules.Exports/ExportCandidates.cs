@@ -13,7 +13,8 @@ namespace GrainLedger.Modules.Exports;
 internal sealed record PlanningCandidate(Guid LotId, string LotCode, Guid LocationId, string LocationName,
     Guid LedgerCommodityId, Guid CatalogCommodityId, string Stage, string ProductIdentity, decimal OnHandKg, decimal AvailableKg, string StockKind,
     bool IsCurrentPool, bool CustodyDerived, string? PoolRevision, string CandidateRevision,
-    int SourceCount, bool LineageComplete, bool InventoryEligible, string[] Restrictions, string[] Reasons)
+    int SourceCount, bool LineageComplete, bool InventoryEligible, string[] Restrictions, string[] Reasons,
+    string? CatalogCommodityCode = null)
 {
     public object ToResponse(string productCompatibility = "NOT_EVALUATED") => new
     {
@@ -30,7 +31,7 @@ internal sealed record PlanningCandidate(Guid LotId, string LotCode, Guid Locati
 internal sealed record PlanningCandidateSnapshot(Guid ContainerId, Guid FacilityId, int OrderVersion,
     int ContainerVersion, string ContainerStatus, Guid CatalogCommodityId, decimal TargetMassKg, DateTimeOffset ObservedAt,
     string ScopeRevision, JsonElement Ledger, JsonElement? Compatibilities,
-    IReadOnlyList<PlanningCandidate> Candidates);
+    IReadOnlyList<PlanningCandidate> Candidates, string? OrderCommodityCode = null);
 
 internal sealed class CandidateDemandChangedException : Exception;
 
@@ -43,7 +44,7 @@ public static partial class ExportModule
 {
     private static async Task<IResult> PlanResiduePreviewAsync(Guid id, PlanResiduePreviewRequest request,
         HttpContext http, IdentityDbContext identity, ICurrentAccess access, ExportDbContext db,
-        LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead applicableMrl,
+        CatalogDbContext catalog, LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead applicableMrl,
         BlendAssessmentPolicyRead assessmentPolicies,
         CancellationToken ct)
     {
@@ -71,7 +72,7 @@ public static partial class ExportModule
             return Problem(409, "PLAN_DEMAND_STALE", "Create a current draft before previewing candidates.");
         PlanningCandidateSnapshot snapshot;
         try { snapshot = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
-            request.FacilityId, db, ledger, ct, withCompatibility: true); }
+            request.FacilityId, db, catalog, ledger, ct, withCompatibility: true); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
         { return CandidateFailure(ex); }
         var target = TargetProductFromSnapshot(plan.DemandSnapshot);
@@ -120,7 +121,7 @@ public static partial class ExportModule
         catch (BlendAssessmentPolicyUnavailableException) { publishedPolicy = null; }
         PlanningCandidateSnapshot refreshed;
         try { refreshed = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
-            request.FacilityId, db, ledger, ct, withCompatibility: true); }
+            request.FacilityId, db, catalog, ledger, ct, withCompatibility: true); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
         { return CandidateFailure(ex); }
         if (PlanScopeRevision(refreshed, plan, target) != planRevision)
@@ -192,9 +193,9 @@ public static partial class ExportModule
     // Ledger compatibility is an exact set rule for a physical BLENDING operation.
     // One candidate can only be a possible input; approval requires the full set.
     private static string ProductCompatibility(PlanningCandidate candidate, string target,
-        Guid outputCatalogCommodityId, JsonElement policies)
+        Guid outputCatalogCommodityId, string? outputCommodityCode, JsonElement policies)
     {
-        if (candidate.ProductIdentity == target && candidate.CatalogCommodityId == outputCatalogCommodityId)
+        if (ExportProductMatch.IsDirect(candidate, target, outputCatalogCommodityId, outputCommodityCode))
             return "DIRECT_MATCH";
         if (target != "BLENDED_RICE" || candidate.Stage is not ("HEAD_RICE" or "BROKEN_RICE" or "BLENDED_RICE"))
             return "PRODUCT_MISMATCH";
@@ -234,13 +235,15 @@ public static partial class ExportModule
     }
 
     private static async Task<PlanningCandidateSnapshot> CandidateSnapshotAsync(Guid id, Guid company,
-        Guid facilityId, ExportDbContext db, LedgerService ledger, CancellationToken ct,
+        Guid facilityId, ExportDbContext db, CatalogDbContext catalog, LedgerService ledger, CancellationToken ct,
         bool withCompatibility = false)
     {
         var container = await db.Containers.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == company, ct);
         if (container is null) throw new KeyNotFoundException();
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
+        var orderCommodityCode = await catalog.Commodities.AsNoTracking()
+            .Where(x => x.Id == order.CommodityId).Select(x => x.Code).SingleAsync(ct);
         var (data, compatibilities) = withCompatibility
             ? await ledger.ReadPlanningCandidatesWithCompatibilityAsync(company, facilityId, ct)
             : (await ledger.ReadPlanningCandidatesAsync(company, facilityId, ct), (JsonElement?)null);
@@ -253,6 +256,12 @@ public static partial class ExportModule
             currentOrder.CommodityId != order.CommodityId)
             throw new CandidateDemandChangedException();
         var positions = data.GetProperty("positions").EnumerateArray().ToArray();
+        var commodityIds = positions.Select(x => x.GetProperty("catalogCommodityId"))
+            .Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetGuid())
+            .Distinct().ToArray();
+        var commodityCodes = await catalog.Commodities.AsNoTracking()
+            .Where(x => commodityIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Code, ct);
         var allNodes = data.GetProperty("nodes").EnumerateArray().Select(x => x.GetProperty("lotId").GetGuid()).ToHashSet();
         var allEdges = data.GetProperty("edges").EnumerateArray().ToArray();
         var byOutput = allEdges.GroupBy(x => x.GetProperty("outputLotId").GetGuid())
@@ -280,6 +289,7 @@ public static partial class ExportModule
             cleared = p.GetProperty("locationCleared"), owner = p.GetProperty("locationOwnerId")
         }).OrderBy(x => x.lotId).ThenBy(x => x.locationId).ToArray();
         var state = JsonSerializer.Serialize(new { orderVersion = order.Version, containerVersion = container.Version, order.CommodityId,
+            orderCommodityCode, commodityCodes = commodityCodes.OrderBy(x => x.Key).ToArray(),
             container.TargetMassKg, facilityId, positions = canonicalPositions,
             nodes = data.GetProperty("nodes"), edges = data.GetProperty("edges"),
             composition = data.GetProperty("composition"), operations = data.GetProperty("operations") });
@@ -339,7 +349,9 @@ public static partial class ExportModule
                 p.GetProperty("productIdentity").GetString()!, onHand, available, kind, isCurrent,
                 custodyDerived, isCurrent ? p.GetProperty("positionPoolRevision").GetString() : null,
                 CandidateHash(revision + ":" + lotId + ":" + locationId), composition.Length,
-                lineageComplete, reasons.Count == 0, restrictions, reasons.Distinct().ToArray()));
+                lineageComplete, reasons.Count == 0, restrictions, reasons.Distinct().ToArray(),
+                commodityCodes.GetValueOrDefault(p.GetProperty("catalogCommodityId").ValueKind == JsonValueKind.Null
+                    ? Guid.Empty : p.GetProperty("catalogCommodityId").GetGuid())));
         }
         // Use the database clock for point-in-time evidence reads. An API host
         // clock a few milliseconds behind PostgreSQL can otherwise miss a
@@ -348,7 +360,7 @@ public static partial class ExportModule
             "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
         return new PlanningCandidateSnapshot(id, facilityId, order.Version, container.Version, container.Status,
             order.CommodityId, container.TargetMassKg, observedAt, revision, data,
-            compatibilities, candidates);
+            compatibilities, candidates, orderCommodityCode);
     }
 
     private static IResult CandidateFailure(Exception ex) => ex switch
@@ -362,7 +374,7 @@ public static partial class ExportModule
     };
 
     private static async Task<IResult> CandidatesAsync(Guid id, HttpContext http, IdentityDbContext identity,
-        ICurrentAccess access, ExportDbContext db, LedgerService ledger, CancellationToken ct)
+        ICurrentAccess access, ExportDbContext db, CatalogDbContext catalog, LedgerService ledger, CancellationToken ct)
     {
         var scope = await ScopeAsync(http, identity, access, Permissions.ExportOrdersRead, ct);
         if (scope is null) return Results.Forbid();
@@ -370,6 +382,8 @@ public static partial class ExportModule
             !Page(http.Request.Query["page"], http.Request.Query["pageSize"], out var page, out var size) ||
             http.Request.Query.ContainsKey("includeExcluded") &&
             !bool.TryParse(http.Request.Query["includeExcluded"], out _) ||
+            http.Request.Query.ContainsKey("productMatchOnly") &&
+            !bool.TryParse(http.Request.Query["productMatchOnly"], out _) ||
             http.Request.Query.ContainsKey("planId") &&
             (!Guid.TryParse(http.Request.Query["planId"], out var parsedPlanId) || parsedPlanId == Guid.Empty))
             return Invalid(new() { ["query"] = ["Choose a facility and valid pagination/filter values."] });
@@ -393,7 +407,7 @@ public static partial class ExportModule
                 return Problem(409, "PLAN_PRODUCT_UNSPECIFIED", "Create a new draft with a target product identity.");
         }
         PlanningCandidateSnapshot snapshot;
-        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, ledger, ct,
+        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, catalog, ledger, ct,
             withCompatibility: plan is not null); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException) { return CandidateFailure(ex); }
         if (plan is not null)
@@ -413,12 +427,17 @@ public static partial class ExportModule
         var eligible = snapshot.Candidates.Where(x => x.InventoryEligible).ToArray();
         var filtered = bool.TryParse(http.Request.Query["includeExcluded"], out var include) && include
             ? snapshot.Candidates : eligible;
+        if (plan is not null && bool.TryParse(http.Request.Query["productMatchOnly"], out var matchOnly) && matchOnly)
+            filtered = filtered.Where(x => ProductCompatibility(x, targetProductIdentity!,
+                snapshot.CatalogCommodityId, snapshot.OrderCommodityCode,
+                snapshot.Compatibilities!.Value) != "PRODUCT_MISMATCH").ToArray();
         var items = filtered.Skip((page - 1) * size).Take(size).Select(x => x.ToResponse(
             plan is null ? "NOT_EVALUATED" : ProductCompatibility(x, targetProductIdentity!,
-                snapshot.CatalogCommodityId, snapshot.Compatibilities!.Value))).ToArray();
+                snapshot.CatalogCommodityId, snapshot.OrderCommodityCode, snapshot.Compatibilities!.Value))).ToArray();
         var eligibleMass = eligible.Sum(x => x.AvailableKg);
         var matchingMass = plan is null ? (decimal?)null : eligible
             .Where(x => ProductCompatibility(x, targetProductIdentity!, snapshot.CatalogCommodityId,
+                snapshot.OrderCommodityCode,
                 snapshot.Compatibilities!.Value) == "DIRECT_MATCH")
             .Sum(x => x.AvailableKg);
         return Results.Ok(new
@@ -438,7 +457,7 @@ public static partial class ExportModule
     }
 
     private static async Task<IResult> CandidateLineageAsync(Guid id, Guid lotId, HttpContext http,
-        IdentityDbContext identity, ICurrentAccess access, ExportDbContext db, LedgerService ledger,
+        IdentityDbContext identity, ICurrentAccess access, ExportDbContext db, CatalogDbContext catalog, LedgerService ledger,
         CancellationToken ct)
     {
         var scope = await ScopeAsync(http, identity, access, Permissions.ExportOrdersRead, ct);
@@ -447,7 +466,7 @@ public static partial class ExportModule
             !Guid.TryParse(http.Request.Query["locationId"], out var locationId) || locationId == Guid.Empty)
             return Invalid(new() { ["query"] = ["Choose a facility and location."] });
         PlanningCandidateSnapshot snapshot;
-        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, ledger, ct); }
+        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, catalog, ledger, ct); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException) { return CandidateFailure(ex); }
         var candidate = snapshot.Candidates.SingleOrDefault(x => x.LotId == lotId && x.LocationId == locationId);
         if (candidate is null) return http.Request.Query.ContainsKey("candidateRevision")
@@ -480,7 +499,7 @@ public static partial class ExportModule
     }
 
     private static async Task<IResult> CandidateResiduePreviewAsync(Guid id, Guid lotId, HttpContext http,
-        IdentityDbContext identity, ICurrentAccess access, ExportDbContext db, LedgerService ledger,
+        IdentityDbContext identity, ICurrentAccess access, ExportDbContext db, CatalogDbContext catalog, LedgerService ledger,
         ResidueEvaluationService residue, CancellationToken ct)
     {
         var scope = await ScopeAsync(http, identity, access, Permissions.ExportOrdersRead, ct);
@@ -491,7 +510,7 @@ public static partial class ExportModule
             string.IsNullOrWhiteSpace(http.Request.Query["substanceIds"]))
             return Invalid(new() { ["query"] = ["Choose a facility, location, candidate revision and substances."] });
         PlanningCandidateSnapshot snapshot;
-        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, ledger, ct); }
+        try { snapshot = await CandidateSnapshotAsync(id, scope.Value.Company, facilityId, db, catalog, ledger, ct); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException) { return CandidateFailure(ex); }
         var candidate = snapshot.Candidates.SingleOrDefault(x => x.LotId == lotId && x.LocationId == locationId);
         if (candidate is null || candidate.CandidateRevision != http.Request.Query["candidateRevision"])

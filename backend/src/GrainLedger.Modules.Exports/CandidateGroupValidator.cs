@@ -52,8 +52,8 @@ internal static class CandidateGroupValidator
             if (total > MaxKg) findings.Add("MASS_OVERFLOW");
             products.Add(position.LedgerCommodityId + ":" + position.ProductIdentity);
             if (mode == "DIRECT_STOCK" &&
-                (position.ProductIdentity != targetProductIdentity ||
-                    position.CatalogCommodityId != snapshot.CatalogCommodityId))
+                !ExportProductMatch.IsDirect(position, targetProductIdentity,
+                    snapshot.CatalogCommodityId, snapshot.OrderCommodityCode))
                 findings.Add("DIRECT_PRODUCT_MISMATCH");
             if (mode == "BLEND_INPUT_STOCK" &&
                 position.Stage is not ("HEAD_RICE" or "BROKEN_RICE" or "BLENDED_RICE"))

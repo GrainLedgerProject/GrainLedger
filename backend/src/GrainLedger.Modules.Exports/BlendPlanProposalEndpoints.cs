@@ -19,7 +19,7 @@ public static partial class ExportModule
 
     private static async Task<IResult> ProposeBlendPlanAsync(Guid id,
         ProposeBlendPlanRequest request, HttpContext http, IdentityDbContext identity,
-        ICurrentAccess access, ExportDbContext db, LedgerService ledger,
+        ICurrentAccess access, ExportDbContext db, CatalogDbContext catalog, LedgerService ledger,
         ResidueEvaluationService residue, ApplicableMrlRead applicableMrl,
         BlendAssessmentPolicyRead assessmentPolicies, TimeProvider clock,
         CancellationToken ct)
@@ -61,7 +61,7 @@ public static partial class ExportModule
         if (previewRequest is null)
             return Problem(409, "PLAN_PREVIEW_INVALID", "Run a new preview before proposing.");
         var recomputed = await ComputeBlendPlanPreviewAsync(id, previewRequest,
-            http, identity, access, db, ledger, residue, applicableMrl,
+            http, identity, access, db, catalog, ledger, residue, applicableMrl,
             assessmentPolicies, clock, false, Permissions.BlendPropose, ct);
         if (recomputed is not IStatusCodeHttpResult { StatusCode: StatusCodes.Status200OK } ||
             recomputed is not IValueHttpResult { Value: { } value }) return recomputed;
@@ -102,7 +102,7 @@ public static partial class ExportModule
 
     private static async Task<IResult> GetBlendPlanProposalAsync(Guid id,
         HttpContext http, IdentityDbContext identity, ICurrentAccess access,
-        ExportDbContext db, LedgerService ledger, ResidueEvaluationService residue,
+        ExportDbContext db, CatalogDbContext catalog, LedgerService ledger, ResidueEvaluationService residue,
         ApplicableMrlRead applicableMrl, BlendAssessmentPolicyRead assessmentPolicies,
         TimeProvider clock, CancellationToken ct)
     {
@@ -125,7 +125,7 @@ public static partial class ExportModule
         if (reasons.Count == 0)
         {
             var current = await ComputeBlendPlanPreviewAsync(id, storedRequest!,
-                http, identity, access, db, ledger, residue, applicableMrl,
+                http, identity, access, db, catalog, ledger, residue, applicableMrl,
                 assessmentPolicies, clock, false, Permissions.ExportOrdersRead, ct);
             if (current is not IStatusCodeHttpResult { StatusCode: StatusCodes.Status200OK } ||
                 current is not IValueHttpResult { Value: { } value })

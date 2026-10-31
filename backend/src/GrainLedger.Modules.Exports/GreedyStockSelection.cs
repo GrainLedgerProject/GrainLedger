@@ -62,12 +62,12 @@ internal static class GreedyStockSelection
 
     internal static Result Select(IReadOnlyList<PlanningCandidate> candidates, decimal targetKg,
         string targetProductIdentity, Guid catalogCommodityId, JsonElement policies,
-        Func<Guid, decimal?>? blendInputTarget = null)
+        Func<Guid, decimal?>? blendInputTarget = null, string? orderCommodityCode = null)
     {
         if (targetKg <= 0) throw new ArgumentOutOfRangeException(nameof(targetKg));
         var eligible = candidates.Where(x => x.InventoryEligible && x.AvailableKg > 0).ToArray();
-        var direct = Fill(targetKg, eligible.Where(x => x.ProductIdentity == targetProductIdentity &&
-                x.CatalogCommodityId == catalogCommodityId),
+        var direct = Fill(targetKg, eligible.Where(x => ExportProductMatch.IsDirect(
+                x, targetProductIdentity, catalogCommodityId, orderCommodityCode)),
             "DIRECT_STOCK", null);
         if (direct.Outcome == "MASS_COVERED") return direct;
         if (targetProductIdentity != "BLENDED_RICE")

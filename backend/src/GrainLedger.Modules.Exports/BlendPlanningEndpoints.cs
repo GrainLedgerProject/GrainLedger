@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GrainLedger.Modules.Catalogs;
 using GrainLedger.Modules.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -82,7 +83,7 @@ public static partial class ExportModule
         bool proposed = false) => new(p.Id, p.OrderId,
         p.ContainerId, p.SpecificationId, p.VersionNo, p.Version, p.Status, ExportRules.Text(p.TargetMassKg),
         TargetProductFromSnapshot(p.DemandSnapshot), p.DemandSnapshot, p.CreatedAt, p.CancelledAt,
-        demandCurrent, canWrite && p.Status == "DRAFT" && !proposed);
+        demandCurrent, canWrite && p.Status == "DRAFT" && !proposed, proposed);
 
     private static bool DemandIsCurrent(BlendPlanDraft plan, ExportOrder order, ExportContainer container)
     {
@@ -105,13 +106,17 @@ public static partial class ExportModule
     }
 
     private static async Task<IResult> PlanningContextAsync(Guid id, HttpContext http,
-        IdentityDbContext identity, ICurrentAccess access, ExportDbContext db, CancellationToken ct)
+        IdentityDbContext identity, ICurrentAccess access, ExportDbContext db, CatalogDbContext catalog,
+        CancellationToken ct)
     {
         var scope = await ScopeAsync(http, identity, access, Permissions.ExportOrdersRead, ct);
         if (scope is null) return Results.Forbid();
         var container = await db.Containers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == scope.Value.Company, ct);
         if (container is null) return Results.NotFound();
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
+        var commodityCode = await catalog.Commodities.AsNoTracking().Where(x => x.Id == order.CommodityId)
+            .Select(x => x.Code).SingleAsync(ct);
+        var allowedProducts = ExportTargetProducts.ForCommodity(commodityCode);
         var ready = await PlanningReadyAsync(db, ct);
         var candidateReady = await db.Database.SqlQueryRaw<bool>("""
             SELECT COALESCE(has_function_privilege(current_user,
@@ -135,12 +140,14 @@ public static partial class ExportModule
         if (!await ProposalReadyAsync(db, ct)) dependencies.Add(new("PROPOSAL_STORAGE_NOT_READY",
             "Apply the reviewed Export proposal migration and runtime grants."));
         return Results.Ok(new BlendPlanningContextDto(id, order.Version, container.Version, ready,
-            ready && container.Status == "PLANNED" && await access.HasPermissionAsync(Permissions.BlendPropose, ct),
-            candidateReady, compatibilityReady, false, dependencies));
+            ready && allowedProducts.Count > 0 && container.Status == "PLANNED" &&
+            await access.HasPermissionAsync(Permissions.BlendPropose, ct),
+            candidateReady, compatibilityReady, false, dependencies, allowedProducts));
     }
 
     private static async Task<IResult> CreatePlanDraftAsync(Guid id, CreateBlendPlanDraftRequest request,
         HttpContext http, IdentityDbContext identity, ICurrentAccess access, ExportDbContext db,
+        CatalogDbContext catalog,
         TimeProvider clock, CancellationToken ct)
     {
         var scope = await ScopeAsync(http, identity, access, Permissions.BlendPropose, ct);
@@ -164,6 +171,10 @@ public static partial class ExportModule
         if (request.ContainerVersion != container.Version || request.OrderVersion != order.Version)
             return Problem(412, "EXPORT_VERSION_STALE", "Reload the order and container before creating a plan.");
         if (container.Status != "PLANNED") return Problem(409, "CONTAINER_IN_USE", "Only planned containers accept a draft.");
+        var commodityCode = await catalog.Commodities.AsNoTracking().Where(x => x.Id == order.CommodityId)
+            .Select(x => x.Code).SingleAsync(ct);
+        if (!ExportTargetProducts.ForCommodity(commodityCode).Contains(request.TargetProductIdentity))
+            return Invalid(new() { ["targetProductIdentity"] = ["Choose a product compatible with the order commodity."] });
         var spec = await db.Specifications.AsNoTracking().SingleAsync(x => x.OrderId == order.Id &&
             x.VersionNo == order.CurrentSpecificationVersion, ct);
         var limits = await db.Limits.AsNoTracking().Where(x => x.SpecificationId == spec.Id)

@@ -16,7 +16,7 @@ internal static class AssessedGreedySearch
         JsonElement compatibilities,
         Func<GreedyStockSelection.Result, CancellationToken, Task<BlendAssessmentResult>> assess,
         int maxIterations, CancellationToken ct,
-        Func<Guid, decimal?>? blendInputTarget = null)
+        Func<Guid, decimal?>? blendInputTarget = null, string? orderCommodityCode = null)
     {
         if (maxIterations is < 1 or > 256) throw new ArgumentOutOfRangeException(nameof(maxIterations));
         if (candidates.Count > 100) return new("SEARCH_EXHAUSTED", 0, null, null,
@@ -38,7 +38,8 @@ internal static class AssessedGreedySearch
             iterations++;
             var selected = GreedyStockSelection.Select(ordered.Where(x =>
                 !excluded.Contains((x.LotId, x.LocationId))).ToArray(), inputTargetKg,
-                targetProductIdentity, catalogCommodityId, compatibilities, blendInputTarget);
+                targetProductIdentity, catalogCommodityId, compatibilities, blendInputTarget,
+                orderCommodityCode);
             if (selected.Outcome != "MASS_COVERED") continue;
             var assessment = await assess(selected, ct);
             if (assessment.Status == "PASS")

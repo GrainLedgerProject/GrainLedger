@@ -15,16 +15,16 @@ public static partial class ExportModule
 {
     private static Task<IResult> PreviewBlendPlanAsync(Guid id,
         PreviewBlendPlanRequest request, HttpContext http, IdentityDbContext identity,
-        ICurrentAccess access, ExportDbContext db, LedgerService ledger,
+        ICurrentAccess access, ExportDbContext db, CatalogDbContext catalog, LedgerService ledger,
         ResidueEvaluationService residue, ApplicableMrlRead applicableMrl,
         BlendAssessmentPolicyRead assessmentPolicies, TimeProvider clock,
         CancellationToken ct) => ComputeBlendPlanPreviewAsync(id, request, http,
-            identity, access, db, ledger, residue, applicableMrl, assessmentPolicies,
+            identity, access, db, catalog, ledger, residue, applicableMrl, assessmentPolicies,
             clock, true, Permissions.BlendPropose, ct);
 
     private static async Task<IResult> ComputeBlendPlanPreviewAsync(Guid id,
         PreviewBlendPlanRequest request, HttpContext http, IdentityDbContext identity,
-        ICurrentAccess access, ExportDbContext db, LedgerService ledger,
+        ICurrentAccess access, ExportDbContext db, CatalogDbContext catalog, LedgerService ledger,
         ResidueEvaluationService residue, ApplicableMrlRead applicableMrl,
         BlendAssessmentPolicyRead assessmentPolicies, TimeProvider clock,
         bool issueReference, string requiredPermission, CancellationToken ct)
@@ -47,7 +47,7 @@ public static partial class ExportModule
             return Problem(409, "PLAN_TARGET_MISSING", "Create a draft with a target product.");
         PlanningCandidateSnapshot snapshot;
         try { snapshot = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
-            request.FacilityId, db, ledger, ct, withCompatibility: true); }
+            request.FacilityId, db, catalog, ledger, ct, withCompatibility: true); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
         { return CandidateFailure(ex); }
         var revision = PlanScopeRevision(snapshot, plan, target);
@@ -163,11 +163,11 @@ public static partial class ExportModule
                     };
                 }
                 return assessment;
-            }, request.MaxIterations, ct, InputTarget);
+            }, request.MaxIterations, ct, InputTarget, snapshot.OrderCommodityCode);
 
         PlanningCandidateSnapshot refreshed;
         try { refreshed = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
-            request.FacilityId, db, ledger, ct, withCompatibility: true); }
+            request.FacilityId, db, catalog, ledger, ct, withCompatibility: true); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
         { return CandidateFailure(ex); }
         var currentPlan = await db.BlendPlanDrafts.AsNoTracking().SingleAsync(x => x.Id == id, ct);
