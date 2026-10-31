@@ -134,11 +134,11 @@ public static class LedgerDatabase
                   )
                   AND NOT EXISTS (
                       SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                      WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
+                      WHERE n.nspname IN ('ledger','identity','capture','catalog','exports','capture_mock')
                         AND pg_has_role(r.oid,c.relowner,'MEMBER')
                   )
                   AND NOT EXISTS (
-                      SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
+                      SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','exports','capture_mock')
                         AND pg_has_role(r.oid,n.nspowner,'MEMBER')
                   )
                   AND NOT EXISTS (
@@ -157,6 +157,12 @@ public static class LedgerDatabase
             REVOKE ALL ON ALL FUNCTIONS IN SCHEMA capture_mock FROM {role};
             REVOKE ALL ON ALL SEQUENCES IN SCHEMA capture_mock FROM {role};
             """ : "";
+        await using var exportsSchema = new NpgsqlCommand("SELECT to_regnamespace('exports') IS NOT NULL", connection);
+        var exportsGrant = Equals(await exportsSchema.ExecuteScalarAsync(ct), true) ? $"""
+            GRANT USAGE ON SCHEMA exports TO {role};
+            GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA exports TO {role};
+            GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA exports TO {role};
+            """ : "";
         await using var grant = new NpgsqlCommand($"""
             REVOKE ALL ON SCHEMA ledger FROM {role};
             GRANT USAGE ON SCHEMA ledger,identity,capture,catalog TO {role};
@@ -165,14 +171,17 @@ public static class LedgerDatabase
             GRANT SELECT ON ALL TABLES IN SCHEMA ledger TO {role};
             REVOKE ALL ON TABLE ledger.mixed_bulk_policies,ledger.mixed_bulk_pools,ledger.custody_events,
                 ledger.custody_edges,ledger.custody_allocations,ledger.custody_processing_allocations,
-                ledger.mixed_bulk_command_results FROM {role};
+                ledger.mixed_bulk_command_results,ledger.planning_yield_rules,
+                ledger.planning_quality_observations FROM {role};
             REVOKE ALL ON TABLE ledger.receiving_threshold_default,ledger.receiving_threshold_overrides,ledger.receiving_threshold_history FROM {role};
             REVOKE ALL ON TABLE ledger.residue_evaluations FROM {role};
             GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA identity,capture,catalog TO {role};
             REVOKE INSERT,UPDATE,DELETE ON TABLE catalog.residue_rule_versions,catalog.residue_policy_setting_versions,
+                catalog.blend_assessment_policies,
                 capture.residue_source_group_versions,capture.residue_report_selections FROM {role};
             REVOKE UPDATE,DELETE,REFERENCES ON TABLE capture.lab_report_retirements FROM {role};
             GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA identity,capture,catalog TO {role};
+            {exportsGrant}
             {legacyRevoke}
             GRANT EXECUTE ON FUNCTION
                 ledger.command(uuid,text,jsonb),ledger.read(uuid,text,jsonb),ledger.trace_lot(uuid,uuid,text,text),ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer),ledger.lock_writes(),
@@ -180,12 +189,17 @@ public static class LedgerDatabase
                 ledger.register_pending_procurement(uuid,uuid),ledger.reserve_source_lot_code(uuid,uuid,uuid,uuid),
                 ledger.receiving_detail(uuid,uuid),ledger.receiving_tasks(uuid,uuid,integer,integer),
                 ledger.procurement_stock(uuid,uuid),ledger.procurement_stock_bulk(uuid,uuid[]),
+                ledger.planning_candidates(uuid,uuid,uuid),ledger.planning_compatibilities(uuid,uuid,uuid),
+                ledger.publish_planning_yield_rule(uuid,jsonb),ledger.planning_yield_rule(uuid,uuid,uuid,uuid,timestamptz),
+                ledger.confirm_planning_quality_observation(uuid,jsonb),
+                ledger.planning_quality_observations(uuid,uuid,uuid,uuid[],timestamptz),
                 ledger.procurement_source_lineage(uuid,uuid),
                 ledger.arrival_command(uuid,uuid,text,jsonb),
                 ledger.receiving_threshold_read(uuid,text,jsonb),ledger.receiving_threshold_command(uuid,text,jsonb),
                 ledger.residue_graph(uuid,uuid),ledger.residue_history(uuid,uuid,uuid),
                 ledger.residue_replay(uuid,uuid,uuid,jsonb),ledger.residue_append(uuid,uuid,uuid,jsonb,jsonb),
                 catalog.publish_residue_rule(uuid,jsonb),catalog.publish_residue_policy_setting(uuid,jsonb),capture.publish_residue_group(uuid,jsonb),
+                catalog.publish_blend_assessment_policy(uuid,jsonb),
                 capture.publish_residue_selection(uuid,jsonb),
                 ledger.can_read_lot(uuid,uuid),ledger.assigned(uuid,uuid),
                 ledger.own(uuid,uuid),ledger.role(uuid)
@@ -196,7 +210,7 @@ public static class LedgerDatabase
             SELECT EXISTS (
                 SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p')
                   AND (n.nspname IN ('ledger','capture_mock') AND has_table_privilege($1,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                    OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER')
+                    OR n.nspname IN ('capture','catalog','identity','exports') AND has_table_privilege($1,c.oid,'TRUNCATE,TRIGGER')
                     OR c.oid IN ('ledger.receiving_threshold_default'::regclass,'ledger.receiving_threshold_overrides'::regclass,'ledger.receiving_threshold_history'::regclass)
                        AND has_table_privilege($1,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
             ) OR has_table_privilege($1,'capture.lab_report_retirements','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
@@ -216,7 +230,11 @@ public static class LedgerDatabase
               OR has_any_column_privilege($1,'ledger.receiving_threshold_history','INSERT')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_history','UPDATE')
               OR has_any_column_privilege($1,'ledger.receiving_threshold_history','REFERENCES')
-            OR has_function_privilege($1,'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
+              OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','exports','capture_mock')
+                  AND has_schema_privilege($1,n.oid,'CREATE'))
+              OR has_function_privilege($1,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
+              OR has_function_privilege($1,'ledger.provision_catalog_commodity(uuid)','EXECUTE')
+              OR has_function_privilege($1,'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
               OR has_function_privilege($1,'ledger.pool_withdraw(uuid,uuid,text,uuid,uuid,numeric,bigint)','EXECUTE')
               OR has_function_privilege($1,'ledger.command_pre_mixed(uuid,text,jsonb)','EXECUTE')
               OR has_function_privilege($1,'ledger.read_before_mixed_bulk(uuid,text,jsonb)','EXECUTE')
@@ -241,7 +259,8 @@ public static class LedgerDatabase
                   SELECT 1 FROM (VALUES
                       ('ledger.mixed_bulk_policies'),('ledger.mixed_bulk_pools'),('ledger.custody_events'),
                       ('ledger.custody_edges'),('ledger.custody_allocations'),('ledger.custody_processing_allocations'),
-                      ('ledger.mixed_bulk_command_results'),('ledger.residue_evaluations')
+                      ('ledger.mixed_bulk_command_results'),('ledger.residue_evaluations'),
+                      ('ledger.planning_yield_rules'),('ledger.planning_quality_observations')
                   ) protected(table_name)
                   WHERE has_table_privilege($1,protected.table_name::regclass,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
                      OR has_any_column_privilege($1,protected.table_name,'SELECT')
@@ -277,11 +296,11 @@ public static class LedgerDatabase
                     )
                     OR EXISTS (
                         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                        WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
+                        WHERE n.nspname IN ('ledger','identity','capture','catalog','exports','capture_mock')
                           AND pg_has_role(r.oid,c.relowner,'MEMBER')
                     )
                     OR EXISTS (
-                        SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','capture_mock')
+                        SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','identity','capture','catalog','exports','capture_mock')
                           AND pg_has_role(r.oid,n.nspowner,'MEMBER')
                     )
                     OR EXISTS (
@@ -292,7 +311,7 @@ public static class LedgerDatabase
                         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                         WHERE c.relkind IN ('r','p')
                           AND (n.nspname IN ('ledger','capture_mock') AND has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                            OR n.nspname IN ('capture','catalog','identity') AND has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER')
+                            OR n.nspname IN ('capture','catalog','identity','exports') AND has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER')
                             OR c.oid IN ('ledger.receiving_threshold_default'::regclass,'ledger.receiving_threshold_overrides'::regclass,'ledger.receiving_threshold_history'::regclass)
                                AND has_table_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
                     )
@@ -308,7 +327,7 @@ public static class LedgerDatabase
                     OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_history','INSERT')
                     OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_history','UPDATE')
                     OR has_any_column_privilege(r.oid,'ledger.receiving_threshold_history','REFERENCES')
-                    OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','capture_mock')
+                    OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname IN ('ledger','capture','catalog','identity','exports','capture_mock')
                         AND has_schema_privilege(r.oid,n.oid,'CREATE'))
                     OR has_function_privilege(r.oid,'ledger.post(uuid,uuid,uuid,numeric,uuid)','EXECUTE')
                     OR has_function_privilege(r.oid,'ledger.provision_catalog_commodity(uuid)','EXECUTE')

@@ -151,7 +151,7 @@ public static class MrlVersionEndpoints
     }
 
     private static async Task<IResult> ResolveAsync(HttpContext http, IdentityDbContext identityDb,
-        CatalogDbContext db, CancellationToken ct)
+        ApplicableMrlRead applicable, CancellationToken ct)
     {
         var actor = await GetActiveActorAsync(http.User, identityDb, ct);
         if (actor is null) return Results.Forbid();
@@ -171,18 +171,16 @@ public static class MrlVersionEndpoints
         else decisionAt = parsedDate.ToUniversalTime();
         if (errors.Count > 0) return Results.ValidationProblem(errors);
 
-        var candidates = await db.MrlVersions.AsNoTracking()
-            .Where(x => x.MarketId == marketId && x.CommodityId == commodityId &&
-                x.Status == "PUBLISHED" && x.PublishedAt <= decisionAt &&
-                x.EffectiveFrom <= decisionAt &&
-                (x.EffectiveTo == null || decisionAt < x.EffectiveTo))
-            .OrderByDescending(x => x.VersionNo).Take(2).ToListAsync(ct);
-        if (candidates.Count == 0)
+        var result = await applicable.ResolveAsync(marketId!.Value, commodityId!.Value, decisionAt!.Value, ct);
+        if (result.Status == "NOT_AVAILABLE")
             return Problem(404, "MRL_VERSION_NOT_AVAILABLE", "No published MRL version applies at that decision time.");
-        if (candidates.Count > 1)
+        if (result.Status == "AMBIGUOUS")
             return Problem(409, "MRL_VERSION_AMBIGUOUS", "More than one published MRL version applies.");
-        http.Response.Headers.ETag = Etag(candidates[0].Version);
-        return Results.Ok(ToResponse(candidates[0]));
+        http.Response.Headers.ETag = Etag(result.VersionToken!.Value);
+        return Results.Ok(new MrlVersionResponse(result.VersionId!.Value, result.MarketId!.Value,
+            result.CommodityId!.Value, result.VersionNo!.Value, "PUBLISHED",
+            result.EffectiveFrom!.Value, result.EffectiveTo, result.PublishedBy,
+            result.PublishedAt, result.SourceRef!));
 
         string? SingleValue(string key) => query.TryGetValue(key, out var values) && values.Count == 1
             ? values[0] : null;

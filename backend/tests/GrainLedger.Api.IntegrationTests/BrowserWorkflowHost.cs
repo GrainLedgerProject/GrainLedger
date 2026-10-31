@@ -1,11 +1,15 @@
 using System.Text.Json;
 using System.Net.Http.Json;
 using GrainLedger.Modules.Identity;
+using GrainLedger.Modules.Catalogs;
+using GrainLedger.Modules.Exports;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Microsoft.Extensions.Logging.Console;
 using Xunit;
 
@@ -18,12 +22,16 @@ public sealed class BrowserWorkflowHost
     {
         var sessionFile = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_SESSION_FILE");
         if (string.IsNullOrWhiteSpace(sessionFile)) return;
-        var apiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_URL") ?? $"http://localhost:{Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_PORT") ?? "5080"}");
-        var uiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_UI_URL") ?? $"http://localhost:{Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_WEB_PORT") ?? "5173"}");
+        var webRoot = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_UI_DIST");
+        var apiPort = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_PORT") ??
+            Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_PORT") ?? "5080";
+        var webPort = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_WEB_PORT") ?? "5173";
+        var apiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_API_URL") ?? $"http://localhost:{apiPort}");
+        var uiOrigin = new Uri(Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_UI_URL") ?? $"http://localhost:{webPort}");
         if (new[] { apiOrigin, uiOrigin }.Any(uri => !uri.IsLoopback || uri.Scheme != "http" || uri.AbsolutePath != "/" || uri.Query != "" || uri.Fragment != ""))
             throw new InvalidOperationException("Browser test origins must be loopback HTTP origins.");
         var apiUrl = apiOrigin.GetLeftPart(UriPartial.Authority);
-        var uiUrl = uiOrigin.GetLeftPart(UriPartial.Authority);
+        var uiUrl = string.IsNullOrWhiteSpace(webRoot) ? uiOrigin.GetLeftPart(UriPartial.Authority) : apiUrl;
         // Long-running test output can fill runner pipes; console overflow must not block HTTP requests.
         var factory = new ApiFactory
         {
@@ -52,6 +60,27 @@ public sealed class BrowserWorkflowHost
         var processed = await scenario.CommitAsync(await scenario.DraftAsync("DRYING", [(traceSourceLotId, "10")], [("DRIED_PADDY", "8")], "2"));
         var traceOutputLotId = LedgerScenario.Output(processed);
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
+        using (var scope = factory.Services.CreateScope())
+        {
+            var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            catalog.AddRange(new Market { Id = Guid.NewGuid(), Code = "DEMO-EU", Name = "Browser test market" },
+                new Commodity { Id = Guid.NewGuid(), Code = "RICE", Name = "Rice" },
+                new QualityAttribute { Id = Guid.NewGuid(), Code = "MOISTURE", Name = "Moisture", Unit = "%" });
+            await catalog.SaveChangesAsync();
+        }
+        async Task<string> StockSnapshotAsync()
+        {
+            await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand("""
+                SELECT jsonb_build_object('positions', (SELECT count(*) FROM ledger.positions),
+                    'massKg', (SELECT coalesce(sum(quantity_kg),0) FROM ledger.positions),
+                    'postings', (SELECT count(*) FROM ledger.postings))::text
+                """, connection);
+            return (string)(await command.ExecuteScalarAsync())!;
+        }
+        var stockBefore = await StockSnapshotAsync();
+        var corruptNextExportResponse = 0;
         var residue = await ResidueScenario.CreateAsync(scenario);
         var first = await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("60"));
         var second = await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("40"));
@@ -140,11 +169,12 @@ public sealed class BrowserWorkflowHost
                 cookie = new { name = cookie.Name, value = cookie.Value, domain = apiOrigin.Host, path = "/", httpOnly = true, secure = false, sameSite = "Lax" }
             };
         }
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing", WebRootPath = webRoot });
         builder.WebHost.UseUrls(apiUrl);
         builder.Services.PostConfigure<ConsoleLoggerOptions>(
             options => options.QueueFullMode = ConsoleLoggerQueueFullMode.DropWrite);
         await using var bridge = builder.Build();
+        if (!string.IsNullOrWhiteSpace(webRoot)) { bridge.UseDefaultFiles(); bridge.UseStaticFiles(); }
         using var upstream = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false, HandleCookies = false
@@ -152,6 +182,27 @@ public sealed class BrowserWorkflowHost
         bridge.Run(async context =>
         {
             // Provisioning belongs only to this loopback test bridge, never production API.
+            if (context.Request.Path == "/__browser/corrupt-next-export-response" && HttpMethods.IsPost(context.Request.Method))
+            {
+                Interlocked.Exchange(ref corruptNextExportResponse, 1);
+                context.Response.StatusCode = 204;
+                return;
+            }
+            if (context.Request.Path == "/__browser/export-check" && HttpMethods.IsGet(context.Request.Method))
+            {
+                using var scope = factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ExportDbContext>();
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    stockUnchanged = stockBefore == await StockSnapshotAsync(),
+                    stock = JsonSerializer.Deserialize<JsonElement>(stockBefore),
+                    orders = await db.Orders.AsNoTracking().Where(x => x.CompanyId == scenario.OwnerId)
+                        .Select(x => new { x.Code, x.Version, x.RequiredMassKg, x.CurrentSpecificationVersion }).ToArrayAsync(),
+                    containerCount = await db.Containers.CountAsync(x => x.CompanyId == scenario.OwnerId),
+                    eventCount = await db.Events.CountAsync(x => x.CompanyId == scenario.OwnerId)
+                });
+                return;
+            }
             if (context.Request.Path == "/__browser/residue-bounds")
             {
                 if (!HttpMethods.IsGet(context.Request.Method)) { context.Response.StatusCode = 405; return; }
@@ -212,6 +263,13 @@ public sealed class BrowserWorkflowHost
                 context.Response.Redirect(uiUrl);
                 return;
             }
+            if (!string.IsNullOrWhiteSpace(webRoot) && HttpMethods.IsGet(context.Request.Method) &&
+                !context.Request.Path.StartsWithSegments("/api") && !context.Request.Path.StartsWithSegments("/signin-google"))
+            {
+                context.Response.ContentType = "text/html";
+                await context.Response.SendFileAsync(Path.Combine(webRoot, "index.html"));
+                return;
+            }
             using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), context.Request.Path + context.Request.QueryString);
             if (context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey("Transfer-Encoding"))
                 request.Content = new StreamContent(context.Request.Body);
@@ -223,6 +281,14 @@ public sealed class BrowserWorkflowHost
             }
             using var response = await upstream.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
             context.Response.StatusCode = (int)response.StatusCode;
+            if (response.IsSuccessStatusCode && context.Request.Path.StartsWithSegments("/api/export-orders") &&
+                !HttpMethods.IsGet(context.Request.Method) && Interlocked.Exchange(ref corruptNextExportResponse, 0) == 1)
+            {
+                context.Response.ContentType = "application/json";
+                context.Response.Headers.CacheControl = "no-store";
+                await context.Response.WriteAsync("{\"id\":");
+                return;
+            }
             foreach (var header in response.Headers.Concat(response.Content.Headers))
                 if (!header.Key.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase)) context.Response.Headers[header.Key] = header.Value.ToArray();
             await response.Content.CopyToAsync(context.Response.Body, context.RequestAborted);

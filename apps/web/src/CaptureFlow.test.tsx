@@ -106,8 +106,14 @@ describe('Capture journey', () => {
     render(<App />); const browser = userEvent.setup();
     await browser.click(await screen.findByRole('button', { name: /Paddy intake/ }));
     await browser.click(await screen.findByRole('button', { name: /Record intake/ }));
+    expect(screen.getByLabelText('Receiving location')).toBeDisabled();
+    expect(screen.getByText('Select a collection site first.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Plot season')).toBeDisabled();
+    expect(screen.getByText('Select a farmer first.')).toBeInTheDocument();
     await browser.selectOptions(await screen.findByLabelText('Farmer'), farmerId);
+    expect(screen.getByLabelText('Plot season')).toBeEnabled();
     await browser.selectOptions(await screen.findByLabelText('Collection site'), siteId);
+    expect(screen.getByLabelText('Receiving location')).toBeEnabled();
     await browser.selectOptions(screen.getByLabelText('Receiving location'), locationId);
     await browser.selectOptions(await screen.findByLabelText('Plot season'), plotSeasonId);
     await browser.type(screen.getByLabelText('Measured mass'), '200');

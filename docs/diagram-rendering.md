@@ -9,9 +9,9 @@ Source files remain tracked in Git under `docs/SDD/`:
 - **Package diagrams**: `docs/SDD/diagrams/*.puml` (3 PlantUML sources: `02_packages_field.puml`, `03_packages_workspace.puml`, `04_packages_core.puml`)
 - **Class and sequence diagrams**: `docs/SDD/diagrams/*.mmd` (28 Mermaid sources)
 
-Rendered outputs belong in `docs/SDD/diagrams/rendered/` and are **gitignored**:
-- `docs/SDD/diagrams/rendered/*.svg` (32 vector files)
-- `docs/SDD/diagrams/rendered/*.png` (32 raster files)
+Rendered outputs belong in `docs/SDD/diagrams/rendered/`:
+- `docs/SDD/diagrams/rendered/*.svg` (32 vector files, tracked so Markdown links work in Git)
+- `docs/SDD/diagrams/rendered/*.png` (32 raster files, generated locally and ignored)
 
 SDD Markdown references images via `diagrams/rendered/<name>.svg`.
 

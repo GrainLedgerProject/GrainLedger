@@ -1,0 +1,80 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { ExportAssessment } from './ExportAssessment';
+
+const fetchMock = vi.fn<typeof fetch>();
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+beforeEach(() => { vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset(); });
+
+it('publishes the reviewed market policy from the Customer Manager form', async () => {
+  fetchMock.mockImplementation(async (input, init) => {
+    const path = String(input);
+    if (path === '/api/auth/csrf') return json({ token: 'csrf' });
+    if (path.startsWith('/api/markets?')) return json({ items: [{ id: 'market-1', code: 'EU', name: 'European Union' }], hasMore: false });
+    if (path.startsWith('/api/commodities?')) return json({ items: [{ id: 'commodity-1', code: 'RICE', name: 'Rice' }], hasMore: false });
+    if (path.startsWith('/api/active-substances?')) return json({ items: [{ id: 'substance-1', code: 'S1', name: 'Substance 1' }], hasMore: false });
+    if (path.startsWith('/api/quality-attributes?')) return json({ items: [{ id: 'attribute-1', code: 'MOIST', name: 'Moisture', unit: '%' }], hasMore: false });
+    if (path === '/api/ledger/lookups') return json({ owners: [], facilities: [], locations: [], commodities: [], equipment: [] });
+    if (path.startsWith('/api/blend-assessment-policies/applicable?')) return json({}, 404);
+    if (path === '/api/blend-assessment-policies' && init?.method === 'POST') return json({ id: 'policy-1' }, 201);
+    return json({}, 404);
+  });
+  const user = userEvent.setup();
+  render(<ExportAssessment companyId="company-1" />);
+  const policy = (await screen.findByRole('heading', { name: 'Market assessment policy' })).closest('section')!;
+  const field = within(policy);
+  await user.selectOptions(field.getByLabelText('Export market'), 'market-1');
+  await user.selectOptions(field.getByLabelText('Commodity'), 'commodity-1');
+  await user.type(field.getByLabelText('MRL safety margin fraction'), '0.1');
+  fireEvent.change(field.getByLabelText('Effective from'), { target: { value: '2026-10-27T10:00' } });
+  await user.type(field.getByLabelText('Comparable residue material basis'), 'finished rice');
+  await user.click(field.getByRole('checkbox', { name: /S1 · Substance 1/ }));
+  await user.selectOptions(field.getByLabelText('Add attribute'), 'attribute-1');
+  await user.type(field.getByLabelText('Approved source or evidence reference'), 'Approved review 123');
+  await user.type(field.getByLabelText('Reviewed by'), 'Reviewer');
+  await user.type(field.getByLabelText('Review authority'), 'Quality team');
+  fireEvent.change(field.getByLabelText('Reviewed at'), { target: { value: '2026-10-27T09:00' } });
+  await user.click(field.getByRole('checkbox', { name: /I checked the approved source/ }));
+  await user.click(field.getByRole('button', { name: 'Publish policy' }));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === '/api/blend-assessment-policies' && init?.method === 'POST')).toBe(true));
+  const request = fetchMock.mock.calls.find(([path, init]) => String(path) === '/api/blend-assessment-policies' && init?.method === 'POST');
+  expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ marketId: 'market-1', commodityId: 'commodity-1', requiredSubstanceIds: ['substance-1'], mrlMarginFraction: '0.1', qualityRules: [{ attributeId: 'attribute-1', unit: '%', calculation: 'MASS_WEIGHTED_MEAN' }] });
+});
+
+it('confirms a new version of measured quality for a finished lot', async () => {
+  fetchMock.mockImplementation(async (input, init) => {
+    const path = String(input);
+    if (path === '/api/auth/csrf') return json({ token: 'csrf' });
+    if (path.includes('/api/markets?') || path.includes('/api/commodities?') || path.includes('/api/active-substances?')) return json({ items: [], hasMore: false });
+    if (path.startsWith('/api/quality-attributes?')) return json({ items: [{ id: 'attribute-1', code: 'MOIST', name: 'Moisture', unit: '%' }], hasMore: false });
+    if (path === '/api/ledger/lookups') return json({ owners: [], facilities: [{ id: 'facility-1', name: 'Demo Mill' }], locations: [{ id: 'location-1', name: 'Silo 2', facilityId: 'facility-1' }], commodities: [], equipment: [] });
+    if (path.startsWith('/api/ledger/lots?')) return json({ items: [{ id: 'lot-1', code: 'HDR-20261027-000029', ownerId: 'company-1', stage: 'HEAD_RICE', positions: [{ locationId: 'location-1', facilityId: 'facility-1', quantityKg: '200' }], restrictions: [] }], page: 1, pageSize: 25, totalCount: 1, hasMore: false });
+    if (path.startsWith('/api/ledger/planning-quality-observations?')) return json([{ id: 'old-1', lotId: 'lot-1', attributeId: 'attribute-1', versionNo: 1, measuredValue: '14', unit: '%', evidenceId: 'evidence-old' }]);
+    if (path === '/api/ledger/evidence' && init?.method === 'POST') return json({ id: 'evidence-new' });
+    if (path === '/api/ledger/planning-quality-observations' && init?.method === 'POST') return json({ id: 'observation-new' });
+    return json({}, 404);
+  });
+  const user = userEvent.setup();
+  render(<ExportAssessment companyId="company-1" />);
+  const quality = (await screen.findByRole('heading', { name: 'Finished-lot quality evidence' })).closest('section')!;
+  const field = within(quality);
+  await user.selectOptions(field.getByLabelText('Facility'), 'facility-1');
+  await user.selectOptions(await field.findByLabelText('Finished lot'), 'lot-1');
+  await waitFor(() => expect(field.getByText('v1')).toBeInTheDocument());
+  await user.selectOptions(field.getByLabelText('Quality attribute'), 'attribute-1');
+  await user.type(field.getByLabelText('Measured value (%)'), '12.5');
+  fireEvent.change(field.getByLabelText('Measured at'), { target: { value: '2026-10-27T08:00' } });
+  await user.upload(field.getByLabelText('Evidence file'), new File(['report'], 'report.txt', { type: 'text/plain' }));
+  await user.click(field.getByRole('button', { name: 'Upload evidence' }));
+  await waitFor(() => expect(field.getByRole('link', { name: 'View stored evidence' })).toBeInTheDocument());
+  await user.type(field.getByLabelText('Report reference'), 'QC-123');
+  await user.type(field.getByLabelText('Reviewed by'), 'Reviewer');
+  await user.type(field.getByLabelText('Review authority'), 'Quality team');
+  fireEvent.change(field.getByLabelText('Reviewed at'), { target: { value: '2026-10-27T09:00' } });
+  await user.click(field.getByRole('checkbox', { name: /I verified that the report measures this lot/ }));
+  await user.click(field.getByRole('button', { name: 'Confirm quality observation' }));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === '/api/ledger/planning-quality-observations' && init?.method === 'POST')).toBe(true));
+  const request = fetchMock.mock.calls.find(([path, init]) => String(path) === '/api/ledger/planning-quality-observations' && init?.method === 'POST');
+  expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ ownerId: 'company-1', facilityId: 'facility-1', lotId: 'lot-1', attributeId: 'attribute-1', versionNo: 2, measuredValue: '12.5', unit: '%', evidenceId: 'evidence-new', subjectConfirmed: true });
+});

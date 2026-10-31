@@ -305,9 +305,10 @@ public sealed class ResidueCompanyPolicyTests(ApiFactory factory) : IClassFixtur
     private static async Task PublishStoredSetting(LedgerScenario scenario, JsonObject payload)
     {
         payload["PublishedBy"] = scenario.Accounts["customer"].User.Id;
-        payload["PublishedAt"] = DateTimeOffset.UtcNow;
         await using var connection = new NpgsqlConnection(scenario.Factory.RuntimeConnectionString);
         await connection.OpenAsync();
+        await using (var clock = new NpgsqlCommand("SELECT clock_timestamp()", connection))
+            payload["PublishedAt"] = new DateTimeOffset((DateTime)(await clock.ExecuteScalarAsync())!);
         await using var command = new NpgsqlCommand("SELECT catalog.publish_residue_policy_setting($1,$2)", connection);
         command.Parameters.AddWithValue(scenario.Accounts["customer"].User.Id);
         command.Parameters.AddWithValue(NpgsqlDbType.Jsonb, payload.ToJsonString());

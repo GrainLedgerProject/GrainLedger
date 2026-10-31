@@ -732,6 +732,11 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
                 ResolveUrl(marketId, commodityId, second.EffectiveFrom)))!.Id);
             using var scope = factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var applicable = scope.ServiceProvider.GetRequiredService<ApplicableMrlRead>();
+            var atBoundary = await applicable.ResolveAsync(marketId, commodityId, second.EffectiveFrom);
+            Assert.Equal("FOUND", atBoundary.Status);
+            Assert.Equal(second.Id, atBoundary.VersionId);
+            Assert.Equal(await db.MrlLimits.CountAsync(x => x.MrlVersionId == second.Id), atBoundary.Limits.Count);
             var closeEvent = await db.CatalogEvents.SingleAsync(x =>
                 x.ResourceId == first.Id && x.EventType == "MRL_VERSION_CLOSED");
             var publishEvent = await db.CatalogEvents.SingleAsync(x =>

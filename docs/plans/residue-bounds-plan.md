@@ -22,7 +22,7 @@ Confidence is high for the source-code findings below. Deployed schema state, pr
 
 ## 2. Proposal requirements
 
-Page numbers refer to the 12-page [proposal PDF](../GrainLedger_V2.pdf), not a separate SRS or prototype UI.
+Page numbers refer to the 12-page `GrainLedger_V2.pdf` proposal (supplied separately), not a separate SRS or prototype UI.
 
 | Requirement | Proposal evidence | Implementation implication |
 | --- | --- | --- |
