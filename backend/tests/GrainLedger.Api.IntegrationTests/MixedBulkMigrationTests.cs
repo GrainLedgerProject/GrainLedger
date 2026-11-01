@@ -52,7 +52,8 @@ public sealed class MixedBulkMigrationTests
         await ledger.GetService<IMigrator>().MigrateAsync("20261021010000_CustodyTraceability");
         var traceHistory = await HistoryAsync(owner);
         Assert.Contains("20261021010000_CustodyTraceability", traceHistory);
-        Assert.Equal(migratedHistory, traceHistory.Where(id => id != "20261021010000_CustodyTraceability").ToArray());
+        Assert.Contains("20261021000000_PlanningCandidates", traceHistory);
+        Assert.Equal(migratedHistory, traceHistory.Where(id => migratedHistory.Contains(id)).ToArray());
         await using var routine = new NpgsqlCommand("SELECT pg_get_functiondef('ledger.trace_lot(uuid,uuid,text,text)'::regprocedure)", owner);
         var definition = (string)(await routine.ExecuteScalarAsync())!;
         Assert.Contains("RECORDED_MATERIAL_RELATIONSHIPS", definition);

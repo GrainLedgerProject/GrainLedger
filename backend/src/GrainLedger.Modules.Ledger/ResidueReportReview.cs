@@ -75,7 +75,11 @@ public sealed partial class ResidueEvaluationService : IConfirmedLabReportResidu
     {
         var requestedByKey = request.Rows.ToDictionary(x => (x.ResultId, x.SourceId));
         var now = new DateTimeOffset((DateTime)(await ExecuteAsync(connection, tx, "SELECT clock_timestamp()", ct))!);
-        var effectiveFrom = request.EffectiveFrom ?? now;
+        // Automatic binding is part of the Capture confirmation transaction.
+        // The API clock and PostgreSQL clock may differ by milliseconds; use
+        // the database instant that owns the binding instead of rejecting the
+        // newly confirmed report as a future-effective manual review.
+        var effectiveFrom = automatic ? now : request.EffectiveFrom ?? now;
         if (effectiveFrom > now) throw new LedgerException(400, "Report binding cannot become effective in the future");
         if (await ExecuteAsync(connection, tx, "SELECT id FROM capture.lab_reports WHERE id=$1 AND company_id=$2", ct,
             reportId, request.CompanyId) is not Guid)

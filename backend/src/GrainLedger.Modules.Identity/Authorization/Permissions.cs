@@ -30,10 +30,15 @@ public static class Permissions
     public const string ContainersWrite = "containers.write";
     public const string FarmsWrite = "farms.write";
     public const string PurchasesWrite = "purchases.write";
+    public const string ExportOrdersRead = "export-orders.read";
+    public const string ExportOrdersWrite = "export-orders.write";
     public const string ResiduePolicyManage = "residue.policy.manage";
     public const string ResidueCompanyPolicyManage = "residue.company-policy.manage";
     public const string ResidueEvidenceManage = "residue.evidence.manage";
     public const string ResidueEvaluate = "residue.evaluate";
+    public const string BlendAssessmentPolicyManage = "blend.assessment-policy.manage";
+    public const string BlendYieldPolicyManage = "blend.yield-policy.manage";
+    public const string BlendQualityEvidenceManage = "blend.quality-evidence.manage";
 
     public static IReadOnlyList<string> All { get; } = Array.AsReadOnly<string>(
     [
@@ -42,16 +47,18 @@ public static class Permissions
         HoldsProcess, ReconciliationRead, HistoryRead, LotsReadFacility, LotsReceive,
         ConversionsWrite, ContainersOperate, FarmsRead, LotsReadTenant, LabWrite,
         BlendApprove, HoldsManage, TraceReadTenant, MrlRead, LabRead, BlendPropose,
-        ContainersWrite, FarmsWrite, PurchasesWrite, ResiduePolicyManage, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate
+        ContainersWrite, FarmsWrite, PurchasesWrite, ExportOrdersRead, ExportOrdersWrite,
+        ResiduePolicyManage, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate,
+        BlendAssessmentPolicyManage, BlendYieldPolicyManage, BlendQualityEvidenceManage
     ]);
 
     public static string[] ForRole(string role) => role switch
     {
         Roles.Administrator => [IdentityManage, PlatformConfigure, TraceReadAll, ResiduePolicyManage],
-        Roles.MillManager => [PlatformRead, LotsReadAll, ConversionsRead, ConversionsConfirm, CorrectionsReconcile, ReceivingReconcile, HoldsProcess, ReconciliationRead, HistoryRead, ResidueEvaluate],
+        Roles.MillManager => [PlatformRead, LotsReadAll, ConversionsRead, ConversionsConfirm, CorrectionsReconcile, ReceivingReconcile, HoldsProcess, ReconciliationRead, HistoryRead, ResidueEvaluate, BlendYieldPolicyManage],
         Roles.MillOperator => [PlatformRead, LotsReadFacility, LotsReceive, ConversionsWrite, ContainersOperate, HistoryRead, ResidueEvaluate],
-        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate],
-        Roles.ExportStaff => [MrlRead, LotsReadTenant, LabRead, BlendPropose, ContainersWrite, TraceReadTenant, HistoryRead, ResidueEvaluate],
+        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead, ExportOrdersRead, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate, BlendAssessmentPolicyManage, BlendQualityEvidenceManage],
+        Roles.ExportStaff => [MrlRead, LotsReadTenant, LabRead, BlendPropose, ContainersWrite, TraceReadTenant, HistoryRead, ExportOrdersRead, ExportOrdersWrite, ResidueEvaluate],
         Roles.PurchasingStaff => [FarmsWrite, PurchasesWrite, HistoryRead],
         _ => []
     };

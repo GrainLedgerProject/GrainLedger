@@ -1,4 +1,6 @@
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GrainLedger.Modules.Capture;
@@ -19,6 +21,11 @@ public sealed record ResidueEvaluation(Guid Id, Guid LotId, Guid CompanyId, Date
     DateTimeOffset? PersistedAt, string EngineVersion, IReadOnlyList<ResidueResult> Results);
 public sealed record ResidueEvaluationPreview(Guid LotId, Guid CompanyId, DateTimeOffset SnapshotAt,
     string EngineVersion, IReadOnlyList<ResidueResult> Results);
+public sealed record HypotheticalBlendInput(Guid LotId, string QuantityKg);
+public sealed record HypotheticalBlendPreview(DateTimeOffset SnapshotAt, string EngineVersion,
+    IReadOnlyList<ResidueResult> Results);
+public sealed record ResidueSelectionPreview(DateTimeOffset SnapshotAt,
+    IReadOnlyList<ResidueEvaluationPreview> Inputs, HypotheticalBlendPreview? HypotheticalBlend);
 
 public sealed partial class ResidueEvaluationService(IConfiguration configuration, LedgerService ledger,
     IResiduePolicyReader policyReader, IResidueEvidenceReader evidenceReader)
@@ -70,22 +77,97 @@ public sealed partial class ResidueEvaluationService(IConfiguration configuratio
         var substances = values.Select(value => Guid.Parse(value)).ToArray();
         if (substances.Contains(Guid.Empty) || substances.Distinct().Count() != substances.Length)
             throw new LedgerException(400, "Preview requires 1–200 distinct substance IDs");
+        return (await PreviewLotsAsync([lotId], substances, ct))[0];
+    }
+
+    // F14 can read several selected lots at one database snapshot. Each graph
+    // remains owner-scoped by Ledger; this method does not append evaluations.
+    public async Task<IReadOnlyList<ResidueEvaluationPreview>> PreviewLotsAsync(
+        IReadOnlyList<Guid> lotIds, IReadOnlyList<Guid> substanceIds, CancellationToken ct)
+    {
+        return (await PreviewSelectionAsync(lotIds.Select(x => new HypotheticalBlendInput(x, "1")).ToArray(),
+            null, substanceIds, ct)).Inputs;
+    }
+
+    // All input bounds and the optional in-memory BLENDING output share one
+    // repeatable-read snapshot and one evidence/policy selection.
+    public async Task<ResidueSelectionPreview> PreviewSelectionAsync(
+        IReadOnlyList<HypotheticalBlendInput> inputs, Guid? outputLedgerCommodityId,
+        IReadOnlyList<Guid> substanceIds, CancellationToken ct)
+    {
+        if (inputs.Count is < 1 or > 100 || outputLedgerCommodityId == Guid.Empty ||
+            inputs.Any(x => x.LotId == Guid.Empty) || inputs.Select(x => x.LotId).Distinct().Count() != inputs.Count ||
+            substanceIds.Count is < 1 or > 200 || substanceIds.Contains(Guid.Empty) ||
+            substanceIds.Distinct().Count() != substanceIds.Count)
+            throw new LedgerException(400, "Preview requires distinct inputs and substances, and a valid output commodity when blending");
+        foreach (var input in inputs)
+        {
+            try
+            {
+                if (ResidueRational.Parse(input.QuantityKg).CompareTo(ResidueRational.Zero) <= 0)
+                    throw new LedgerException(400, "Positive exact input kg required");
+            }
+            catch (FormatException) { throw new LedgerException(400, "Positive exact input kg required"); }
+        }
         var actor = await ledger.ActorAsync(ct);
         await using var connection = new NpgsqlConnection(configuration.GetConnectionString("GrainLedger"));
         await connection.OpenAsync(ct);
-        DateTimeOffset snapshotAt;
-        (ResidueNode[] Nodes, ResiduePolicySnapshot Policies, ResidueEvidenceSnapshot Evidence) materialized;
-        await using (var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct))
+        await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await ExecuteAsync(connection, tx, "SET TRANSACTION READ ONLY", ct);
+        var captured = await ExecuteAsync(connection, tx, "SELECT clock_timestamp()", ct);
+        var at = new DateTimeOffset((DateTime)captured!);
+        var nodes = new Dictionary<Guid, ResidueNode>();
+        Guid? company = null;
+        foreach (var input in inputs)
         {
-            await ExecuteAsync(connection, tx, "SET TRANSACTION READ ONLY", ct);
-            var captured = await ExecuteAsync(connection, tx, "SELECT clock_timestamp()", ct);
-            snapshotAt = new DateTimeOffset((DateTime)captured!);
-            materialized = await ReadSnapshotAsync(connection, tx, actor, lotId, substances, snapshotAt, ct);
-            await tx.CommitAsync(ct);
+            var graph = (string)(await ExecuteAsync(connection, tx,
+                "SELECT ledger.residue_graph($1,$2)::text", ct, actor, input.LotId))!;
+            var graphNodes = JsonSerializer.Deserialize<ResidueNode[]>(graph, Json)!;
+            var root = graphNodes.Single(x => x.LotId == input.LotId);
+            if (company is not null && root.CompanyId != company)
+                throw new LedgerException(403, "Blend inputs must have one owner");
+            company = root.CompanyId;
+            foreach (var node in graphNodes) nodes.TryAdd(node.LotId, node);
         }
-        var results = CalculateResults(lotId, substances, materialized.Nodes, materialized.Evidence, materialized.Policies, snapshotAt);
-        return new ResidueEvaluationPreview(lotId, materialized.Nodes.Single(x => x.LotId == lotId).CompanyId,
-            snapshotAt, ResidueCalculator.EngineVersion, results);
+        Guid? syntheticId = null;
+        if (outputLedgerCommodityId is { } output)
+        {
+            // residue_graph exposes Catalog commodity IDs for physical nodes.
+            // The hypothetical output must use that same identity so approved
+            // processing factors match both physical and synthetic nodes.
+            var catalogOutput = await ExecuteAsync(connection, tx,
+                "SELECT catalog_commodity_id FROM ledger.catalog_commodities WHERE ledger_commodity_id=$1",
+                ct, output);
+            if (catalogOutput is not Guid catalogCommodityId)
+                throw new LedgerException(422, "Hypothetical blend output has no Catalog commodity mapping");
+            // A transient random ID would change the F12 dependency graph on
+            // every read and make an otherwise identical F14 preview stale.
+            var syntheticKey = output.ToString("N") + ":" + string.Join(";",
+                inputs.OrderBy(x => x.LotId).Select(x =>
+                    $"{x.LotId:N}:{x.QuantityKg}"));
+            syntheticId = new Guid(SHA256.HashData(
+                Encoding.UTF8.GetBytes(syntheticKey)).AsSpan(0, 16));
+            if (nodes.ContainsKey(syntheticId.Value))
+                throw new LedgerException(409, "Hypothetical blend identity collides with a physical lot");
+            nodes.Add(syntheticId.Value, new ResidueNode(syntheticId.Value, company!.Value,
+                catalogCommodityId, "BLENDED_RICE", "BLENDED_RICE", at,
+                "BLENDING", null, null, inputs.Select(x => new ResidueParent(x.LotId, x.QuantityKg)).ToArray()));
+        }
+        var substances = substanceIds.ToArray();
+        var owner = company ?? throw new LedgerException(400, "Preview needs at least one owned lot");
+        var policies = await policyReader.ReadAsync(connection, tx, owner, substances, at, ct);
+        var evidence = await evidenceReader.ReadAsync(connection, tx, owner,
+            nodes.Values.Where(x => x.Kind == "SOURCE").Select(x => x.LotId).Distinct().ToArray(),
+            substances, at, ct);
+        await tx.CommitAsync(ct);
+        var snapshotNodes = nodes.Values.ToArray();
+        var previews = inputs.Select(x => new ResidueEvaluationPreview(x.LotId, owner, at,
+            ResidueCalculator.EngineVersion,
+            CalculateResults(x.LotId, substances, snapshotNodes, evidence, policies, at))).ToArray();
+        var hypothetical = syntheticId is { } id
+            ? new HypotheticalBlendPreview(at, ResidueCalculator.EngineVersion,
+                CalculateResults(id, substances, snapshotNodes, evidence, policies, at)) : null;
+        return new ResidueSelectionPreview(at, previews, hypothetical);
     }
 
     private async Task<(ResidueNode[] Nodes, ResiduePolicySnapshot Policies, ResidueEvidenceSnapshot Evidence)> ReadSnapshotAsync(

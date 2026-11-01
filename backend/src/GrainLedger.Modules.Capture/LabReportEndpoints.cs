@@ -348,7 +348,11 @@ public static class LabReportEndpoints
             };
             if (!valid) return Problem(409, "REPORT_IDENTITY_UNRESOLVED", "Printed identity or independently evidenced laboratory reference must establish sample identity.");
         }
-        var now = clock.GetUtcNow();
+        // Confirmation and automatic residue binding share this transaction.
+        // Use PostgreSQL time so the binding read cannot see the new
+        // confirmation as a future event when API and DB clocks differ.
+        var now = await db.Database.SqlQueryRaw<DateTimeOffset>(
+            "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
         var confirmation = new LabReportConfirmation { Id = Guid.NewGuid(), CompanyId = company.Value, ReportId = id, ConfirmedBy = actor, ConfirmedAt = now, IdentityChecked = true, TranscriptionChecked = true };
         db.LabReportConfirmations.Add(confirmation);
         foreach (var match in p.Matches)

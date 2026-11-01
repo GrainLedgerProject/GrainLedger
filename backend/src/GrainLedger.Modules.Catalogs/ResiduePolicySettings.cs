@@ -89,6 +89,8 @@ public static class ResiduePolicySettingEndpoints
                     stored.Add(previous.Id, previous);
                 }
             }
+            var databaseNow = await db.Database.SqlQueryRaw<DateTimeOffset>(
+                "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
             foreach (var request in requests)
             {
                 // Replays retain original publication metadata; changed UUID payloads conflict.
@@ -101,7 +103,7 @@ public static class ResiduePolicySettingEndpoints
                     items.Add(previous);
                     continue;
                 }
-                var item = request with { PublishedBy = actor, PublishedAt = now };
+                var item = request with { PublishedBy = actor, PublishedAt = databaseNow };
                 await using var command = new NpgsqlCommand("SELECT catalog.publish_residue_policy_setting($1,$2)", connection, transaction);
                 command.Parameters.AddWithValue(actor);
                 command.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(item));

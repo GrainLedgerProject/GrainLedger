@@ -18,6 +18,7 @@ export function ProcurementForm({ userId, companyId, onBack, onCreated }: { user
   const [farmerId, setFarmerId] = useState(pending?.payload.farmerId ?? '');
   const [plots, setPlots] = useState<PlotOption[]>([]);
   const [plotSeasons, setPlotSeasons] = useState<PlotSeasonOption[]>([]);
+  const [plotSeasonsLoading, setPlotSeasonsLoading] = useState(false);
   const [sourceError, setSourceError] = useState('');
   const [sourceRetry, setSourceRetry] = useState(0);
   const [reference, setReference] = useState<ProcurementReference | null>(null);
@@ -56,15 +57,16 @@ export function ProcurementForm({ userId, companyId, onBack, onCreated }: { user
   }, [referenceRetry]);
 
   useEffect(() => {
-    if (!farmerId) { setPlots([]); setPlotSeasons([]); return; }
-    let active = true; const controller = new AbortController(); setSourceError(''); setPlotSeasons([]);
+    if (!farmerId) { setPlots([]); setPlotSeasons([]); setPlotSeasonsLoading(false); return; }
+    let active = true; const controller = new AbortController(); setSourceError(''); setPlotSeasons([]); setPlotSeasonsLoading(true);
     void (async () => {
       const farmerPlots = await loadAllPages(page => api<Page<PlotOption>>(`/api/plots?farmerId=${encodeURIComponent(farmerId)}&page=${page}&pageSize=100`, { signal: controller.signal }));
       const plotIds = new Set(farmerPlots.map(plot => plot.id));
       const allSeasons = await loadAllPages(page => api<Page<PlotSeasonOption>>(`/api/plot-seasons?page=${page}&pageSize=100`, { signal: controller.signal }));
       return { farmerPlots, farmerSeasons: allSeasons.filter(item => plotIds.has(item.plotId)) };
     })().then(value => { if (active) { setPlots(value.farmerPlots); setPlotSeasons(value.farmerSeasons); } })
-      .catch(cause => { if (active) setSourceError(errorMessage(cause)); });
+      .catch(cause => { if (active) setSourceError(errorMessage(cause)); })
+      .finally(() => { if (active) setPlotSeasonsLoading(false); });
     return () => { active = false; controller.abort(); };
   }, [farmerId, sourceRetry]);
 
@@ -119,11 +121,11 @@ export function ProcurementForm({ userId, companyId, onBack, onCreated }: { user
       <h2>Delivery</h2>
       {farmers.length > 10 && <label>Find farmer<input value={farmerSearch} onChange={e => setFarmerSearch(e.target.value)} disabled={busy || !!pending} placeholder="Name or code" /></label>}
       <label>Farmer<select value={farmerId} onChange={e => { setFarmerId(e.target.value); setLines([{ plotSeasonId: '', measuredValue: '', measuredUnit: 'KG', moisturePercent: '' }]); }} required aria-invalid={showValidation && !!fieldErrors.farmer} disabled={busy || !!pending}><option value="">Select farmer</option>{visibleFarmers.map(item => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}</select>{validation('farmer')}</label>
-      <div className="form-columns"><label>Collection site<select value={siteId} onChange={e => { setSiteId(e.target.value); setLocationId(''); }} required aria-invalid={showValidation && !!fieldErrors.site} disabled={busy || !!pending}><option value="">Select site</option>{sites.map(site => <option key={site.collectionSiteId} value={site.collectionSiteId}>{site.collectionSiteName} · {site.collectionSiteCode}</option>)}</select>{validation('site')}</label>
-        <label>Receiving location<select value={locationId} onChange={e => setLocationId(e.target.value)} required aria-invalid={showValidation && !!fieldErrors.location} disabled={busy || !!pending || !siteId}><option value="">Select location</option>{locations.map(option => <option key={option.receivingLocationId} value={option.receivingLocationId}>{option.receivingLocationCode}</option>)}</select>{validation('location')}</label></div>
+      <div className="form-columns"><label>Collection site<select value={siteId} onChange={e => { setSiteId(e.target.value); setLocationId(''); }} required aria-invalid={showValidation && !!fieldErrors.site} disabled={busy || !!pending}><option value="">Select site</option>{sites.map(site => <option key={site.collectionSiteId} value={site.collectionSiteId}>{site.collectionSiteName}</option>)}</select>{validation('site')}</label>
+        <label>Receiving location<select aria-label="Receiving location" aria-describedby="receiving-location-help" value={locationId} onChange={e => setLocationId(e.target.value)} required aria-invalid={showValidation && !!fieldErrors.location} disabled={busy || !!pending || !siteId}><option value="">Select location</option>{locations.map(option => <option key={option.receivingLocationId} value={option.receivingLocationId}>{option.receivingLocationCode}</option>)}</select><span id="receiving-location-help" className="muted small">{!siteId ? 'Select a collection site first.' : locations.length === 0 && !referenceError ? 'No receiving location is available for this site.' : 'Select where the mill will receive this delivery.'}</span>{validation('location')}</label></div>
       <label>Received at<input type="datetime-local" value={receivedAt} onChange={e => setReceivedAt(e.target.value)} required aria-invalid={showValidation && !!fieldErrors.receivedAt} disabled={busy || !!pending} />{validation('receivedAt')}</label>
       <h2>Receipt lines</h2>
-      {lines.map((line, index) => <div className="capture-item-row" key={index}><strong>Line {index + 1}</strong><label>Plot season<select value={line.plotSeasonId} onChange={e => updateLine(index, { plotSeasonId: e.target.value })} required aria-invalid={showValidation && !!fieldErrors[`plotSeason-${index}`]} disabled={busy || !!pending || !farmerId}><option value="">Select plot season</option>{plotSeasons.map(item => <option key={item.id} value={item.id}>{plots.find(plot => plot.id === item.plotId)?.code ?? item.plotId} · {item.riceVariety}</option>)}</select>{validation(`plotSeason-${index}`)}</label>
+      {lines.map((line, index) => <div className="capture-item-row" key={index}><strong>Line {index + 1}</strong><label>Plot season<select aria-label="Plot season" aria-describedby={`plot-season-help-${index}`} value={line.plotSeasonId} onChange={e => updateLine(index, { plotSeasonId: e.target.value })} required aria-invalid={showValidation && !!fieldErrors[`plotSeason-${index}`]} disabled={busy || !!pending || !farmerId}><option value="">Select plot season</option>{plotSeasons.map(item => <option key={item.id} value={item.id}>{plots.find(plot => plot.id === item.plotId)?.code ?? item.plotId} · {item.riceVariety}</option>)}</select><span id={`plot-season-help-${index}`} className="muted small">{!farmerId ? 'Select a farmer first.' : plotSeasonsLoading ? 'Loading plot seasons for this farmer…' : plotSeasons.length === 0 && !sourceError ? 'No plot season is available for this farmer. Register a plot season first.' : 'Select a registered plot and crop season for this farmer.'}</span>{validation(`plotSeason-${index}`)}</label>
         <div className="form-columns"><label>Measured mass<input inputMode="decimal" value={line.measuredValue} onChange={e => updateLine(index, { measuredValue: e.target.value })} required aria-invalid={showValidation && !!fieldErrors[`mass-${index}`]} disabled={busy || !!pending} placeholder="600" />{validation(`mass-${index}`)}</label><label>Unit<select value={line.measuredUnit} onChange={e => updateLine(index, { measuredUnit: e.target.value })} aria-invalid={showValidation && !!fieldErrors[`unit-${index}`]} disabled={busy || !!pending}>{(reference?.massUnits ?? [{ code: 'KG', name: 'Kilogram' }]).map(unit => <option key={unit.code} value={unit.code}>{unit.name} ({unit.code})</option>)}</select>{validation(`unit-${index}`)}</label></div>
         <label>Moisture (%)<input inputMode="decimal" value={line.moisturePercent} onChange={e => updateLine(index, { moisturePercent: e.target.value })} required aria-invalid={showValidation && !!fieldErrors[`moisture-${index}`]} disabled={busy || !!pending} placeholder="22.5 (number only)" />{validation(`moisture-${index}`)}</label>
         {lines.length > 1 && !pending && <button className="text-button" type="button" onClick={() => setLines(rows => rows.filter((_, i) => i !== index))}>Remove line</button>}</div>)}

@@ -14,7 +14,7 @@ Capture migration `20261020120000_TrimLegacyLabIdentityComparisons` updates the 
 
 GrainLedger records physical samples, dispatch to an external laboratory, received reports, and results linked to the sampled procurement lot. Testing, laboratory instruments, and laboratory processing remain outside GrainLedger.
 
-Proposal references: [GrainLedger V2](../GrainLedger_V2.pdf), pages 8–9: F11 records samples and results; F12 calculates residue bounds; F18/F19 cover tracing and HOLDs. These are separate responsibilities, not one global pass/fail flag.
+Proposal references: `GrainLedger_V2.pdf` (supplied separately), pages 8–9: F11 records samples and results; F12 calculates residue bounds; F18/F19 cover tracing and HOLDs. These are separate responsibilities, not one global pass/fail flag.
 
 ### Confirmed business decisions
 
@@ -271,7 +271,7 @@ A recurring real report format can justify a dedicated importer later. No extern
 
 ## References
 
-- [GrainLedger V2 proposal](../GrainLedger_V2.pdf), pages 8–9.
+- `GrainLedger_V2.pdf` (supplied separately), pages 8–9.
 - [Sample API](../api/sample-api.md).
 - [Procurement API](../api/procurement-api.md).
 - [MRL API](../api/mrl-api.md).

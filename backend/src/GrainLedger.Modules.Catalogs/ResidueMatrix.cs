@@ -37,7 +37,10 @@ public static class ResidueMatrixEndpoints
         var permission = request.CompanyId is null ? Permissions.ResiduePolicyManage : Permissions.ResidueCompanyPolicyManage;
         if (!await ResidueReview.AuthorizeAsync(connection, transaction, actor, permission, request.CompanyId, ct))
             return Results.Forbid();
-        var now = clock.GetUtcNow();
+        // Protected publishers compare the review and publication instants
+        // against PostgreSQL time, so derive both validations from that clock.
+        var now = await db.Database.SqlQueryRaw<DateTimeOffset>(
+            "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
         var history = await ResidueRuleEndpoints.ReadVersionsAsync(connection, transaction, request.CompanyId, ct);
         var rules = new List<ResidueRuleVersion>();
         foreach (var change in request.Rules)

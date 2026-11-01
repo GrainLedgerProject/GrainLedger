@@ -112,7 +112,12 @@ public static class ResidueRuleEndpoints
             request.SupersedesId is { } previous && !prior.Any(x => x.Id == previous && x.SubstanceId == request.SubstanceId && x.Kind == request.Kind) ||
             prior.Any(x => x.SupersedesId == request.SupersedesId && request.SupersedesId is not null))
             return Conflict("Rule ID/version or supersession conflicts with published history.");
-        var rule = request with { PublishedBy = actor, PublishedAt = now };
+        // The protected SQL publisher compares PublishedAt with its own clock.
+        // Use that database clock so a small API/DB clock skew cannot reject a
+        // newly reviewed rule as future-published.
+        var databaseNow = await db.Database.SqlQueryRaw<DateTimeOffset>(
+            "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
+        var rule = request with { PublishedBy = actor, PublishedAt = databaseNow };
         await using var insert = new NpgsqlCommand("SELECT catalog.publish_residue_rule($1,$2)", connection, transaction);
         insert.Parameters.AddWithValue(actor);
         insert.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(rule));

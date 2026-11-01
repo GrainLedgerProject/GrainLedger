@@ -7,7 +7,7 @@ Thiết kế đầy đủ theo yêu cầu GrainLedger, trình bày theo phần S
 - `GrainLedger_SDD.md`: nội dung nguồn, heading/caption tương ứng DOCX.
 - `GrainLedger_Architecture.drawio`: nguồn chỉnh sửa riêng của System Architecture.
 - `diagrams/`: chứa các file nguồn chỉnh sửa gồm 28 file Mermaid (`.mmd`) và 3 file PlantUML (`.puml`: `02_packages_field.puml`, `03_packages_workspace.puml`, `04_packages_core.puml`).
-- `diagrams/rendered/`: chứa **32 SVG, 32 PNG** đã render (thư mục được gitignore), gồm 1 architecture, 3 package, 9 class và 19 sequence. Xem hướng dẫn render tại `docs/diagram-rendering.md`.
+- `diagrams/rendered/`: chứa **32 SVG** được lưu trong Git để link ảnh ở bản Markdown hoạt động; PNG có thể render cục bộ và không được lưu trong Git. Gồm 1 architecture, 3 package, 9 class và 19 sequence. Xem hướng dẫn render tại `docs/diagram-rendering.md`.
 - `repository_context_vi.md`: căn cứ code/docs đã đọc, mapping tên, các phần existing/planned và khác biệt thu mua/nhận thực tế.
 - `design_basis_and_traceability.md`: căn cứ thiết kế và đối chiếu đủ UC-01–UC-38; các ghi chú revision cũ được giữ làm lịch sử.
 - `validation_report.md`: kiểm tra đầu ra và đối chiếu repository không đổi.

@@ -8,6 +8,7 @@ using GrainLedger.Modules.Ledger;
 using Npgsql;
 using GrainLedger.Modules.Capture;
 using GrainLedger.Modules.Catalogs;
+using GrainLedger.Modules.Exports;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -148,6 +149,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.MigrateAsync();
         await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
         await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
+        await scope.ServiceProvider.GetRequiredService<ExportDbContext>().Database.MigrateAsync();
         await using var owner = new NpgsqlConnection(OwnerConnectionString);
         await owner.OpenAsync();
         await using (var command = new NpgsqlCommand("CREATE ROLE grainledger_test_runtime LOGIN PASSWORD 'test-runtime' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT", owner))
