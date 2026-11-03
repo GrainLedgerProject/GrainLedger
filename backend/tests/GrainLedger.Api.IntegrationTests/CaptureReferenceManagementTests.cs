@@ -237,6 +237,58 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
     }
 
     [Fact]
+    public async Task Farmer_list_respects_linked_references_soft_deletion_and_read_only_access()
+    {
+        var company = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
+        var foreignCompany = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
+        var (owner, ownerSession) = await factory.SeedUserAsync(Roles.PurchasingStaff, company.Id);
+        var (reader, readerSession) = await factory.SeedUserAsync(Roles.CustomerManager, company.Id);
+        var (foreign, foreignSession) = await factory.SeedUserAsync(Roles.PurchasingStaff, foreignCompany.Id);
+        using var ownerClient = factory.CreateRealCookieClient(owner, ownerSession);
+        using var readerClient = factory.CreateRealCookieClient(reader, readerSession);
+        using var foreignClient = factory.CreateRealCookieClient(foreign, foreignSession);
+        var plotFarmer = Guid.NewGuid();
+        var procurementFarmer = Guid.NewGuid();
+        var retiredPlotFarmer = Guid.NewGuid();
+        var readerFarmer = Guid.NewGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Farmers.AddRange(
+                new Farmer { Id = plotFarmer, CompanyId = company.Id, Code = "REF-A", Name = "Reference A", CreatedAt = DateTimeOffset.UtcNow, CreatedBy = owner.Id },
+                new Farmer { Id = procurementFarmer, CompanyId = company.Id, Code = "REF-B", Name = "Reference B", CreatedAt = DateTimeOffset.UtcNow, CreatedBy = owner.Id },
+                new Farmer { Id = retiredPlotFarmer, CompanyId = company.Id, Code = "REF-C", Name = "Reference C", CreatedAt = DateTimeOffset.UtcNow, CreatedBy = owner.Id },
+                new Farmer { Id = readerFarmer, CompanyId = company.Id, Code = "REF-D", Name = "Reference D", CreatedAt = DateTimeOffset.UtcNow, CreatedBy = reader.Id });
+            await db.SaveChangesAsync();
+            db.Plots.AddRange(
+                new Plot { Id = Guid.NewGuid(), CompanyId = company.Id, FarmerId = plotFarmer, Code = "ACTIVE",
+                    BoundaryGeojson = "{\"type\":\"Point\",\"coordinates\":[106.35,10.4]}", AreaHa = 1m, CreatedBy = owner.Id },
+                new Plot { Id = Guid.NewGuid(), CompanyId = company.Id, FarmerId = retiredPlotFarmer, Code = "RETIRED",
+                    BoundaryGeojson = "{\"type\":\"Point\",\"coordinates\":[106.35,10.4]}", AreaHa = 1m, CreatedBy = owner.Id, IsDeleted = true });
+            db.Procurements.Add(new Procurement { Id = Guid.NewGuid(), CompanyId = company.Id, FarmerId = procurementFarmer,
+                Code = "REF-PROCUREMENT", CollectionSiteId = Guid.NewGuid(), ReceivedBy = owner.Id,
+                ReceivedAt = DateTimeOffset.UtcNow, Status = "DRAFT" });
+            await db.SaveChangesAsync();
+        }
+
+        var firstPage = await ownerClient.GetFromJsonAsync<FarmerListResponse>("/api/farmers?search=Reference&sortBy=name&pageSize=2");
+        Assert.Equal(4, firstPage!.TotalCount);
+        Assert.True(firstPage.HasMore);
+        Assert.Equal(new[] { plotFarmer, procurementFarmer }, firstPage.Items.Select(x => x.Id));
+        Assert.All(firstPage.Items, x => Assert.False(x.CanEdit || x.CanDelete));
+        var secondPage = await ownerClient.GetFromJsonAsync<FarmerListResponse>("/api/farmers?search=Reference&sortBy=name&page=2&pageSize=2");
+        Assert.Equal(new[] { retiredPlotFarmer, readerFarmer }, secondPage!.Items.Select(x => x.Id));
+        Assert.True(secondPage.Items[0].CanEdit && secondPage.Items[0].CanDelete);
+        Assert.False(secondPage.Items[1].CanEdit || secondPage.Items[1].CanDelete);
+        Assert.False(secondPage.HasMore);
+        var readOnly = await readerClient.GetFromJsonAsync<FarmerListResponse>("/api/farmers?search=Reference");
+        Assert.Equal(4, readOnly!.TotalCount);
+        Assert.All(readOnly.Items, x => Assert.False(x.CanEdit || x.CanDelete));
+        var foreignList = await foreignClient.GetFromJsonAsync<FarmerListResponse>("/api/farmers?search=Reference");
+        Assert.Empty(foreignList!.Items);
+    }
+
+    [Fact]
     public async Task Soft_deleted_child_allows_parent_retirement_but_cannot_be_reused()
     {
         var company = await factory.SeedOrganizationAsync(OrganizationKind.Customer);

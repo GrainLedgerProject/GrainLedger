@@ -4,10 +4,13 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Security.Claims;
 using GrainLedger.Api.Features.Identity;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace GrainLedger.Api.IntegrationTests;
@@ -61,6 +64,93 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
             await db.Sessions.Where(x => x.Id == session.Id).ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow));
         }
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/session")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Valid_cookie_renews_both_server_clocks()
+    {
+        var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff);
+        var oldSeen = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var oldExpiry = DateTimeOffset.UtcNow.AddMinutes(2);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Sessions.Where(x => x.Id == session.Id)
+                .ExecuteUpdateAsync(x => x.SetProperty(s => s.LastSeenAt, oldSeen).SetProperty(s => s.ExpiresAt, oldExpiry));
+        }
+        using var client = factory.CreateRealCookieClient(user, session);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
+        using var check = factory.Services.CreateScope();
+        var renewed = await check.ServiceProvider.GetRequiredService<AppDbContext>().Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+        Assert.True(renewed.LastSeenAt > oldSeen);
+        Assert.True(renewed.ExpiresAt > oldExpiry);
+        Assert.Equal(renewed.LastSeenAt.AddMinutes(15), renewed.ExpiresAt);
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("disabled")]
+    [InlineData("revoked")]
+    public async Task Invalid_server_session_never_renews(string reason)
+    {
+        var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff);
+        using var client = factory.CreateRealCookieClient(user, session);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        if (reason == "expired")
+            await db.Sessions.Where(x => x.Id == session.Id).ExecuteUpdateAsync(x => x.SetProperty(s => s.ExpiresAt, DateTimeOffset.UtcNow.AddMinutes(-1)));
+        else if (reason == "revoked")
+            await db.Sessions.Where(x => x.Id == session.Id).ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow));
+        else
+            await db.Users.Where(x => x.Id == user.Id).ExecuteUpdateAsync(x => x.SetProperty(u => u.IsActive, false));
+        var before = await db.Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+        var response = await client.GetAsync("/api/auth/session");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains(response.Headers.GetValues("Set-Cookie"), value => value.Contains("expires=", StringComparison.OrdinalIgnoreCase));
+        var after = await db.Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+        Assert.Equal(before.LastSeenAt, after.LastSeenAt);
+        Assert.Equal(before.ExpiresAt, after.ExpiresAt);
+        Assert.Equal(before.RevokedAt, after.RevokedAt);
+    }
+
+    [Theory]
+    [InlineData("missing-user")]
+    [InlineData("invalid-user")]
+    [InlineData("noncanonical-user")]
+    [InlineData("other-user")]
+    [InlineData("missing-session")]
+    [InlineData("invalid-session")]
+    public async Task Invalid_cookie_claims_do_not_renew_session(string reason)
+    {
+        var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff);
+        var userClaim = reason switch
+        {
+            "missing-user" => null,
+            "invalid-user" => "invalid",
+            "noncanonical-user" => user.Id.ToString("N"),
+            "other-user" => Guid.NewGuid().ToString(),
+            _ => user.Id.ToString()
+        };
+        var sessionClaim = reason switch
+        {
+            "missing-session" => null,
+            "invalid-session" => "invalid",
+            _ => session.Id.ToString()
+        };
+        using var scope = factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get("GrainLedger.Application");
+        var identity = new ClaimsIdentity("GrainLedger.Application");
+        if (userClaim is not null) identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, userClaim));
+        if (sessionClaim is not null) identity.AddClaim(new Claim("session_id", sessionClaim));
+        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), new AuthenticationProperties { ExpiresUtc = session.ExpiresAt }, "GrainLedger.Application");
+        using var client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Add("Cookie", $"{options.Cookie.Name}={options.TicketDataFormat.Protect(ticket)}");
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var before = await db.Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/session")).StatusCode);
+        var after = await db.Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+        Assert.Equal(before.LastSeenAt, after.LastSeenAt);
+        Assert.Equal(before.ExpiresAt, after.ExpiresAt);
     }
 
     [Fact]
@@ -137,10 +227,21 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
     public async Task Logout_revokes_current_session_and_cookie_replay_fails()
     {
         var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff);
+        var cookie = factory.ProtectSessionCookie(user, session);
         using var client = factory.CreateRealCookieClient(user, session);
         await AddCsrfAsync(client);
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/session")).StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var revoked = await db.Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+        Assert.NotNull(revoked.RevokedAt);
+        using var replay = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        replay.DefaultRequestHeaders.Add("Cookie", $"{cookie.Name}={cookie.Value}");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await replay.GetAsync("/api/auth/session")).StatusCode);
+        var after = await db.Sessions.AsNoTracking().SingleAsync(x => x.Id == session.Id);
+        Assert.Equal(revoked.RevokedAt, after.RevokedAt);
+        Assert.Equal(revoked.LastSeenAt, after.LastSeenAt);
+        Assert.Equal(revoked.ExpiresAt, after.ExpiresAt);
     }
 
     [Fact]

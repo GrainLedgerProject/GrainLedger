@@ -26,19 +26,24 @@ public sealed class SessionCookieEvents(AppDbContext db, TimeProvider clock) : C
         {
             context.RejectPrincipal(); return;
         }
-        var now = clock.GetUtcNow();
-        var session = await db.Sessions.Include(x => x.User).SingleOrDefaultAsync(x => x.Id == sessionId, context.HttpContext.RequestAborted);
         var claimedUserId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (session is null || session.UserId.ToString() != claimedUserId || session.RevokedAt is not null || session.ExpiresAt <= now || !session.User.IsActive)
+        if (!Guid.TryParse(claimedUserId, out var userId) || userId.ToString() != claimedUserId)
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(AuthSchemes.Application);
             return;
         }
+        var now = clock.GetUtcNow();
         // Renew both clocks together. A conditional update cannot undo concurrent logout.
-        var renewed = await db.Sessions.Where(x => x.Id == sessionId && x.RevokedAt == null && x.ExpiresAt > now && x.User.IsActive)
+        var renewed = await db.Sessions.Where(x => x.Id == sessionId && x.UserId == userId &&
+                x.RevokedAt == null && x.ExpiresAt > now && x.User.IsActive)
             .ExecuteUpdateAsync(set => set.SetProperty(x => x.LastSeenAt, now).SetProperty(x => x.ExpiresAt, now.AddMinutes(15)), context.HttpContext.RequestAborted);
-        if (renewed == 0) { context.RejectPrincipal(); return; }
+        if (renewed == 0)
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync(AuthSchemes.Application);
+            return;
+        }
         context.ShouldRenew = true;
     }
 }

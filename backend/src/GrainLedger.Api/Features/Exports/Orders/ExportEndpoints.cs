@@ -127,12 +127,17 @@ public static partial class ExportModule
     private static async Task<ExportOrderDto> DetailAsync(AppDbContext db, ExportOrder order, bool canEdit,
         CancellationToken ct)
     {
-        var spec = await db.Specifications.AsNoTracking().SingleAsync(x => x.OrderId == order.Id &&
-            x.VersionNo == order.CurrentSpecificationVersion, ct);
+        var spec = await db.Specifications.AsNoTracking()
+            .Where(x => x.OrderId == order.Id && x.VersionNo == order.CurrentSpecificationVersion)
+            .Select(x => new
+            {
+                x.Id,
+                Allocated = db.Containers.Where(c => c.OrderId == order.Id)
+                    .Sum(c => (decimal?)c.TargetMassKg) ?? 0m
+            }).SingleAsync(ct);
         var limits = await db.Limits.AsNoTracking().Where(x => x.SpecificationId == spec.Id)
             .OrderBy(x => x.AttributeCode).ToListAsync(ct);
-        var allocated = await db.Containers.AsNoTracking().Where(x => x.OrderId == order.Id)
-            .SumAsync(x => (decimal?)x.TargetMassKg, ct) ?? 0m;
+        var allocated = spec.Allocated;
         return new(order.Id, order.Code, order.MarketId, order.CommodityId,
             ExportRules.Text(order.RequiredMassKg), order.OriginalMass, order.OriginalUnit,
             order.ShippingFrom, order.ShippingTo, order.Version, order.CurrentSpecificationVersion,
@@ -381,13 +386,17 @@ public static partial class ExportModule
             return Invalid(new() { ["query"] = ["Invalid pagination."] });
         var query = db.Events.AsNoTracking().Where(x => x.OrderId == id);
         var total = await query.CountAsync(ct);
-        var rows = await query.OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id)
-            .Skip((page - 1) * size).Take(size).ToListAsync(ct);
-        var actorIds = rows.Select(x => x.ActorId).Distinct().ToArray();
-        var actorNames = await db.Users.AsNoTracking().Where(x => actorIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, x => x.DisplayName, ct);
+        var pageQuery = query.OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id)
+            .Skip((page - 1) * size).Take(size);
+        var rows = await (from x in pageQuery
+                          join user in db.Users.AsNoTracking() on x.ActorId equals user.Id into users
+                          from user in users.DefaultIfEmpty()
+                          orderby x.RecordedAt descending, x.Id
+                          select new { x.Action, x.RecordedAt, x.Snapshot,
+                              ActorName = user == null ? "Unknown user" : user.DisplayName })
+            .ToListAsync(ct);
         return Results.Ok(new ExportPage<ExportEventDto>(rows.Select(x => new ExportEventDto(x.Action,
-            x.RecordedAt, x.Snapshot, actorNames.GetValueOrDefault(x.ActorId, "Unknown user")))
+            x.RecordedAt, x.Snapshot, x.ActorName))
             .ToArray(), page, size, total, (long)page * size < total));
     }
 

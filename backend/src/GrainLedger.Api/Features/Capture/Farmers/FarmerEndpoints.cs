@@ -176,15 +176,15 @@ public static class CaptureModule
             ("createdat", false) => query.OrderBy(x => x.CreatedAt),
             _ => query.OrderByDescending(x => x.CreatedAt)
         };
-        var rows = await ordered.ThenBy(x => x.Id).Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
+        var rows = await ordered.ThenBy(x => x.Id).Skip((currentPage - 1) * size).Take(size)
+            .Select(x => new
+            {
+                Farmer = x,
+                InUse = db.Plots.Any(p => p.CompanyId == actor.Value.CompanyId && p.FarmerId == x.Id) ||
+                    db.Procurements.Any(p => p.CompanyId == actor.Value.CompanyId && p.FarmerId == x.Id)
+            }).ToListAsync(ct);
         var canManage = await access.HasPermissionAsync("farms.write", ct);
-        var ids = rows.Select(x => x.Id).ToArray();
-        var plotOwners = await db.Plots.AsNoTracking().Where(x => x.CompanyId == actor.Value.CompanyId && ids.Contains(x.FarmerId))
-            .Select(x => x.FarmerId).Distinct().ToArrayAsync(ct);
-        var procurementOwners = await db.Procurements.AsNoTracking().Where(x => x.CompanyId == actor.Value.CompanyId && ids.Contains(x.FarmerId))
-            .Select(x => x.FarmerId).Distinct().ToArrayAsync(ct);
-        var inUse = plotOwners.Concat(procurementOwners).ToHashSet();
-        var items = rows.Select(x => ToReferenceItem(x, actor.Value.UserId, canManage && !inUse.Contains(x.Id))).ToArray();
+        var items = rows.Select(x => ToReferenceItem(x.Farmer, actor.Value.UserId, canManage && !x.InUse)).ToArray();
         return Results.Ok(new FarmerListResponse(items, currentPage, size, totalCount,
             (long)currentPage * size < totalCount));
     }

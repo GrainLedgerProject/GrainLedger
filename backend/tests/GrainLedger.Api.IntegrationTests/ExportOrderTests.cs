@@ -984,7 +984,13 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         spec.Headers.TryAddWithoutValidation("If-Match", created.Headers.ETag!.ToString());
         var updated = await writer.SendAsync(spec);
         Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
-        Assert.Equal(2, (await updated.Content.ReadFromJsonAsync<ExportOrderDto>())!.SpecificationVersion);
+        var updatedOrder = (await updated.Content.ReadFromJsonAsync<ExportOrderDto>())!;
+        Assert.Equal(2, updatedOrder.SpecificationVersion);
+        Assert.Equal("13", Assert.Single(updatedOrder.Limits).MaxValue);
+        Assert.Equal("48000", updatedOrder.AllocatedMassKg);
+        var current = (await reader.GetFromJsonAsync<ExportOrderDto>($"/api/export-orders/{order.Id}"))!;
+        Assert.Equal(updatedOrder.Limits, current.Limits);
+        Assert.Equal(updatedOrder.AllocatedMassKg, current.AllocatedMassKg);
         var specPage = await writer.GetFromJsonAsync<ExportPage<ExportSpecificationDto>>(
             $"/api/export-orders/{order.Id}/specifications?page=1&pageSize=1");
         Assert.Equal(2, specPage!.TotalCount);
@@ -993,7 +999,20 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var historyPage = await reader.GetFromJsonAsync<ExportPage<ExportEventDto>>(
             $"/api/export-orders/{order.Id}/history?page=1&pageSize=1");
         Assert.NotNull(historyPage);
-        Assert.Equal(staff.DisplayName, Assert.Single(historyPage.Items).ActorName);
+        Assert.Equal(2, historyPage.TotalCount);
+        Assert.True(historyPage.HasMore);
+        var latestEvent = Assert.Single(historyPage.Items);
+        Assert.Equal(staff.DisplayName, latestEvent.ActorName);
+        Assert.Equal("SPECIFICATION_VERSION_ADDED", latestEvent.Action);
+        Assert.Equal(specOperation, JsonDocument.Parse(latestEvent.Snapshot).RootElement.GetProperty("OperationId").GetGuid());
+        var earlierPage = (await reader.GetFromJsonAsync<ExportPage<ExportEventDto>>(
+            $"/api/export-orders/{order.Id}/history?page=2&pageSize=1"))!;
+        var earlierEvent = Assert.Single(earlierPage.Items);
+        Assert.Equal("ORDER_CREATED", earlierEvent.Action);
+        Assert.Equal(staff.DisplayName, earlierEvent.ActorName);
+        Assert.Equal(operation, JsonDocument.Parse(earlierEvent.Snapshot).RootElement.GetProperty("OperationId").GetGuid());
+        Assert.False(earlierPage.HasMore);
+        Assert.Equal(HttpStatusCode.NotFound, (await outsider.GetAsync($"/api/export-orders/{order.Id}/history")).StatusCode);
         var oldReplay = await writer.PostAsJsonAsync("/api/export-orders", payload);
         Assert.Equal(HttpStatusCode.Created, oldReplay.StatusCode);
         Assert.Equal(1, (await oldReplay.Content.ReadFromJsonAsync<ExportOrderDto>())!.SpecificationVersion);
