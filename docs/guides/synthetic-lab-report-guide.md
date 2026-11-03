@@ -25,7 +25,7 @@ Replace sample/seal values below with the values copied from your test sample:
 
 ```bash
 python3 tools/generate_synthetic_lab_report.py \
-  --sample-code SMP-261020-0001 \
+  --sample-code SMP-20261020-0001 \
   --seal-code SEAL-001 \
   --lab-sample-reference LAB-S001 \
   --report-number SYN-MANUAL-001 \
@@ -61,7 +61,7 @@ For a large panel:
 
 ```bash
 python3 tools/generate_synthetic_lab_report.py \
-  --sample-code SMP-261020-0001 \
+  --sample-code SMP-20261020-0001 \
   --seal-code SEAL-001 \
   --report-number SYN-PANEL-001 \
   --rows 300 \

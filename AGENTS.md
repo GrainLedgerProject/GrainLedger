@@ -43,6 +43,8 @@ Use `http://localhost:5173`; Vite proxies `/api` and `/signin-google` to backend
 - `ConnectionStrings__GrainLedger` is the restricted runtime connection. `ConnectionStrings__GrainLedgerMigration` is migration-owner access, not normal application access. Never bypass runtime-role validation or use elevated credentials to make application startup succeed.
 - Never print or commit credentials, tokens, `.env`, or real evidence files. Never expose backend secrets through `VITE_` variables.
 - Capture owns official procurement source records; `POST /api/procurements` registers source expectation, while assigned-facility arrival measurement and review routes live in Ledger. Source status remains immutable `COMMITTED`; Ledger receiving projection supplies outward workflow state. Do not convert historical synthetic records automatically or alter existing Ledger stock/history.
+- Capture farmer, plot, procurement and sample creation requires `payloadSchemaVersion: 2`; do not extend this version change to other operations. Preserve stored codes. Procurement and sample codes use `YYYYMMDD` and independent continuous company/type counters; see `docs/guides/companion-capture-codes.md`.
+- Code-issuance cutover requires coordinated Capture and Ledger migrations and compatible API instances; follow the Capture and lot-code guides and obtain database-owner approval before shared migrations. Legacy processing drafts cannot be edited or committed, and unreserved source receipts fail closed; do not invent reservations or rewrite history.
 
 ## Correctness boundaries
 

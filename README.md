@@ -14,6 +14,8 @@ Lot-to-lot tracing is available through Ledger → Traceability and the [audited
 
 The React web app supports desktop and mobile-sized screens. The mobile workspace is a placeholder, not a shipped mobile app. GrainLedger does not include customer settlement. Planned or documented future workflows are not implied to be available.
 
+New Capture records use server-generated codes. Procurement and sample codes use `PRC-YYYYMMDD-NNNN` and `SMP-YYYYMMDD-NNNN`, with separate company/type counters continuing across dates. Existing codes remain unchanged. See the [Capture code guide](docs/guides/companion-capture-codes.md) for creation contracts and cutover guidance.
+
 ## Technology
 - ASP.NET Core 10 monolith: one API project, feature folders, one EF Core context, one Npgsql runtime pool
 - PostgreSQL application objects in schema `grainledger`; React web app remains separate

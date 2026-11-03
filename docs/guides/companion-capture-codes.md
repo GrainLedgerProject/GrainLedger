@@ -39,9 +39,11 @@ Ledger source and processing lot codes continue to follow
 replacement of the same product retains the original lot code; it does not
 gain an `-R1` suffix.
 
-Deploy the Capture migration before starting the new API. It seeds each
-company/type counter from the highest existing dated counter and recognizable
-historical code serial, without changing stored codes. Do not run the migration
-as part of ordinary startup. Test with an isolated PostgreSQL database first.
-During the API/web cutover, pause Capture writes and stop old API instances;
-otherwise old date-scoped counters can advance after the migration.
+Review forward migration `20261103000100_ContinuousCaptureCodes` with the
+database owner and obtain explicit approval before applying it to a shared
+database. It seeds each company/type counter from the highest existing dated
+counter and recognizable historical code serial, without changing stored
+codes. Do not run the migration as part of ordinary startup. Test with an
+isolated PostgreSQL database first. During API/web cutover, pause Capture
+writes and stop old API instances; otherwise old date-scoped counters can
+advance after the migration. Deployment status must be established independently.

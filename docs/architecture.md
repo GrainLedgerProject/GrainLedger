@@ -16,6 +16,8 @@ Source/stock workflows retain their operation-specific transaction boundaries. C
 
 Within `Features`, Capture groups farmer, season, spray declaration, procurement, sample, lab report and residue-evidence workflows; Catalogs groups commodities, reference data, MRLs, residue rules and blend assessment. Ledger groups endpoints, planning, residue and traceability; Exports groups orders and planning. Shared feature composition and persistence files remain at their feature root. Folder moves retain the existing feature namespaces; `Data/Migrations` and embedded `Data/Sql` remain unchanged.
 
+Current Capture creation assigns farmer, plot, procurement and sample codes server-side; these four create requests require `payloadSchemaVersion: 2`, while other Capture operations retain their own version contracts. Procurement and sample codes include `YYYYMMDD` and independent continuous per-company/type counters. Stored codes remain unchanged. Ledger reserves source and processing lot codes; legacy processing drafts and unreserved source receipts fail closed. Migration and cutover require database-owner review and explicit shared-database approval; deployment status is unconfirmed. See [Capture code guide](guides/companion-capture-codes.md) and [lot-code guide](guides/unified-lot-code-guide.md).
+
 ## Historical module-era architecture snapshot
 
 The following sections record behavior and deployment details from the prior multi-context/multi-schema implementation. Treat old schema and migration names as historical identifiers, not instructions for the approved single-schema baseline. Current reset/deployment status must be established independently.

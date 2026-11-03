@@ -109,7 +109,7 @@ For confirmed-report exceptions, backend matches adopted profiles and previews e
 All values below are fictional workflow examples, not legal limits or compliance guidance.
 
 - Procurement source lot: `RAW-20261020-000002`
-- Sample code on bag: `SMP-261020-0001`
+- Sample code on bag: `SMP-20261020-0001`
 - Physical seal: `SEAL-001`
 - Laboratory reference: `LAB-S001`
 - Printed report number: `R-EXAMPLE-1042`
