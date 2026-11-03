@@ -1,0 +1,70 @@
+classDiagram
+direction TB
+class CorrectionRequest {
+ <<logical target>>
+ +UUID request_id
+ +UUID original_conversion_id
+ +UUID compensation_id
+ +UUID replacement_id
+ +String reconciliation_ref
+ +String outcome
+ +canCommit(reconciliation, downstream) Boolean
+ +validateReplacementScope(plan) ValidationResult
+}
+class Conversion {
+ <<logical target>>
+ +UUID conversion_id
+ +UUID company_id
+ +UUID plan_id
+ +String conversion_type
+ +String status
+ +Decimal declared_loss_kg
+ +Decimal measurement_variance_kg
+ +String variance_reason
+ +UUID variance_confirmed_by
+ +calculateVariance() Decimal
+ +validateBalance(policy) ValidationResult
+}
+class InventoryMovement {
+ <<logical target>>
+ +UUID movement_id
+ +UUID event_id
+ +UUID allocation_id
+ +UUID reservation_id
+ +UUID reverses_movement_id
+ +Decimal delta_kg
+ +isExactReversalOf(original) Boolean
+}
+class ReservationEvent {
+ <<logical target>>
+ +UUID reservation_event_id
+ +UUID reservation_id
+ +UUID movement_id
+ +UUID reverses_event_id
+ +UUID correction_request_id
+ +String event_type
+ +Decimal mass_kg
+ +signedEffect() Decimal
+ +isExactConsumptionReversal(original) Boolean
+}
+class StockReservation {
+ <<logical target>>
+ +UUID reservation_id
+ +UUID plan_allocation_id
+ +UUID plan_output_id
+ +Decimal reserved_kg
+ +Decimal consumed_kg
+ +Decimal released_kg
+ +outstandingMass() Decimal
+ +canConsume(massKg) Boolean
+}
+InventoryMovement "0..1" --> "0..1" InventoryMovement : reversed_by
+StockReservation "0..1" --> "0..*" InventoryMovement : consumes_reserved_mass
+Conversion "1" --> "0..*" CorrectionRequest : investigated
+Conversion "0..1" --> "0..1" CorrectionRequest : compensation_result
+Conversion "0..1" --> "0..1" CorrectionRequest : corrected_replacement
+Conversion "0..1" --> "0..*" Conversion : compensates_original
+StockReservation "1" --> "0..*" ReservationEvent : history
+ReservationEvent "0..1" --> "0..1" ReservationEvent : reverses_consumption
+InventoryMovement "0..1" --> "0..1" ReservationEvent : matched_movement
+CorrectionRequest "0..1" --> "0..*" ReservationEvent : correction_accounting

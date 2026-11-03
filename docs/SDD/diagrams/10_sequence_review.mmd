@@ -1,0 +1,34 @@
+sequenceDiagram
+ autonumber
+ actor M as Customer Manager
+ participant UI as :Plan Review UI
+ participant Ctrl as :PlansEndpoints (planned)
+ participant P as :PlanningService
+ participant C as :ComplianceService
+ participant R as :PlanningPersistence port (planned)
+ participant DB as :Database
+ M->>UI: Choose APPROVE or REJECT with review scope
+ UI->>+Ctrl: reviewPlan(planId, decision, scope)
+ Ctrl->>+P: review(command, authenticatedActor)
+ P->>+R: beginAndLockPlanContainerAndAllocations(planId)
+ R->>DB: BEGIN, lock active authority, stock and reservations
+ DB-->>R: Remaining-input or actual-output snapshot
+ R-->>-P: Protected review snapshot
+ P->>P: requireCompanyGrantAndValidReviewScope()
+ P->>C: assess(REVIEW, exactScope, currentBasis)
+ C-->>P: Current verdict, versions and findings
+ alt APPROVE requested and current verdict PASS
+ P->>R: appendReviewAuthorityAndScopedReservations(command)
+ R->>DB: New review, current authority, eligible INPUT/OUTPUT reservations
+ R->>DB: Release superseded unfinished authority, COMMIT
+ P->>P: result = Approved(scope)
+ else REJECT requested or approval cannot pass
+ P->>R: retainAssessmentAndActualDecisionWithoutNewAuthority()
+ R->>DB: Assessment/findings, REJECT review only when selected, COMMIT
+ P->>P: result = RejectedOrApprovalRefused(findings)
+ end
+ P-->>-Ctrl: ReviewOutcome
+ Ctrl-->>-UI: Decision and scoped findings
+ UI-->>M: Display retained review outcome
+ Note over P,DB: OUTPUT_ONLY uses actual outputs, never reruns spent inputs
+ Note over DB: Full target design, not a claim of implemented export or residue APIs.

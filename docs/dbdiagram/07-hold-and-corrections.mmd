@@ -1,0 +1,82 @@
+erDiagram
+    %% Live catalog snapshot 2026-10-19. Exact type aliases: varchar(n)=character varying(n); timestamptz=timestamp with time zone.
+    %% NN = NOT NULL; NULL = nullable. PK/FK mark catalog constraints; FK labels are exact constraint names.
+
+    %% identity.organizations — reference only; full fields in owning diagram
+    identity_organizations {
+        uuid Id PK "NN"
+    }
+    %% identity.users — reference only; full fields in owning diagram
+    identity_users {
+        uuid Id PK "NN"
+    }
+    %% ledger.corrections — full table
+    ledger_corrections {
+        uuid id PK "NN"
+        uuid operation_id FK "NN"
+        text reason "NN"
+        text status "NN"
+        uuid evidence_id FK "NULL"
+        jsonb reconciliation "NULL"
+        uuid replacement_operation_id FK "NULL"
+        uuid replacement_version "NULL"
+        jsonb replacement_content "NULL"
+    }
+    %% ledger.evidence — reference only; full fields in owning diagram
+    ledger_evidence {
+        uuid id PK "NN"
+    }
+    %% ledger.holds — full table
+    ledger_holds {
+        uuid id PK "NN"
+        uuid lot_id FK "NN"
+        text reason "NN"
+        text status "NN"
+        uuid evidence_id FK "NULL"
+        text response "NULL"
+        timestamptz created_at "NN"
+    }
+    %% ledger.lots — reference only; full fields in owning diagram
+    ledger_lots {
+        uuid id PK "NN"
+    }
+    %% ledger.notifications — full table
+    ledger_notifications {
+        uuid id PK "NN"
+        uuid user_id FK "NN"
+        uuid hold_id FK "NN"
+        uuid lot_id FK "NN"
+        text message "NN"
+        timestamptz created_at "NN"
+        timestamptz read_at "NULL"
+    }
+    %% ledger.operations — reference only; full fields in owning diagram
+    ledger_operations {
+        uuid id PK "NN"
+    }
+    %% ledger.receipt_correction_blocks — full table
+    ledger_receipt_correction_blocks {
+        uuid correction_id PK "NN"
+        uuid receipt_id "NN"
+        uuid owner_id FK "NN"
+        boolean committed "NN"
+    }
+    %% ledger.receipt_reversals — full table
+    ledger_receipt_reversals {
+        uuid receipt_id PK "NN"
+        uuid correction_id "NN"
+        uuid owner_id FK "NN"
+        uuid evidence_id FK "NN"
+    }
+
+    identity_organizations ||..o{ ledger_receipt_correction_blocks : "receipt_correction_blocks_owner_id_fkey"
+    identity_organizations ||..o{ ledger_receipt_reversals : "receipt_reversals_owner_id_fkey"
+    identity_users ||..o{ ledger_notifications : "notifications_user_id_fkey"
+    ledger_evidence o|..o{ ledger_corrections : "corrections_evidence_id_fkey"
+    ledger_evidence o|..o{ ledger_holds : "holds_evidence_id_fkey"
+    ledger_evidence ||..o{ ledger_receipt_reversals : "receipt_reversals_evidence_id_fkey"
+    ledger_holds ||..o{ ledger_notifications : "notifications_hold_id_fkey"
+    ledger_lots ||..o{ ledger_holds : "holds_lot_id_fkey"
+    ledger_lots ||..o{ ledger_notifications : "notifications_lot_id_fkey"
+    ledger_operations o|..o| ledger_corrections : "corrections_replacement_operation_id_fkey"
+    ledger_operations ||..o| ledger_corrections : "corrections_operation_id_fkey"

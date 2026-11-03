@@ -1,0 +1,859 @@
+// Live PostgreSQL catalog snapshot; captured 2026-10-19. See DATA_DICTIONARY.md for exact SQL details DBML cannot express.
+Project grainledger_live {
+  database_type: 'PostgreSQL'
+  Note: 'Live deployed schema snapshot captured 2026-10-19; 61 tables (including ledger.__EFMigrationsHistory). Not a future design.'
+}
+
+Table capture.business_events {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid
+  actor_id uuid
+  event_type "character varying(60)" [not null]
+  occurred_at "timestamp with time zone" [not null]
+  recorded_at "timestamp with time zone" [not null]
+  correlation_id uuid [not null]
+  payload jsonb [not null]
+  indexes {
+    (actor_id)
+    (company_id)
+  }
+}
+Table capture.code_counters {
+  company_id uuid [not null]
+  kind "character varying(3)" [not null]
+  scope "character varying(32)" [not null]
+  next_value bigint [not null]
+  indexes {
+    (company_id, kind, scope) [pk]
+  }
+}
+Table capture.crop_seasons {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  name text [not null]
+  starts_on date [not null]
+  ends_on date [not null]
+  created_by uuid
+  version integer [not null, default: `1`]
+  is_deleted boolean [not null, default: `false`]
+  indexes {
+    (company_id, id) [unique]
+  }
+}
+Table capture.farmers {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code "character varying(40)" [not null]
+  name text [not null]
+  contact text
+  created_at "timestamp with time zone" [not null]
+  created_by uuid
+  version integer [not null, default: `1`]
+  is_deleted boolean [not null, default: `false`]
+  code_number bigint
+  indexes {
+    (company_id, created_at, id)
+    (company_id, code) [unique]
+    (company_id, code_number) [unique]
+    (company_id, id) [unique]
+  }
+}
+Table capture.offline_operations {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  submitted_by uuid [not null]
+  device_id "character varying(100)" [not null]
+  client_operation_id uuid [not null]
+  payload_hash "character varying(128)" [not null]
+  payload jsonb [not null]
+  captured_at "timestamp with time zone" [not null]
+  capture_geojson jsonb
+  received_at "timestamp with time zone" [not null]
+  status "character varying(32)" [not null]
+  applied_event_id uuid
+  result_payload jsonb
+  conflict_reason text
+  indexes {
+    (applied_event_id) [unique]
+    (company_id, id) [unique]
+    (submitted_by)
+    (company_id, device_id, client_operation_id) [unique]
+  }
+}
+Table capture.plot_seasons {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plot_id uuid [not null]
+  season_id uuid [not null]
+  rice_variety text [not null]
+  created_by uuid
+  version integer [not null, default: `1`]
+  is_deleted boolean [not null, default: `false`]
+  indexes {
+    (season_id)
+    (company_id, id) [unique]
+    (plot_id, season_id) [unique]
+  }
+}
+Table capture.plots {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  farmer_id uuid [not null]
+  code "character varying(40)" [not null]
+  boundary_geojson jsonb [not null]
+  area_ha numeric(24,12) [not null]
+  created_by uuid
+  version integer [not null, default: `1`]
+  is_deleted boolean [not null, default: `false`]
+  indexes {
+    (company_id, id) [unique]
+    (farmer_id, code) [unique]
+  }
+}
+Table capture.procurement_items {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  procurement_id uuid [not null]
+  line_no integer [not null]
+  plot_season_id uuid [not null]
+  net_mass_kg numeric(20,6) [not null]
+  measured_value numeric(24,12) [not null]
+  measured_unit "character varying(20)" [not null]
+  moisture_percent numeric(24,12) [not null]
+  indexes {
+    (plot_season_id)
+    (company_id, id) [unique]
+    (procurement_id, line_no) [unique]
+  }
+}
+Table capture.procurements {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code "character varying(40)" [not null]
+  farmer_id uuid [not null]
+  collection_site_id uuid [not null]
+  received_by uuid [not null]
+  received_at "timestamp with time zone" [not null]
+  status "character varying(32)" [not null]
+  event_id uuid
+  receiving_workflow text [default: `'PHYSICAL_ARRIVAL_V1'::text`]
+  indexes {
+    (company_id, received_at, id)
+    (event_id) [unique]
+    (company_id, code) [unique]
+    (company_id, id) [unique]
+  }
+}
+Table capture.sample_handovers {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  sample_id uuid [not null]
+  recorded_by uuid [not null]
+  from_party text [not null]
+  to_party text [not null]
+  handed_over_at "timestamp with time zone" [not null]
+  seal_condition text [not null]
+  evidence_ref text
+  indexes {
+    (recorded_by)
+    (sample_id)
+    (company_id, id) [unique]
+  }
+}
+Table capture.samples {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code "character varying(60)" [not null]
+  source_lot_id uuid [not null]
+  seal_code "character varying(100)" [not null]
+  collected_by uuid [not null]
+  collected_at "timestamp with time zone" [not null]
+  indexes {
+    (collected_by)
+    (source_lot_id)
+    (company_id, code) [unique]
+    (company_id, id) [unique]
+  }
+}
+Table capture.source_lots {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  lot_id uuid [not null]
+  procurement_item_id uuid [not null]
+  indexes {
+    (lot_id) [unique]
+    (procurement_item_id) [unique]
+    (company_id, id) [unique]
+  }
+}
+Table capture.spray_declarations {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plot_season_id uuid [not null]
+  applied_on date [not null]
+  recorded_by uuid [not null]
+  recorded_at "timestamp with time zone" [not null]
+  evidence_ref text
+  indexes {
+    (plot_season_id)
+    (recorded_by)
+    (company_id, id) [unique]
+  }
+}
+Table capture.spray_items {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  declaration_id uuid [not null]
+  product_name text
+  substance_id uuid
+  rate numeric(24,12)
+  rate_unit "character varying(40)"
+  indexes {
+    (declaration_id)
+    (substance_id)
+    (company_id, id) [unique]
+  }
+}
+Table catalog.active_substances {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code "character varying(60)" [not null]
+  name text [not null]
+  indexes {
+    (code) [unique]
+  }
+}
+Table catalog.catalog_events {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  actor_id uuid [not null]
+  event_type "character varying(60)" [not null]
+  resource_type "character varying(60)" [not null]
+  resource_id uuid [not null]
+  occurred_at "timestamp with time zone" [not null]
+  correlation_id uuid [not null]
+  before_state jsonb
+  after_state jsonb
+  indexes {
+    (actor_id)
+    (correlation_id)
+    (resource_type, resource_id, occurred_at)
+  }
+}
+Table catalog.commodities {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code "character varying(40)" [not null]
+  name text [not null]
+  created_by uuid
+  is_archived boolean [not null, default: `false`]
+  indexes {
+    (code) [unique]
+  }
+}
+Table catalog.markets {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code "character varying(40)" [not null]
+  name text [not null]
+  indexes {
+    (code) [unique]
+  }
+}
+Table catalog.measurement_units {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code "character varying(30)" [not null]
+  name text [not null]
+  quantity_kind "character varying(32)" [not null]
+  created_by uuid
+  is_deleted boolean [not null, default: `false`]
+  indexes {
+    (code) [unique]
+  }
+}
+Table catalog.mrl_limits {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  mrl_version_id uuid [not null]
+  substance_id uuid [not null]
+  limit_value numeric(24,12) [not null]
+  unit "character varying(20)" [not null]
+  indexes {
+    (mrl_version_id, substance_id) [unique]
+    (substance_id)
+  }
+}
+Table catalog.mrl_versions {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  market_id uuid [not null]
+  commodity_id uuid [not null]
+  version_no integer [not null]
+  status "character varying(32)" [not null]
+  effective_from "timestamp with time zone" [not null]
+  effective_to "timestamp with time zone"
+  published_by uuid
+  published_at "timestamp with time zone"
+  source_ref text [not null]
+  indexes {
+    (commodity_id)
+    (market_id, commodity_id, version_no) [unique]
+    (published_by)
+  }
+}
+Table catalog.quality_attributes {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code "character varying(60)" [not null]
+  name text [not null]
+  unit "character varying(30)" [not null]
+  indexes {
+    (code) [unique]
+  }
+}
+Table catalog.rice_varieties {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  code "character varying(40)" [not null]
+  name text [not null]
+  indexes {
+    (code) [unique]
+  }
+}
+Table identity.audit_events {
+  Id bigint [pk, not null, increment, note: 'GENERATED BY DEFAULT AS IDENTITY; exact sequence configuration in DATA_DICTIONARY.md']
+  ActorUserId uuid
+  SubjectUserId uuid
+  Action "character varying(100)" [not null]
+  DetailsJson jsonb [not null]
+  OccurredAt "timestamp with time zone" [not null]
+  IpAddress text
+  indexes {
+    (OccurredAt)
+  }
+}
+Table identity.organizations {
+  Id uuid [pk, not null]
+  Name "character varying(160)" [not null]
+  Kind "character varying(20)" [not null]
+  CreatedAt "timestamp with time zone" [not null]
+  indexes {
+    (Name) [unique]
+  }
+}
+Table identity.password_reset_codes {
+  Id uuid [pk, not null]
+  UserId uuid [not null]
+  CodeHash "character varying(64)" [not null]
+  FailedAttempts integer [not null]
+  CreatedAt "timestamp with time zone" [not null]
+  ExpiresAt "timestamp with time zone" [not null]
+  LastSentAt "timestamp with time zone" [not null]
+  ConsumedAt "timestamp with time zone"
+  indexes {
+    (UserId, ConsumedAt)
+  }
+}
+Table identity.registration_attempts {
+  Id uuid [pk, not null]
+  Email "character varying(320)" [not null]
+  NormalizedEmail "character varying(320)" [not null]
+  DisplayName "character varying(120)" [not null]
+  PasswordHash "character varying(1000)" [not null]
+  CodeHash "character varying(64)" [not null]
+  FailedAttempts integer [not null]
+  CreatedAt "timestamp with time zone" [not null]
+  ExpiresAt "timestamp with time zone" [not null]
+  LastSentAt "timestamp with time zone" [not null]
+  InvalidatedAt "timestamp with time zone"
+  ConsumedAt "timestamp with time zone"
+  indexes {
+    (NormalizedEmail, InvalidatedAt)
+  }
+}
+Table identity.sessions {
+  Id uuid [pk, not null]
+  UserId uuid [not null]
+  CreatedAt "timestamp with time zone" [not null]
+  LastSeenAt "timestamp with time zone" [not null]
+  ExpiresAt "timestamp with time zone" [not null]
+  RevokedAt "timestamp with time zone"
+  IpAddress "character varying(64)"
+  UserAgent "character varying(512)"
+  FamilyId uuid [not null, default: `'00000000-0000-0000-0000-000000000000'::uuid`]
+  RefreshTokenHash "character varying(64)"
+  ReplacedBySessionId uuid
+  RefreshTokenUsedAt "timestamp with time zone"
+  indexes {
+    (FamilyId)
+    (UserId, RevokedAt)
+  }
+}
+Table identity.users {
+  Id uuid [pk, not null]
+  Provider "character varying(30)" [not null]
+  ProviderSubject "character varying(255)" [not null]
+  Email "character varying(320)" [not null]
+  DisplayName "character varying(120)" [not null]
+  PhoneNumber "character varying(32)"
+  Role "character varying(40)"
+  OrganizationId uuid
+  IsActive boolean [not null]
+  Version uuid [not null]
+  CreatedAt "timestamp with time zone" [not null]
+  UpdatedAt "timestamp with time zone" [not null]
+  FailedLoginCount integer [not null, default: `0`]
+  LockoutEnd "timestamp with time zone"
+  NormalizedEmail "character varying(320)"
+  PasswordHash "character varying(1000)"
+  indexes {
+    (Email)
+    (OrganizationId)
+    (Provider, ProviderSubject) [unique]
+  }
+}
+Table ledger.__EFMigrationsHistory {
+  MigrationId "character varying(150)" [pk, not null]
+  ProductVersion "character varying(32)" [not null]
+}
+Table ledger.arrival_measurement_sets {
+  id uuid [pk, not null]
+  procurement_id uuid [not null]
+  operation_id uuid [not null]
+  operator_id uuid [not null]
+  captured_at "timestamp with time zone" [not null]
+  recorded_at "timestamp with time zone" [not null, default: `clock_timestamp()`]
+  observations text [not null]
+  expected_version integer [not null]
+  threshold_company_id uuid
+  threshold_percentage numeric(8,6)
+  threshold_source text
+  threshold_revision uuid
+  indexes {
+    (operation_id) [unique]
+    (procurement_id, id) [unique]
+  }
+}
+Table ledger.arrival_measurements {
+  measurement_set_id uuid [not null]
+  procurement_item_id uuid [not null]
+  measured_value numeric(24,12) [not null]
+  measured_unit text [not null]
+  actual_kg numeric(20,6) [not null]
+  indexes {
+    (measurement_set_id, procurement_item_id) [pk]
+  }
+}
+Table ledger.arrival_operations {
+  operation_id uuid [pk, not null]
+  procurement_id uuid [not null]
+  actor_id uuid [not null]
+  kind text [not null]
+  payload jsonb [not null]
+  result jsonb [not null]
+  recorded_at "timestamp with time zone" [not null, default: `clock_timestamp()`]
+}
+Table ledger.arrival_reviews {
+  id uuid [pk, not null]
+  procurement_id uuid [not null]
+  measurement_set_id uuid [not null]
+  operation_id uuid [not null]
+  expected_version integer [not null]
+  action text [not null]
+  reason text [not null]
+  evidence_id uuid [not null]
+  manager_id uuid [not null]
+  recorded_at "timestamp with time zone" [not null, default: `clock_timestamp()`]
+  indexes {
+    (operation_id) [unique]
+    (procurement_id, id) [unique]
+  }
+}
+Table ledger.assignments {
+  user_id uuid [not null]
+  facility_id uuid [not null]
+  created_by uuid
+  version uuid [not null, default: `gen_random_uuid()`]
+  is_deleted boolean [not null, default: `false`]
+  indexes {
+    (user_id, facility_id) [pk]
+  }
+}
+Table ledger.catalog_commodities {
+  catalog_commodity_id uuid [pk, not null]
+  ledger_commodity_id uuid [not null]
+  indexes {
+    (ledger_commodity_id) [unique]
+  }
+}
+Table ledger.commodities {
+  id uuid [pk, not null]
+  name text [not null]
+}
+Table ledger.compatibilities {
+  id uuid [pk, not null]
+  facility_id uuid [not null]
+  input_products text[] [not null]
+  output_commodity_id uuid [not null]
+  effective_from "timestamp with time zone" [not null]
+  evidence_id uuid [not null]
+}
+Table ledger.contributions {
+  lot_id uuid [not null]
+  source_lot_id uuid [not null]
+  quantity_kg numeric(20,6) [not null]
+  indexes {
+    (lot_id, source_lot_id) [pk]
+    (source_lot_id, lot_id)
+  }
+}
+Table ledger.corrections {
+  id uuid [pk, not null]
+  operation_id uuid [not null]
+  reason text [not null]
+  status text [not null, default: `'REQUESTED'::text`]
+  evidence_id uuid
+  reconciliation jsonb
+  replacement_operation_id uuid
+  replacement_version uuid
+  replacement_content jsonb
+  indexes {
+    (operation_id) [unique]
+    (replacement_operation_id) [unique]
+  }
+}
+Table ledger.equipment {
+  id uuid [pk, not null]
+  facility_id uuid [not null]
+  name text [not null]
+  created_by uuid
+  version uuid [not null, default: `gen_random_uuid()`]
+  is_deleted boolean [not null, default: `false`]
+}
+Table ledger.events {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  kind text [not null]
+  actor_id uuid [not null]
+  operation_id uuid
+  lot_id uuid
+  details jsonb [not null]
+  occurred_at "timestamp with time zone" [not null, default: `now()`]
+  indexes {
+    (lot_id)
+    (operation_id)
+  }
+}
+Table ledger.evidence {
+  id uuid [pk, not null]
+  owner_id uuid [not null]
+  facility_id uuid [not null]
+  file_name text [not null]
+  content_type text [not null]
+  content bytea [not null]
+  sha256 text [not null]
+  actor_id uuid [not null]
+  created_at "timestamp with time zone" [not null, default: `now()`]
+}
+Table ledger.facilities {
+  id uuid [pk, not null]
+  name text [not null]
+  created_by uuid
+  version uuid [not null, default: `gen_random_uuid()`]
+  is_deleted boolean [not null, default: `false`]
+}
+Table ledger.holds {
+  id uuid [pk, not null]
+  lot_id uuid [not null]
+  reason text [not null]
+  status text [not null, default: `'ACTIVE'::text`]
+  evidence_id uuid
+  response text
+  created_at "timestamp with time zone" [not null, default: `now()`]
+  indexes {
+    (lot_id)
+  }
+}
+Table ledger.locations {
+  id uuid [pk, not null]
+  facility_id uuid [not null]
+  name text [not null]
+  kind text [not null]
+  owner_id uuid
+  cleared boolean [not null, default: `true`]
+  created_by uuid
+  version uuid [not null, default: `gen_random_uuid()`]
+  is_deleted boolean [not null, default: `false`]
+}
+Table ledger.lot_code_reservations {
+  lot_id uuid [pk, not null]
+  code text [not null]
+  owner_id uuid [not null]
+  context_kind text [not null]
+  context_id uuid [not null]
+  stage text [not null]
+  product_identity text [not null]
+  issued_at "timestamp with time zone" [not null, default: `clock_timestamp()`]
+  indexes {
+    (code) [unique]
+    (context_kind, context_id)
+  }
+}
+Table ledger.lot_codes {
+  code text [pk, not null]
+  origin_lot_id uuid [not null]
+  indexes {
+    (code, origin_lot_id) [unique]
+  }
+}
+Table ledger.lots {
+  id uuid [pk, not null]
+  code text [not null]
+  code_origin_id uuid [not null]
+  owner_id uuid [not null]
+  commodity_id uuid [not null]
+  stage text [not null]
+  product_identity text [not null]
+  receipt_id uuid
+  receipt_line_id uuid
+  operation_id uuid
+  created_at "timestamp with time zone" [not null, default: `now()`]
+  indexes {
+    (owner_id, id) [unique]
+    (receipt_line_id) [unique]
+  }
+}
+Table ledger.notifications {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  user_id uuid [not null]
+  hold_id uuid [not null]
+  lot_id uuid [not null]
+  message text [not null]
+  created_at "timestamp with time zone" [not null, default: `now()`]
+  read_at "timestamp with time zone"
+}
+Table ledger.operations {
+  id uuid [pk, not null]
+  owner_id uuid [not null]
+  facility_id uuid [not null]
+  kind text [not null]
+  occurred_at "timestamp with time zone" [not null]
+  equipment_id uuid [not null]
+  content jsonb [not null]
+  status text [not null, default: `'DRAFT'::text`]
+  version uuid [not null]
+  confirmed_version uuid
+  confirmed_by uuid
+  confirmation_evidence_id uuid
+  variance_kg numeric(20,6)
+  allowed_variance_kg numeric(20,6)
+  correction_id uuid
+  created_by uuid
+  is_deleted boolean [not null, default: `false`]
+  lot_code_scheme text [not null, default: `'LEGACY'::text`]
+}
+Table ledger.policies {
+  id uuid [pk, not null]
+  facility_id uuid [not null]
+  kind text [not null]
+  tolerance_percent numeric(20,6) [not null]
+  effective_from "timestamp with time zone" [not null]
+  evidence_id uuid [not null]
+  indexes {
+    (facility_id, kind, effective_from) [unique]
+  }
+}
+Table ledger.positions {
+  lot_id uuid [not null]
+  location_id uuid [not null]
+  quantity_kg numeric(20,6) [not null]
+  indexes {
+    (lot_id, location_id) [pk]
+  }
+}
+Table ledger.postings {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  event_id uuid [not null]
+  lot_id uuid [not null]
+  location_id uuid [not null]
+  quantity_kg numeric(20,6) [not null]
+  reverses_posting_id uuid
+  indexes {
+    (event_id)
+    (lot_id, event_id)
+    (reverses_posting_id) [unique]
+  }
+}
+Table ledger.receipt_correction_blocks {
+  correction_id uuid [pk, not null]
+  receipt_id uuid [not null]
+  owner_id uuid [not null]
+  committed boolean [not null, default: `false`]
+  indexes {
+    (receipt_id) [unique]
+  }
+}
+Table ledger.receipt_reversals {
+  receipt_id uuid [pk, not null]
+  correction_id uuid [not null]
+  owner_id uuid [not null]
+  evidence_id uuid [not null]
+  indexes {
+    (correction_id) [unique]
+  }
+}
+Table ledger.receiving {
+  procurement_id uuid [pk, not null]
+  status text [not null]
+  version integer [not null, default: `0`]
+  latest_measurement_set_id uuid
+  accepted_measurement_set_id uuid
+  accepted_review_id uuid
+}
+Table ledger.receiving_blocks {
+  discrepancy_id uuid [pk, not null]
+  lot_id uuid [not null]
+  blocked boolean [not null]
+  evidence_id uuid [not null]
+  reason text [not null]
+  real_difference boolean [not null, default: `false`]
+}
+Table ledger.receiving_threshold_default {
+  singleton boolean [pk, not null, default: `true`]
+  percentage numeric(8,6) [not null]
+  revision uuid [not null]
+  indexes {
+    (revision) [unique]
+  }
+}
+Table ledger.receiving_threshold_history {
+  revision uuid [pk, not null]
+  company_id uuid
+  scope text [not null]
+  action text [not null]
+  old_percentage numeric(8,6)
+  new_percentage numeric(8,6)
+  actor_id uuid
+  recorded_at "timestamp with time zone" [not null, default: `clock_timestamp()`]
+  reason text [not null]
+  migration_id text
+}
+Table ledger.receiving_threshold_overrides {
+  company_id uuid [pk, not null]
+  percentage numeric(8,6) [not null]
+  revision uuid [not null]
+  indexes {
+    (revision) [unique]
+  }
+}
+Ref: capture.business_events.actor_id > identity.users.Id [delete: restrict]
+Ref: capture.business_events.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.crop_seasons.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.crop_seasons.created_by > identity.users.Id [delete: restrict]
+Ref: capture.farmers.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.farmers.created_by > identity.users.Id [delete: restrict]
+Ref: capture.offline_operations.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.business_events.id - capture.offline_operations.applied_event_id [delete: restrict]
+Ref: capture.offline_operations.submitted_by > identity.users.Id [delete: restrict]
+Ref: capture.plot_seasons.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.plot_seasons.(company_id, plot_id) > capture.plots.(company_id, id) [delete: restrict]
+Ref: capture.plot_seasons.(company_id, season_id) > capture.crop_seasons.(company_id, id) [delete: restrict]
+Ref: capture.plot_seasons.created_by > identity.users.Id [delete: restrict]
+Ref: capture.plots.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.plots.(company_id, farmer_id) > capture.farmers.(company_id, id) [delete: restrict]
+Ref: capture.plots.created_by > identity.users.Id [delete: restrict]
+Ref: capture.procurement_items.(company_id, plot_season_id) > capture.plot_seasons.(company_id, id) [delete: restrict]
+Ref: capture.procurement_items.(company_id, procurement_id) > capture.procurements.(company_id, id) [delete: restrict]
+Ref: capture.procurements.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.procurements.(company_id, farmer_id) > capture.farmers.(company_id, id) [delete: restrict]
+Ref: capture.business_events.id - capture.procurements.event_id [delete: restrict]
+Ref: capture.procurements.received_by > identity.users.Id [delete: restrict]
+Ref: capture.sample_handovers.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.sample_handovers.recorded_by > identity.users.Id [delete: restrict]
+Ref: capture.sample_handovers.(company_id, sample_id) > capture.samples.(company_id, id) [delete: restrict]
+Ref: capture.samples.collected_by > identity.users.Id [delete: restrict]
+Ref: capture.samples.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.samples.(company_id, source_lot_id) > capture.source_lots.(company_id, id) [delete: restrict]
+Ref: capture.procurement_items.(company_id, id) - capture.source_lots.(company_id, procurement_item_id) [delete: restrict]
+Ref: capture.spray_declarations.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.spray_declarations.(company_id, plot_season_id) > capture.plot_seasons.(company_id, id) [delete: restrict]
+Ref: capture.spray_declarations.recorded_by > identity.users.Id [delete: restrict]
+Ref: capture.spray_items.company_id > identity.organizations.Id [delete: restrict]
+Ref: capture.spray_items.(company_id, declaration_id) > capture.spray_declarations.(company_id, id) [delete: restrict]
+Ref: capture.spray_items.substance_id > catalog.active_substances.id [delete: restrict]
+Ref: catalog.catalog_events.actor_id > identity.users.Id [delete: restrict]
+Ref: catalog.mrl_limits.substance_id > catalog.active_substances.id [delete: restrict]
+Ref: catalog.mrl_limits.mrl_version_id > catalog.mrl_versions.id [delete: restrict]
+Ref: catalog.mrl_versions.commodity_id > catalog.commodities.id [delete: restrict]
+Ref: catalog.mrl_versions.market_id > catalog.markets.id [delete: restrict]
+Ref: catalog.mrl_versions.published_by > identity.users.Id [delete: restrict]
+Ref: identity.password_reset_codes.UserId > identity.users.Id [delete: cascade]
+Ref: identity.sessions.UserId > identity.users.Id [delete: cascade]
+Ref: identity.users.OrganizationId > identity.organizations.Id [delete: restrict]
+Ref: ledger.arrival_measurement_sets.operator_id > identity.users.Id
+Ref: ledger.arrival_measurement_sets.procurement_id > ledger.receiving.procurement_id
+Ref: ledger.arrival_measurement_sets.threshold_company_id > identity.organizations.Id
+Ref: ledger.arrival_measurement_sets.threshold_revision > ledger.receiving_threshold_history.revision
+Ref: ledger.arrival_measurements.measurement_set_id > ledger.arrival_measurement_sets.id
+Ref: ledger.arrival_measurements.procurement_item_id > capture.procurement_items.id
+Ref: ledger.arrival_operations.actor_id > identity.users.Id
+Ref: ledger.arrival_operations.procurement_id > ledger.receiving.procurement_id
+Ref: ledger.arrival_reviews.evidence_id > ledger.evidence.id
+Ref: ledger.arrival_reviews.manager_id > identity.users.Id
+Ref: ledger.arrival_reviews.procurement_id > ledger.receiving.procurement_id
+Ref: ledger.arrival_reviews.(procurement_id, measurement_set_id) > ledger.arrival_measurement_sets.(procurement_id, id)
+Ref: ledger.assignments.created_by > identity.users.Id
+Ref: ledger.assignments.facility_id > ledger.facilities.id
+Ref: ledger.assignments.user_id > identity.users.Id
+Ref: catalog.commodities.id - ledger.catalog_commodities.catalog_commodity_id
+Ref: ledger.commodities.id - ledger.catalog_commodities.ledger_commodity_id
+Ref: ledger.compatibilities.evidence_id > ledger.evidence.id
+Ref: ledger.compatibilities.facility_id > ledger.facilities.id
+Ref: ledger.compatibilities.output_commodity_id > ledger.commodities.id
+Ref: ledger.contributions.lot_id > ledger.lots.id
+Ref: ledger.contributions.source_lot_id > ledger.lots.id
+Ref: ledger.corrections.evidence_id > ledger.evidence.id
+Ref: ledger.operations.id - ledger.corrections.operation_id
+Ref: ledger.operations.id - ledger.corrections.replacement_operation_id
+Ref: ledger.equipment.created_by > identity.users.Id
+Ref: ledger.equipment.facility_id > ledger.facilities.id
+Ref: ledger.events.actor_id > identity.users.Id
+Ref: ledger.events.lot_id > ledger.lots.id
+Ref: ledger.events.operation_id > ledger.operations.id
+Ref: ledger.evidence.actor_id > identity.users.Id
+Ref: ledger.evidence.facility_id > ledger.facilities.id
+Ref: ledger.evidence.owner_id > identity.organizations.Id
+Ref: ledger.facilities.created_by > identity.users.Id
+Ref: ledger.holds.evidence_id > ledger.evidence.id
+Ref: ledger.holds.lot_id > ledger.lots.id
+Ref: ledger.locations.created_by > identity.users.Id
+Ref: ledger.locations.facility_id > ledger.facilities.id
+Ref: ledger.locations.owner_id > identity.organizations.Id
+Ref: ledger.lot_code_reservations.owner_id > identity.organizations.Id
+Ref: ledger.lot_codes.origin_lot_id > ledger.lots.id
+Ref: ledger.lots.(code, code_origin_id) > ledger.lot_codes.(code, origin_lot_id)
+Ref: ledger.lots.commodity_id > ledger.commodities.id
+Ref: ledger.lots.operation_id > ledger.operations.id
+Ref: ledger.lots.owner_id > identity.organizations.Id
+Ref: ledger.notifications.hold_id > ledger.holds.id
+Ref: ledger.notifications.lot_id > ledger.lots.id
+Ref: ledger.notifications.user_id > identity.users.Id
+Ref: ledger.operations.confirmation_evidence_id > ledger.evidence.id
+Ref: ledger.operations.confirmed_by > identity.users.Id
+Ref: ledger.operations.created_by > identity.users.Id
+Ref: ledger.operations.equipment_id > ledger.equipment.id
+Ref: ledger.operations.facility_id > ledger.facilities.id
+Ref: ledger.operations.owner_id > identity.organizations.Id
+Ref: ledger.policies.evidence_id > ledger.evidence.id
+Ref: ledger.policies.facility_id > ledger.facilities.id
+Ref: ledger.positions.location_id > ledger.locations.id
+Ref: ledger.positions.lot_id > ledger.lots.id
+Ref: ledger.postings.event_id > ledger.events.id
+Ref: ledger.postings.location_id > ledger.locations.id
+Ref: ledger.postings.lot_id > ledger.lots.id
+Ref: ledger.postings.id - ledger.postings.reverses_posting_id
+Ref: ledger.receipt_correction_blocks.owner_id > identity.organizations.Id
+Ref: ledger.receipt_reversals.evidence_id > ledger.evidence.id
+Ref: ledger.receipt_reversals.owner_id > identity.organizations.Id
+Ref: ledger.arrival_measurement_sets.(procurement_id, id) - ledger.receiving.(procurement_id, accepted_measurement_set_id)
+Ref: ledger.arrival_reviews.(procurement_id, id) - ledger.receiving.(procurement_id, accepted_review_id)
+Ref: capture.procurements.id - ledger.receiving.procurement_id
+Ref: ledger.arrival_measurement_sets.(procurement_id, id) - ledger.receiving.(procurement_id, latest_measurement_set_id)
+Ref: ledger.receiving_blocks.evidence_id > ledger.evidence.id
+Ref: ledger.receiving_blocks.lot_id > ledger.lots.id
+Ref: ledger.receiving_threshold_history.revision - ledger.receiving_threshold_default.revision
+Ref: ledger.receiving_threshold_history.actor_id > identity.users.Id
+Ref: ledger.receiving_threshold_history.company_id > identity.organizations.Id
+Ref: identity.organizations.Id - ledger.receiving_threshold_overrides.company_id
+Ref: ledger.receiving_threshold_history.revision - ledger.receiving_threshold_overrides.revision

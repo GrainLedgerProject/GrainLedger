@@ -1,0 +1,315 @@
+import { useAuthStore } from '@/app/store/authStore';
+import { useUiStore } from '@/app/store/uiStore';
+import { RoleChip } from '@/components/RoleChip/RoleChip';
+import type { UserRole } from '@/shared/types/roles';
+import {
+  ArrowsClockwise,
+  BookOpen,
+  Buildings,
+  CaretDoubleLeft,
+  CaretDoubleRight,
+  ChartPieSlice,
+  CheckSquare,
+  ClockCounterClockwise,
+  CoinVertical,
+  Crosshair,
+  Drop,
+  Export,
+  Factory,
+  FileText,
+  Flask,
+  HandCoins,
+  House,
+  ListBullets,
+  LockSimple,
+  MagnifyingGlass,
+  MapPin,
+  Package,
+  Scales,
+  ShieldCheck,
+  Tag,
+  TestTube,
+  Truck,
+  Users,
+  WarningCircle,
+} from '@phosphor-icons/react';
+import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
+
+interface NavItem {
+  label: string;
+  path: string;
+  icon: React.ComponentType<{ size?: number; weight?: 'bold' | 'fill' | 'regular'; className?: string }>;
+  badge?: number | string;
+  badgeTone?: 'danger' | 'warning' | 'primary';
+  isPrimary?: boolean;
+}
+
+export const AppSidebar: React.FC = () => {
+  const user = useAuthStore((state) => state.user);
+  const { isSidebarCollapsed, toggleSidebar, pendingOfflineCount } = useUiStore();
+  const location = useLocation();
+
+  const role: UserRole = user?.role || 'MILL_OPERATOR';
+
+  // Role-based Nav Structure defined precisely by SRS §3.1.3
+  const getNavItems = (): NavItem[] => {
+    switch (role) {
+      case 'MILL_ADMIN':
+        return [
+          { label: 'Tổng quan hệ thống', path: '/home', icon: House },
+          { label: 'Khách hàng', path: '/admin/customers', icon: Buildings },
+          { label: 'Tài khoản & Quyền', path: '/admin/access', icon: Users },
+          { label: 'Cơ sở & Thiết bị', path: '/admin/facilities', icon: Factory },
+          { label: 'Chính sách cân bằng', path: '/admin/balance-policy', icon: Scales },
+          { label: 'Danh mục vận hành', path: '/admin/master-data', icon: ListBullets },
+          { label: 'Phiên bản MRL', path: '/compliance/mrl-versions', icon: BookOpen },
+          { label: 'Tìm sự kiện', path: '/events', icon: MagnifyingGlass },
+        ];
+
+      case 'MILL_OPERATOR':
+        return [
+          { label: 'Hôm nay tại dây chuyền', path: '/home', icon: House },
+          {
+            label: 'Ghi bước chế biến',
+            path: '/mill/operations/new',
+            icon: Scales,
+            isPrimary: true,
+          },
+          { label: 'Yêu cầu sửa', path: '/mill/corrections/new', icon: ClockCounterClockwise },
+          {
+            label: 'Ghi bút toán bù',
+            path: '/mill/corrections/pending',
+            icon: CheckSquare,
+            badge: 2,
+            badgeTone: 'warning',
+          },
+          {
+            label: 'Thực thi plan',
+            path: '/mill/plan-executions/PLAN-001',
+            icon: ArrowsClockwise,
+            badge: 1,
+            badgeTone: 'primary',
+          },
+          { label: 'Tìm sự kiện', path: '/events', icon: MagnifyingGlass },
+        ];
+
+      case 'MILL_MANAGER':
+        return [
+          { label: 'Bàn điều hành Quản lý', path: '/home', icon: House },
+          {
+            label: 'Đối soát & Xác nhận',
+            path: '/mill/reconciliations/REC-001',
+            icon: CheckSquare,
+            badge: 1,
+            badgeTone: 'warning',
+          },
+          { label: 'Ghi bút toán bù', path: '/mill/corrections/pending', icon: ClockCounterClockwise },
+          {
+            label: 'Cảnh báo HOLD',
+            path: '/risk/holds',
+            icon: LockSimple,
+            badge: 1,
+            badgeTone: 'danger',
+          },
+          { label: 'Chính sách cân bằng', path: '/admin/balance-policy', icon: Scales },
+          { label: 'Ghi bước chế biến', path: '/mill/operations/new', icon: Scales },
+          { label: 'Tìm sự kiện', path: '/events', icon: MagnifyingGlass },
+        ];
+
+      case 'CUSTOMER_PROCUREMENT_OFFICER':
+        return [
+          { label: 'Bàn làm việc thu mua', path: '/home', icon: House },
+          {
+            label: 'Đồng bộ / Hàng đợi',
+            path: '/field/sync',
+            icon: ArrowsClockwise,
+            badge: pendingOfflineCount,
+            badgeTone: pendingOfflineCount > 0 ? 'warning' : undefined,
+          },
+          { label: 'Nông hộ', path: '/field/farmers/new', icon: Users },
+          { label: 'Thửa ruộng', path: '/field/plots/new', icon: MapPin },
+          { label: 'Khai báo thuốc BVTV', path: '/field/declarations/new', icon: Drop },
+          { label: 'Thu mua lúa', path: '/field/receipts/new', icon: HandCoins },
+          { label: 'Lấy mẫu niêm phong', path: '/field/samples/new', icon: TestTube },
+          { label: 'Tìm sự kiện', path: '/events', icon: MagnifyingGlass },
+        ];
+
+      case 'CUSTOMER_MANAGER':
+        return [
+          { label: 'Điều phối Chất lượng & Rủi ro', path: '/home', icon: House },
+          {
+            label: 'Truy vết hai chiều',
+            path: '/risk/traceback',
+            icon: Crosshair,
+            isPrimary: true,
+          },
+          {
+            label: 'Lệnh giữ HOLD',
+            path: '/risk/holds',
+            icon: LockSimple,
+            badge: 1,
+            badgeTone: 'danger',
+          },
+          { label: 'Mẫu xét nghiệm', path: '/compliance/lab-samples/new', icon: Flask },
+          { label: 'Kết quả xét nghiệm', path: '/compliance/lab-results', icon: TestTube },
+          { label: 'Biên an toàn MRL', path: '/compliance/safety-margin', icon: ShieldCheck },
+          {
+            label: 'Duyệt phương án',
+            path: '/export/plans/pending',
+            icon: CheckSquare,
+            badge: 1,
+            badgeTone: 'warning',
+          },
+          { label: 'Phiên bản MRL', path: '/compliance/mrl-versions', icon: BookOpen },
+          { label: 'Tìm sự kiện', path: '/events', icon: MagnifyingGlass },
+        ];
+
+      case 'CUSTOMER_EXPORT_OFFICER':
+        return [
+          { label: 'Điều phối Đơn hàng & Xuất khẩu', path: '/home', icon: House },
+          { label: 'Đơn xuất khẩu', path: '/export/orders', icon: Export, isPrimary: true },
+          { label: 'Yêu cầu phương án', path: '/export/plans', icon: ChartPieSlice },
+          { label: 'Xếp container', path: '/export/containers', icon: Truck },
+          { label: 'Hồ sơ & Chứng từ', path: '/export/dossiers', icon: FileText },
+          { label: 'Cảnh báo HOLD', path: '/risk/holds', icon: LockSimple },
+          { label: 'Phiên bản MRL', path: '/compliance/mrl-versions', icon: BookOpen },
+          { label: 'Tìm sự kiện', path: '/events', icon: MagnifyingGlass },
+        ];
+
+      case 'AUTHORIZED_STOCK_VIEWER':
+        return [
+          { label: 'Tổng quan tồn kho', path: '/home', icon: House },
+          { label: 'Tồn kho theo vị trí', path: '/stock', icon: Package, isPrimary: true },
+          { label: 'Chi tiết lô lúa/gạo', path: '/stock/lots/LOT-2026-S1', icon: Tag },
+        ];
+
+      default:
+        return [
+          { label: 'Tổng quan', path: '/home', icon: House },
+          { label: 'Tìm sự kiện', path: '/events', icon: MagnifyingGlass },
+        ];
+    }
+  };
+
+  const navItems = getNavItems();
+
+  return (
+    <aside
+      className={`h-screen sticky top-0 bg-surface-raised dark:bg-surface-base border-r border-ink-tertiary/20 flex flex-col justify-between transition-all duration-300 z-40 ${
+        isSidebarCollapsed ? 'w-[64px]' : 'w-[248px]'
+      }`}
+      aria-label="Sidebar Navigation"
+    >
+      {/* Top Branding Section */}
+      <div>
+        <div className="h-14 px-3 flex items-center justify-between border-b border-ink-tertiary/15">
+          <Link
+            to="/home"
+            className={`flex items-center gap-2.5 overflow-hidden transition-all ${
+              isSidebarCollapsed ? 'justify-center w-full' : ''
+            }`}
+            title="GrainLedger — Về trang chủ"
+          >
+            <div className="w-8 h-8 rounded-md bg-accent-primary text-white flex items-center justify-center shrink-0 shadow-xs">
+              <img src="/favicon.svg" alt="GrainLedger" className="w-8 h-8" />
+            </div>
+            {!isSidebarCollapsed && (
+              <div className="flex flex-col min-w-0">
+                <span className="font-serif font-bold text-base text-ink-primary tracking-tight leading-tight">
+                  GrainLedger
+                </span>
+                <span className="text-[10px] text-ink-tertiary uppercase tracking-wider truncate font-mono">
+                  ISO 22095 Custody
+                </span>
+              </div>
+            )}
+          </Link>
+        </div>
+
+        {/* Navigation Links */}
+        <nav className="p-2 space-y-1 overflow-y-auto max-h-[calc(100vh-140px)]">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive =
+              location.pathname === item.path ||
+              (item.path !== '/home' && location.pathname.startsWith(item.path));
+
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`group relative flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                  isActive
+                    ? 'bg-surface-base dark:bg-surface-overlay text-accent-primary font-semibold shadow-xs border-l-4 border-accent-primary'
+                    : 'text-ink-secondary hover:text-ink-primary hover:bg-surface-base/60 dark:hover:bg-surface-overlay/50'
+                } ${isSidebarCollapsed ? 'justify-center px-0' : ''}`}
+                title={isSidebarCollapsed ? item.label : undefined}
+              >
+                <Icon
+                  size={18}
+                  weight={isActive ? 'fill' : 'regular'}
+                  className={`shrink-0 ${
+                    isActive ? 'text-accent-primary' : 'text-ink-tertiary group-hover:text-ink-primary'
+                  }`}
+                />
+
+                {!isSidebarCollapsed && (
+                  <span className="truncate flex-1 text-left">{item.label}</span>
+                )}
+
+                {/* Badge indicator */}
+                {!isSidebarCollapsed && item.badge !== undefined && (
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full font-mono shrink-0 ${
+                      item.badgeTone === 'danger'
+                        ? 'bg-accent-danger text-white'
+                        : item.badgeTone === 'warning'
+                        ? 'bg-accent-warning text-ink-primary'
+                        : 'bg-accent-primary text-white'
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+
+                {/* Tooltip on collapsed state */}
+                {isSidebarCollapsed && item.badge !== undefined && (
+                  <span
+                    className={`absolute top-1 right-1 w-2 h-2 rounded-full ${
+                      item.badgeTone === 'danger'
+                        ? 'bg-accent-danger'
+                        : item.badgeTone === 'warning'
+                        ? 'bg-accent-warning'
+                        : 'bg-accent-primary'
+                    }`}
+                  />
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Bottom Section: Role Chip & Collapse Toggle */}
+      <div className="p-2 border-t border-ink-tertiary/15 space-y-2">
+        {!isSidebarCollapsed && (
+          <div className="px-2 py-1">
+            <RoleChip role={role} size="sm" showCode className="w-full justify-center" />
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          className="w-full flex items-center justify-center p-2 rounded-md text-ink-tertiary hover:text-ink-primary hover:bg-surface-base transition-colors text-xs"
+          aria-label={isSidebarCollapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'}
+          title={isSidebarCollapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'}
+        >
+          {isSidebarCollapsed ? <CaretDoubleRight size={16} /> : <CaretDoubleLeft size={16} />}
+          {!isSidebarCollapsed && <span className="ml-2 text-xs">Thu gọn</span>}
+        </button>
+      </div>
+    </aside>
+  );
+};

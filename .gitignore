@@ -35,6 +35,7 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+bin\\Debug
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
@@ -976,3 +977,9 @@ $RECYCLE.BIN/
 # Additional files built by Visual Studio
 
 # End of https://www.toptal.com/developers/gitignore/api/rider,visualstudio,visualstudiocode,react,reactnative,csharp,dotnetcore,windows,linux
+/tools/mock_lab_reports/
+
+# SDD generated diagram renders
+docs/SDD/diagrams/rendered/
+docs/SDD/diagrams/*.svg
+docs/SDD/diagrams/*.png

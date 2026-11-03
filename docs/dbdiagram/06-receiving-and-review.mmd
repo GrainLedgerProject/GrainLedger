@@ -1,0 +1,141 @@
+erDiagram
+    %% Live catalog snapshot 2026-10-19. Exact type aliases: varchar(n)=character varying(n); timestamptz=timestamp with time zone.
+    %% NN = NOT NULL; NULL = nullable. PK/FK mark catalog constraints; FK labels are exact constraint names.
+
+    %% capture.procurement_items — reference only; full fields in owning diagram
+    capture_procurement_items {
+        uuid id PK "NN"
+    }
+    %% capture.procurements — reference only; full fields in owning diagram
+    capture_procurements {
+        uuid id PK "NN"
+    }
+    %% identity.organizations — reference only; full fields in owning diagram
+    identity_organizations {
+        uuid Id PK "NN"
+    }
+    %% identity.users — reference only; full fields in owning diagram
+    identity_users {
+        uuid Id PK "NN"
+    }
+    %% ledger.arrival_measurement_sets — full table
+    ledger_arrival_measurement_sets {
+        uuid id PK "NN"
+        uuid procurement_id FK "NN"
+        uuid operation_id "NN"
+        uuid operator_id FK "NN"
+        timestamptz captured_at "NN"
+        timestamptz recorded_at "NN"
+        text observations "NN"
+        integer expected_version "NN"
+        uuid threshold_company_id FK "NULL"
+        numeric(8,6) threshold_percentage "NULL"
+        text threshold_source "NULL"
+        uuid threshold_revision FK "NULL"
+    }
+    %% ledger.arrival_measurements — full table
+    ledger_arrival_measurements {
+        uuid measurement_set_id PK,FK "NN"
+        uuid procurement_item_id PK,FK "NN"
+        numeric(24,12) measured_value "NN"
+        text measured_unit "NN"
+        numeric(20,6) actual_kg "NN"
+    }
+    %% ledger.arrival_operations — full table
+    ledger_arrival_operations {
+        uuid operation_id PK "NN"
+        uuid procurement_id FK "NN"
+        uuid actor_id FK "NN"
+        text kind "NN"
+        jsonb payload "NN"
+        jsonb result "NN"
+        timestamptz recorded_at "NN"
+    }
+    %% ledger.arrival_reviews — full table
+    ledger_arrival_reviews {
+        uuid id PK "NN"
+        uuid procurement_id FK "NN"
+        uuid measurement_set_id FK "NN"
+        uuid operation_id "NN"
+        integer expected_version "NN"
+        text action "NN"
+        text reason "NN"
+        uuid evidence_id FK "NN"
+        uuid manager_id FK "NN"
+        timestamptz recorded_at "NN"
+    }
+    %% ledger.evidence — reference only; full fields in owning diagram
+    ledger_evidence {
+        uuid id PK "NN"
+    }
+    %% ledger.lots — reference only; full fields in owning diagram
+    ledger_lots {
+        uuid id PK "NN"
+    }
+    %% ledger.receiving — full table
+    ledger_receiving {
+        uuid procurement_id PK,FK "NN"
+        text status "NN"
+        integer version "NN"
+        uuid latest_measurement_set_id FK "NULL"
+        uuid accepted_measurement_set_id FK "NULL"
+        uuid accepted_review_id FK "NULL"
+    }
+    %% ledger.receiving_blocks — full table
+    ledger_receiving_blocks {
+        uuid discrepancy_id PK "NN"
+        uuid lot_id FK "NN"
+        boolean blocked "NN"
+        uuid evidence_id FK "NN"
+        text reason "NN"
+        boolean real_difference "NN"
+    }
+    %% ledger.receiving_threshold_default — full table
+    ledger_receiving_threshold_default {
+        boolean singleton PK "NN"
+        numeric(8,6) percentage "NN"
+        uuid revision FK "NN"
+    }
+    %% ledger.receiving_threshold_history — full table
+    ledger_receiving_threshold_history {
+        uuid revision PK "NN"
+        uuid company_id FK "NULL"
+        text scope "NN"
+        text action "NN"
+        numeric(8,6) old_percentage "NULL"
+        numeric(8,6) new_percentage "NULL"
+        uuid actor_id FK "NULL"
+        timestamptz recorded_at "NN"
+        text reason "NN"
+        text migration_id "NULL"
+    }
+    %% ledger.receiving_threshold_overrides — full table
+    ledger_receiving_threshold_overrides {
+        uuid company_id PK,FK "NN"
+        numeric(8,6) percentage "NN"
+        uuid revision FK "NN"
+    }
+
+    capture_procurement_items ||--o{ ledger_arrival_measurements : "arrival_measurements_procurement_item_id_fkey"
+    capture_procurements ||--o| ledger_receiving : "receiving_procurement_id_fkey"
+    identity_organizations o|..o{ ledger_arrival_measurement_sets : "arrival_measurement_sets_threshold_company_id_fkey"
+    identity_organizations o|..o{ ledger_receiving_threshold_history : "receiving_threshold_history_company_id_fkey"
+    identity_organizations ||--o| ledger_receiving_threshold_overrides : "receiving_threshold_overrides_company_id_fkey"
+    identity_users o|..o{ ledger_receiving_threshold_history : "receiving_threshold_history_actor_id_fkey"
+    identity_users ||..o{ ledger_arrival_measurement_sets : "arrival_measurement_sets_operator_id_fkey"
+    identity_users ||..o{ ledger_arrival_operations : "arrival_operations_actor_id_fkey"
+    identity_users ||..o{ ledger_arrival_reviews : "arrival_reviews_manager_id_fkey"
+    ledger_arrival_measurement_sets o|..o| ledger_receiving : "receiving_procurement_id_accepted_measurement_set_id_fkey"
+    ledger_arrival_measurement_sets o|..o| ledger_receiving : "receiving_procurement_id_latest_measurement_set_id_fkey"
+    ledger_arrival_measurement_sets ||--o{ ledger_arrival_measurements : "arrival_measurements_measurement_set_id_fkey"
+    ledger_arrival_measurement_sets ||..o{ ledger_arrival_reviews : "arrival_reviews_procurement_id_measurement_set_id_fkey"
+    ledger_arrival_reviews o|..o| ledger_receiving : "receiving_procurement_id_accepted_review_id_fkey"
+    ledger_evidence ||..o{ ledger_arrival_reviews : "arrival_reviews_evidence_id_fkey"
+    ledger_evidence ||..o{ ledger_receiving_blocks : "receiving_blocks_evidence_id_fkey"
+    ledger_lots ||..o{ ledger_receiving_blocks : "receiving_blocks_lot_id_fkey"
+    ledger_receiving ||..o{ ledger_arrival_measurement_sets : "arrival_measurement_sets_procurement_id_fkey"
+    ledger_receiving ||..o{ ledger_arrival_operations : "arrival_operations_procurement_id_fkey"
+    ledger_receiving ||..o{ ledger_arrival_reviews : "arrival_reviews_procurement_id_fkey"
+    ledger_receiving_threshold_history o|..o{ ledger_arrival_measurement_sets : "arrival_measurement_sets_threshold_revision_fkey"
+    ledger_receiving_threshold_history ||..o| ledger_receiving_threshold_default : "receiving_threshold_default_revision_fkey"
+    ledger_receiving_threshold_history ||..o| ledger_receiving_threshold_overrides : "receiving_threshold_overrides_revision_fkey"

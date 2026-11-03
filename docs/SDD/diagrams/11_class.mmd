@@ -1,0 +1,109 @@
+classDiagram
+direction TB
+class Container {
+ <<planned>>
+ +UUID container_id
+ +UUID order_id
+ +String internal_code
+ +String container_number
+ +String seal_number
+ +Decimal target_mass_kg
+ +String status
+ +canAcceptLoading() Boolean
+ +hasExactTarget(loadedKg) Boolean
+}
+class ContainerLoading {
+ <<planned>>
+ +UUID loading_id
+ +UUID container_id
+ +UUID plan_id
+ +UUID recorded_by
+ +UUID event_id
+ +String status
+ +DateTime loaded_at
+ +totalLoadedMass(items) Decimal
+}
+class LoadingAllocation {
+ <<planned>>
+ +UUID loading_allocation_id
+ +UUID loading_id
+ +UUID source_allocation_id
+ +UUID reservation_id
+ +Decimal loaded_kg
+ +Integer bag_count
+ +matchesOutputReservation(reservation) Boolean
+}
+class PlanOutputAllocation {
+ <<planned>>
+ +UUID plan_output_id
+ +UUID plan_id
+ +UUID allocation_id
+ +UUID output_id
+ +Decimal assigned_kg
+ +matchesOutputAndPlan(output, plan) Boolean
+}
+class StockReservation {
+ <<planned>>
+ +UUID reservation_id
+ +UUID plan_allocation_id
+ +UUID plan_output_id
+ +Decimal reserved_kg
+ +Decimal consumed_kg
+ +Decimal released_kg
+ +outstandingMass() Decimal
+ +canConsume(massKg) Boolean
+}
+class ComplianceAssessment {
+ <<planned>>
+ +UUID assessment_id
+ +UUID container_id
+ +UUID plan_id
+ +UUID loading_id
+ +String purpose
+ +String verdict
+ +UUID mrl_version_id
+ +UUID safety_margin_policy_id
+ +String immutable_basis_ref
+ +isPassFor(scope, revision) Boolean
+}
+class ComplianceDossier {
+ <<planned>>
+ +UUID dossier_id
+ +UUID container_id
+ +UUID closing_assessment_id
+ +UUID created_by
+ +DateTime finalized_at
+ +String immutable_snapshot_ref
+ +matchesClosingAssessment(assessment) Boolean
+}
+class DossierSupplement {
+ <<planned>>
+ +UUID supplement_id
+ +UUID dossier_id
+ +UUID added_by
+ +String evidence_ref
+ +String reason
+ +DateTime added_at
+ +validateEvidenceAndReason() ValidationResult
+}
+class ShipmentDocument {
+ <<planned>>
+ +UUID document_id
+ +UUID container_id
+ +UUID created_by
+ +String document_type
+ +Integer version_no
+ +String immutable_file_ref
+ +DateTime issued_at
+ +matchesContainer(containerId) Boolean
+}
+Container "1" --> "0..*" ComplianceAssessment : assessment_scope
+ContainerLoading "0..1" --> "0..*" ComplianceAssessment : evaluated_loading
+PlanOutputAllocation "0..1" --> "0..*" StockReservation : reserves_outputs
+Container "1" --> "0..*" ContainerLoading : receives
+ContainerLoading "1" --> "0..*" LoadingAllocation : contains
+StockReservation "1" --> "0..*" LoadingAllocation : consumes_output_reservation
+Container "1" --> "0..1" ComplianceDossier : finalized_with
+ComplianceAssessment "1" --> "0..1" ComplianceDossier : closing_basis
+ComplianceDossier "1" --> "0..*" DossierSupplement : supplements
+Container "1" --> "0..*" ShipmentDocument : documents

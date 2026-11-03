@@ -1,0 +1,70 @@
+@startuml
+title GrainLedger Backend Package Diagram
+skinparam packageStyle folder
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 16
+skinparam packageBackgroundColor White
+skinparam packageBorderColor #5D6D7E
+skinparam rectangleBorderColor #5D6D7E
+skinparam ArrowColor #44566A
+skinparam nodesep 45
+skinparam ranksep 65
+skinparam linetype polyline
+' Hidden arrows below are layout constraints only, never dependencies.
+package "GrainLedger.Api — composition root" as Api #FFF2CC {
+folder "Program.cs / module registration" as A0
+folder "Middleware / auth / CSRF" as A1
+folder "OpenAPI / static hosting" as A2
+A0 -[hidden]right-> A1
+A1 -[hidden]right-> A2
+}
+package "GrainLedger.Modules.Identity" as Identity #DBE8FB {
+folder "Domain" as Identity0
+folder "Features" as Identity1
+folder "Authorization / Infrastructure" as Identity2
+Identity0 -[hidden]right-> Identity1
+Identity1 -[hidden]right-> Identity2
+}
+package "GrainLedger.Modules.Catalogs" as Catalogs #D5E8D4 {
+folder "Endpoint classes" as Catalogs0
+folder "CatalogDbContext" as Catalogs1
+folder "Catalog entities / Migrations" as Catalogs2
+Catalogs0 -[hidden]right-> Catalogs1
+Catalogs1 -[hidden]right-> Catalogs2
+}
+package "GrainLedger.Modules.Capture" as Capture #F8CECC {
+folder "Endpoint classes / DTOs" as Capture0
+folder "CaptureDbContext / entities" as Capture1
+folder "IProcurementLedgerPort" as Capture2
+Capture0 -[hidden]right-> Capture1
+Capture1 -[hidden]right-> Capture2
+}
+package "GrainLedger.Modules.Ledger" as Ledger #E5DFEF {
+folder "LedgerEndpoints / LedgerService" as Ledger0
+folder "ProcurementLedgerPort" as Ledger1
+folder "Sql / protected routines" as Ledger2
+Ledger0 -[hidden]right-> Ledger1
+Ledger1 -[hidden]right-> Ledger2
+}
+Identity -[hidden]right-> Catalogs
+Capture -[hidden]right-> Ledger
+Api -[hidden]down-> Identity
+Api -[hidden]down-> Catalogs
+Identity -[hidden]down-> Capture
+Catalogs -[hidden]down-> Ledger
+Api .down.> Identity
+Api .down.> Catalogs
+Api .down.> Capture
+Api .down.> Ledger
+Capture .right.> Ledger
+Ledger .left.> Capture : implements Capture contract
+rectangle "Compliance capability: planned logical\nmodule / namespace not yet fixed" as Compliance #FFF5D9;line.dashed
+rectangle "Export capability: planned logical\nmodule / namespace not yet fixed" as Export #FFF5D9;line.dashed
+Capture1 -[hidden]down-> Compliance
+Ledger1 -[hidden]down-> Export
+Compliance -[hidden]right-> Export
+legend bottom
+Module-owned schemas. Capture → Ledger contract shares caller transaction; EF entities do not cross module boundaries.
+endlegend
+@enduml

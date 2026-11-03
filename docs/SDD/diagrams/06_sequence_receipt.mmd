@@ -1,0 +1,30 @@
+sequenceDiagram
+ autonumber
+ actor P as PurchasingStaff
+ participant UI as :LedgerReceiving
+ participant E as :ProcurementEndpoints
+ participant C as :CaptureDbContext
+ participant Port as :IProcurementLedgerPort
+ participant DB as :PostgreSQL
+ P->>UI: Submit procurement source expectation
+ UI->>E: POST /api/procurements, stable operation key and decimal strings
+ E->>E: Authorize purchases.write, validate canonical source payload
+ E->>C: Begin READ COMMITTED and acquire stock-write advisory lock
+ C->>DB: Lock 714928352 before source/stock reads
+ E->>C: Find previous CaptureOperation by company/device/operation
+ alt Same actor, same key and accepted canonical hash
+ C-->>E: Retained original registration result
+ E-->>UI: Replay outcome, no duplicate source or stock
+ else Key reused with changed content
+ E-->>UI: 409 OPERATION_CONFLICT, no second source package
+ else New operation and valid source scope
+ E->>Port: IsValidReceivingOptionAsync(shared connection, transaction)
+ Port->>DB: Validate receiving facility/location and company
+ E->>C: Save CaptureBusinessEvent, Procurement, ProcurementItems, SourceLots, CaptureOperation
+ E->>Port: RegisterPendingAsync(shared connection, transaction, actor, procurementId)
+ Port->>DB: ledger.register_pending_procurement(actor, procurementId)
+ E->>C: CommitAsync
+ E-->>UI: 201 source result, PENDING_ARRIVAL, InitialStock=0
+ end
+ UI-->>P: Registration outcome and separate receiving state
+ Note over C,DB: Source status remains COMMITTED, source identity is not usable stock.<br/>Port never commits the caller transaction.

@@ -1,0 +1,81 @@
+%% Implemented F13 schema. grainledger.dbml also depicts later planning/loading tables;
+%% those target-design tables are not created by the F13 migration.
+erDiagram
+    identity_organizations ||--o{ export_orders : owns
+    catalog_markets ||--o{ export_orders : destination
+    catalog_commodities ||--o{ export_orders : product
+    export_orders ||--o{ order_specifications : versions
+    order_specifications ||--|{ specification_limits : bounds
+    catalog_quality_attributes ||--o{ specification_limits : defines
+    export_orders ||--|{ containers : plans
+    export_orders ||--o{ events : audits
+    export_orders ||--o{ idempotent_operations : retries
+    identity_organizations ||--o{ code_counters : issues
+
+    export_orders {
+        uuid id PK
+        uuid company_id FK
+        text code
+        uuid market_id FK
+        uuid commodity_id FK
+        numeric required_mass_kg
+        text original_mass
+        text original_unit
+        date shipping_from
+        date shipping_to
+        int version
+        int current_specification_version
+    }
+    order_specifications {
+        uuid id PK
+        uuid order_id FK
+        uuid company_id FK
+        int version_no
+        uuid recorded_by FK
+        timestamptz recorded_at
+    }
+    specification_limits {
+        uuid id PK
+        uuid specification_id FK
+        uuid attribute_id FK
+        text attribute_code
+        text attribute_name
+        text unit
+        numeric min_value
+        numeric max_value
+    }
+    containers {
+        uuid id PK
+        uuid order_id FK
+        uuid company_id FK
+        text internal_code
+        numeric target_mass_kg
+        text original_mass
+        text original_unit
+        text status
+        int version
+    }
+    events {
+        uuid id PK
+        uuid order_id FK
+        uuid actor_id FK
+        text action
+        jsonb snapshot
+        timestamptz recorded_at
+    }
+    idempotent_operations {
+        uuid id PK
+        uuid company_id FK
+        uuid actor_id FK
+        uuid operation_id
+        text request_hash
+        uuid order_id FK
+        jsonb response_json
+        int response_status
+        int response_version
+    }
+    code_counters {
+        uuid company_id PK
+        text kind PK
+        bigint next_value
+    }

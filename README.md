@@ -1,0 +1,85 @@
+# GrainLedger
+
+GrainLedger is a rice supply-chain traceability platform. It connects identity and access control, shared product catalogs, procurement source records, and a protected ledger for receiving, stock, processing, and history.
+
+Lot-to-lot tracing is available through Ledger → Traceability and the [audited trace API](docs/api/traceability-api.md). The [implementation plan](docs/plans/traceability-implementation-plan.md) records current scope and deferred lab/export/container dependencies. New trace migration/runtime grants require explicit deployment; normal startup does not apply them.
+
+## What it does
+
+- **Identity:** Google and email/password sign-in, verified onboarding, session management, and administrator-managed organizations and permissions.
+- **Catalog:** Shared commodities and measurement units used by procurement and ledger workflows.
+- **Capture:** Farmer, plot, crop-season, procurement, physical samples, laboratory dispatch, and immutable external reports/results. Procurement records source expectations; it does not create usable stock. Laboratory confirmation checks transcription and identity, not market compliance.
+- **Ledger:** Permission- and scope-controlled receiving, stock, processing, transfers, HOLDs, evidence, corrections, and history. Accepted arrivals create stock from measured mass.
+- **Residue bounds:** On-demand, scoped lot intervals through committed processing/custody paths, with immutable evaluation history and reviewed rule/evidence maintenance. Missing scientific inputs stay `UNRESOLVED`; a finite interval is not market certification.
+
+The React web app supports desktop and mobile-sized screens. The mobile workspace is a placeholder, not a shipped mobile app. GrainLedger does not include customer settlement. Planned or documented future workflows are not implied to be available.
+
+New Capture records use server-generated codes. Procurement and sample codes use `PRC-YYYYMMDD-NNNN` and `SMP-YYYYMMDD-NNNN`, with separate company/type counters continuing across dates. Existing codes remain unchanged. See the [Capture code guide](docs/guides/companion-capture-codes.md) for creation contracts and cutover guidance.
+
+## Technology
+- ASP.NET Core 10 monolith: one API project, feature folders, one EF Core context, one Npgsql runtime pool
+- PostgreSQL application objects in schema `grainledger`; React web app remains separate
+- Docker image and Compose PostgreSQL service for local development
+
+## Repository map
+
+```text
+backend/src/GrainLedger.Api/Features/          Identity, Catalogs, Capture, Ledger, Exports
+backend/src/GrainLedger.Api/Data/              AppDbContext and unified migration
+backend/tests/                                 Backend integration tests
+apps/web/                                      React web app
+apps/mobile/                                   Placeholder workspace
+docs/                                          Setup, architecture and API guides
+```
+
+> Approved cutover target; this does not claim database reset or deployment has occurred. See [setup and deployment](docs/setup-and-deployment.md#approved-cutover-target-pending-deployment).
+
+## Run locally
+
+Requires .NET SDK 10, Node.js 24, and npm. Quickstart assumes PostgreSQL is provisioned and migrated to the approved `grainledger` baseline, with root `.env` containing working `ConnectionStrings__GrainLedger`, JWT, Google, and (for email/password flows) SMTP settings. For a fresh local database, role provisioning and explicit migration, follow [Setup and deployment](docs/setup-and-deployment.md).
+
+From repository root:
+
+```bash
+dotnet run --project backend/src/GrainLedger.Api
+```
+
+Then in another terminal:
+
+```bash
+npm ci
+npm run dev --workspace @grainledger/web
+```
+
+Open the Vite URL, usually **http://localhost:5173**. In Development, API Scalar is at **http://localhost:5080/scalar/v1** and OpenAPI JSON at **http://localhost:5080/openapi/v1.json**. Use a Bearer access token in Scalar for protected API calls.
+
+Normal startup does not migrate or seed the database. Do not run migration or seed commands against a shared database without explicit database-owner approval.
+
+## Build and test
+
+Run from repository root. Backend integration tests require Docker and use isolated PostgreSQL containers, not the configured shared database.
+
+```bash
+dotnet build GrainLedger.slnx
+dotnet test GrainLedger.slnx --no-build
+npm test
+npm run build
+```
+
+GitHub Actions selects checks by changed files for pull requests into `dev`. Backend source changes run backend tests; web source changes run web tests/build; packaging and dependency changes also validate the Docker image. PRs into `main`, pushes to `main`, merge queues and manual runs require all checks. There is no push run on `dev`: protect that branch and require PR check `required`. See [CI setup and operation](docs/ci-guide.md) for routing, caches and setup. CI does not deploy or use the shared database.
+
+## Documentation
+- [Documentation index](docs/README.md): index of architecture, APIs, guides, plans, and reports
+- [Setup and deployment](docs/setup-and-deployment.md): local provisioning, configuration, migrations, seeds, and production deployment
+- [Architecture and access control](docs/architecture.md): approved monolith/schema target, authorization, and historical architecture snapshot
+- [CI setup and operation](docs/ci-guide.md) · [CI implementation plan](docs/ci-plan.md)
+- [Email/password authentication and Scalar](docs/guides/auth-email-password-scalar.md)
+- [Development accounts and seed modes](docs/guides/development-accounts.md): setup-only bootstrap and explicit full demo
+- [Farmer API](docs/api/farmer-api.md) · [Procurement API](docs/api/procurement-api.md)
+- [MRL CSV/Excel and YouTrack reference import](docs/guides/mrl-file-import.md): substance setup, Vietnam draft limits, source provenance, and import safeguards
+- [Unified lot-code guide](docs/guides/unified-lot-code-guide.md)
+- [Laboratory workflow guide](docs/guides/lab-flow-guide.md) · [Samples and external laboratory API](docs/api/sample-api.md#laboratory-report-routes) · [Laboratory workflow policy boundaries](docs/plans/lab-flow-plan.md)
+- [Residue bounds: policy gates, delivered API, workflow and verification](docs/plans/residue-bounds-plan.md#9-delivered-residue-bounds-contracts)
+- [PostgreSQL diagrams and data dictionary](docs/dbdiagram/README.md)
+
+For deployment, separate restricted runtime credentials from migration-owner credentials, use HTTPS behind a trusted reverse proxy, and protect persistent DataProtection keys. See [production deployment guidance](docs/setup-and-deployment.md#production-deployment).

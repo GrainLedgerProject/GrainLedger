@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Base surfaces — Light Mode (Warm Parchment) */
+  --color-surface-base:       #F4EFE6;  /* warm parchment — light mode bg */
+  --color-surface-raised:     #EDE8DC;  /* slightly darker card surface */
+  --color-surface-overlay:    #E5DFCF;  /* modal, dropdown */
+  --color-ink-primary:        #1B2420;  /* near-black, warm-tinted */
+  --color-ink-secondary:      #4A5C55;  /* secondary text */
+  --color-ink-tertiary:       #7A8F87;  /* captions, placeholders */
+  --color-ink-inverse:        #F4EFE6;  /* text on dark bg */
+  --color-canvas-dark:        #0E1411;  /* dark mode base */
+
+  /* Semantic accents */
+  --color-accent-primary:     #2F6B3A;  /* paddy green — CTAs, active states */
+  --color-accent-primary-dim: #245430;  /* pressed state */
+  --color-accent-warning:     #D9A441;  /* straw gold — pending, near-limit */
+  --color-accent-danger:      #B5412B;  /* fired clay — rejection, HOLD, over-limit */
+  --color-accent-info:        #2C4A6B;  /* indigo — informational, neutral status */
+  --color-accent-success:     #3A7D44;  /* confirmed, balanced, compliant */
+
+  /* Company context colors (stable per company, colorblind-safe) */
+  --color-company-a:          #2563EB;
+  --color-company-b:          #7C3AED;
+  --color-company-c:          #0891B2;
+  --color-company-d:          #D97706;
+
+  /* Functional surfaces */
+  --color-hold-bg:            #FEF2EE;  /* lot/container under HOLD */
+  --color-hold-border:        #B5412B;
+  --color-stale-bg:           #FEFCE8;  /* stale blend plan */
+  --color-stale-border:       #D9A441;
+  --color-balanced-bg:        #F0FDF4;  /* scale balanced */
+  --color-balanced-border:    #2F6B3A;
+  --color-rejected-bg:        #FEF2EE;
+  --color-rejected-border:    #B5412B;
+
+  /* Typography */
+  --font-display:             'Be Vietnam Pro', Roboto, system-ui, sans-serif;
+  --font-body:                'Be Vietnam Pro', Roboto, system-ui, sans-serif;
+  --font-serif:               'Lora', 'Times New Roman', serif;
+  --font-mono:                'JetBrains Mono', 'Fira Mono', monospace;
+
+  /* Spacing */
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem;    --space-6: 1.5rem; --space-8: 2rem;
+  --space-12: 3rem;   --space-16: 4rem;  --space-24: 6rem;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-full: 9999px;
+
+  /* Motion */
+  --duration-instant:  100ms;
+  --duration-fast:     150ms;
+  --duration-normal:   250ms;
+  --duration-slow:     400ms;
+  --duration-dramatic: 700ms;
+
+  --ease-spring:   cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out:      cubic-bezier(0.0, 0.0, 0.2, 1);
+  --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce:   cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.dark {
+  --color-surface-base:       #0E1411;  /* dark surface base */
+  --color-surface-raised:     #162019;  /* raised dark */
+  --color-surface-overlay:    #1C2820;  /* overlay dark */
+  --color-ink-primary:        #F4EFE6;  /* parchment text on dark */
+  --color-ink-secondary:      #A3B8AF;
+  --color-ink-tertiary:       #6E857C;
+  --color-ink-inverse:        #0E1411;
+
+  --color-accent-primary:     #429452;
+  --color-accent-primary-dim: #2F6B3A;
+  --color-accent-warning:     #E5B254;
+  --color-accent-danger:      #D4563E;
+  --color-accent-info:        #4D74A1;
+  --color-accent-success:     #4BA35B;
+
+  --color-hold-bg:            #241513;
+  --color-hold-border:        #D4563E;
+  --color-stale-bg:           #242010;
+  --color-stale-border:       #E5B254;
+  --color-balanced-bg:        #102416;
+  --color-balanced-border:    #429452;
+  --color-rejected-bg:        #241513;
+  --color-rejected-border:    #D4563E;
+}
+
+/* Subtle parchment grain texture overlay */
+.bg-parchment-grain {
+  background-color: var(--color-surface-base);
+  background-image: radial-gradient(rgba(27, 36, 32, 0.03) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+.dark .bg-parchment-grain {
+  background-color: var(--color-surface-base);
+  background-image: radial-gradient(rgba(244, 239, 230, 0.02) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+/* Tabular nums rule for all ledger and numerical representations */
+.tabular-numbers {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Accessible focus ring */
+:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+/* Shake keyframes for ledger rejection moment */
+@keyframes ledgerShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+.animate-ledger-shake {
+  animation: ledgerShake 0.4s var(--ease-spring);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-tertiary);
+  border-radius: var(--radius-full);
+}

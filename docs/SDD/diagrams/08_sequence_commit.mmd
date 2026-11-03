@@ -1,0 +1,24 @@
+sequenceDiagram
+ autonumber
+ actor O as MillOperator
+ participant UI as :LedgerOperations
+ participant E as :LedgerEndpoints
+ participant S as :LedgerService
+ participant DB as :PostgreSQL protected routines
+ O->>UI: Commit current reconciled correction
+ UI->>E: POST /api/ledger/corrections/{id}/commit
+ E->>S: CommandAsync(correction_commit, payload)
+ S->>DB: ledger.command(actor, correction_commit, payload)
+ DB->>DB: lock_writes, validate scope, original outputs and reconciled replacement digest/version
+ alt Evidence, remaining positions or replacement binding invalid
+ DB-->>S: Reject and rollback complete correction
+ S-->>E: 400 / 403 / 409 ProblemDetails
+ E-->>UI: ProblemDetails / result
+ else Reconciliation and replacement still valid
+ DB->>DB: Reverse eligible original postings once and commit replacement in same transaction
+ DB->>DB: Update positions, retain correction events and source attribution
+ DB-->>S: Committed reviewed replacement, original history preserved
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ end
+ Note over S,DB: Export reservation accounting is a planned extension.<br/>Future REVERSE_CONSUME and replacement CONSUME must join this transaction, never a separate commit.

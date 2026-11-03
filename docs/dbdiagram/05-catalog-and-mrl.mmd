@@ -1,0 +1,90 @@
+erDiagram
+    %% Live catalog snapshot 2026-10-19. Exact type aliases: varchar(n)=character varying(n); timestamptz=timestamp with time zone.
+    %% NN = NOT NULL; NULL = nullable. PK/FK mark catalog constraints; FK labels are exact constraint names.
+
+    %% catalog.active_substances — full table
+    catalog_active_substances {
+        uuid id PK "NN"
+        varchar(60) code "NN"
+        text name "NN"
+    }
+    %% catalog.catalog_events — full table
+    catalog_catalog_events {
+        uuid id PK "NN"
+        uuid actor_id FK "NN"
+        varchar(60) event_type "NN"
+        varchar(60) resource_type "NN"
+        uuid resource_id "NN"
+        timestamptz occurred_at "NN"
+        uuid correlation_id "NN"
+        jsonb before_state "NULL"
+        jsonb after_state "NULL"
+    }
+    %% catalog.commodities — full table
+    catalog_commodities {
+        uuid id PK "NN"
+        varchar(40) code "NN"
+        text name "NN"
+        uuid created_by "NULL"
+        boolean is_archived "NN"
+    }
+    %% catalog.markets — full table
+    catalog_markets {
+        uuid id PK "NN"
+        varchar(40) code "NN"
+        text name "NN"
+    }
+    %% catalog.measurement_units — full table
+    catalog_measurement_units {
+        uuid id PK "NN"
+        varchar(30) code "NN"
+        text name "NN"
+        varchar(32) quantity_kind "NN"
+        uuid created_by "NULL"
+        boolean is_deleted "NN"
+    }
+    %% catalog.mrl_limits — full table
+    catalog_mrl_limits {
+        uuid id PK "NN"
+        uuid mrl_version_id FK "NN"
+        uuid substance_id FK "NN"
+        numeric(24,12) limit_value "NN"
+        varchar(20) unit "NN"
+    }
+    %% catalog.mrl_versions — full table
+    catalog_mrl_versions {
+        uuid id PK "NN"
+        uuid market_id FK "NN"
+        uuid commodity_id FK "NN"
+        integer version_no "NN"
+        varchar(32) status "NN"
+        timestamptz effective_from "NN"
+        timestamptz effective_to "NULL"
+        uuid published_by FK "NULL"
+        timestamptz published_at "NULL"
+        text source_ref "NN"
+    }
+    %% catalog.quality_attributes — full table
+    catalog_quality_attributes {
+        uuid id PK "NN"
+        varchar(60) code "NN"
+        text name "NN"
+        varchar(30) unit "NN"
+    }
+    %% catalog.rice_varieties — full table
+    catalog_rice_varieties {
+        uuid id PK "NN"
+        varchar(40) code "NN"
+        text name "NN"
+    }
+    %% identity.users — reference only; full fields in owning diagram
+    identity_users {
+        uuid Id PK "NN"
+    }
+
+    catalog_active_substances ||..o{ catalog_mrl_limits : "FK_mrl_limits_active_substances_substance_id"
+    catalog_commodities ||..o{ catalog_mrl_versions : "FK_mrl_versions_commodities_commodity_id"
+    catalog_markets ||..o{ catalog_mrl_versions : "FK_mrl_versions_markets_market_id"
+    catalog_mrl_versions ||..o{ catalog_mrl_limits : "FK_mrl_limits_mrl_versions_mrl_version_id"
+    identity_users o|..o{ catalog_mrl_versions : "fk_mrl_versions_published_by"
+    identity_users ||..o{ catalog_catalog_events : "fk_catalog_events_actor"

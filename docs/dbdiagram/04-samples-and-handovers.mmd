@@ -1,0 +1,46 @@
+erDiagram
+    %% Live catalog snapshot 2026-10-19. Exact type aliases: varchar(n)=character varying(n); timestamptz=timestamp with time zone.
+    %% NN = NOT NULL; NULL = nullable. PK/FK mark catalog constraints; FK labels are exact constraint names.
+
+    %% capture.sample_handovers — full table
+    capture_sample_handovers {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        uuid sample_id FK "NN"
+        uuid recorded_by FK "NN"
+        text from_party "NN"
+        text to_party "NN"
+        timestamptz handed_over_at "NN"
+        text seal_condition "NN"
+        text evidence_ref "NULL"
+    }
+    %% capture.samples — full table
+    capture_samples {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+        varchar(60) code "NN"
+        uuid source_lot_id FK "NN"
+        varchar(100) seal_code "NN"
+        uuid collected_by FK "NN"
+        timestamptz collected_at "NN"
+    }
+    %% capture.source_lots — reference only; full fields in owning diagram
+    capture_source_lots {
+        uuid id PK "NN"
+        uuid company_id FK "NN"
+    }
+    %% identity.organizations — reference only; full fields in owning diagram
+    identity_organizations {
+        uuid Id PK "NN"
+    }
+    %% identity.users — reference only; full fields in owning diagram
+    identity_users {
+        uuid Id PK "NN"
+    }
+
+    capture_samples ||..o{ capture_sample_handovers : "fk_sample_handovers_sample"
+    capture_source_lots ||..o{ capture_samples : "fk_samples_source_lot"
+    identity_organizations ||..o{ capture_sample_handovers : "fk_sample_handovers_company"
+    identity_organizations ||..o{ capture_samples : "fk_samples_company"
+    identity_users ||..o{ capture_sample_handovers : "fk_sample_handovers_recorded_by"
+    identity_users ||..o{ capture_samples : "fk_samples_collected_by"

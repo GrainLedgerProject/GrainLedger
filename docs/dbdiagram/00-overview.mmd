@@ -1,0 +1,9 @@
+flowchart TB
+    %% Schema-level aggregation of physical cross-schema foreign keys from the live catalog.
+    %% Table-level constraints are in diagrams 01-08 and DBML; arrows run child schema -> parent schema.
+    capture -->|FK| identity
+    capture -->|FK| catalog
+    catalog -->|FK| identity
+    ledger -->|FK| identity
+    ledger -->|FK| capture
+    ledger -->|FK| catalog

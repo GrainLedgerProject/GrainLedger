@@ -1,0 +1,114 @@
+classDiagram
+direction TB
+class ExportOrder {
+ <<planned>>
+ +UUID order_id
+ +UUID company_id
+ +UUID market_id
+ +UUID commodity_id
+ +UUID created_by
+ +String order_code
+ +Decimal required_mass_kg
+ +remainingMass(completedKg) Decimal
+}
+class OrderSpecificationVersion {
+ <<planned>>
+ +UUID specification_id
+ +UUID order_id
+ +Integer version_no
+ +DateTime recorded_at
+ +hasRequiredAttributes() Boolean
+}
+class SpecificationLimit {
+ <<planned>>
+ +UUID specification_limit_id
+ +UUID specification_id
+ +UUID attribute_id
+ +Decimal minimum_value
+ +Decimal maximum_value
+ +isSatisfied(value) Boolean
+}
+class Container {
+ <<planned>>
+ +UUID container_id
+ +UUID order_id
+ +String internal_code
+ +String container_number
+ +String seal_number
+ +Decimal target_mass_kg
+ +String status
+ +canAcceptLoading() Boolean
+ +hasExactTarget(loadedKg) Boolean
+}
+class BlendPlan {
+ <<planned>>
+ +UUID plan_id
+ +UUID container_id
+ +UUID specification_id
+ +UUID proposed_by
+ +Integer version_no
+ +String status
+ +String search_outcome
+ +hasCurrentAuthority(scope) Boolean
+}
+class BlendPlanAllocation {
+ <<planned>>
+ +UUID plan_allocation_id
+ +UUID plan_id
+ +UUID allocation_id
+ +Decimal proposed_input_kg
+ +validateInputQuota(netConsumedKg) ValidationResult
+}
+class PlanReview {
+ <<planned>>
+ +UUID review_id
+ +UUID plan_id
+ +UUID assessment_id
+ +UUID reviewed_by
+ +String decision
+ +String review_scope
+ +String reason
+ +authorizes(scope, assessment) Boolean
+}
+class StockReservation {
+ <<planned>>
+ +UUID reservation_id
+ +UUID plan_allocation_id
+ +UUID plan_output_id
+ +Decimal reserved_kg
+ +Decimal consumed_kg
+ +Decimal released_kg
+ +outstandingMass() Decimal
+ +canConsume(massKg) Boolean
+}
+class PlanOutputAllocation {
+ <<planned>>
+ +UUID plan_output_id
+ +UUID plan_id
+ +UUID allocation_id
+ +UUID output_id
+ +Decimal assigned_kg
+ +matchesOutputAndPlan(output, plan) Boolean
+}
+class PlanFinding {
+ <<planned>>
+ +UUID finding_id
+ +UUID plan_id
+ +UUID assessment_id
+ +UUID substance_id
+ +UUID attribute_id
+ +String constraint_code
+ +String explanation
+ +refersTo(targetId) Boolean
+}
+ExportOrder "1" --> "0..*" OrderSpecificationVersion : versions
+OrderSpecificationVersion "1" --> "0..*" SpecificationLimit : limits
+ExportOrder "1" --> "0..*" Container : ships_in
+Container "1" --> "0..*" BlendPlan : plan_history
+OrderSpecificationVersion "1" --> "0..*" BlendPlan : meets
+BlendPlan "1" --> "0..*" BlendPlanAllocation : proposes
+BlendPlan "1" --> "0..*" PlanFinding : explains
+BlendPlan "1" --> "0..*" PlanReview : reviewed
+BlendPlanAllocation "0..1" --> "0..*" StockReservation : reserves_inputs
+BlendPlan "1" --> "0..*" PlanOutputAllocation : earmarks_outputs
+PlanOutputAllocation "0..1" --> "0..*" StockReservation : reserves_outputs

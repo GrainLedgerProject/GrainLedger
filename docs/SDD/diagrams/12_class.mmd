@@ -1,0 +1,70 @@
+classDiagram
+direction TB
+class Lot {
+ <<logical target>>
+ +UUID lot_id
+ +UUID company_id
+ +UUID commodity_id
+ +String lot_code
+ +String stage
+ +DateTime created_at
+ +belongsTo(companyId) Boolean
+ +isStageCompatible(operation) Boolean
+}
+class MassContribution {
+ <<logical target>>
+ +UUID contribution_id
+ +UUID input_id
+ +UUID output_id
+ +Decimal attributed_output_kg
+ +validateAttribution(outputKg) ValidationResult
+}
+class Container {
+ <<logical target>>
+ +UUID container_id
+ +UUID order_id
+ +String internal_code
+ +String container_number
+ +String seal_number
+ +Decimal target_mass_kg
+ +String status
+ +canAcceptLoading() Boolean
+ +hasExactTarget(loadedKg) Boolean
+}
+class Hold {
+ <<logical target>>
+ +UUID hold_id
+ +UUID company_id
+ +UUID lot_id
+ +UUID container_id
+ +UUID lab_result_id
+ +UUID ordered_by
+ +String reason
+ +hasExactlyOneTarget() Boolean
+ +blocks(action, target) Boolean
+}
+class HoldNotification {
+ <<logical target>>
+ +UUID notification_id
+ +UUID hold_id
+ +UUID recipient_id
+ +String message
+ +DateTime created_at
+ +DateTime read_at
+ +belongsToRecipient(userId) Boolean
+}
+class HoldHandlingEvent {
+ <<logical target>>
+ +UUID handling_id
+ +UUID hold_id
+ +UUID recorded_by
+ +String action
+ +String evidence_ref
+ +String note
+ +DateTime recorded_at
+ +isPermittedHandling(action) Boolean
+}
+Lot "0..1" --> "0..*" Hold : target_lot
+Container "0..1" --> "0..*" Hold : target_container
+Hold "1" --> "0..*" HoldHandlingEvent : handled
+Hold "1" --> "0..*" HoldNotification : notifies

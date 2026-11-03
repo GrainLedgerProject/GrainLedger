@@ -1,0 +1,44 @@
+sequenceDiagram
+ autonumber
+ actor O as MillOperator
+ actor M as MillManager
+ participant UI as :LedgerReceiving
+ participant E as :LedgerEndpoints
+ participant S as :LedgerService
+ participant DB as :PostgreSQL protected routines
+ O->>UI: Record complete actual measurements for every procurement line
+ UI->>E: POST /api/ledger/receiving/{id}/measurements
+ E->>S: ReceivingAsync(measurements, request)
+ S->>DB: ledger.arrival_command(actor, id, measurements, payload)
+ DB->>DB: READ COMMITTED, global write lock, scope/version/idempotency checks
+ alt Every actual normalized mass exactly equals expected mass
+ DB->>DB: Append measurements and post actual lots/positions/contributions/events atomically
+ DB-->>S: RECEIVED_MATCHED, actual mass becomes usable
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ else Any discrepancy
+ DB->>DB: Append immutable complete observation set, no stock
+ DB-->>S: AWAITING_MANAGER_REVIEW, usable stock=0
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ M->>UI: Review mismatch with reason and scoped evidence
+ UI->>E: POST /api/ledger/receiving/{id}/reviews
+ E->>S: ReceivingAsync(reviews, request)
+ S->>DB: ledger.arrival_command(actor, id, reviews, payload)
+ alt APPROVE_SHORTAGE, every actual <= expected and at least one short
+ DB->>DB: Append review and post positive actuals only atomically
+ DB-->>S: RECEIVED_SHORTAGE_APPROVED
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ else REQUEST_REMEASUREMENT
+ DB->>DB: Retain old evidence, append request, next measurement set is new
+ DB-->>S: REMEASUREMENT_REQUESTED, no usable stock
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ else KEEP_BLOCKED or unsupported surplus/invalid review
+ DB-->>S: BLOCKED_UNRESOLVED or rejection, no stock
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ end
+ end
+ Note over S,DB: One procurement = one complete arrival, no partial-arrival, surplus approval or tolerance.<br/>Legacy NULL receiving marker and existing stock are preserved.
