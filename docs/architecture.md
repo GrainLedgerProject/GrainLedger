@@ -4,11 +4,21 @@
 
 This implementation follows `Week1_report/GrainLedger_V2.pdf` (September 30, 2026) and the V2 role matrix in `GLM/03_Nguoi_dung_va_personas.md`. Those documents supersede earlier SRS role names: the mill owns the platform, and customer companies own their business data. Farmer accounts and buyer/auditor links are not internal roles in this baseline. The qualified ledger workflows below are implemented engineering defaults, not claims of factory or supervisor approval.
 
-## One application, explicit modules
+## Approved cutover target (deployment status unconfirmed)
 
-`GrainLedger.Api` is the composition root. Identity owns the `identity` schema, Catalog owns catalog data, Capture owns farmer/procurement records, samples and external laboratory reports in `capture`, and Ledger owns protected stock, operations, postings, lineage, facility evidence, processing corrections, HOLD, notifications and history in `ledger`. React uses this same-origin host with HttpOnly session cookies; API clients can use Bearer access tokens.
+The intended application is one ASP.NET Core project, `GrainLedger.Api`, with feature folders `Identity`, `Catalogs`, `Capture`, `Ledger`, and `Exports`. `Data/AppDbContext.cs` is the sole EF Core context and sets PostgreSQL default schema `grainledger`; one scoped context uses one shared restricted Npgsql data source. React remains separate. This is an approved target, not evidence that reset, migration, or deployment has occurred.
 
-The modules are class libraries in one process. Each owns its tables and migrations; cross-module calls use in-process contracts and share one Npgsql connection/transaction for source/stock changes. No EF entities cross module boundaries. Procurement registration writes source only; accepted arrival measurement and Ledger lot/posting are atomic through the registered Ledger port. Source registration, operator measurement, manager review and accepted posting acquire PostgreSQL transaction advisory lock `714928352` before source/stock reads at `READ COMMITTED`. No broker, gateway, service discovery or independently deployed business API is required.
+All application-owned database objects move into `grainledger` using deterministic names: `grainledger.<original-schema>_<original-object>`, with original tokens `identity`, `catalog`, `capture`, `ledger`, `exports`. This also applies to indexes, constraints, triggers and routines; oversized names use the approved SHA-256 suffix rule. Columns, enum values, permissions, API contracts and business behavior do not change because of renaming.
+
+The approved `--seed-setup` command provisions accounts and mill setup only in Development; full demo data remains a separate explicit `--seed-ledger` choice. The selected initial data excludes demo policies/evidence and business workflows; migration-installed reference/configuration data is preserved. See deployment guide for exact counts and guardrails.
+
+Source/stock workflows retain their operation-specific transaction boundaries. Capture and protected Ledger routines borrow the caller's connection and transaction; no request-wide transaction is introduced. Stock-changing workflows retain advisory lock `714928352` and `READ COMMITTED`; residue materialization retains read-only `REPEATABLE READ` followed by separate validated append.
+
+## Historical module-era architecture snapshot
+
+The following sections record behavior and deployment details from the prior multi-context/multi-schema implementation. Treat old schema and migration names as historical identifiers, not instructions for the approved single-schema baseline. Current reset/deployment status must be established independently.
+
+### Historical module composition
 
 New procurement registration creates durable source expectation only; no Ledger lot, position, posting or usable stock exists until a complete arrival is accepted. One procurement equals one complete arrival; use separate procurement per load. No truck model, customer settlement workflow, partial arrival or surplus acceptance. Assigned MillOperator records actual mass for every line in one complete set: exact match confirms and posts measured mass; a complete positive set with at least one shortage, every actual at or below expected, and every line within the owning company's effective receiving threshold posts measured actual mass as `RECEIVED_WITHIN_TOLERANCE`; any surplus or over-threshold shortage remains without stock for assigned MillManager review. Manager requires reason and owner/facility-scoped evidence: shortage approval posts actual mass only when no line exceeds expected and at least one is short; remeasurement appends new observations/request; keep-blocked leaves unresolved discrepancy without stock. Threshold escalates discrepancy only; it does not settle customer payments.
 
@@ -67,7 +77,7 @@ Cookie-authenticated mutating API calls require `X-CSRF-TOKEN`, fetched from `/a
 - Capture migration `20261020000000_ExternalLaboratoryWorkflow` adds laboratory records and database immutability guards. Exact decimal strings retain reported values, LOD and LOQ without conversion. Confirmed reports may show the existing read-time numeric VN baseline against published rows; this is not a persisted legal assessment or lot residue interval. Missing limits/evidence remain explicitly unassessed. No automatic disposition route exists.
 - Unconfirmed laboratory editing appends a replacement report with fresh section/result IDs; an append-only draft lifecycle record retires the previous version. Deletion appends a tombstone and hides the draft from the active queue, never deleting original files or observations. Confirmed reports cannot be retired or reopened. API transactions and database guards serialize retirement/confirmation under the existing advisory lock; exact-operation replay and current company/permission checks remain enforced. Draft revisions are separate from actual laboratory amendment/retest document relationships.
 
-Route/DTO implementations live in [Capture](../backend/src/GrainLedger.Modules.Capture/), [Catalog](../backend/src/GrainLedger.Modules.Catalogs/) and [Ledger](../backend/src/GrainLedger.Modules.Ledger/); API contract errors use ProblemDetails. Historical synthetic source evidence is not converted or dropped automatically. Test-only cookie/auth/browser harness belongs to integration tests, not production bypass.
+Route/DTO implementations live in `backend/src/GrainLedger.Api/Features/{Capture,Catalogs,Ledger}`; API contract errors use ProblemDetails. Historical synthetic source evidence is not converted or dropped automatically. Test-only cookie/auth/browser harness belongs to integration tests, not production bypass.
 
 ## Read scalability and tracing readiness
 
@@ -147,7 +157,7 @@ Lot detail automatically loads scoped read-only `GET /api/ledger/lots/{lotId}/re
 
 Run a real Google consent flow using your project's client ID and secret, including cancellation, an unverified identity rejection, pending onboarding, first-admin onboarding, logout, and a disabled account. Automated tests substitute provider identities; they cannot verify your Google Cloud consent configuration. Future business modules still need resource-specific authorization tests when their endpoints are implemented. Buyer links, offline synchronization, and domain workflows are outside this authentication/profile slice.
 
-## Identity module layout
+## Historical Identity module layout
 
 ```text
 GrainLedger.Modules.Identity/

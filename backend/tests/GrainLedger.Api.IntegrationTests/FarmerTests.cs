@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -60,7 +61,7 @@ public sealed class FarmerTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal(HttpStatusCode.Created, (await clientB.PostAsJsonAsync("/api/farmers", Request(Guid.NewGuid(), Guid.NewGuid(), "F-001"))).StatusCode);
 
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Farmers.CountAsync(x => x.CompanyId == companyA.Id && x.Id == entityId));
         Assert.Equal(userA.Id, (await db.Farmers.SingleAsync(x => x.CompanyId == companyA.Id && x.Id == entityId)).CreatedBy);
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CompanyId == companyA.Id && x.CorrelationId == operationId));
@@ -123,7 +124,7 @@ public sealed class FarmerTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.All(responses, x => Assert.Contains(x.StatusCode, new[] { HttpStatusCode.Created, HttpStatusCode.OK }));
 
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Farmers.CountAsync(x => x.Id == farmerId));
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CompanyId == company.Id && x.CorrelationId == operationId));
         Assert.Equal(1, await db.OfflineOperations.CountAsync(x => x.CompanyId == company.Id && x.ClientOperationId == operationId));

@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Text.Json;
 using System.Net.Http.Json;
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Exports;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Exports;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -62,7 +63,7 @@ public sealed class BrowserWorkflowHost
         var pendingReceipt = await LedgerScenario.SendAsync(scenario.Purchaser, HttpMethod.Post, "/api/procurements", scenario.ReceiptBody(Guid.NewGuid(), ["12", "8"]));
         using (var scope = factory.Services.CreateScope())
         {
-            var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var catalog = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             catalog.AddRange(new Market { Id = Guid.NewGuid(), Code = "DEMO-EU", Name = "Browser test market" },
                 new Commodity { Id = Guid.NewGuid(), Code = "RICE", Name = "Rice" },
                 new QualityAttribute { Id = Guid.NewGuid(), Code = "MOISTURE", Name = "Moisture", Unit = "%" });
@@ -73,9 +74,9 @@ public sealed class BrowserWorkflowHost
             await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
             await connection.OpenAsync();
             await using var command = new NpgsqlCommand("""
-                SELECT jsonb_build_object('positions', (SELECT count(*) FROM ledger.positions),
-                    'massKg', (SELECT coalesce(sum(quantity_kg),0) FROM ledger.positions),
-                    'postings', (SELECT count(*) FROM ledger.postings))::text
+                SELECT jsonb_build_object('positions', (SELECT count(*) FROM grainledger.ledger_positions),
+                    'massKg', (SELECT coalesce(sum(quantity_kg),0) FROM grainledger.ledger_positions),
+                    'postings', (SELECT count(*) FROM grainledger.ledger_postings))::text
                 """, connection);
             return (string)(await command.ExecuteScalarAsync())!;
         }
@@ -154,7 +155,7 @@ public sealed class BrowserWorkflowHost
             scenario.ReceiptBody(Guid.NewGuid(), ["10"], traceMixedLocation));
         await scenario.ConfirmArrivalAsync(mixedReceipt);
         var mixedRoot = LedgerScenario.Lots(mixedReceipt)[0];
-        var traceSource = await scenario.Purchaser.GetFromJsonAsync<GrainLedger.Modules.Capture.SourceLotResponse>(
+        var traceSource = await scenario.Purchaser.GetFromJsonAsync<GrainLedger.Api.Features.Capture.SourceLotResponse>(
             $"/api/source-lots/{mixedReceipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()}");
         var mixedPool = traceSource!.CurrentStock.Single().CurrentStockLotId;
         await scenario.HoldAsync(mixedRoot);
@@ -191,7 +192,7 @@ public sealed class BrowserWorkflowHost
             if (context.Request.Path == "/__browser/export-check" && HttpMethods.IsGet(context.Request.Method))
             {
                 using var scope = factory.Services.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<ExportDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await context.Response.WriteAsJsonAsync(new
                 {
                     stockUnchanged = stockBefore == await StockSnapshotAsync(),

@@ -1,3 +1,4 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -5,7 +6,7 @@ using System.Text.Json;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -84,12 +85,12 @@ public sealed class LocalAuthTests(ApiFactory factory) : IClassFixture<ApiFactor
         var email = $"shared-{Guid.NewGuid():N}@example.com";
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Users.Add(new User { Provider = "google", ProviderSubject = Guid.NewGuid().ToString("N"), Email = email, DisplayName = "Google User" });
             await db.SaveChangesAsync();
         }
         using var client = factory.CreateClient(); await CreateAndLoginAsync(client, email);
-        using var verify = factory.Services.CreateScope(); var users = await verify.ServiceProvider.GetRequiredService<IdentityDbContext>().Users
+        using var verify = factory.Services.CreateScope(); var users = await verify.ServiceProvider.GetRequiredService<AppDbContext>().Users
             .Where(x => x.Email == email).OrderBy(x => x.Provider).ToListAsync();
         Assert.Equal(2, users.Count); Assert.Equal(["google", "local"], users.Select(x => x.Provider)); Assert.Null(users.Single(x => x.Provider == "google").PasswordHash);
     }
@@ -101,7 +102,7 @@ public sealed class LocalAuthTests(ApiFactory factory) : IClassFixture<ApiFactor
         await RegisterAndVerifyAsync(client, email);
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>(); var user = await db.Users.SingleAsync(x => x.Provider == "local" && x.NormalizedEmail == email.ToUpperInvariant());
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>(); var user = await db.Users.SingleAsync(x => x.Provider == "local" && x.NormalizedEmail == email.ToUpperInvariant());
             user.Role = Roles.Administrator; await db.SaveChangesAsync();
         }
         var login = await LoginAsync(client, email, "StrongPass!123"); client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.AccessToken);
@@ -116,7 +117,7 @@ public sealed class LocalAuthTests(ApiFactory factory) : IClassFixture<ApiFactor
         for (var i = 0; i < 5; i++)
             Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/verify-email", new { email, registrationId = pending.RegistrationId, otp = wrong })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/verify-email", new { email, registrationId = pending.RegistrationId, otp = correct })).StatusCode);
-        using var scope = factory.Services.CreateScope(); var attempt = await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().RegistrationAttempts.SingleAsync(x => x.Id == pending.RegistrationId);
+        using var scope = factory.Services.CreateScope(); var attempt = await scope.ServiceProvider.GetRequiredService<AppDbContext>().RegistrationAttempts.SingleAsync(x => x.Id == pending.RegistrationId);
         Assert.Equal(5, attempt.FailedAttempts);
 
         var replayEmail = $"replay-{Guid.NewGuid():N}@example.com"; var replay = await RegisterAsync(client, replayEmail, "StrongPass!123"); var otp = factory.Email.VerificationCode(replayEmail);
@@ -125,7 +126,7 @@ public sealed class LocalAuthTests(ApiFactory factory) : IClassFixture<ApiFactor
 
         var expiredEmail = $"expired-{Guid.NewGuid():N}@example.com"; var expired = await RegisterAsync(client, expiredEmail, "StrongPass!123");
         using (var expiryScope = factory.Services.CreateScope())
-            await expiryScope.ServiceProvider.GetRequiredService<IdentityDbContext>().RegistrationAttempts.Where(x => x.Id == expired.RegistrationId)
+            await expiryScope.ServiceProvider.GetRequiredService<AppDbContext>().RegistrationAttempts.Where(x => x.Id == expired.RegistrationId)
                 .ExecuteUpdateAsync(x => x.SetProperty(a => a.ExpiresAt, DateTimeOffset.UtcNow.AddMinutes(-1)));
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/verify-email",
             new { email = expiredEmail, registrationId = expired.RegistrationId, otp = factory.Email.VerificationCode(expiredEmail) })).StatusCode);
@@ -142,7 +143,7 @@ public sealed class LocalAuthTests(ApiFactory factory) : IClassFixture<ApiFactor
         }
         finally { factory.Email.FailDelivery = false; }
         using var scope = factory.Services.CreateScope();
-        Assert.False(await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().RegistrationAttempts.AnyAsync(x => x.NormalizedEmail == email.ToUpperInvariant()));
+        Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().RegistrationAttempts.AnyAsync(x => x.NormalizedEmail == email.ToUpperInvariant()));
     }
 
     [Fact]
@@ -152,7 +153,7 @@ public sealed class LocalAuthTests(ApiFactory factory) : IClassFixture<ApiFactor
         for (var i = 0; i < 5; i++) Assert.Equal(HttpStatusCode.Unauthorized,
             (await client.PostAsJsonAsync("/api/auth/login", new { email, password = "WrongPass!999" })).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/auth/login", new { email, password = "StrongPass!123" })).StatusCode);
-        using var scope = factory.Services.CreateScope(); var user = await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.SingleAsync(x => x.NormalizedEmail == email.ToUpperInvariant());
+        using var scope = factory.Services.CreateScope(); var user = await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.SingleAsync(x => x.NormalizedEmail == email.ToUpperInvariant());
         Assert.True(user.LockoutEnd > DateTimeOffset.UtcNow.AddMinutes(14));
     }
 
@@ -210,7 +211,7 @@ public sealed class LocalAuthTests(ApiFactory factory) : IClassFixture<ApiFactor
     }
     private async Task MakeRegistrationResendableAsync(Guid id)
     {
-        using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.RegistrationAttempts.Where(x => x.Id == id).ExecuteUpdateAsync(x => x.SetProperty(a => a.LastSentAt, DateTimeOffset.UtcNow.AddMinutes(-2)));
     }
     private sealed record TokenPair(string AccessToken, string RefreshToken);

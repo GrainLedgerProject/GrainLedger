@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -69,7 +70,7 @@ public sealed class MeasurementUnitTests(ApiFactory factory) : IClassFixture<Api
         stale.Headers.TryAddWithoutValidation("If-Match", etag);
         Assert.Equal(HttpStatusCode.PreconditionFailed, (await adminClient.SendAsync(stale)).StatusCode);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(2, await db.CatalogEvents.CountAsync(x => x.ResourceId == unit.Id));
         Assert.Equal("MASS", (await db.MeasurementUnits.SingleAsync(x => x.Id == unit.Id)).QuantityKind);
     }
@@ -116,7 +117,7 @@ public sealed class MeasurementUnitTests(ApiFactory factory) : IClassFixture<Api
         var legacy = (await legacyResponse.Content.ReadFromJsonAsync<MeasurementUnitResponse>())!;
         using (var legacyScope = factory.Services.CreateScope())
         {
-            var legacyDb = legacyScope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var legacyDb = legacyScope.ServiceProvider.GetRequiredService<AppDbContext>();
             var row = await legacyDb.MeasurementUnits.SingleAsync(x => x.Id == legacy.Id);
             row.CreatedBy = null;
             await legacyDb.SaveChangesAsync();
@@ -143,7 +144,7 @@ public sealed class MeasurementUnitTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/measurement-units",
             new { code = removable.Code, name = "Reused code", quantityKind = "AREA" })).StatusCode);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var deleted = await db.MeasurementUnits.IgnoreQueryFilters().SingleAsync(x => x.Id == removable.Id);
         Assert.True(deleted.IsDeleted);
         Assert.NotEqual(removable.Version, deleted.Version);

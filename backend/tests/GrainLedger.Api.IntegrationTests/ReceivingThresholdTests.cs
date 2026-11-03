@@ -3,9 +3,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Ledger;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Ledger;
 using Npgsql;
 using NpgsqlTypes;
 using Xunit;
@@ -62,7 +62,7 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
         AssertThreshold(Snapshot(result), s.OwnerId, 2m, "SYSTEM_DEFAULT", Version(policy));
         Assert.Equal(accepted ? decimal.Parse(actual, CultureInfo.InvariantCulture) : 0m, Decimal(result.GetProperty("usableStockKg")));
         Assert.Empty(result.GetProperty("reviews").EnumerateArray());
-        Assert.Equal(accepted ? 1L : 0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        Assert.Equal(accepted ? 1L : 0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=@id", id));
         if (accepted)
         {
             Assert.Equal(decimal.Parse(actual, CultureInfo.InvariantCulture), Quantity(await s.LotAsync(Lots(receipt)[0])));
@@ -72,14 +72,14 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
             Assert.Equal(lotCode, (await s.LotAsync(Lots(receipt)[0])).GetProperty("code").GetString());
             Assert.Equal(lotCode, (await GetAsync(s.Operator, $"/api/ledger/receiving/{id}"))
                 .GetProperty("items")[0].GetProperty("lotCode").GetString());
-            Assert.Equal(decimal.Parse(actual, CultureInfo.InvariantCulture), await ScalarAsync<decimal>("SELECT quantity_kg FROM ledger.contributions WHERE lot_id=@id", Lots(receipt)[0]));
+            Assert.Equal(decimal.Parse(actual, CultureInfo.InvariantCulture), await ScalarAsync<decimal>("SELECT quantity_kg FROM grainledger.ledger_contributions WHERE lot_id=@id", Lots(receipt)[0]));
             var source = await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()}");
             Assert.Equal("100", source!.InitialNetMassKg);
             Assert.Equal(decimal.Parse(actual, CultureInfo.InvariantCulture), decimal.Parse(source.CurrentStock.Single().OnHandKg, CultureInfo.InvariantCulture));
         }
         var projected = await GetAsync(s.Purchaser, $"/api/procurements/{id}");
         Assert.Equal(status, projected.GetProperty("status").GetString());
-        Assert.Equal("COMMITTED", await ScalarAsync<string>("SELECT status FROM capture.procurements WHERE id=@id", id));
+        Assert.Equal("COMMITTED", await ScalarAsync<string>("SELECT status FROM grainledger.capture_procurements WHERE id=@id", id));
         var queue = await GetAsync(s.Operator, $"/api/ledger/receiving-tasks?facilityId={s.FacilityId}&status={status}");
         Assert.Contains(queue.GetProperty("items").EnumerateArray(), x => Id(x) == id);
         await DefaultAsync(s, "3");
@@ -103,7 +103,7 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
         var result = await SendAsync(s.Operator, HttpMethod.Post, Measurements(id), MeasurementBody(receipt, actual: [first, second]));
         Assert.Equal("AWAITING_MANAGER_REVIEW", result.GetProperty("status").GetString());
         Assert.Equal(0m, Decimal(result.GetProperty("usableStockKg")));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=@id", id));
         if (surplus)
             await RejectedAsync(s.Manager, HttpMethod.Post, $"/api/ledger/receiving/{id}/reviews", Review(result, "APPROVE_SHORTAGE", s.EvidenceId), HttpStatusCode.Conflict);
         else
@@ -398,10 +398,10 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
         await using (var tx = await owner.BeginTransactionAsync())
         {
-            await using var takeLock = new NpgsqlCommand("SELECT ledger.lock_writes()", owner, tx); await takeLock.ExecuteNonQueryAsync();
+            await using var takeLock = new NpgsqlCommand("SELECT grainledger.ledger_lock_writes()", owner, tx); await takeLock.ExecuteNonQueryAsync();
             var measurement = SendAsync(s.Operator, HttpMethod.Post, Measurements(Id(first)), MeasurementBody(first, actual: ["97.5"]));
             await WaitForWriteWaiterAsync("arrival_command");
-            await RoutineAsync(owner, tx, "ledger.receiving_threshold_command(@actor,'default',@body)", s.Accounts["admin"].User.Id,
+            await RoutineAsync(owner, tx, "grainledger.ledger_receiving_threshold_command(@actor,'default',@body)", s.Accounts["admin"].User.Id,
                 new { percentage = "3", version = Version(policy), reason = "Configuration wins serialization" });
             await tx.CommitAsync();
             var result = await measurement;
@@ -413,10 +413,10 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
         var second = await RegisterAsync(s, "100");
         await using (var tx = await owner.BeginTransactionAsync())
         {
-            await using var takeLock = new NpgsqlCommand("SELECT ledger.lock_writes()", owner, tx); await takeLock.ExecuteNonQueryAsync();
+            await using var takeLock = new NpgsqlCommand("SELECT grainledger.ledger_lock_writes()", owner, tx); await takeLock.ExecuteNonQueryAsync();
             var edit = SendAsync(s.Admin, HttpMethod.Put, Settings + "/default", new { percentage = "3", version = Version(policy), reason = "Measurement wins serialization" });
             await WaitForWriteWaiterAsync("receiving_threshold_command");
-            var measured = await RoutineAsync(owner, tx, "ledger.arrival_command(@actor,@id,'measurements',@body)", s.Accounts["operator"].User.Id,
+            var measured = await RoutineAsync(owner, tx, "grainledger.ledger_arrival_command(@actor,@id,'measurements',@body)", s.Accounts["operator"].User.Id,
                 MeasurementBody(second, actual: ["97.5"]), Id(second));
             await tx.CommitAsync(); await edit;
             Assert.Equal("AWAITING_MANAGER_REVIEW", measured.GetProperty("status").GetString());
@@ -437,25 +437,25 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
         var saved = await SendAsync(s.Operator, HttpMethod.Post, Measurements(Id(savedReceipt)), savedBody);
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
         // Test-only fault injection; restore same immutable revision rather than manufacturing policy.
-        await using var read = new NpgsqlCommand("SELECT percentage,revision FROM ledger.receiving_threshold_default", owner);
+        await using var read = new NpgsqlCommand("SELECT percentage,revision FROM grainledger.ledger_receiving_threshold_default", owner);
         decimal percentage; Guid revision;
         await using (var row = await read.ExecuteReaderAsync()) { Assert.True(await row.ReadAsync()); percentage = row.GetDecimal(0); revision = row.GetGuid(1); }
         await using var fault = new NpgsqlCommand(invalid
-            ? "UPDATE ledger.receiving_threshold_default SET percentage=99"
-            : "DELETE FROM ledger.receiving_threshold_default", owner);
+            ? "UPDATE grainledger.ledger_receiving_threshold_default SET percentage=99"
+            : "DELETE FROM grainledger.ledger_receiving_threshold_default", owner);
         await fault.ExecuteNonQueryAsync();
         try
         {
             using var response = await RawAsync(s.Operator, HttpMethod.Post, Measurements(id), MeasurementBody(receipt));
             Assert.False(response.IsSuccessStatusCode);
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.arrival_measurement_sets WHERE procurement_id=@id", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
-            Assert.Equal("PENDING_ARRIVAL", await ScalarAsync<string>("SELECT status FROM ledger.receiving WHERE procurement_id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_arrival_measurement_sets WHERE procurement_id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=@id", id));
+            Assert.Equal("PENDING_ARRIVAL", await ScalarAsync<string>("SELECT status FROM grainledger.ledger_receiving WHERE procurement_id=@id", id));
             Assert.Equal(saved.GetRawText(), (await SendAsync(s.Operator, HttpMethod.Post, Measurements(Id(savedReceipt)), savedBody)).GetRawText());
         }
         finally
         {
-            await using var restore = new NpgsqlCommand("INSERT INTO ledger.receiving_threshold_default(singleton,percentage,revision) VALUES(true,@percentage,@revision) ON CONFLICT(singleton) DO UPDATE SET percentage=EXCLUDED.percentage,revision=EXCLUDED.revision", owner);
+            await using var restore = new NpgsqlCommand("INSERT INTO grainledger.ledger_receiving_threshold_default(singleton,percentage,revision) VALUES(true,@percentage,@revision) ON CONFLICT(singleton) DO UPDATE SET percentage=EXCLUDED.percentage,revision=EXCLUDED.revision", owner);
             restore.Parameters.AddWithValue("percentage", percentage); restore.Parameters.AddWithValue("revision", revision); await restore.ExecuteNonQueryAsync();
         }
     }
@@ -467,18 +467,18 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
         foreach (var sql in new[]
         {
-            "SELECT * FROM ledger.receiving_threshold_default",
-            "SELECT * FROM ledger.receiving_threshold_overrides",
-            "SELECT * FROM ledger.receiving_threshold_history",
-            "UPDATE ledger.receiving_threshold_default SET percentage=99",
-            "DELETE FROM ledger.receiving_threshold_default",
-            "INSERT INTO ledger.receiving_threshold_default(singleton,percentage,revision) VALUES(false,99,gen_random_uuid())",
-            "INSERT INTO ledger.receiving_threshold_overrides(company_id,percentage,revision) VALUES(@company,99,gen_random_uuid())",
-            "UPDATE ledger.receiving_threshold_overrides SET percentage=99",
-            "DELETE FROM ledger.receiving_threshold_overrides",
-            "INSERT INTO ledger.receiving_threshold_history(revision,scope,action,new_percentage,reason) VALUES(gen_random_uuid(),'SYSTEM_DEFAULT','UPDATE',99,'forged')",
-            "UPDATE ledger.receiving_threshold_history SET reason='forged'",
-            "DELETE FROM ledger.receiving_threshold_history"
+            "SELECT * FROM grainledger.ledger_receiving_threshold_default",
+            "SELECT * FROM grainledger.ledger_receiving_threshold_overrides",
+            "SELECT * FROM grainledger.ledger_receiving_threshold_history",
+            "UPDATE grainledger.ledger_receiving_threshold_default SET percentage=99",
+            "DELETE FROM grainledger.ledger_receiving_threshold_default",
+            "INSERT INTO grainledger.ledger_receiving_threshold_default(singleton,percentage,revision) VALUES(false,99,gen_random_uuid())",
+            "INSERT INTO grainledger.ledger_receiving_threshold_overrides(company_id,percentage,revision) VALUES(@company,99,gen_random_uuid())",
+            "UPDATE grainledger.ledger_receiving_threshold_overrides SET percentage=99",
+            "DELETE FROM grainledger.ledger_receiving_threshold_overrides",
+            "INSERT INTO grainledger.ledger_receiving_threshold_history(revision,scope,action,new_percentage,reason) VALUES(gen_random_uuid(),'SYSTEM_DEFAULT','UPDATE',99,'forged')",
+            "UPDATE grainledger.ledger_receiving_threshold_history SET reason='forged'",
+            "DELETE FROM grainledger.ledger_receiving_threshold_history"
         })
         {
             await using var command = new NpgsqlCommand(sql, runtime); command.Parameters.AddWithValue("company", s.OwnerId);
@@ -488,7 +488,7 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
         var before = await GetAsync(s.Admin, Settings); var history = await GetAsync(s.Admin, Settings + "/history?page=1&pageSize=100");
         foreach (var label in new[] { "purchaser", "customer", "operator", "manager", "pending" })
         {
-            await using var command = new NpgsqlCommand("SELECT ledger.receiving_threshold_command(@actor,'default',@body)", runtime);
+            await using var command = new NpgsqlCommand("SELECT grainledger.ledger_receiving_threshold_command(@actor,'default',@body)", runtime);
             command.Parameters.AddWithValue("actor", s.Accounts[label].User.Id);
             command.Parameters.AddWithValue("body", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new { percentage = "99", version = Version(policy), reason = "Unauthorized DB call" }));
             var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteScalarAsync());
@@ -509,16 +509,16 @@ public sealed class ReceivingThresholdTests(ApiFactory factory) : IClassFixture<
             await create.ExecuteNonQueryAsync();
         try
         {
-            await using (var grant = new NpgsqlCommand($"GRANT SELECT({column}) ON ledger.{table} TO {group}; GRANT {group} TO grainledger_test_runtime WITH INHERIT TRUE", owner))
+            await using (var grant = new NpgsqlCommand($"GRANT SELECT({column}) ON grainledger.ledger_{table} TO {group}; GRANT {group} TO grainledger_test_runtime WITH INHERIT TRUE", owner))
                 await grant.ExecuteNonQueryAsync();
-            await using (var effective = new NpgsqlCommand($"SELECT has_column_privilege('grainledger_test_runtime','ledger.{table}','{column}','SELECT') AND NOT has_table_privilege('grainledger_test_runtime','ledger.{table}','SELECT')", owner))
+            await using (var effective = new NpgsqlCommand($"SELECT has_column_privilege('grainledger_test_runtime','grainledger.ledger_{table}','{column}','SELECT') AND NOT has_table_privilege('grainledger_test_runtime','grainledger.ledger_{table}','SELECT')", owner))
                 Assert.Equal(true, await effective.ExecuteScalarAsync());
             await Assert.ThrowsAsync<InvalidOperationException>(() => LedgerDatabase.ValidateRuntimeAsync(factory.RuntimeConnectionString));
             await Assert.ThrowsAsync<InvalidOperationException>(() => LedgerDatabase.ConfigureRuntimeRoleAsync(factory.OwnerConnectionString, "grainledger_test_runtime"));
         }
         finally
         {
-            await using var cleanup = new NpgsqlCommand($"REVOKE {group} FROM grainledger_test_runtime; REVOKE SELECT({column}) ON ledger.{table} FROM {group}; DROP ROLE {group}", owner);
+            await using var cleanup = new NpgsqlCommand($"REVOKE {group} FROM grainledger_test_runtime; REVOKE SELECT({column}) ON grainledger.ledger_{table} FROM {group}; DROP ROLE {group}", owner);
             await cleanup.ExecuteNonQueryAsync();
         }
     }

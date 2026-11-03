@@ -1,7 +1,8 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,7 +17,7 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
     private async Task<User> CreateUserAsync(string? role = null)
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var email = $"qa-{Guid.NewGuid():N}@example.com";
         var user = new User { Provider = "local", ProviderSubject = Guid.NewGuid().ToString("N"), Email = email,
             NormalizedEmail = email.ToUpperInvariant(), DisplayName = "QA User", Role = role };
@@ -97,7 +98,7 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
         var user = await CreateUserAsync(); using var client = factory.CreateClient();
         var tokens = await LoginAsync(client, user);
         using (var scope = factory.Services.CreateScope())
-            await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.Where(x => x.Id == user.Id)
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.Where(x => x.Id == user.Id)
                 .ExecuteUpdateAsync(x => x.SetProperty(u => u.IsActive, false));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/profile")).StatusCode);
@@ -115,7 +116,7 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
         for (var i = 0; i < 5; i++)
             Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/reset-password", new { user.Email, otp = wrong, newPassword = Password })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/reset-password", new { user.Email, otp = code, newPassword = Password })).StatusCode);
-        using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.PasswordResetCodes.Where(x => x.UserId == user.Id).ExecuteUpdateAsync(x => x.SetProperty(c => c.LastSentAt, DateTimeOffset.UtcNow.AddMinutes(-2)));
         Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsJsonAsync("/api/auth/forgot-password", new { user.Email })).StatusCode);
         code = factory.Email.ResetCode(user.Email);

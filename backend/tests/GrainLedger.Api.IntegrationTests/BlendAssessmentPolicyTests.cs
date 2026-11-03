@@ -1,7 +1,8 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -21,7 +22,7 @@ public sealed class BlendAssessmentPolicyTests(ApiFactory factory) : IClassFixtu
         var attribute = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Markets.Add(new Market { Id = market, Code = $"M{market:N}", Name = "Synthetic market" });
             db.Commodities.Add(new Commodity { Id = commodity, Code = $"C{commodity:N}", Name = "Synthetic commodity" });
             db.ActiveSubstances.Add(new ActiveSubstance { Id = substance, Code = $"S{substance:N}", Name = "Synthetic substance" });

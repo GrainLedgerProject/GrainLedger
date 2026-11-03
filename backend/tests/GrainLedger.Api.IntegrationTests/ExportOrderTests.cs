@@ -1,9 +1,10 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Exports;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Exports;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -34,7 +35,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var mrlVersionId = Guid.NewGuid();
         using (var catalogScope = factory.Services.CreateScope())
         {
-            var catalog = catalogScope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var catalog = catalogScope.ServiceProvider.GetRequiredService<AppDbContext>();
             catalog.ActiveSubstances.Add(new ActiveSubstance
             { Id = substanceId, Code = $"F14-{substanceId:N}", Name = "Synthetic F14 analyte" });
             catalog.MrlVersions.Add(new MrlVersion
@@ -647,7 +648,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         using var writer = client;
         Guid companyId;
         using (var scope = factory.Services.CreateScope())
-            companyId = (await scope.ServiceProvider.GetRequiredService<ExportDbContext>().Orders.SingleAsync(x => x.Id == order.Id)).CompanyId;
+            companyId = (await scope.ServiceProvider.GetRequiredService<AppDbContext>().Orders.SingleAsync(x => x.Id == order.Id)).CompanyId;
         var other = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
         var (manager, session) = await factory.SeedUserAsync(Roles.CustomerManager, companyId);
         var (outsider, outsideSession) = await factory.SeedUserAsync(Roles.ExportStaff, other.Id);
@@ -688,16 +689,16 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
         await connection.OpenAsync();
         foreach (var sql in new[] {
-            "UPDATE exports.blend_plan_drafts SET target_mass_kg=1 WHERE id=$1",
-            "DELETE FROM exports.blend_plan_drafts WHERE id=$1",
-            "UPDATE exports.blend_plan_events SET action='FAKE' WHERE plan_id=$1" })
+            "UPDATE grainledger.exports_blend_plan_drafts SET target_mass_kg=1 WHERE id=$1",
+            "DELETE FROM grainledger.exports_blend_plan_drafts WHERE id=$1",
+            "UPDATE grainledger.exports_blend_plan_events SET action='FAKE' WHERE plan_id=$1" })
         {
             await using var command = new NpgsqlCommand(sql, connection);
             command.Parameters.AddWithValue(draft.Id);
             var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync());
             Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
         }
-        await using var direct = new NpgsqlCommand("UPDATE exports.export_orders SET required_mass_kg=49000 WHERE id=$1", connection);
+        await using var direct = new NpgsqlCommand("UPDATE grainledger.exports_export_orders SET required_mass_kg=49000 WHERE id=$1", connection);
         direct.Parameters.AddWithValue(order.Id);
         Assert.Equal(1, await direct.ExecuteNonQueryAsync());
     }
@@ -842,9 +843,9 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand("""
-            SELECT (SELECT count(*) FROM ledger.positions),
-                   (SELECT coalesce(sum(quantity_kg), 0) FROM ledger.positions),
-                   (SELECT count(*) FROM ledger.postings)
+            SELECT (SELECT count(*) FROM grainledger.ledger_positions),
+                   (SELECT coalesce(sum(quantity_kg), 0) FROM grainledger.ledger_positions),
+                   (SELECT count(*) FROM grainledger.ledger_postings)
             """, connection);
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
@@ -933,9 +934,9 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         async Task<(long Positions, decimal Mass, long Postings)> StockAsync()
         {
             await using var check = new NpgsqlCommand("""
-                SELECT (SELECT count(*) FROM ledger.positions),
-                       (SELECT coalesce(sum(quantity_kg), 0) FROM ledger.positions),
-                       (SELECT count(*) FROM ledger.postings)
+                SELECT (SELECT count(*) FROM grainledger.ledger_positions),
+                       (SELECT coalesce(sum(quantity_kg), 0) FROM grainledger.ledger_positions),
+                       (SELECT count(*) FROM grainledger.ledger_postings)
                 """, owner);
             await using var reader = await check.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());
@@ -1001,14 +1002,14 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         stale.Headers.TryAddWithoutValidation("If-Match", created.Headers.ETag!.ToString());
         Assert.Equal(HttpStatusCode.PreconditionFailed, (await writer.SendAsync(stale)).StatusCode);
         using var scope = factory.Services.CreateScope();
-        var exports = scope.ServiceProvider.GetRequiredService<ExportDbContext>();
+        var exports = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await exports.Orders.CountAsync(x => x.CompanyId == company.Id));
         Assert.Equal(2, await exports.Containers.CountAsync(x => x.OrderId == order.Id));
         Assert.Equal(2, await exports.Specifications.CountAsync(x => x.OrderId == order.Id));
         Assert.Equal(stockBefore, await StockAsync());
         await using var rewrite = new NpgsqlCommand("""
-            UPDATE exports.specification_limits SET max_value=99
-            WHERE specification_id IN (SELECT id FROM exports.order_specifications WHERE order_id=$1)
+            UPDATE grainledger.exports_specification_limits SET max_value=99
+            WHERE specification_id IN (SELECT id FROM grainledger.exports_order_specifications WHERE order_id=$1)
             """, owner);
         rewrite.Parameters.AddWithValue(order.Id);
         var violation = await Assert.ThrowsAsync<PostgresException>(() => rewrite.ExecuteNonQueryAsync());
@@ -1018,7 +1019,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
     private async Task<(Guid Market, Guid Commodity, Guid Attribute)> CatalogAsync()
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var market = new Market { Id = Guid.NewGuid(), Code = "TEST-MKT-" + suffix, Name = "Test market" };
         var commodity = await db.Commodities.SingleOrDefaultAsync(x => x.Code == "RICE")

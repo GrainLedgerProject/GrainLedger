@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Security.Claims;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
@@ -29,7 +30,7 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
         var (second, secondSession) = await factory.SeedUserAsync(Roles.ExportStaff);
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.Sessions.Where(x => x.Id == firstSession.Id || x.Id == secondSession.Id)
                 .ExecuteUpdateAsync(x => x.SetProperty(s => s.FamilyId, Guid.Empty));
         }
@@ -56,7 +57,7 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.Sessions.Where(x => x.Id == session.Id).ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow));
         }
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/session")).StatusCode);
@@ -79,7 +80,7 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
     public async Task Google_provisioning_requires_verified_email_uses_subject_and_bootstraps_exact_email()
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.Sessions.ExecuteDeleteAsync(); await db.AuditEvents.ExecuteDeleteAsync(); await db.Users.ExecuteDeleteAsync(); await db.Organizations.ExecuteDeleteAsync();
         var provisioner = scope.ServiceProvider.GetRequiredService<GoogleIdentityProvisioner>();
         await Assert.ThrowsAsync<InvalidOperationException>(() => provisioner.ProvisionAsync(new("bad", "admin@example.com", "Bad", false)));
@@ -201,7 +202,7 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
     public async Task Concurrent_admin_demotions_leave_one_active_administrator()
     {
         using (var cleanup = factory.Services.CreateScope())
-            await cleanup.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.Where(x => x.Role == Roles.Administrator)
+            await cleanup.ServiceProvider.GetRequiredService<AppDbContext>().Users.Where(x => x.Role == Roles.Administrator)
                 .ExecuteUpdateAsync(x => x.SetProperty(u => u.Role, Roles.MillManager));
         var mill = await factory.SeedOrganizationAsync(OrganizationKind.Mill);
         var (firstAdmin, firstSession) = await factory.SeedUserAsync(Roles.Administrator, mill.Id);
@@ -223,7 +224,7 @@ public sealed class IdentityTests(ApiFactory factory) : IClassFixture<ApiFactory
         // session/role may already be revoked before authentication/authorization (401/403).
         Assert.Single(responses, x => x.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden);
         using var scope = factory.Services.CreateScope();
-        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.CountAsync(x => x.Role == Roles.Administrator && x.IsActive));
+        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.CountAsync(x => x.Role == Roles.Administrator && x.IsActive));
     }
 
     [Fact]

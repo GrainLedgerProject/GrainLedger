@@ -1,7 +1,8 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,7 +37,7 @@ public sealed class BrowserPasswordSessionTests(ApiFactory factory) : IClassFixt
         await CsrfAsync(client);
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync("/api/profile", new { displayName = "Changed", phoneNumber = "" })).StatusCode);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var session = await db.Sessions.SingleAsync(x => x.User.Email == email);
         Assert.Null(session.RefreshTokenHash);
     }
@@ -71,7 +72,7 @@ public sealed class BrowserPasswordSessionTests(ApiFactory factory) : IClassFixt
             var (admin, adminSession) = await factory.SeedUserAsync(Roles.Administrator);
             using var manager = factory.CreateRealCookieClient(admin, adminSession);
             using var scope = factory.Services.CreateScope();
-            var user = await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.SingleAsync(x => x.Email == email);
+            var user = await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.SingleAsync(x => x.Email == email);
             manager.DefaultRequestHeaders.IfMatch.Add(new System.Net.Http.Headers.EntityTagHeaderValue($"\"{user.Version:N}\""));
             await CsrfAsync(manager);
             Assert.Equal(HttpStatusCode.OK, (await manager.PutAsJsonAsync($"/api/admin/users/{user.Id}/access", new { role = (string?)null, organizationId = (Guid?)null, isActive = false })).StatusCode);
@@ -79,7 +80,7 @@ public sealed class BrowserPasswordSessionTests(ApiFactory factory) : IClassFixt
         else
         {
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             if (action == "disable") await db.Users.Where(x => x.Email == email).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsActive, false));
             else await db.Sessions.Where(x => x.User.Email == email).ExecuteUpdateAsync(s => s.SetProperty(x => x.ExpiresAt, DateTimeOffset.UtcNow.AddMinutes(-1)));
         }

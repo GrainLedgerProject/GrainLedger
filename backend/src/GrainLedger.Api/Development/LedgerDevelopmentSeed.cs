@@ -3,7 +3,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Data;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,12 +22,12 @@ internal static class LedgerDevelopmentSeed
         CancellationToken ct = default)
     {
         if (environment != Environments.Development)
-            throw new InvalidOperationException("--seed-ledger is only available in Development.");
+            throw new InvalidOperationException("--seed-setup and --seed-ledger are only available in Development.");
         if (!LocalAuthService.IsStrongPassword(password ?? ""))
             throw new InvalidOperationException("DevelopmentSeed__Password must contain 12–128 characters including upper/lower case, a digit and a symbol.");
 
         await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
         // Fail before creating prerequisites; never reset an existing account to make the seed work.
         foreach (var (alias, role) in new[]
@@ -46,12 +47,12 @@ internal static class LedgerDevelopmentSeed
                 kind == OrganizationKind.Customer && user.Organization.Name != CustomerName ||
                 user.LockoutEnd > DateTimeOffset.UtcNow || user.PasswordHash is null ||
                 hasher.VerifyHashedPassword(user, user.PasswordHash, password!) == PasswordVerificationResult.Failed)
-                throw new InvalidOperationException($"Existing demo account {email} is incompatible with --seed-ledger (password, role, organization, active or lockout state). Account left unchanged.");
+                throw new InvalidOperationException($"Existing development seed account {email} is incompatible with --seed-setup or --seed-ledger (password, role, organization, active or lockout state). Account left unchanged.");
         }
         await DevelopmentSeed.RunAsync(db, hasher, environment, password, ct);
     }
 
-    internal static async Task RunAsync(HttpClient client, string password, CancellationToken ct = default)
+    internal static async Task RunAsync(HttpClient client, string password, bool includeDemoData, CancellationToken ct = default)
     {
         var previousAuthorization = client.DefaultRequestHeaders.Authorization;
         try
@@ -65,7 +66,7 @@ internal static class LedgerDevelopmentSeed
             if (purchaser.GetProperty("user").GetProperty("organizationName").GetString() != CustomerName ||
                 manager.GetProperty("user").GetProperty("organizationId").GetGuid() != admin.GetProperty("user").GetProperty("organizationId").GetGuid() ||
                 millOperator.GetProperty("user").GetProperty("organizationId").GetGuid() != admin.GetProperty("user").GetProperty("organizationId").GetGuid())
-                throw new InvalidOperationException("Demo accounts must belong to the seeded mill and demo customer organizations. Accounts left unchanged.");
+                throw new InvalidOperationException("Seed accounts must belong to the configured mill and customer organizations. Accounts left unchanged.");
 
             Use(admin);
             var setup = await GetAsync("/api/ledger/setup");
@@ -85,6 +86,8 @@ internal static class LedgerDevelopmentSeed
                         x.GetProperty("userId").GetGuid() == userId && x.GetProperty("facilityId").GetGuid() == Id(1)))
                     await PostAsync("/api/ledger/assignments", new { userId, facilityId = Id(1) });
             }
+
+            if (!includeDemoData) return;
 
             if (!setup.GetProperty("policies").EnumerateArray().Any(x => x.GetProperty("id").GetGuid() == Id(8)))
             {
@@ -160,7 +163,7 @@ internal static class LedgerDevelopmentSeed
                 var result = await PostAsync("/api/auth/login", new { email = alias + "@grainledger.local", password });
                 if (result.GetProperty("user").GetProperty("role").GetString() != role ||
                     !result.GetProperty("user").GetProperty("isActive").GetBoolean())
-                    throw new InvalidOperationException($"Demo account {alias} has incompatible access; left unchanged.");
+                    throw new InvalidOperationException($"Development seed account {alias} has incompatible access; left unchanged.");
                 return result;
             }
 
@@ -210,7 +213,7 @@ internal static class LedgerDevelopmentSeed
                                 x.Value.EnumerateArray().Select(error => x.Name + ": " + error.GetString())));
                     }
                     catch (JsonException) { }
-                    throw new InvalidOperationException($"Ledger demo seed {method} {path} failed ({(int)response.StatusCode}): {title}. Existing data was not reset; rerun after resolving the prerequisite.");
+                    throw new InvalidOperationException($"Development seed {method} {path} failed ({(int)response.StatusCode}): {title}. Existing data was not reset; rerun after resolving the prerequisite.");
                 }
                 return await response.Content.ReadFromJsonAsync<JsonElement>(ct);
             }

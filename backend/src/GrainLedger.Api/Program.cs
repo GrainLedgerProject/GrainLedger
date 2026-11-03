@@ -1,8 +1,9 @@
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Ledger;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Exports;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Ledger;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Exports;
+using GrainLedger.Api.Data;
 using GrainLedger.Api.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -19,11 +20,12 @@ var builder = WebApplication.CreateBuilder(args);
 var migrating = args.Contains("--migrate", StringComparer.Ordinal);
 var configuringRuntimeRole = args.Contains("--configure-runtime-role", StringComparer.Ordinal);
 var seedDevelopment = args.Contains("--seed-dev", StringComparer.Ordinal);
+var seedSetup = args.Contains("--seed-setup", StringComparer.Ordinal);
 var seedLedger = args.Contains("--seed-ledger", StringComparer.Ordinal);
-if (new[] { migrating, configuringRuntimeRole, seedDevelopment, seedLedger }.Count(value => value) > 1)
-    throw new InvalidOperationException("Run --migrate, --configure-runtime-role, --seed-dev and --seed-ledger separately.");
-if (seedLedger && !builder.Environment.IsDevelopment())
-    throw new InvalidOperationException("--seed-ledger is only available in Development.");
+if (new[] { migrating, configuringRuntimeRole, seedDevelopment, seedSetup, seedLedger }.Count(value => value) > 1)
+    throw new InvalidOperationException("Run --migrate, --configure-runtime-role, --seed-dev, --seed-setup and --seed-ledger separately.");
+if ((seedLedger || seedSetup) && !builder.Environment.IsDevelopment())
+    throw new InvalidOperationException($"{(seedSetup ? "--seed-setup" : "--seed-ledger")} is only available in Development.");
 if (!builder.Environment.IsEnvironment("Testing"))
 {
     builder.Configuration.AddLocalEnvironmentFile(builder.Environment.ContentRootPath, builder.Environment.IsDevelopment());
@@ -37,7 +39,7 @@ if (migrating || configuringRuntimeRole)
     if (string.IsNullOrWhiteSpace(migrationConnection)) throw new InvalidOperationException("ConnectionStrings:GrainLedgerMigration is required for explicit owner commands.");
     if (migrating) builder.Configuration["ConnectionStrings:GrainLedger"] = migrationConnection;
 }
-if (seedLedger)
+if (seedLedger || seedSetup)
 {
     // Seed authentication lives only for this loopback host; no persistent auth settings change.
     builder.Configuration["Authentication:Jwt:SigningKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
@@ -73,7 +75,7 @@ if (seedDevelopment)
 {
     await using var scope = app.Services.CreateAsyncScope();
     var created = await DevelopmentSeed.RunAsync(
-        scope.ServiceProvider.GetRequiredService<IdentityDbContext>(),
+        scope.ServiceProvider.GetRequiredService<AppDbContext>(),
         scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.IPasswordHasher<User>>(),
         app.Environment.EnvironmentName, builder.Configuration["DevelopmentSeed:Password"]);
     app.Logger.LogInformation("Development seed completed: {Created} accounts created; existing local accounts unchanged.", created);
@@ -83,17 +85,14 @@ if (seedDevelopment)
 if (migrating)
 {
     await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
-    await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.MigrateAsync();
-    await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
-    await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
+    await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.MigrateAsync();
     await LedgerDatabase.ConfigureRuntimeRoleAsync(migrationConnection!, builder.Configuration["Ledger:RuntimeRole"] ?? throw new InvalidOperationException("Ledger:RuntimeRole is required."));
     return;
 }
 if (!app.Environment.IsEnvironment("Testing"))
     await LedgerDatabase.ValidateRuntimeAsync(app.Services.GetRequiredService<IConfiguration>().GetConnectionString("GrainLedger")
         ?? throw new InvalidOperationException("ConnectionStrings:GrainLedger is required."));
-if (seedLedger)
+if (seedLedger || seedSetup)
 {
     await LedgerDevelopmentSeed.PrepareAccountsAsync(app.Services, app.Environment.EnvironmentName,
         builder.Configuration["DevelopmentSeed:Password"]);
@@ -107,7 +106,7 @@ foreach (var proxy in builder.Configuration.GetSection("ReverseProxy:KnownProxie
     if (IPAddress.TryParse(proxy, out var address)) forwardedHeaders.KnownProxies.Add(address);
 app.UseForwardedHeaders(forwardedHeaders);
 app.UseExceptionHandler();
-if (!seedLedger) app.UseHttpsRedirection();
+if (!seedLedger && !seedSetup) app.UseHttpsRedirection();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRateLimiter();
@@ -131,7 +130,7 @@ app.MapExportsModule();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 if (!app.Environment.IsDevelopment()) app.MapFallbackToFile("index.html");
 
-if (seedLedger)
+if (seedLedger || seedSetup)
 {
     await app.StartAsync();
     try
@@ -141,8 +140,10 @@ if (seedLedger)
         {
             BaseAddress = new Uri(address)
         };
-        await LedgerDevelopmentSeed.RunAsync(client, builder.Configuration["DevelopmentSeed:Password"]!);
-        app.Logger.LogInformation("Ledger development seed completed: synthetic demo mill configured; existing stock and history preserved.");
+        await LedgerDevelopmentSeed.RunAsync(client, builder.Configuration["DevelopmentSeed:Password"]!, includeDemoData: seedLedger);
+        app.Logger.LogInformation(seedSetup
+            ? "Development setup seed completed; existing account and setup data unchanged."
+            : "Ledger development seed completed: synthetic demo mill configured; existing stock and history preserved.");
     }
     finally
     {

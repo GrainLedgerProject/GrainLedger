@@ -199,7 +199,7 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
     {
         await using var connection = new NpgsqlConnection(Ledger.Factory.OwnerConnectionString);
         await connection.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT lot_id, revision FROM ledger.mixed_bulk_pools WHERE location_id=$1", connection);
+        await using var command = new NpgsqlCommand("SELECT lot_id, revision FROM grainledger.ledger_mixed_bulk_pools WHERE location_id=$1", connection);
         command.Parameters.AddWithValue(locationId);
         await using var row = await command.ExecuteReaderAsync();
         Assert.True(await row.ReadAsync());
@@ -223,14 +223,14 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand("""
             SELECT jsonb_build_object(
-                'positions', (SELECT jsonb_agg(to_jsonb(t) ORDER BY lot_id, location_id) FROM ledger.positions t),
-                'postings', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM ledger.postings t),
-                'holds', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM ledger.holds t),
-                'sources', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.source_lots t),
-                'procurements', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.procurements t),
-                'reports', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.lab_reports t),
-                'results', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM capture.lab_results t),
-                'mrl', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM catalog.mrl_versions t))::text
+                'positions', (SELECT jsonb_agg(to_jsonb(t) ORDER BY lot_id, location_id) FROM grainledger.ledger_positions t),
+                'postings', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM grainledger.ledger_postings t),
+                'holds', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM grainledger.ledger_holds t),
+                'sources', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM grainledger.capture_source_lots t),
+                'procurements', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM grainledger.capture_procurements t),
+                'reports', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM grainledger.capture_lab_reports t),
+                'results', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM grainledger.capture_lab_results t),
+                'mrl', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM grainledger.catalog_mrl_versions t))::text
             """, connection);
         return (string)(await command.ExecuteScalarAsync())!;
     }

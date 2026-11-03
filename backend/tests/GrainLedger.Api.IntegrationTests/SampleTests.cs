@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -77,7 +78,7 @@ public sealed class SampleTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal("handover-proof", history.Items[0].EvidenceRef);
         Assert.Equal(handoverId, history.Items[0].Id);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Samples.CountAsync(x => x.Id == sampleId));
         Assert.Equal(1, await db.SampleHandovers.CountAsync(x => x.SampleId == sampleId));
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CorrelationId == sampleOperation));

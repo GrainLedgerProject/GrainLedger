@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -162,7 +163,7 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
         Assert.Equal(HttpStatusCode.NotFound, (await ownerClient.GetAsync($"/api/plot-seasons/{ids.PlotSeasonA}")).StatusCode);
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.True((await db.Farmers.IgnoreQueryFilters().SingleAsync(x => x.Id == ids.FarmerA)).IsDeleted);
             Assert.Equal(3, (await db.Farmers.IgnoreQueryFilters().SingleAsync(x => x.Id == ids.FarmerA)).Version);
             Assert.True((await db.Plots.IgnoreQueryFilters().SingleAsync(x => x.Id == ids.PlotA)).IsDeleted);
@@ -194,7 +195,7 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
         var plotSeasonId = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Farmers.Add(new Farmer { Id = farmerId, CompanyId = company.Id, Code = "IN-USE-FARMER", Name = "In Use Farmer",
                 CreatedAt = DateTimeOffset.UtcNow, CreatedBy = owner.Id });
             await db.SaveChangesAsync();
@@ -246,7 +247,7 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
         var plotId = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Farmers.Add(new Farmer { Id = farmerId, CompanyId = company.Id, Code = "RETIRED-PARENT",
                 Name = "Retired Parent", CreatedAt = DateTimeOffset.UtcNow, CreatedBy = owner.Id });
             db.Plots.Add(new Plot { Id = plotId, CompanyId = company.Id, FarmerId = farmerId, Code = "RETIRED-CHILD",
@@ -275,7 +276,7 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
             Assert.Equal(HttpStatusCode.Conflict, newPlot.StatusCode);
 
         using var verifyScope = factory.Services.CreateScope();
-        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.True((await verifyDb.Farmers.IgnoreQueryFilters().SingleAsync(x => x.Id == farmerId)).IsDeleted);
         Assert.True((await verifyDb.Plots.IgnoreQueryFilters().SingleAsync(x => x.Id == plotId)).IsDeleted);
         Assert.Empty(await verifyDb.Farmers.Where(x => x.Id == farmerId).ToListAsync());
@@ -298,7 +299,7 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
         var plotSeasonA = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var plotSeasonZ = Guid.Parse("00000000-0000-0000-0000-000000000002");
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         db.Farmers.AddRange(
             new Farmer { Id = supportFarmer, CompanyId = companyId, Code = "SUPPORT-FARMER", Name = "Support Farmer", CreatedAt = DateTimeOffset.UtcNow, CreatedBy = ownerId },
             new Farmer { Id = farmerA, CompanyId = companyId, Code = "OWNED-A", Name = "Owned A", CreatedAt = DateTimeOffset.UtcNow, CreatedBy = ownerId },

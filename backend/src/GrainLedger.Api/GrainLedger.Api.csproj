@@ -8,14 +8,22 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
     <PackageReference Include="Scalar.AspNetCore" Version="2.18.0" />
     <PackageReference Include="DotNetEnv" Version="3.2.0" />
-    <ProjectReference Include="../GrainLedger.Modules.Identity/GrainLedger.Modules.Identity.csproj" />
-    <ProjectReference Include="../GrainLedger.Modules.Ledger/GrainLedger.Modules.Ledger.csproj" />
-    <ProjectReference Include="../GrainLedger.Modules.Capture/GrainLedger.Modules.Capture.csproj" />
-    <ProjectReference Include="../GrainLedger.Modules.Catalogs/GrainLedger.Modules.Catalogs.csproj" />
-    <ProjectReference Include="../GrainLedger.Modules.Exports/GrainLedger.Modules.Exports.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.13" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
+    <PackageReference Include="MailKit" Version="4.18.1" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.13" />
+    <PackageReference Include="NetTopologySuite" Version="2.6.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Data/Sql/InitialSchema.sql" LogicalName="GrainLedger.Data.Sql.InitialSchema.sql" />
+    <EmbeddedResource Include="Data/Sql/InitialReferenceData.sql" LogicalName="GrainLedger.Data.Sql.InitialReferenceData.sql" />
+    <EmbeddedResource Include="Data/Sql/InitialConstraints.sql" LogicalName="GrainLedger.Data.Sql.InitialConstraints.sql" />
+    <InternalsVisibleTo Include="GrainLedger.Api.IntegrationTests" />
   </ItemGroup>
 </Project>

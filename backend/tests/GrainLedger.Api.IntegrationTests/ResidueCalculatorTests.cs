@@ -1,5 +1,5 @@
 using System.Globalization;
-using GrainLedger.Modules.Ledger;
+using GrainLedger.Api.Features.Ledger;
 using Xunit;
 
 namespace GrainLedger.Api.IntegrationTests;

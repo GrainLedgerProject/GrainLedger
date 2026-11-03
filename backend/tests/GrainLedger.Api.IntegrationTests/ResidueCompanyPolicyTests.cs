@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using GrainLedger.Modules.Catalogs;
+using GrainLedger.Api.Features.Catalogs;
 using Npgsql;
 using NpgsqlTypes;
 using Xunit;
@@ -309,7 +309,7 @@ public sealed class ResidueCompanyPolicyTests(ApiFactory factory) : IClassFixtur
         await connection.OpenAsync();
         await using (var clock = new NpgsqlCommand("SELECT clock_timestamp()", connection))
             payload["PublishedAt"] = new DateTimeOffset((DateTime)(await clock.ExecuteScalarAsync())!);
-        await using var command = new NpgsqlCommand("SELECT catalog.publish_residue_policy_setting($1,$2)", connection);
+        await using var command = new NpgsqlCommand("SELECT grainledger.catalog_publish_residue_policy_setting($1,$2)", connection);
         command.Parameters.AddWithValue(scenario.Accounts["customer"].User.Id);
         command.Parameters.AddWithValue(NpgsqlDbType.Jsonb, payload.ToJsonString());
         await command.ExecuteNonQueryAsync();

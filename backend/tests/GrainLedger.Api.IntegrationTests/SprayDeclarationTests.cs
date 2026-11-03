@@ -1,9 +1,10 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -21,7 +22,7 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
         var plotSeasonId = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Farmers.Add(new Farmer { Id = farmerId, CompanyId = company.Id,
                 Code = Guid.NewGuid().ToString("N"), Name = "Farmer", CreatedAt = DateTimeOffset.UtcNow });
             db.Plots.Add(new Plot { Id = plotId, CompanyId = company.Id, FarmerId = farmerId,
@@ -37,7 +38,7 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
         var substanceId = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var catalog = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             catalog.ActiveSubstances.Add(new ActiveSubstance { Id = substanceId,
                 Code = $"T{substanceId:N}", Name = "Test substance" });
             await catalog.SaveChangesAsync();
@@ -102,7 +103,7 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
                 items, "Different notebook"));
         Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.SprayDeclarations.CountAsync(x => x.Id == entityId));
         Assert.Equal(2, await db.SprayItems.CountAsync(x => x.DeclarationId == entityId && x.Rate == null && x.RateUnit == null));
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CorrelationId == operationId));
@@ -132,7 +133,7 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
                 Request(source.PlotSeasonId, source.SubstanceId,
                     appliedOn: new DateOnly(2026, 10, 14)))).StatusCode);
         using var scope = factory.Services.CreateScope();
-        Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<CaptureDbContext>()
+        Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<AppDbContext>()
             .SprayDeclarations.CountAsync(x => x.CompanyId == source.CompanyId));
     }
 
@@ -173,7 +174,7 @@ public sealed class SprayDeclarationTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Contains(responses, x => x.StatusCode == HttpStatusCode.Created);
         Assert.Contains(responses, x => x.StatusCode == HttpStatusCode.OK);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.SprayDeclarations.CountAsync(x => x.Id == entityId));
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CorrelationId == operationId));
         Assert.Equal(1, await db.OfflineOperations.CountAsync(x => x.ClientOperationId == operationId));

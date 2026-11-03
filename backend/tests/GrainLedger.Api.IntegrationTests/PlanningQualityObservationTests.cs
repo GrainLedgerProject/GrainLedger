@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -27,7 +28,7 @@ public sealed class PlanningQualityObservationTests(ApiFactory factory) : IClass
         var attributeId = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.QualityAttributes.Add(new QualityAttribute
             {
                 Id = attributeId, Code = "Q" + attributeId.ToString("N"),

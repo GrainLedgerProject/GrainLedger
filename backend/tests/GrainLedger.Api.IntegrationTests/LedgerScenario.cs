@@ -1,10 +1,11 @@
+using GrainLedger.Api.Data;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Catalogs;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Catalogs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -64,7 +65,7 @@ internal sealed class LedgerScenario : IDisposable
         await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/equipment", new { id = s.EquipmentId, facilityId = s.FacilityId, name = "Synthetic equipment" });
         using (var scope = factory.Services.CreateScope())
         {
-            var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var catalog = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var paddy = await catalog.Commodities.SingleOrDefaultAsync(x => x.Code == "PADDY");
             if (paddy is null)
             {

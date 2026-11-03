@@ -15,28 +15,26 @@ Lot-to-lot tracing is available through Ledger → Traceability and the [audited
 The React web app supports desktop and mobile-sized screens. The mobile workspace is a placeholder, not a shipped mobile app. GrainLedger does not include customer settlement. Planned or documented future workflows are not implied to be available.
 
 ## Technology
-
-- ASP.NET Core 10 modular monolith with PostgreSQL and Npgsql
-- React, TypeScript, and Vite web app
+- ASP.NET Core 10 monolith: one API project, feature folders, one EF Core context, one Npgsql runtime pool
+- PostgreSQL application objects in schema `grainledger`; React web app remains separate
 - Docker image and Compose PostgreSQL service for local development
 
 ## Repository map
 
 ```text
-backend/src/GrainLedger.Api/                  ASP.NET Core host
-backend/src/GrainLedger.Modules.Identity/     Identity and access
-backend/src/GrainLedger.Modules.Catalogs/     Shared catalog
-backend/src/GrainLedger.Modules.Capture/      Farmer and procurement records
-backend/src/GrainLedger.Modules.Ledger/        Receiving, stock and operations
-backend/tests/                                Backend integration tests
-apps/web/                                     React web app
-apps/mobile/                                  Placeholder workspace
-docs/                                         Setup, architecture and API guides
+backend/src/GrainLedger.Api/Features/          Identity, Catalogs, Capture, Ledger, Exports
+backend/src/GrainLedger.Api/Data/              AppDbContext and unified migration
+backend/tests/                                 Backend integration tests
+apps/web/                                      React web app
+apps/mobile/                                   Placeholder workspace
+docs/                                          Setup, architecture and API guides
 ```
+
+> Approved cutover target; this does not claim database reset or deployment has occurred. See [setup and deployment](docs/setup-and-deployment.md#approved-cutover-target-pending-deployment).
 
 ## Run locally
 
-Requires .NET SDK 10, Node.js 24, and npm. Quickstart assumes PostgreSQL is already provisioned, its schema is migrated, and root `.env` contains working `ConnectionStrings__GrainLedger`, JWT, Google, and (for email/password flows) SMTP settings. For a fresh local database, role provisioning, configuration, and first migration, follow [Setup and deployment](docs/setup-and-deployment.md).
+Requires .NET SDK 10, Node.js 24, and npm. Quickstart assumes PostgreSQL is provisioned and migrated to the approved `grainledger` baseline, with root `.env` containing working `ConnectionStrings__GrainLedger`, JWT, Google, and (for email/password flows) SMTP settings. For a fresh local database, role provisioning and explicit migration, follow [Setup and deployment](docs/setup-and-deployment.md).
 
 From repository root:
 
@@ -71,10 +69,10 @@ GitHub Actions selects checks by changed files for pull requests into `dev`. Bac
 ## Documentation
 - [Documentation index](docs/README.md): index of architecture, APIs, guides, plans, and reports
 - [Setup and deployment](docs/setup-and-deployment.md): local provisioning, configuration, migrations, seeds, and production deployment
-- [Architecture and access control](docs/architecture.md): module boundaries, authorization, and data rules
+- [Architecture and access control](docs/architecture.md): approved monolith/schema target, authorization, and historical architecture snapshot
 - [CI setup and operation](docs/ci-guide.md) · [CI implementation plan](docs/ci-plan.md)
 - [Email/password authentication and Scalar](docs/guides/auth-email-password-scalar.md)
-- [Development accounts and demo Ledger data](docs/guides/development-accounts.md)
+- [Development accounts and seed modes](docs/guides/development-accounts.md): setup-only bootstrap and explicit full demo
 - [Farmer API](docs/api/farmer-api.md) · [Procurement API](docs/api/procurement-api.md)
 - [MRL CSV/Excel and YouTrack reference import](docs/guides/mrl-file-import.md): substance setup, Vietnam draft limits, source provenance, and import safeguards
 - [Unified lot-code guide](docs/guides/unified-lot-code-guide.md)

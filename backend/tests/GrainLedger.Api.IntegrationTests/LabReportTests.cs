@@ -1,11 +1,12 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Capture;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Capture;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -108,7 +109,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal(before.GetRawText(), (await GetAsync(s.Customer, $"/api/lab-reports/{id}")).GetRawText());
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal(1, await db.LabReports.CountAsync(x => x.CompanyId == s.OwnerId));
             Assert.False(await db.LabReportRetirements.AnyAsync(x => x.ReportId == id));
             var operation = edit["clientOperationId"]!.GetValue<Guid>();
@@ -198,7 +199,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", malformed, HttpStatusCode.BadRequest);
         var before = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
         using (var scope = factory.Services.CreateScope())
-            await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.Where(x => x.Id == s.Accounts["customer"].User.Id)
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.Where(x => x.Id == s.Accounts["customer"].User.Id)
                 .ExecuteUpdateAsync(x => x.SetProperty(u => u.Role, Roles.ExportStaff));
         await ExpectAsync(s.Customer, HttpMethod.Put, $"/api/lab-reports/{id}", EditRequest(request), HttpStatusCode.Forbidden);
         await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{id}", DeleteRequest(), HttpStatusCode.Forbidden);
@@ -249,14 +250,14 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
         await runtime.OpenAsync();
         await using (var privileges = new NpgsqlCommand("""
-            SELECT has_table_privilege(current_user,'capture.lab_report_retirements','SELECT,INSERT')
-                AND NOT has_table_privilege(current_user,'capture.lab_report_retirements','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                AND NOT has_function_privilege(current_user,'capture.guard_lab_retirement()','EXECUTE')
-                AND NOT has_function_privilege(current_user,'capture.guard_lab_active_report()','EXECUTE')
+            SELECT has_table_privilege(current_user,'grainledger.capture_lab_report_retirements','SELECT,INSERT')
+                AND NOT has_table_privilege(current_user,'grainledger.capture_lab_report_retirements','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                AND NOT has_function_privilege(current_user,'grainledger.capture_guard_lab_retirement()','EXECUTE')
+                AND NOT has_function_privilege(current_user,'grainledger.capture_guard_lab_active_report()','EXECUTE')
             """, runtime))
             Assert.Equal(true, await privileges.ExecuteScalarAsync());
         await using (var command = new NpgsqlCommand("""
-            INSERT INTO capture.lab_report_retirements(report_id,company_id,status,recorded_by,recorded_at)
+            INSERT INTO grainledger.capture_lab_report_retirements(report_id,company_id,status,recorded_by,recorded_at)
             VALUES($1,$2,'DELETED',$3,clock_timestamp())
             """, runtime))
         {
@@ -268,7 +269,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         await ExpectAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", draft, HttpStatusCode.Created);
         await ExpectAsync(s.Customer, HttpMethod.Delete, $"/api/lab-reports/{draftId}", DeleteRequest(), HttpStatusCode.NoContent);
         await using (var command = new NpgsqlCommand("""
-            INSERT INTO capture.lab_report_confirmations(id,company_id,report_id,confirmed_by,confirmed_at,identity_checked,transcription_checked)
+            INSERT INTO grainledger.capture_lab_report_confirmations(id,company_id,report_id,confirmed_by,confirmed_at,identity_checked,transcription_checked)
             VALUES($1,$2,$3,$4,clock_timestamp(),true,true)
             """, runtime))
         {
@@ -278,7 +279,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         }
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
         await owner.OpenAsync();
-        await using var mutation = new NpgsqlCommand("DELETE FROM capture.lab_report_retirements WHERE report_id=$1", owner);
+        await using var mutation = new NpgsqlCommand("DELETE FROM grainledger.capture_lab_report_retirements WHERE report_id=$1", owner);
         mutation.Parameters.AddWithValue(draftId);
         Assert.Equal("55000", (await Assert.ThrowsAsync<PostgresException>(() => mutation.ExecuteNonQueryAsync())).SqlState);
         Assert.Equal("CONFIRMED", (await GetAsync(s.Customer, $"/api/lab-reports/{id}")).GetProperty("status").GetString());
@@ -318,7 +319,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal(revised.GetProperty("id").GetGuid(), Assert.Single(currentParent.GetProperty("relatedReports").EnumerateArray()).GetProperty("id").GetGuid());
         await AssertFileAsync(s.Customer, parentId, OriginalBytes);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var retirement = await db.LabReportRetirements.SingleAsync(x => x.ReportId == childId);
         Assert.Equal(s.Accounts["customer"].User.Id, retirement.RecordedBy);
         Assert.True(retirement.RecordedAt > CapturedAt);
@@ -432,10 +433,10 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         {
             await owner.OpenAsync();
             await using var transaction = await owner.BeginTransactionAsync();
-            await using var command = new NpgsqlCommand("ALTER TABLE capture.lab_result_sets DISABLE TRIGGER lab_result_sets_immutable", owner, transaction);
+            await using var command = new NpgsqlCommand("ALTER TABLE grainledger.capture_lab_result_sets DISABLE TRIGGER capture_lab_result_sets_immutable", owner, transaction);
             await command.ExecuteNonQueryAsync();
             command.CommandText = """
-                UPDATE capture.lab_result_sets
+                UPDATE grainledger.capture_lab_result_sets
                 SET stated_sample_code = chr(160) || chr(8195) || stated_sample_code || chr(12288),
                     stated_seal_code = chr(9) || stated_seal_code || chr(10)
                 WHERE report_id = $1
@@ -444,14 +445,14 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
             await command.ExecuteNonQueryAsync();
             command.Parameters.Clear();
             command.CommandText = """
-                UPDATE capture.lab_result_sets
+                UPDATE grainledger.capture_lab_result_sets
                 SET laboratory_sample_reference = chr(9) || laboratory_sample_reference || chr(10)
                 WHERE report_id = $1 AND position = 2
                 """;
             command.Parameters.AddWithValue(id);
             await command.ExecuteNonQueryAsync();
             command.Parameters.Clear();
-            command.CommandText = "ALTER TABLE capture.lab_result_sets ENABLE TRIGGER lab_result_sets_immutable";
+            command.CommandText = "ALTER TABLE grainledger.capture_lab_result_sets ENABLE TRIGGER capture_lab_result_sets_immutable";
             await command.ExecuteNonQueryAsync();
             await transaction.CommitAsync();
         }
@@ -532,10 +533,10 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal(confirmed.GetRawText(), (await GetAsync(s.Customer, $"/api/lab-reports/{id}")).GetRawText());
     }
 
-    private async Task AssertImmutableAsync(Func<CaptureDbContext, Task> mutate)
+    private async Task AssertImmutableAsync(Func<AppDbContext, Task> mutate)
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await mutate(db);
         var exception = await Record.ExceptionAsync(() => db.SaveChangesAsync());
         Assert.NotNull(exception);
@@ -660,7 +661,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         var list = await GetAsync(s.Customer, $"/api/lab-reports?sampleId={sample.Id}");
         Assert.Single(list.GetProperty("items").EnumerateArray());
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Set<LabReport>().CountAsync(x => x.Id == id));
         Assert.Equal(1, await db.Set<LabReportConfirmation>().CountAsync(x => x.ReportId == id));
         Assert.Equal(1, await db.Set<LabConfirmedAssociation>().CountAsync(x => x.ResultSetId == detail.GetProperty("resultSets")[0].GetProperty("id").GetGuid()));

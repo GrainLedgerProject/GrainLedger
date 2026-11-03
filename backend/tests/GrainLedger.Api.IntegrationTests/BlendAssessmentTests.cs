@@ -1,6 +1,6 @@
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Exports;
-using GrainLedger.Modules.Ledger;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Exports;
+using GrainLedger.Api.Features.Ledger;
 using Xunit;
 
 namespace GrainLedger.Api.IntegrationTests;

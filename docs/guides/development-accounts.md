@@ -1,6 +1,6 @@
-# Tài khoản local mẫu cho Development
+# Development accounts and seed modes
 
-`--seed-dev` seeds six local Identity accounts without OTP; `--seed-ledger` also creates demo mill setup and Ledger stock through official APIs. Use only a development/test database you own and control; Development environment alone does not prove database is isolated. Confirm `ConnectionStrings__GrainLedger` before running. Accounts are in `identity`, not Supabase Auth.
+Approved setup-only behavior is documented here; this does not assert that database reset or deployment has occurred. Use only a Development/test database you own and control. Confirm restricted `ConnectionStrings__GrainLedger` before seeding. Accounts live in GrainLedger application database, not Supabase Auth.
 
 ## 1. Cấu hình
 
@@ -12,14 +12,22 @@ DevelopmentSeed__Password='THAY_BANG_MAT_KHAU_TEST_CUA_BAN'
 
 Giá trị trên là placeholder. Chọn mật khẩu 12–128 ký tự, có chữ hoa, chữ thường, số và ký tự đặc biệt. Sáu tài khoản dùng cùng mật khẩu bạn chọn lúc tạo; database chỉ lưu hash. Không cần SMTP cho seed hoặc login. Login vẫn cần `Authentication__Jwt__SigningKey` đã cấu hình.
 
-## 2. Chạy từ thư mục gốc project
+## 2. Run from repository root
 
 ```bash
 dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --environment Development --migrate
-dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --environment Development --seed-dev
+dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --environment Development --seed-setup
 ```
 
-Migration updates schema; either seed command creates accounts then exits. Choose `--seed-dev` for accounts only or `--seed-ledger` for the complete demo below; do not combine flags or run migration implicitly. Use only a database you own/control. Process environment overrides `.env`. Do not silently start a replacement local database or alter existing connection strings.
+Migration installs the unified baseline in application schema `grainledger`; seed is separate and uses restricted runtime credentials. `--seed-setup` is Development-only and accounts/setup only. It creates two organizations, six local accounts, one synthetic facility, three locations, two equipment rows and two facility assignments. It creates no demo commodities/units, processing policy/evidence, farmers, plots/seasons, procurement, laboratory records, stock/lots/postings, or export orders. Existing migration-installed reference/configuration data, including receiving threshold default and initialization history, remains. No deployment/reset status is implied.
+
+Use `--seed-dev` instead when only accounts are needed. `--seed-ledger` remains an explicit full-demo command; it creates synthetic policy/evidence and a 600 kg receipt. Do not combine flags or run both seed modes during deployment. Never use these commands against shared Supabase without explicit owner approval and completed destructive-operation preflight.
+
+```bash
+dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --environment Development --seed-dev
+# Explicit full demo, only when wanted:
+dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --environment Development --seed-ledger
+```
 
 ## 3. Capture và Ledger
 
@@ -60,7 +68,7 @@ Trước mọi migration, seed, thay đổi schema/role/grant hoặc kiểm tra 
 | export@grainledger.local | ExportStaff | GrainLedger Demo Customer |
 | purchasing@grainledger.local | PurchasingStaff | GrainLedger Demo Customer |
 
-Seed dùng nhà máy đang có; nếu chưa có thì tạo `GrainLedger Mill`. Chỉ tạo một công ty khách hàng mẫu. Không xóa tài khoản/tổ chức có sẵn.
+`--seed-setup` creates the two deterministic organizations and six-account set described above. Use the listed accounts for Development login after seed completes; conflicting existing demo identities fail instead of being overwritten.
 
 ```bash
 dotnet run --project backend/src/GrainLedger.Api
@@ -70,10 +78,10 @@ Mở Scalar tại `http://localhost:5080/scalar/v1`, gọi `POST /api/auth/login
 
 ## Chạy lại và giới hạn
 
-- Dữ liệu được lưu lâu dài trong Supabase; không seed lại khi restart backend.
-- Chạy lại bỏ qua email local đã tồn tại, không đổi password, role hoặc trạng thái của tài khoản đó. Vì vậy đổi `DevelopmentSeed__Password` không reset mật khẩu đã seed.
-- Nếu email đã tồn tại trước lần seed đầu, tài khoản đó cũng được giữ nguyên. Con số tài khoản mới tạo có thể ít hơn 6.
-- Lệnh bị chặn ngoài môi trường Development. Không có endpoint HTTP tạo tài khoản mẫu.
+- Seeded data stays in the configured application database; restarting backend does not seed again.
+- Reruns preserve account passwords, roles, organization assignments and setup edits; they do not refill stock.
+- Conflicting account or setup identity fails rather than resetting credentials or replacing user edits.
+- `--seed-setup` and `--seed-ledger` are blocked outside Development. No public endpoint creates seed accounts.
 - Địa chỉ `@grainledger.local` là định danh test, không phải hộp thư thật. Không dùng forgot-password/OTP qua email cho các tài khoản này.
 - Không commit `.env` hoặc chia sẻ mật khẩu seed công khai.
 

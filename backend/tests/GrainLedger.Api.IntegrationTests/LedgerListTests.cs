@@ -80,7 +80,7 @@ public sealed class LedgerListTests(ApiFactory factory) : IClassFixture<ApiFacto
         await using (var owner = new NpgsqlConnection(factory.OwnerConnectionString))
         {
             await owner.OpenAsync();
-            await using var retained = new NpgsqlCommand("SELECT is_deleted AND content->'inputs'=$2::jsonb AND content->'outputs'=$3::jsonb AND content->>'declaredLossKg'=$4 AND version<>$5 FROM ledger.operations WHERE id=$1", owner);
+            await using var retained = new NpgsqlCommand("SELECT is_deleted AND content->'inputs'=$2::jsonb AND content->'outputs'=$3::jsonb AND content->>'declaredLossKg'=$4 AND version<>$5 FROM grainledger.ledger_operations WHERE id=$1", owner);
             retained.Parameters.AddWithValue(Id(drafts[1]));
             retained.Parameters.AddWithValue(drafts[1].GetProperty("inputs").GetRawText());
             retained.Parameters.AddWithValue(drafts[1].GetProperty("outputs").GetRawText());
@@ -170,7 +170,7 @@ public sealed class LedgerListTests(ApiFactory factory) : IClassFixture<ApiFacto
         Assert.DoesNotContain(lookups.GetProperty("locations").EnumerateArray(), row => Id(row) == locationId);
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
         await owner.OpenAsync();
-        await using var retained = new NpgsqlCommand("SELECT (SELECT is_deleted FROM ledger.facilities WHERE id=$1) AND (SELECT is_deleted FROM ledger.locations WHERE id=$2) AND (SELECT is_deleted FROM ledger.equipment WHERE id=$3) AND (SELECT is_deleted FROM ledger.assignments WHERE user_id=$4 AND facility_id=$1) AND NOT ledger.assigned($4,$1)", owner);
+        await using var retained = new NpgsqlCommand("SELECT (SELECT is_deleted FROM grainledger.ledger_facilities WHERE id=$1) AND (SELECT is_deleted FROM grainledger.ledger_locations WHERE id=$2) AND (SELECT is_deleted FROM grainledger.ledger_equipment WHERE id=$3) AND (SELECT is_deleted FROM grainledger.ledger_assignments WHERE user_id=$4 AND facility_id=$1) AND NOT grainledger.ledger_assigned($4,$1)", owner);
         retained.Parameters.AddWithValue(facilityId);
         retained.Parameters.AddWithValue(locationId);
         retained.Parameters.AddWithValue(equipmentId);
@@ -188,10 +188,10 @@ public sealed class LedgerListTests(ApiFactory factory) : IClassFixture<ApiFacto
         await using (var owner = new NpgsqlConnection(factory.OwnerConnectionString))
         {
             await owner.OpenAsync();
-            await using var operation = new NpgsqlCommand("UPDATE ledger.operations SET created_by=NULL WHERE id=$1", owner);
+            await using var operation = new NpgsqlCommand("UPDATE grainledger.ledger_operations SET created_by=NULL WHERE id=$1", owner);
             operation.Parameters.AddWithValue(Id(draft));
             await operation.ExecuteNonQueryAsync();
-            await using var facility = new NpgsqlCommand("INSERT INTO ledger.facilities(id,name) VALUES($1,'Legacy facility')", owner);
+            await using var facility = new NpgsqlCommand("INSERT INTO grainledger.ledger_facilities(id,name) VALUES($1,'Legacy facility')", owner);
             facility.Parameters.AddWithValue(legacyFacility);
             await facility.ExecuteNonQueryAsync();
         }
@@ -208,7 +208,7 @@ public sealed class LedgerListTests(ApiFactory factory) : IClassFixture<ApiFacto
         Assert.All(lookups.GetProperty("facilities").EnumerateArray(), row => Assert.False(row.TryGetProperty("createdBy", out _)));
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
         await runtime.OpenAsync();
-        await using var privileges = new NpgsqlCommand("SELECT has_function_privilege(current_user,'ledger.receiving_tasks_page(uuid,jsonb)','EXECUTE') OR has_function_privilege(current_user,'ledger.operation_for_actor(uuid,uuid)','EXECUTE')", runtime);
+        await using var privileges = new NpgsqlCommand("SELECT has_function_privilege(current_user,'grainledger.ledger_receiving_tasks_page(uuid,jsonb)','EXECUTE') OR has_function_privilege(current_user,'grainledger.ledger_operation_for_actor(uuid,uuid)','EXECUTE')", runtime);
         Assert.False((bool)(await privileges.ExecuteScalarAsync())!);
     }
 

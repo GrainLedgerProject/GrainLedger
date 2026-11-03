@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -20,7 +21,7 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
     private async Task<Farmer> SeedFarmerAsync(Guid companyId, string? code = null)
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var farmer = new Farmer
         {
             Id = Guid.NewGuid(), CompanyId = companyId, Code = code ?? Guid.NewGuid().ToString("N"),
@@ -82,7 +83,7 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.DoesNotContain(listB!.Items, x => x.Id == entityId);
 
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Plots.CountAsync(x => x.Id == entityId && x.CompanyId == companyA.Id));
         Assert.Equal(userA.Id, (await db.Plots.SingleAsync(x => x.Id == entityId)).CreatedBy);
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CompanyId == companyA.Id && x.CorrelationId == operationId));
@@ -125,7 +126,7 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
             PointRequest(entityId, farmerA.Id, operationId, 2m, capturedAt: capturedAt))).StatusCode);
 
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Plots.CountAsync(x => x.CompanyId == companyA.Id));
         Assert.Equal(1.25m, (await db.Plots.SingleAsync(x => x.Id == entityId)).AreaHa);
     }
