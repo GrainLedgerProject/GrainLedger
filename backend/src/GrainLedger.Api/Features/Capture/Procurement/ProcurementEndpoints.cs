@@ -401,12 +401,18 @@ public static class ProcurementEndpoints
         if (companyId is null) return Results.Forbid();
         var source = await db.SourceLots.AsNoTracking().SingleOrDefaultAsync(x => x.CompanyId == companyId && x.Id == id, ct);
         if (source is null) return Problem(404, "SOURCE_LOT_NOT_FOUND", "Source lot not found.");
-        var item = await db.ProcurementItems.AsNoTracking().SingleAsync(x => x.Id == source.ProcurementItemId && x.CompanyId == companyId, ct);
-        var header = await db.Procurements.AsNoTracking().SingleAsync(x => x.Id == item.ProcurementId && x.CompanyId == companyId, ct);
-        var ev = await db.BusinessEvents.AsNoTracking().SingleAsync(x => x.Id == header.EventId && x.CompanyId == companyId, ct);
-        using var json = JsonDocument.Parse(ev.Payload);
+        var history = await (
+            from item in db.ProcurementItems.AsNoTracking()
+            join h in db.Procurements.AsNoTracking()
+                on new { item.CompanyId, Id = item.ProcurementId } equals new { h.CompanyId, h.Id }
+            join ev in db.BusinessEvents.AsNoTracking()
+                on new { CompanyId = (Guid?)h.CompanyId, Id = h.EventId } equals new { ev.CompanyId, Id = (Guid?)ev.Id }
+            where item.Id == source.ProcurementItemId && item.CompanyId == companyId
+            select new { ItemId = item.Id, Header = new { h.Id, h.Code, h.FarmerId, h.ReceivedAt, h.CollectionSiteId }, ev.Payload }).SingleAsync(ct);
+        var header = history.Header;
+        using var json = JsonDocument.Parse(history.Payload);
         var snapshot = json.RootElement.GetProperty("result").Deserialize<ProcurementResponse>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
-        var line = snapshot.Items.Single(x => x.Id == item.Id);
+        var line = snapshot.Items.Single(x => x.Id == history.ItemId);
         try
         {
             var state = await ledger.GetReceivingStateAsync(header.Id, ct);
@@ -427,23 +433,25 @@ public static class ProcurementEndpoints
                     on new { association.CompanyId, Id = association.ResultSetId } equals new { resultSet.CompanyId, resultSet.Id }
                 where association.CompanyId == companyId && sampleIds.Contains(association.SampleId)
                 select resultSet.ReportId).Distinct().OrderBy(x => x).ToArrayAsync(ct);
-            var farmer = await db.Farmers.IgnoreQueryFilters().AsNoTracking()
-                .Where(x => x.CompanyId == companyId && x.Id == header.FarmerId)
-                .Select(x => new { x.Name, x.Code }).SingleOrDefaultAsync(ct);
-            var plotCode = await db.Plots.IgnoreQueryFilters().AsNoTracking()
-                .Where(x => x.CompanyId == companyId && x.Id == line.PlotId)
-                .Select(x => x.Code).SingleOrDefaultAsync(ct);
-            var seasonName = await db.CropSeasons.IgnoreQueryFilters().AsNoTracking()
-                .Where(x => x.CompanyId == companyId && x.Id == line.SeasonId)
-                .Select(x => x.Name).SingleOrDefaultAsync(ct);
+            var metadata = await db.SourceLots.AsNoTracking()
+                .Where(x => x.CompanyId == companyId && x.Id == source.Id)
+                .Select(x => new
+                {
+                    Farmer = db.Farmers.IgnoreQueryFilters().Where(f => f.CompanyId == companyId && f.Id == header.FarmerId)
+                        .Select(f => new { f.Name, f.Code }).SingleOrDefault(),
+                    PlotCode = db.Plots.IgnoreQueryFilters().Where(p => p.CompanyId == companyId && p.Id == line.PlotId)
+                        .Select(p => p.Code).SingleOrDefault(),
+                    SeasonName = db.CropSeasons.IgnoreQueryFilters().Where(s => s.CompanyId == companyId && s.Id == line.SeasonId)
+                        .Select(s => s.Name).SingleOrDefault()
+                }).SingleAsync(ct);
             return Results.Ok(new SourceLotResponse(source.Id, source.LotId, line.LotCode,
-                snapshot.CommodityId, line.Stage, header.Id, header.Code, item.Id, header.FarmerId,
+                snapshot.CommodityId, line.Stage, header.Id, header.Code, history.ItemId, header.FarmerId,
                 line.PlotId, line.SeasonId, line.PlotSeasonId, line.RiceVariety, header.ReceivedAt,
                 header.CollectionSiteId, snapshot.ReceivingLocationId, line.NetMassKg,
                 line.MoisturePercent, stock, lineage.Descendants, sampleIds, reportIds, clock.GetUtcNow(),
                 state?.Status ?? snapshot.Status,
                 Number(stock.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture))),
-                farmer?.Name, farmer?.Code, plotCode, seasonName));
+                metadata.Farmer?.Name, metadata.Farmer?.Code, metadata.PlotCode, metadata.SeasonName));
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }

@@ -75,6 +75,48 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, "/api/procurements", wrongSource, HttpStatusCode.Conflict);
     }
 
+    [Fact]
+    public async Task Source_detail_uses_snapshot_references_and_includes_archived_labels()
+    {
+        using var s = await CreateAsync(factory);
+        var receipt = await s.ReceiptAsync("10");
+        var sourceId = receipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
+        var before = (await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{sourceId}"))!;
+        var replacement = await s.RegisterSourceAsync(s.Purchaser, s.OwnerId);
+        var replacementSeason = await s.RegisterSourceAsync(s.Purchaser, s.OwnerId);
+        await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
+        await connection.OpenAsync();
+        await using (var command = new NpgsqlCommand("""
+            UPDATE grainledger.capture_farmers SET name='Archived farmer',is_deleted=true WHERE id=@farmer;
+            UPDATE grainledger.capture_plots SET code='ARCHIVED-PLOT',is_deleted=true WHERE id=@plot;
+            UPDATE grainledger.capture_crop_seasons SET name='Archived season',is_deleted=true WHERE id=@season;
+            UPDATE grainledger.capture_plot_seasons
+                SET plot_id=(SELECT plot_id FROM grainledger.capture_plot_seasons WHERE id=@replacement),
+                    season_id=(SELECT season_id FROM grainledger.capture_plot_seasons WHERE id=@replacementSeason)
+                WHERE id=@plotSeason;
+            """, connection))
+        {
+            command.Parameters.AddWithValue("farmer", s.FarmerId);
+            command.Parameters.AddWithValue("plot", before.PlotId);
+            command.Parameters.AddWithValue("season", before.SeasonId);
+            command.Parameters.AddWithValue("plotSeason", before.PlotSeasonId);
+            command.Parameters.AddWithValue("replacement", replacement.PlotSeason);
+            command.Parameters.AddWithValue("replacementSeason", replacementSeason.PlotSeason);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var after = (await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{sourceId}"))!;
+        Assert.Equal(before.PlotId, after.PlotId);
+        Assert.Equal(before.SeasonId, after.SeasonId);
+        Assert.Equal(before.PlotSeasonId, after.PlotSeasonId);
+        Assert.Equal("Archived farmer", after.FarmerName);
+        Assert.Equal(before.FarmerCode, after.FarmerCode);
+        Assert.Equal("ARCHIVED-PLOT", after.PlotCode);
+        Assert.Equal("Archived season", after.SeasonName);
+        Assert.Equal(HttpStatusCode.NotFound, (await s.ForeignCustomer.GetAsync($"/api/source-lots/{sourceId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await s.Purchaser.GetAsync($"/api/source-lots/{Guid.NewGuid()}")).StatusCode);
+    }
+
     [Theory]
     [InlineData("0.001", "G", "0.000001")]
     [InlineData("0.000000001", "T", "0.000001")]
