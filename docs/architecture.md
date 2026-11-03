@@ -14,6 +14,8 @@ The approved `--seed-setup` command provisions accounts and mill setup only in D
 
 Source/stock workflows retain their operation-specific transaction boundaries. Capture and protected Ledger routines borrow the caller's connection and transaction; no request-wide transaction is introduced. Stock-changing workflows retain advisory lock `714928352` and `READ COMMITTED`; residue materialization retains read-only `REPEATABLE READ` followed by separate validated append.
 
+Within `Features`, Capture groups farmer, season, spray declaration, procurement, sample, lab report and residue-evidence workflows; Catalogs groups commodities, reference data, MRLs, residue rules and blend assessment. Ledger groups endpoints, planning, residue and traceability; Exports groups orders and planning. Shared feature composition and persistence files remain at their feature root. Folder moves retain the existing feature namespaces; `Data/Migrations` and embedded `Data/Sql` remain unchanged.
+
 ## Historical module-era architecture snapshot
 
 The following sections record behavior and deployment details from the prior multi-context/multi-schema implementation. Treat old schema and migration names as historical identifiers, not instructions for the approved single-schema baseline. Current reset/deployment status must be established independently.
