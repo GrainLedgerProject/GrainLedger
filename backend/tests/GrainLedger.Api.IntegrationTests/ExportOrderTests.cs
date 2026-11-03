@@ -954,7 +954,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", payload);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var order = (await created.Content.ReadFromJsonAsync<ExportOrderDto>())!;
-        Assert.Matches(@"^EXP-\d{6}-\d{6,}$", order.Code);
+        Assert.Matches(@"^EXP-\d{8}-\d{6,}$", order.Code);
         Assert.Equal("48000", order.RequiredMassKg);
         Assert.Equal("0", order.RemainingMassKg);
         var targets = await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>($"/api/export-orders/{order.Id}/containers");
@@ -962,7 +962,9 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.All(targets.Items, x => Assert.Matches(@"^CTN-\d{8}-\d{6,}$", x.InternalCode));
         var replay = await writer.PostAsJsonAsync("/api/export-orders", payload);
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
-        Assert.Equal(order.Id, (await replay.Content.ReadFromJsonAsync<ExportOrderDto>())!.Id);
+        var replayedOrder = (await replay.Content.ReadFromJsonAsync<ExportOrderDto>())!;
+        Assert.Equal(order.Id, replayedOrder.Id);
+        Assert.Equal(order.Code, replayedOrder.Code);
         var changed = new
         {
             operationId = operation, marketId = market, commodityId = commodity,

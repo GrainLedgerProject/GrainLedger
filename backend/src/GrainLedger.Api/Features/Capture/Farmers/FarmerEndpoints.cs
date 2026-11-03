@@ -68,16 +68,13 @@ public static class CaptureModule
         if (errors.Count != 0) return Results.ValidationProblem(errors);
         var payload = request.Payload!;
         var deviceId = request.DeviceId!.Trim();
-        var legacyCode = payload.Code is null
-            ? $"ND-{payload.EntityId.ToString("N")[..12].ToUpperInvariant()}"
-            : payload.Code.Trim();
         var name = payload.Name!.Trim();
         var contact = string.IsNullOrWhiteSpace(payload.Contact) ? null : payload.Contact.Trim();
         var capturedAt = request.CapturedAt.ToUniversalTime();
         var canonical = JsonSerializer.Serialize(new
         {
             operationType = "FARMER_REGISTERED", request.PayloadSchemaVersion, capturedAt,
-            payload.EntityId, code = request.PayloadSchemaVersion == 1 ? legacyCode : null, name, contact
+            payload.EntityId, code = (string?)null, name, contact
         });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         var lockKey = $"{companyId:N}:{deviceId}:{request.ClientOperationId:N}";
@@ -101,8 +98,7 @@ public static class CaptureModule
 
         if (await db.Farmers.AnyAsync(x => x.CompanyId == companyId && x.Id == payload.EntityId, ct))
             return Problem(409, "ENTITY_ALREADY_EXISTS", "The farmer ID already exists.");
-        var (number, generatedCode) = await CaptureCodes.FarmerAsync(db, companyId, ct);
-        var code = request.PayloadSchemaVersion == 1 ? legacyCode : generatedCode;
+        var (number, code) = await CaptureCodes.FarmerAsync(db, companyId, ct);
         if (await db.Farmers.AnyAsync(x => x.CompanyId == companyId && x.Code == code, ct))
             return Problem(409, "FARMER_CODE_EXISTS", "The farmer code already exists.");
 
@@ -326,14 +322,11 @@ public static class CaptureModule
         if (string.IsNullOrWhiteSpace(request.DeviceId) || request.DeviceId.Trim().Length > 100) errors["deviceId"] = ["Device ID is required and must not exceed 100 characters."];
         if (request.ClientOperationId == Guid.Empty) errors["clientOperationId"] = ["Operation ID is required."];
         if (request.CapturedAt == default) errors["capturedAt"] = ["Capture time is required."];
-        if (request.PayloadSchemaVersion is not (1 or 2)) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
-        if (request.PayloadSchemaVersion == 2 && request.Payload?.Code is not null)
+        if (request.PayloadSchemaVersion != 2) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
+        if (request.Payload?.Code is not null)
             errors["payload.code"] = ["The server assigns the farmer code."];
         if (request.Payload is null) { errors["payload"] = ["Farmer data is required."]; return errors; }
         if (request.Payload.EntityId == Guid.Empty) errors["payload.entityId"] = ["Farmer ID is required."];
-        if (request.Payload.Code is not null &&
-            (string.IsNullOrWhiteSpace(request.Payload.Code) || request.Payload.Code.Trim().Length > 40))
-            errors["payload.code"] = ["If supplied, code must not be blank or exceed 40 characters."];
         if (string.IsNullOrWhiteSpace(request.Payload.Name)) errors["payload.name"] = ["Name is required."];
         return errors;
     }

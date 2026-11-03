@@ -19,10 +19,10 @@ public sealed class FarmerTests(ApiFactory factory) : IClassFixture<ApiFactory>
         client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", csrf.GetProperty("token").GetString());
     }
 
-    private static object Request(Guid entityId, Guid operationId, string code, string name = "Farmer A") => new
+    private static object Request(Guid entityId, Guid operationId, string name = "Farmer A") => new
     {
         deviceId = "test-device", clientOperationId = operationId, capturedAt = DateTimeOffset.UtcNow,
-        payloadSchemaVersion = 1, payload = new { entityId, code, name, contact = (string?)null }
+        payloadSchemaVersion = 2, payload = new { entityId, name, contact = (string?)null }
     };
 
     [Fact]
@@ -41,17 +41,17 @@ public sealed class FarmerTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var operationId = Guid.NewGuid();
         var capturedAt = DateTimeOffset.UtcNow;
         var input = new { deviceId = "test-device", clientOperationId = operationId, capturedAt,
-            payloadSchemaVersion = 1, payload = new { entityId, name = "Farmer A" } };
+            payloadSchemaVersion = 2, payload = new { entityId, name = "Farmer A" } };
         var created = await clientA.PostAsJsonAsync("/api/farmers", input);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var createdFarmer = (await created.Content.ReadFromJsonAsync<FarmerResponse>())!;
         Assert.Equal(entityId, createdFarmer.Id);
-        Assert.Equal($"ND-{entityId.ToString("N")[..12].ToUpperInvariant()}", createdFarmer.Code);
+        Assert.Equal("FRM-0001", createdFarmer.Code);
         Assert.Equal(HttpStatusCode.OK, (await clientA.PostAsJsonAsync("/api/farmers", input)).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await clientA.PostAsJsonAsync("/api/farmers", new
         {
             deviceId = "test-device", clientOperationId = operationId, capturedAt,
-            payloadSchemaVersion = 1, payload = new { entityId, name = "Farmer B" }
+            payloadSchemaVersion = 2, payload = new { entityId, name = "Farmer B" }
         })).StatusCode);
 
         Assert.Equal(HttpStatusCode.OK, (await clientA.GetAsync($"/api/farmers/{entityId}")).StatusCode);
@@ -69,19 +69,20 @@ public sealed class FarmerTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     [Fact]
-    public async Task Validation_and_duplicate_code_do_not_add_a_second_farmer()
+    public async Task Validation_and_generated_codes_are_unique()
     {
         var company = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
         var (user, session) = await factory.SeedUserAsync(Roles.PurchasingStaff, company.Id);
         using var client = factory.CreateRealCookieClient(user, session);
         await AddCsrfAsync(client);
-        var code = "F-" + Guid.NewGuid().ToString("N")[..8];
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/farmers",
             Request(Guid.NewGuid(), Guid.NewGuid(), "  "))).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/farmers",
-            Request(Guid.NewGuid(), Guid.NewGuid(), code))).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/farmers",
-            Request(Guid.NewGuid(), Guid.NewGuid(), code))).StatusCode);
+        var first = await client.PostAsJsonAsync("/api/farmers", Request(Guid.NewGuid(), Guid.NewGuid()));
+        var second = await client.PostAsJsonAsync("/api/farmers", Request(Guid.NewGuid(), Guid.NewGuid()));
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        var code = (await first.Content.ReadFromJsonAsync<FarmerResponse>())!.Code;
+        Assert.NotEqual(code, (await second.Content.ReadFromJsonAsync<FarmerResponse>())!.Code);
         var found = await client.GetFromJsonAsync<FarmerListResponse>($"/api/farmers?q={code}&page=1&pageSize=1");
         Assert.Single(found!.Items);
     }

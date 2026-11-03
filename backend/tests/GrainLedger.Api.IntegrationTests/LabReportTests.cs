@@ -957,12 +957,12 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         var procurement = receipt ?? await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), ["100"]));
         var sourceLotId = procurement.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
         var id = Guid.NewGuid();
-        var code = $"S-{id:N}";
         var seal = $"SEAL-{id:N}";
-        await SendAsync(purchaser ?? s.Purchaser, HttpMethod.Post, "/api/samples", Envelope(new
+        var sample = await SendAsync(purchaser ?? s.Purchaser, HttpMethod.Post, "/api/samples", Envelope(new
         {
-            entityId = id, sourceLotId, code, sealCode = seal, collectedAt = CapturedAt.AddHours(-1), materialDescription = "Procurement paddy"
-        }));
+            entityId = id, sourceLotId, sealCode = seal, collectedAt = CapturedAt.AddHours(-1), materialDescription = "Procurement paddy"
+        }, 2));
+        var code = sample.GetProperty("code").GetString()!;
         return new SampleIdentity(id, sourceLotId, Lots(procurement)[0], code, seal, procurement);
     }
 
@@ -1004,10 +1004,10 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         resultSets = sets
     });
 
-    private static JsonObject Envelope(object payload) => JsonSerializer.SerializeToNode(new
+    private static JsonObject Envelope(object payload, int version = 1) => JsonSerializer.SerializeToNode(new
     {
         deviceId = "lab-integration-test", clientOperationId = Guid.NewGuid(), capturedAt = CapturedAt,
-        payloadSchemaVersion = 1, payload
+        payloadSchemaVersion = version, payload
     })!.AsObject();
 
     internal static Guid EntityId(JsonObject envelope) => envelope["payload"]!["entityId"]!.GetValue<Guid>();

@@ -785,12 +785,13 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements",
             s.ReceiptBody(Guid.NewGuid(), ["25"], site.LocationId));
         var sourceId = receipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
-        var sampleId = Guid.NewGuid(); var sampleCode = $"S-{sampleId:N}"; var seal = $"SEAL-{sampleId:N}";
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/samples", CaptureCommand(new
+        var sampleId = Guid.NewGuid(); var seal = $"SEAL-{sampleId:N}";
+        var sample = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/samples", CaptureCommand(new
         {
-            entityId = sampleId, sourceLotId = sourceId, code = sampleCode, sealCode = seal,
+            entityId = sampleId, sourceLotId = sourceId, sealCode = seal,
             collectedAt = DateTimeOffset.UtcNow, materialDescription = "Synthetic pre-pooling sample"
-        }));
+        }, 2));
+        var sampleCode = sample.GetProperty("code").GetString();
         await site.Scenario.ConfirmArrivalAsync(receipt);
         var reportId = Guid.NewGuid();
         await SendAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", CaptureCommand(new

@@ -18,7 +18,13 @@ public sealed class MonolithBaselineTests
                 .MigrationsHistoryTable("__EFMigrationsHistory", "grainledger"))
             .Options;
         await using (var db = new AppDbContext(options))
+        {
+            var applied = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
+            Assert.Contains("20261103000000_InitialMonolith", applied);
             await db.Database.MigrateAsync();
+            Assert.Equal(applied, (await db.Database.GetAppliedMigrationsAsync()).ToArray());
+            Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+        }
 
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
         await owner.OpenAsync();
@@ -34,7 +40,6 @@ public sealed class MonolithBaselineTests
                AND (SELECT count(*) FROM grainledger.ledger_receiving_threshold_history
                     WHERE scope='SYSTEM_DEFAULT' AND action='INITIALIZE' AND new_percentage=2
                       AND migration_id='20261019000000_ReceivingLossThreshold') = 1
-               AND (SELECT count(*) FROM grainledger."__EFMigrationsHistory") = 1
                AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname IN ('identity','catalog','capture','ledger','exports'))
             """, owner))
             Assert.True((bool)(await baseline.ExecuteScalarAsync())!);

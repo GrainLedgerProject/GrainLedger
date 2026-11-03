@@ -1128,7 +1128,7 @@ BEGIN
     RETURN result;
 END $_$;
 
-CREATE FUNCTION grainledger.ledger_command_legacy(a uuid, action text, p jsonb) RETURNS jsonb
+CREATE FUNCTION grainledger.ledger_command_core(a uuid, action text, p jsonb) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'grainledger', 'pg_temp'
     AS $_$
@@ -1800,11 +1800,11 @@ DECLARE prior grainledger.ledger_operations; saved grainledger.ledger_operations
     outputs jsonb:='[]'::jsonb; assigned_code text; reservation grainledger.ledger_lot_code_reservations;
     prior_outputs jsonb; requested_outputs jsonb; original_lot grainledger.ledger_lots;
 BEGIN
-    IF action<>'draft' THEN RETURN grainledger.ledger_command_legacy(a,action,p); END IF;
+    IF action<>'draft' THEN RETURN grainledger.ledger_command_core(a,action,p); END IF;
     PERFORM grainledger.ledger_lock_writes();
     SELECT * INTO prior FROM grainledger.ledger_operations WHERE id=(p->>'id')::uuid;
     IF FOUND AND prior.lot_code_scheme='LEGACY' THEN
-        RETURN grainledger.ledger_command_legacy(a,action,p);
+        RAISE EXCEPTION 'Legacy drafts cannot be edited; create a new draft with reserved lot codes' USING ERRCODE='23514';
     END IF;
     IF FOUND AND prior.lot_code_scheme='GENERATED' AND NOT p ? 'version' THEN
         SELECT jsonb_agg(value-'code' ORDER BY ordinal) INTO prior_outputs
@@ -1819,8 +1819,8 @@ BEGIN
                 'canDelete',NOT grainledger.ledger_record_in_use('operations',prior.id));
         END IF;
     END IF;
-    -- The legacy command performs persisted role, owner, input, facility and draft-version checks.
-    result:=grainledger.ledger_command_legacy(a,action,p);
+    -- Core command performs persisted role, owner, input, facility and draft-version checks.
+    result:=grainledger.ledger_command_core(a,action,p);
     SELECT * INTO STRICT saved FROM grainledger.ledger_operations WHERE id=(p->>'id')::uuid FOR UPDATE;
     IF EXISTS(SELECT 1 FROM jsonb_array_elements(saved.content->'outputs') x
         GROUP BY (x->>'id')::uuid HAVING count(*)>1) THEN
@@ -1916,6 +1916,9 @@ BEGIN
     IF operation.status='COMMITTED' AND corr IS NULL THEN RETURN grainledger.ledger_operation_json(op); END IF;
     IF operation.status<>'DRAFT' THEN
         RAISE EXCEPTION 'Only draft operations can commit' USING ERRCODE='23514';
+    END IF;
+    IF operation.lot_code_scheme<>'GENERATED' THEN
+        RAISE EXCEPTION 'Legacy drafts cannot be committed; create a new draft with reserved lot codes' USING ERRCODE='23514';
     END IF;
     IF corr IS NOT NULL THEN
         SELECT operation_id INTO original_operation FROM grainledger.ledger_corrections
@@ -2030,6 +2033,23 @@ BEGIN
     END LOOP;
 
     FOR output IN SELECT value FROM jsonb_array_elements(operation.content->'outputs') LOOP
+        IF nullif(output->>'originalLotId','') IS NULL THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM grainledger.ledger_lot_code_reservations r
+                WHERE r.lot_id=(output->>'id')::uuid AND r.code=output->>'code'
+                  AND r.owner_id=operation.owner_id AND r.context_kind='OPERATION' AND r.context_id=op
+                  AND r.stage=output->>'stage' AND r.product_identity=output->>'productIdentity'
+            ) THEN
+                RAISE EXCEPTION 'Output lot is missing its matching reserved code' USING ERRCODE='23514';
+            END IF;
+        ELSIF corr IS NULL OR NOT EXISTS (
+            SELECT 1 FROM grainledger.ledger_lots l
+            WHERE l.id=(output->>'originalLotId')::uuid AND l.operation_id=original_operation
+              AND l.owner_id=operation.owner_id AND l.code=output->>'code'
+              AND l.stage=output->>'stage' AND l.product_identity=output->>'productIdentity'
+        ) THEN
+            RAISE EXCEPTION 'Replacement output does not match original lot' USING ERRCODE='23514';
+        END IF;
         quantity:=grainledger.ledger_kg(output->>'quantityKg');
         IF quantity<=0 THEN
             RAISE EXCEPTION 'Output must be positive' USING ERRCODE='23514';
@@ -2511,7 +2531,6 @@ BEGIN
            OR item_snapshot->>'RiceVariety' IS DISTINCT FROM row.rice_variety
            OR (item_snapshot->>'SourceLotId')::uuid IS DISTINCT FROM row.source_id
            OR (item_snapshot->>'LotId')::uuid IS DISTINCT FROM row.lot_id
-           OR item_snapshot->>'LotCode' IS DISTINCT FROM upper('LL-'||replace(row.lot_id::text,'-',''))
            OR item_snapshot->>'Stage' IS DISTINCT FROM 'RAW_PADDY'
            OR (item_snapshot->>'MeasuredValue')::numeric IS DISTINCT FROM row.measured_value
            OR item_snapshot->>'MeasuredUnit' IS DISTINCT FROM row.measured_unit
@@ -4744,16 +4763,13 @@ CREATE FUNCTION grainledger.ledger_source_lot_code(r uuid, v_lot uuid) RETURNS t
     LANGUAGE plpgsql STABLE
     SET search_path TO 'pg_catalog', 'grainledger', 'pg_temp'
     AS $$
-DECLARE reserved text; version integer;
+DECLARE reserved text;
 BEGIN
     SELECT code INTO reserved FROM grainledger.ledger_lot_code_reservations
     WHERE lot_id=v_lot AND context_kind='SOURCE' AND context_id=r
       AND stage='RAW_PADDY' AND product_identity='RAW_PADDY';
     IF reserved IS NOT NULL THEN RETURN reserved; END IF;
-    SELECT COALESCE((ev.payload->>'schemaVersion')::integer,1) INTO version
-    FROM grainledger.capture_procurements p JOIN grainledger.capture_business_events ev ON ev.id=p.event_id WHERE p.id=r;
-    IF version>=2 THEN RAISE EXCEPTION 'New source lot is missing its reserved code' USING ERRCODE='23514'; END IF;
-    RETURN upper('LL-'||replace(v_lot::text,'-',''));
+    RAISE EXCEPTION 'Source lot is missing its reserved code' USING ERRCODE='23514';
 END $$;
 
 CREATE FUNCTION grainledger.ledger_trace_lot(a uuid, target uuid, direction text, view_mode text) RETURNS jsonb

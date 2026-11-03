@@ -51,9 +51,6 @@ public static class PlotEndpoints
 
         var payload = request.Payload!;
         var companyId = actor.Value.CompanyId;
-        var legacyCode = payload.Code is null
-            ? $"TR-{payload.EntityId:N}".ToUpperInvariant()
-            : payload.Code.Trim();
         var deviceId = request.DeviceId!.Trim();
         var capturedAt = request.CapturedAt.ToUniversalTime();
         var normalizedArea = decimal.Parse(payload.AreaHa.ToString("G29", CultureInfo.InvariantCulture),
@@ -61,7 +58,7 @@ public static class PlotEndpoints
         var canonical = JsonSerializer.Serialize(new
         {
             operationType = "PLOT_REGISTERED", request.PayloadSchemaVersion, capturedAt,
-            payload.EntityId, payload.FarmerId, code = request.PayloadSchemaVersion == 1 ? legacyCode : null,
+            payload.EntityId, payload.FarmerId, code = (string?)null,
             geometry = JsonSerializer.Deserialize<JsonElement>(geometry), areaHa = normalizedArea
         });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
@@ -88,9 +85,8 @@ public static class PlotEndpoints
             return Problem(409, "SOURCE_RECORD_NOT_READY", "The selected farmer is not available.");
         if (await db.Plots.AnyAsync(x => x.Id == payload.EntityId, ct))
             return Problem(409, "ENTITY_ALREADY_EXISTS", "The plot ID already exists.");
-        var code = request.PayloadSchemaVersion == 1 ? legacyCode
-            : await CaptureCodes.PlotAsync(db, companyId, farmer.Id,
-                await CaptureCodes.FarmerNumberAsync(db, farmer, ct), ct);
+        var code = await CaptureCodes.PlotAsync(db, companyId, farmer.Id,
+            await CaptureCodes.FarmerNumberAsync(db, farmer, ct), ct);
         if (await db.Plots.AnyAsync(x => x.FarmerId == payload.FarmerId && x.Code == code, ct))
             return Problem(409, "PLOT_CODE_EXISTS", "The plot code already exists for this farmer.");
 
@@ -302,15 +298,12 @@ public static class PlotEndpoints
             errors["deviceId"] = ["Device ID is required and must not exceed 100 characters."];
         if (request.ClientOperationId == Guid.Empty) errors["clientOperationId"] = ["Operation ID is required."];
         if (request.CapturedAt == default) errors["capturedAt"] = ["Capture time is required."];
-        if (request.PayloadSchemaVersion is not (1 or 2)) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
-        if (request.PayloadSchemaVersion == 2 && request.Payload?.Code is not null)
+        if (request.PayloadSchemaVersion != 2) errors["payloadSchemaVersion"] = ["Unsupported payload version."];
+        if (request.Payload?.Code is not null)
             errors["payload.code"] = ["The server assigns the plot code."];
         if (request.Payload is null) { errors["payload"] = ["Plot data is required."]; return errors; }
         if (request.Payload.EntityId == Guid.Empty) errors["payload.entityId"] = ["Plot ID is required."];
         if (request.Payload.FarmerId == Guid.Empty) errors["payload.farmerId"] = ["Farmer ID is required."];
-        if (request.Payload.Code is not null &&
-            (string.IsNullOrWhiteSpace(request.Payload.Code) || request.Payload.Code.Trim().Length > 40))
-            errors["payload.code"] = ["If supplied, code must not be blank or exceed 40 characters."];
         if (!PlotGeometry.TryNormalize(request.Payload.Geometry, out geometry))
             errors["payload.geometry"] = ["A valid WGS84 Point or Polygon is required."];
         if (request.Payload.AreaHa <= 0 || request.Payload.AreaHa >= 1_000_000_000_000m ||

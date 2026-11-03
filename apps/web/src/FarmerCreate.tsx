@@ -7,7 +7,7 @@ type RegisterFarmerRequest = {
   deviceId: string;
   clientOperationId: string;
   capturedAt: string;
-  payloadSchemaVersion: 1 | 2;
+  payloadSchemaVersion: 2;
   payload: { entityId: string; name: string; contact: string | null };
 };
 

@@ -311,18 +311,11 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
             Assert.Equal(HttpStatusCode.NoContent, retiredChild.StatusCode);
         using (var retiredParent = await DeleteAsync(client, $"/api/farmers/{farmerId}", 1))
             Assert.Equal(HttpStatusCode.NoContent, retiredParent.StatusCode);
-        using (var duplicateCode = await client.PostAsJsonAsync("/api/farmers", new
-                   {
-                       deviceId = "soft-delete-test", clientOperationId = Guid.NewGuid(), capturedAt = DateTimeOffset.UtcNow,
-                       payloadSchemaVersion = 1, payload = new { entityId = Guid.NewGuid(), code = "RETIRED-PARENT",
-                           name = "Duplicate", contact = (string?)null }
-                   }))
-            Assert.Equal(HttpStatusCode.Conflict, duplicateCode.StatusCode);
         using (var newPlot = await client.PostAsJsonAsync("/api/plots", new
                    {
                        deviceId = "soft-delete-test", clientOperationId = Guid.NewGuid(), capturedAt = DateTimeOffset.UtcNow,
-                       payloadSchemaVersion = 1,
-                       payload = new { entityId = Guid.NewGuid(), farmerId, code = "REUSE-RETIRED-FARMER",
+                       payloadSchemaVersion = 2,
+                       payload = new { entityId = Guid.NewGuid(), farmerId,
                            geometry = Point(), areaHa = 1m }
                    }))
             Assert.Equal(HttpStatusCode.Conflict, newPlot.StatusCode);

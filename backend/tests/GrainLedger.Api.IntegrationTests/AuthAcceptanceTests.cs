@@ -81,7 +81,7 @@ public sealed class AuthAcceptanceTests(ApiFactory factory) : IClassFixture<ApiF
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/ledger/lookups")).StatusCode);
         var farmerId = Guid.NewGuid();
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/farmers",
-            LedgerScenario.CaptureCommand(new { entityId = farmerId, name = "Bearer farmer" }))).StatusCode);
+            LedgerScenario.CaptureCommand(new { entityId = farmerId, name = "Bearer farmer" }, 2))).StatusCode);
         var foreign = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
         var (foreignUser, foreignSession) = await factory.SeedUserAsync(Roles.PurchasingStaff, foreign.Id);
         using var foreignClient = factory.CreateRealCookieClient(foreignUser, foreignSession);

@@ -146,11 +146,9 @@ The Dockerfile builds frontend assets and ASP.NET app into a single image exposi
 
 Serve app through HTTPS reverse proxy on one origin. Configure trusted proxy addresses in `ReverseProxy__KnownProxies__0` (and indexed entries), preserve original `Host`, and forward `X-Forwarded-Proto: https`. Set `AllowedHosts` to deployed host. Production cookies require HTTPS. Configure `DataProtection__KeysPath` to durable storage with access restricted to the app identity and protected backups; instances that share cookie authentication need access to the same protected key ring. Set production Google callback to `https://YOUR_HOST/signin-google`. Compose starts local PostgreSQL only; it does not provide proxy, production secrets, or Google setup.
 
-### Receiving and unified lot-code compatibility
+### Receiving and code cutover
 
-For releases containing the current receiving/code behavior, ensure Ledger migrations include `20261017000000_UnifiedLotCodes`, `20261019000000_ReceivingLossThreshold`, and forward repair `20261019010000_RepairReceivingLotCodeBoundary` (`RepairReceivingLotCodeBoundary.sql`) in order. A database that already recorded the threshold migration may still have earlier functions that hardcode `LL-…`, rejecting schema-version-2 procurement with `Pending source package incomplete`. Editing an applied migration does not update installed functions. The forward repair replaces threshold-aware package validation and receiving detail with unified-code versions without rewriting stock, evidence, or threshold snapshots. Run through approved migration-owner job; do not rerun historical SQL or delete migration-history rows. Confirm applied migrations against target database before deployment; source code alone does not mean repair has run there.
-
-The API and database must be cut over together: pause intake and processing writes during unified-code deployment; old API instances cannot issue or validate new codes. Do not roll back to an API version that only understands `LL-…` after unified codes exist. Existing historical `LL-…` records remain unchanged. New generated codes use `TOKEN-YYYYMMDD-SERIAL`; see [unified lot-code guide](guides/unified-lot-code-guide.md).
+Apply the current monolith migrations through an approved migration-owner job before deploying the matching API. Pause Capture and Ledger writes during cutover; inventory pending receipts without lot-code reservations and older processing drafts first. Those records cannot proceed through the new write paths without an explicit remediation plan. Stored records are not rewritten. See [lot-code guide](guides/unified-lot-code-guide.md) and [Capture code guide](guides/companion-capture-codes.md).
 
 ### External laboratory workflow
 

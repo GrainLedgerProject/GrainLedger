@@ -69,12 +69,11 @@ internal static class CaptureCodes
         string kind, DateTimeOffset occurredAt, CancellationToken ct)
     {
         var localDate = TimeZoneInfo.ConvertTime(occurredAt, Vietnam);
-        var scope = localDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
-        var shortDate = localDate.ToString("yyMMdd", CultureInfo.InvariantCulture);
+        var date = localDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         while (true)
         {
-            var number = await NextAsync(db, companyId, kind, scope, ct);
-            var code = $"{kind}-{shortDate}-{number.ToString("D4", CultureInfo.InvariantCulture)}";
+            var number = await NextAsync(db, companyId, kind, "", ct);
+            var code = $"{kind}-{date}-{number.ToString("D4", CultureInfo.InvariantCulture)}";
             var exists = kind == "PRC"
                 ? await db.Procurements.AnyAsync(x => x.CompanyId == companyId && x.Code == code, ct)
                 : await db.Samples.AnyAsync(x => x.CompanyId == companyId && x.Code == code, ct);

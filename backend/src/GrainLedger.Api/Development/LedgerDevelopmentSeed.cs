@@ -117,12 +117,14 @@ internal static class LedgerDevelopmentSeed
                     throw new InvalidOperationException("Existing KG catalog unit is not MASS; left unchanged.");
 
                 Use(purchaser);
-                await PostAsync("/api/farmers", Capture(30, new { entityId = Id(10), code = "GL-DEMO-FARMER", name = "Synthetic Demo Farmer" }));
-                await PostAsync("/api/plots", Capture(31, new
-                {
-                    entityId = Id(11), farmerId = Id(10), code = "GL-DEMO-PLOT", areaHa = 1m,
-                    geometry = new { type = "Point", coordinates = new[] { 106.123456m, 10.123456m } }
-                }));
+                if (await GetOptionalAsync($"/api/farmers/{Id(10)}") is null)
+                    await PostAsync("/api/farmers", Capture(30, new { entityId = Id(10), name = "Synthetic Demo Farmer" }, 2));
+                if (await GetOptionalAsync($"/api/plots/{Id(11)}") is null)
+                    await PostAsync("/api/plots", Capture(31, new
+                    {
+                        entityId = Id(11), farmerId = Id(10), areaHa = 1m,
+                        geometry = new { type = "Point", coordinates = new[] { 106.123456m, 10.123456m } }
+                    }, 2));
                 var plotSeason = await GetOptionalAsync($"/api/plot-seasons/{Id(12)}");
                 Guid seasonId;
                 if (plotSeason is { } existingLink)
@@ -142,7 +144,7 @@ internal static class LedgerDevelopmentSeed
                     commodityId = commodity.GetProperty("id").GetGuid(), receivedAt = CapturedAt,
                     items = new[] { new { itemId = Id(21), lineNo = 1, plotSeasonId = Id(12), measuredValue = "600",
                         measuredUnit = "KG", moisturePercent = "22.5", lotId = Id(22), sourceLotId = Id(23) } }
-                }));
+                }, 2));
             }
 
             Use(millOperator);
@@ -224,9 +226,9 @@ internal static class LedgerDevelopmentSeed
         }
     }
 
-    private static object Capture(int operation, object payload) => new
+    private static object Capture(int operation, object payload, int version = 1) => new
     {
         deviceId = "grainledger-development-seed-v1", clientOperationId = Id(operation),
-        capturedAt = CapturedAt, payloadSchemaVersion = 1, payload
+        capturedAt = CapturedAt, payloadSchemaVersion = version, payload
     };
 }

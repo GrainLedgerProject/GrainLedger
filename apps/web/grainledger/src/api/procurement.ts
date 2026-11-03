@@ -4,10 +4,9 @@ export interface RegisterFarmerRequest {
   deviceId?: string | null;
   clientOperationId: string;
   capturedAt: string;
-  payloadSchemaVersion: number;
+  payloadSchemaVersion: 2;
   payload: {
     entityId: string;
-    code: string;
     name: string;
     contact: string;
   };
@@ -17,11 +16,10 @@ export interface RegisterPlotRequest {
   deviceId?: string | null;
   clientOperationId: string;
   capturedAt: string;
-  payloadSchemaVersion: number;
+  payloadSchemaVersion: 2;
   payload: {
     entityId: string;
     farmerId: string;
-    code: string;
     geometry: unknown;
     areaHa: number;
   };
@@ -31,7 +29,7 @@ export interface RegisterProcurementRequest {
   deviceId?: string | null;
   clientOperationId: string;
   capturedAt: string;
-  payloadSchemaVersion: number;
+  payloadSchemaVersion: 2;
   payload: {
     entityId: string;
     farmerId: string;

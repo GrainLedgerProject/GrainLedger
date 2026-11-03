@@ -397,7 +397,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     }
 
     [Fact]
-    public async Task Runtime_cannot_bypass_code_issuer_or_call_legacy_command()
+    public async Task Runtime_cannot_bypass_code_issuer_or_call_core_command()
     {
         using var s = await CreateAsync(factory);
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
@@ -406,7 +406,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         {
             "SELECT nextval('grainledger.ledger_lot_code_serial')",
             "SELECT grainledger.ledger_reserve_lot_code_internal($1,$2,'OPERATION',$3,'DRIED_PADDY','DRIED_PADDY')",
-            "SELECT grainledger.ledger_command_legacy($1,'draft','{}'::jsonb)"
+            "SELECT grainledger.ledger_command_core($1,'draft','{}'::jsonb)"
         })
         {
             await using var command = new NpgsqlCommand(sql, runtime);
@@ -419,6 +419,32 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
             var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync());
             Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
         }
+    }
+
+    [Fact]
+    public async Task Legacy_draft_cannot_commit_and_missing_source_reservation_fails_closed()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var draft = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
+        var id = draft.GetProperty("id").GetGuid();
+        await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
+        await owner.OpenAsync();
+        await using (var markLegacy = new NpgsqlCommand("UPDATE grainledger.ledger_operations SET lot_code_scheme='LEGACY' WHERE id=$1", owner))
+        {
+            markLegacy.Parameters.AddWithValue(id);
+            await markLegacy.ExecuteNonQueryAsync();
+        }
+        await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations",
+            s.OperationBody(id, "DRYING", [(source, "10")], [("DRIED_PADDY", "10")]));
+        await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{id}/commit", new { });
+        Assert.Equal(10m, Quantity(await s.LotAsync(source)));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=@id", id));
+        await using var missing = new NpgsqlCommand("SELECT grainledger.ledger_source_lot_code($1,$2)", owner);
+        missing.Parameters.AddWithValue(Guid.NewGuid());
+        missing.Parameters.AddWithValue(Guid.NewGuid());
+        var error = await Assert.ThrowsAsync<PostgresException>(() => missing.ExecuteScalarAsync());
+        Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
     }
 
     [Fact]

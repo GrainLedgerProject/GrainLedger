@@ -39,17 +39,23 @@ checks the correction, owner, facility, stage, and product identity, then uses
 the original code. A new or changed product gets a new code. Correction
 lineage is checked again at commit.
 
-Historical `LL-…` source codes and pre-cutover manually coded processing
-drafts remain unchanged. New code syntax is not used to infer whether a record
-is historical. Lot codes are not proof of accepted stock; check receiving
-status and available quantity for that.
+Historical source and processing codes remain unchanged, as do committed
+receipts, operations and stock. Historic receipt verification compares the
+saved code with the recorded lot rather than reconstructing a code. Existing
+legacy processing drafts cannot be edited or committed: create a new draft
+with server-assigned codes. Lot codes are not proof of accepted stock; check
+receiving status and available quantity.
 
-Deployment requires review of the forward-only Ledger migration and an
-explicit shared-database migration approval. After migration, reconfigure the
-restricted runtime grants with the existing role-configuration procedure
-before starting the new API. Pause intake and processing writes during the
-API cutover; old API instances cannot issue or validate the new codes. Do not
-roll back to an API version that only understands `LL-…` after new codes exist.
+Deployment requires database-owner review and explicit shared-database
+approval before applying forward migration `20261103000200_LedgerLotCodeCutover`.
+Pause intake and processing writes during cutover and deploy compatible API
+instances together. Inventory pending source receipts and legacy drafts before
+approval. A source lot without a matching reservation fails closed, including
+pending historical receipts; resolve each affected case through an explicitly
+approved data-preserving procedure before accepting it. The migration does not
+create reservations or alter historical data. Review runtime grants using the
+existing role-configuration procedure before restarting the API. Rollback to
+older code is unsupported.
 
 ## Mixed-bulk custody generations
 

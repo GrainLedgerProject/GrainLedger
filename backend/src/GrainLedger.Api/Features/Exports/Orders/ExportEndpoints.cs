@@ -282,9 +282,7 @@ public static partial class ExportModule
         command.Parameters.AddWithValue(kind);
         var serial = (long)(await command.ExecuteScalarAsync(ct))!;
         var local = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh"));
-        return kind == "EXP"
-            ? $"{kind}-{local:yyMMdd}-{serial:D6}"
-            : $"{kind}-{local:yyyyMMdd}-{serial:D6}";
+        return $"{kind}-{local:yyyyMMdd}-{serial:D6}";
     }
 
     private static async Task AddSpecificationRowsAsync(AppDbContext db,
