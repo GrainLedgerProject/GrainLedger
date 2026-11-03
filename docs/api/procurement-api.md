@@ -8,7 +8,7 @@ Existing historical procurement evidence and Ledger stock are grandfathered unch
 
 Forward Ledger migrations add the protected Capture/Ledger integration and package validation (`20261014010000_UseOfficialCaptureBoundary`) and receiving-threshold configuration/snapshots (`20261019000000_ReceivingLossThreshold`, resource `ReceivingLossThreshold.sql`). The threshold migration initializes 2% with migration-origin history, leaves overrides absent and historical measurement snapshots absent. Preserve generated migration history and existing stock. Shared database migration requires explicit owner approval; no shared database migration was applied for threshold verification.
 
-After `20261017000000_UnifiedLotCodes` and the threshold migration, owner-applied forward migration **`20261019010000_RepairReceivingLotCodeBoundary`** (`RepairReceivingLotCodeBoundary.sql`) is required. Previously installed threshold functions can still expect `LL-…` codes while schema-version-2 Capture snapshots reserve `RAW-…` codes, causing `Pending source package incomplete`. The repair replaces only `ledger.procurement_package_complete` and `ledger.receiving_detail`, retaining threshold behavior and all historical stock, source evidence and applied snapshots. Changing historical migration files does not repair databases that already recorded them; retain migration history and apply the forward migration through the approved owner job. No shared deployment or live fix is claimed.
+For the current monolith cutover, review forward migrations `20261103000100_ContinuousCaptureCodes` and `20261103000200_LedgerLotCodeCutover` with the database owner and obtain explicit approval before applying them to a shared database. Pause Capture and Ledger writes and stop incompatible API instances. Inventory pending receipts without source-lot reservations and legacy processing drafts; unreserved source lots fail closed, including pending historical receipts, and legacy drafts cannot be edited or committed. Use an explicitly approved data-preserving remediation for affected receipts and create new processing drafts with server-assigned codes. Historical records remain unchanged; rollback to older code is unsupported. See the [Capture code guide](../guides/companion-capture-codes.md) and [lot-code guide](../guides/unified-lot-code-guide.md). Deployment status must be established independently.
 
 The API routes are:
 
@@ -64,11 +64,12 @@ Receiving version starts at `0`, increments on each mutation; stale version or m
 Migration `20261014190000_PhysicalReceiving` adds nullable `capture.procurements.receiving_workflow`: `NULL` marks existing historical committed procurement unchanged; new registrations use `PHYSICAL_ARRIVAL_V1`. Source status remains immutable `COMMITTED`; workflow projection supplies outward receiving status. Historical evidence and stock are grandfathered; migration does not retroactively freeze, rewrite or reinterpret legacy stock.
 
 The OpenAPI document exposes registration request records. Example:
+```json
 {
   "deviceId": "web-test-01",
   "clientOperationId": "44444444-4444-4444-8444-444444444444",
   "capturedAt": "2026-10-14T03:05:00Z",
-  "payloadSchemaVersion": 1,
+  "payloadSchemaVersion": 2,
   "payload": {
     "entityId": "55555555-5555-4555-8555-555555555555",
     "farmerId": "6114dc9c-f08c-4b25-a90f-91c7c88a05b0",
@@ -91,6 +92,8 @@ The OpenAPI document exposes registration request records. Example:
 ```
 
 The UUIDs here are illustrative; use actual IDs from the current environment. `collectionSiteId` is a Ledger facility UUID, and `receivingLocationId` is a Ledger receiving-location UUID. `commodityId` is the Catalog commodity UUID; Ledger resolves it through persisted Catalog-to-Ledger mapping. Supply `measuredValue` and `moisturePercent` as decimal strings. Supported mass units are KG, G, and T, provided they exist as MASS units in the catalog. The server rejects conversion that cannot fit `numeric(20,6)` kg exactly.
+
+Registration requires `payloadSchemaVersion: 2`; version 1 procurement creation is no longer accepted. The server assigns `PRC-YYYYMMDD-NNNN` using Vietnam local `receivedAt` date and a per-company procurement sequence that does not reset daily. Existing stored codes remain unchanged; exact retries return the original result. Other Capture operations retain their own version contracts.
 
 `IProcurementLedgerPort` uses the same open `NpgsqlConnection` and `NpgsqlTransaction` as Capture. Pending registration writes source records and receiving marker only; it creates no Ledger lot or posting. Accepted posting uses actual measurement in the shared transaction. Incomplete historical source lots without Ledger stock fail closed with `503 LEDGER_STOCK_UNAVAILABLE`; pending source lots return `currentStock: []` and zero usable stock instead. Receipt timestamps are normalized to UTC microsecond precision before hashing, snapshotting, and persistence.
 

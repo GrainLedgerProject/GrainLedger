@@ -4,10 +4,10 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## System Reference
 
-- [Architecture and access control](architecture.md): module boundaries, authorization, and data rules
-- [Setup and deployment](setup-and-deployment.md): local provisioning, configuration, migrations, seeds, and deployment
+- [Architecture and access control](architecture.md): approved single-project/single-schema target, authorization, and historical architecture snapshot
+- [Setup and deployment](setup-and-deployment.md): pending cutover target, local provisioning, restricted credentials, migrations, and setup/full-demo seeds
 - [Diagram rendering guide](diagram-rendering.md): Mermaid, PlantUML, and draw.io rendering workflows
-- [Database diagrams and data dictionary](dbdiagram/README.md): deployed-schema ERD, DBML, table descriptions, and data dictionary
+- [Database diagrams and data dictionary](dbdiagram/README.md): existing database-schema snapshot ERD, DBML, table descriptions, and data dictionary
 - [Software Design Description (SDD)](SDD/README.md): system decomposition, class diagrams, sequence diagrams, and traceability
 
 ## API Specifications (`docs/api/`)

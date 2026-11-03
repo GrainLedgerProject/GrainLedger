@@ -10,7 +10,7 @@ Purchasing Staff records one physical sample against one committed procurement s
 | POST | `/api/samples/{id}/handovers` | Append a handover. Requires `purchases.write`. |
 | GET | `/api/samples/{id}/handovers?page=1&pageSize=20` | Read handover history. Same read permissions. |
 
-All requests are scoped to the authenticated customer company. `sourceLotId` is the ID of `capture.source_lots`, not the Ledger `lotId`. The source must have committed procurement and its acceptance event; usable Ledger stock is not required. The app creates `entityId`, `clientOperationId`, `deviceId`, and `capturedAt`. Current web collection sends `payloadSchemaVersion: 2`, omits `code`, and uses the server-assigned `SMP` code described in [companion codes](../guides/companion-capture-codes.md). Version 1 remains compatible for historical manual-code submissions, as illustrated below. Record the physical seal code and write or print the returned sample code on the sample bag. One physical sample cannot represent multiple source lots.
+All requests are scoped to the authenticated customer company. `sourceLotId` is the ID of `capture.source_lots`, not the Ledger `lotId`. The source must have committed procurement and its acceptance event; usable Ledger stock is not required. The app creates `entityId`, `clientOperationId`, `deviceId`, and `capturedAt`. Collection requires `payloadSchemaVersion: 2` and omits `code`; the server assigns an `SMP-YYYYMMDD-NNNN` code with a company-scoped sequence that does not reset daily. Record the physical seal code and write or print the returned sample code on the sample bag. One physical sample cannot represent multiple source lots.
 
 ## Create sample
 
@@ -19,20 +19,19 @@ All requests are scoped to the authenticated customer company. `sourceLotId` is 
   "deviceId": "web-test-01",
   "clientOperationId": "ad5182d9-2188-45b2-bb52-9d1ab8e5bd30",
   "capturedAt": "2026-10-14T03:05:00Z",
-  "payloadSchemaVersion": 1,
+  "payloadSchemaVersion": 2,
   "payload": {
     "entityId": "71f17c62-99c8-4f65-9016-6bf889095251",
     "sourceLotId": "88888888-8888-4888-8888-888888888888",
-    "code": "SAMPLE-001",
     "sealCode": "SEAL-001",
     "collectedAt": "2026-10-14T03:00:00Z"
   }
 }
 ```
 
-Replace the UUIDs with new IDs and an accepted source lot in the current environment. The sample code must be unique per company. The seal code is required but is not unique by database rule. The server records `collectedBy` from the authenticated user. A successful POST returns 201, a `Location` header, the sample, and `handoverCount: 0`.
+Replace the UUIDs with new IDs and an accepted source lot in the current environment. The seal code is required but is not unique by database rule. The server records `collectedBy` from the authenticated user. A successful POST returns 201, a `Location` header, the sample, and `handoverCount: 0`.
 
-`materialDescription` is optional bounded text (200 characters) on both payload versions and nullable in detail/list responses. Current web collection requires staff to describe material sampled. Missing historical material remains `null`; it is never guessed.
+`materialDescription` is optional bounded text (200 characters) and nullable in detail/list responses. Current web collection requires staff to describe material sampled. Missing historical material remains `null`; it is never guessed.
 
 ## Record handover
 

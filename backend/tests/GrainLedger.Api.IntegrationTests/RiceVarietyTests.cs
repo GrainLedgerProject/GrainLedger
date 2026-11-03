@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -55,7 +56,7 @@ public sealed class RiceVarietyTests(ApiFactory factory) : IClassFixture<ApiFact
         stale.Headers.TryAddWithoutValidation("If-Match", etag);
         Assert.Equal(HttpStatusCode.PreconditionFailed, (await adminClient.SendAsync(stale)).StatusCode);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(2, await db.CatalogEvents.CountAsync(x => x.ResourceId == variety.Id));
     }
 

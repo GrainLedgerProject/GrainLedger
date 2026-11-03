@@ -1,8 +1,10 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Ledger;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,8 +23,8 @@ public sealed class LedgerLookupTests(ApiFactory factory) : IClassFixture<ApiFac
         var id = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
-            var ledger = scope.ServiceProvider.GetRequiredService<ICommodityLedgerPort>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var ledger = scope.ServiceProvider.GetRequiredService<CommodityLedgerPort>();
             await using var transaction = await db.Database.BeginTransactionAsync();
             db.Commodities.Add(new Commodity { Id = id, Code = $"RB-{Guid.NewGuid():N}", Name = "Must roll back" });
             await db.SaveChangesAsync();
@@ -33,10 +35,10 @@ public sealed class LedgerLookupTests(ApiFactory factory) : IClassFixture<ApiFac
             await transaction.RollbackAsync();
         }
         using (var scope = factory.Services.CreateScope())
-            Assert.False(await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Commodities.AnyAsync(x => x.Id == id));
+            Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().Commodities.AnyAsync(x => x.Id == id));
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
         await runtime.OpenAsync();
-        await using var mappings = new NpgsqlCommand("SELECT count(*) FROM ledger.catalog_commodities WHERE catalog_commodity_id=$1", runtime);
+        await using var mappings = new NpgsqlCommand("SELECT count(*) FROM grainledger.ledger_catalog_commodities WHERE catalog_commodity_id=$1", runtime);
         mappings.Parameters.AddWithValue(id);
         Assert.Equal(0L, await mappings.ExecuteScalarAsync());
     }
@@ -56,7 +58,7 @@ public sealed class LedgerLookupTests(ApiFactory factory) : IClassFixture<ApiFac
         {
             await owner.OpenAsync();
             await using var seed = new NpgsqlCommand("""
-                INSERT INTO ledger.operations(id,owner_id,facility_id,kind,occurred_at,equipment_id,content,version)
+                INSERT INTO grainledger.ledger_operations(id,owner_id,facility_id,kind,occurred_at,equipment_id,content,version)
                 VALUES(gen_random_uuid(),$1,$2,'DRYING',now(),$3,'{}'::jsonb,gen_random_uuid())
                 """, owner);
             seed.Parameters.AddWithValue(operationOwner.Id);
@@ -94,7 +96,7 @@ public sealed class LedgerLookupTests(ApiFactory factory) : IClassFixture<ApiFac
         var beforeWriteId = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Commodities.Add(new Commodity { Id = beforeWriteId, Code = $"PRE-{Guid.NewGuid():N}", Name = "Canonical blend" });
             await db.SaveChangesAsync();
         }
@@ -156,16 +158,16 @@ public sealed class LedgerLookupTests(ApiFactory factory) : IClassFixture<ApiFac
         await runtime.OpenAsync();
         foreach (var actor in new[] { s.Accounts["operator"].User.Id, s.Accounts["purchaser"].User.Id })
         {
-            await using var denied = new NpgsqlCommand("SELECT ledger.provision_catalog_commodities($1)", runtime);
+            await using var denied = new NpgsqlCommand("SELECT grainledger.ledger_provision_catalog_commodities($1)", runtime);
             denied.Parameters.AddWithValue(actor);
             var error = await Assert.ThrowsAsync<PostgresException>(() => denied.ExecuteNonQueryAsync());
             Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
         }
-        await using var removed = new NpgsqlCommand("SELECT ledger.command($1,'commodities',$2::jsonb)", runtime);
+        await using var removed = new NpgsqlCommand("SELECT grainledger.ledger_command($1,'commodities',$2::jsonb)", runtime);
         removed.Parameters.AddWithValue(s.Accounts["admin"].User.Id);
         removed.Parameters.AddWithValue(JsonSerializer.Serialize(new { id = Guid.NewGuid(), name = "Duplicate" }));
         Assert.Equal(PostgresErrorCodes.CheckViolation, (await Assert.ThrowsAsync<PostgresException>(() => removed.ExecuteNonQueryAsync())).SqlState);
-        await using var internalDenied = new NpgsqlCommand("SELECT ledger.provision_catalog_commodity($1)", runtime);
+        await using var internalDenied = new NpgsqlCommand("SELECT grainledger.ledger_provision_catalog_commodity($1)", runtime);
         internalDenied.Parameters.AddWithValue(catalogId);
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, (await Assert.ThrowsAsync<PostgresException>(() => internalDenied.ExecuteNonQueryAsync())).SqlState);
     }

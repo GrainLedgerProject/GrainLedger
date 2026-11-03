@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -63,7 +64,7 @@ public sealed class ActiveSubstanceTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(HttpStatusCode.PreconditionFailed, (await adminClient.SendAsync(stale)).StatusCode);
 
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(2, await db.CatalogEvents.CountAsync(x => x.ResourceId == body.Id));
         Assert.Equal("Corrected name", (await db.ActiveSubstances.SingleAsync(x => x.Id == body.Id)).Name);
     }
@@ -112,7 +113,7 @@ public sealed class ActiveSubstanceTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(HttpStatusCode.NoContent, (await adminClient.SendAsync(delete)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await adminClient.GetAsync(url)).StatusCode);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(0, await db.ActiveSubstances.CountAsync(x => x.Id == id));
         Assert.Equal(2, await db.CatalogEvents.CountAsync(x => x.ResourceId == id));
         Assert.Equal("ACTIVE_SUBSTANCE_DELETED",
@@ -134,13 +135,13 @@ public sealed class ActiveSubstanceTests(ApiFactory factory) : IClassFixture<Api
         {
             await owner.OpenAsync();
             await using var setup = new NpgsqlCommand("""
-                CREATE TABLE IF NOT EXISTS catalog.test_active_substance_refs (
+                CREATE TABLE IF NOT EXISTS grainledger.catalog_test_active_substance_refs (
                     id uuid PRIMARY KEY,
-                    substance_id uuid NOT NULL REFERENCES catalog.active_substances(id)
+                    substance_id uuid NOT NULL REFERENCES grainledger.catalog_active_substances(id)
                 );
                 """, owner);
             await setup.ExecuteNonQueryAsync();
-            await using var reference = new NpgsqlCommand("INSERT INTO catalog.test_active_substance_refs(id,substance_id) VALUES($1,$2)", owner);
+            await using var reference = new NpgsqlCommand("INSERT INTO grainledger.catalog_test_active_substance_refs(id,substance_id) VALUES($1,$2)", owner);
             reference.Parameters.AddWithValue(Guid.NewGuid());
             reference.Parameters.AddWithValue(id);
             await reference.ExecuteNonQueryAsync();
@@ -149,7 +150,7 @@ public sealed class ActiveSubstanceTests(ApiFactory factory) : IClassFixture<Api
         delete.Headers.TryAddWithoutValidation("If-Match", created.Headers.ETag!.ToString());
         Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(delete)).StatusCode);
         using var verify = factory.Services.CreateScope();
-        var catalog = verify.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var catalog = verify.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await catalog.ActiveSubstances.CountAsync(x => x.Id == id));
         Assert.Equal(0, await catalog.CatalogEvents.CountAsync(x => x.ResourceId == id && x.EventType == "ACTIVE_SUBSTANCE_DELETED"));
     }

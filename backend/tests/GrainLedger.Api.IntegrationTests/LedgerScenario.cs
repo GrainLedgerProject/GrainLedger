@@ -1,10 +1,11 @@
+using GrainLedger.Api.Data;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Catalogs;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Catalogs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -64,7 +65,7 @@ internal sealed class LedgerScenario : IDisposable
         await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/equipment", new { id = s.EquipmentId, facilityId = s.FacilityId, name = "Synthetic equipment" });
         using (var scope = factory.Services.CreateScope())
         {
-            var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var catalog = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var paddy = await catalog.Commodities.SingleOrDefaultAsync(x => x.Code == "PADDY");
             if (paddy is null)
             {
@@ -94,15 +95,15 @@ internal sealed class LedgerScenario : IDisposable
 
     public async Task PolicyAsync(string kind, string tolerance) => await SendAsync(Admin, HttpMethod.Post, "/api/ledger/policies", new { id = Guid.NewGuid(), facilityId = FacilityId, kind, tolerancePercent = tolerance, effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1), evidenceId = EvidenceId });
 
-    public static object CaptureCommand(object payload) => new { deviceId = "integration-test", clientOperationId = Guid.NewGuid(),
-        capturedAt = DateTimeOffset.UtcNow, payloadSchemaVersion = 1, payload };
+    public static object CaptureCommand(object payload, int version = 1) => new { deviceId = "integration-test", clientOperationId = Guid.NewGuid(),
+        capturedAt = DateTimeOffset.UtcNow, payloadSchemaVersion = version, payload };
 
     public async Task<(Guid Farmer, Guid Season, Guid PlotSeason)> RegisterSourceAsync(HttpClient client, Guid company)
     {
         var farmer = Guid.NewGuid(); var plot = Guid.NewGuid(); var plotSeason = Guid.NewGuid();
-        await SendAsync(client, HttpMethod.Post, "/api/farmers", CaptureCommand(new { entityId = farmer, name = "Test source farmer", contact = "+84000000000" }));
+        await SendAsync(client, HttpMethod.Post, "/api/farmers", CaptureCommand(new { entityId = farmer, name = "Test source farmer", contact = "+84000000000" }, 2));
         await SendAsync(client, HttpMethod.Post, "/api/plots", CaptureCommand(new { entityId = plot, farmerId = farmer,
-            areaHa = 1m, geometry = new { type = "Point", coordinates = new[] { 106.123456m, 10.123456m } } }));
+            areaHa = 1m, geometry = new { type = "Point", coordinates = new[] { 106.123456m, 10.123456m } } }, 2));
         var season = (await SendAsync(Admin, HttpMethod.Post, "/api/crop-seasons", new { companyId = company, name = "Test season", startsOn = "2026-01-01", endsOn = "2026-12-31" })).GetProperty("id").GetGuid();
         await SendAsync(client, HttpMethod.Post, "/api/plot-seasons", CaptureCommand(new { entityId = plotSeason, plotId = plot, seasonId = season, riceVariety = "ST25" }));
         return (farmer, season, plotSeason);
@@ -117,7 +118,7 @@ internal sealed class LedgerScenario : IDisposable
         items = quantities.Select((quantity, index) => new { itemId = Guid.NewGuid(), lineNo = index + 1,
             plotSeasonId = plotSeasonId ?? PlotSeasonId, measuredValue = quantity, measuredUnit = unit,
             moisturePercent = "22.5", lotId = Guid.NewGuid(), sourceLotId = Guid.NewGuid() }).ToArray()
-    });
+    }, 2);
 
     public async Task<JsonElement> ReceiptAsync(params string[] quantities)
     {

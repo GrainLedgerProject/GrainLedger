@@ -1,6 +1,7 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,7 +15,7 @@ public sealed class DevelopmentSeedTests(ApiFactory factory) : IClassFixture<Api
     public async Task Seed_creates_six_login_accounts_and_rerun_preserves_existing_passwords_and_roles()
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
         const string password = "SeedOnly!Password123";
         Assert.Equal(6, await DevelopmentSeed.RunAsync(db, hasher, "Development", password));
@@ -44,7 +45,7 @@ public sealed class DevelopmentSeedTests(ApiFactory factory) : IClassFixture<Api
     public async Task Seed_rejects_production_and_weak_password_before_writing()
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
         await Assert.ThrowsAsync<InvalidOperationException>(() => DevelopmentSeed.RunAsync(db, hasher, "Production", "SeedOnly!Password123"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => DevelopmentSeed.RunAsync(db, hasher, "Development", "weak"));

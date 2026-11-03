@@ -1,9 +1,10 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Exports;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Exports;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
@@ -38,7 +39,7 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         var mrlId = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Markets.Add(new Market { Id = marketId,
                 Code = "M" + marketId.ToString("N"), Name = "Synthetic market" });
             db.QualityAttributes.Add(new QualityAttribute { Id = attributeId,
@@ -111,10 +112,10 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
             await connection.OpenAsync();
             await using var command = new NpgsqlCommand("""
-                SELECT (SELECT count(*) FROM ledger.positions),
-                       (SELECT coalesce(sum(quantity_kg), 0) FROM ledger.positions),
-                       (SELECT count(*) FROM ledger.postings),
-                       (SELECT count(*) FROM ledger.holds)
+                SELECT (SELECT count(*) FROM grainledger.ledger_positions),
+                       (SELECT coalesce(sum(quantity_kg), 0) FROM grainledger.ledger_positions),
+                       (SELECT count(*) FROM grainledger.ledger_postings),
+                       (SELECT count(*) FROM grainledger.ledger_holds)
                 """, connection);
             await using var reader = await command.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());

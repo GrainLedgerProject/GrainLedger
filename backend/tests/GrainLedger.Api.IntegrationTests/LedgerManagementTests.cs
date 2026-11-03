@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Identity;
 using Npgsql;
 using Xunit;
 using static GrainLedger.Api.IntegrationTests.LedgerScenario;
@@ -64,30 +64,30 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         using var s = await CreateAsync(factory, policies: false);
         var procurement = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), ["10"]));
         var procurementId = procurement.GetProperty("id").GetGuid();
-        var sourceSnapshot = await OwnerScalarAsync("SELECT payload::text FROM capture.business_events WHERE id=(SELECT event_id FROM capture.procurements WHERE id=$1)", procurementId);
+        var sourceSnapshot = await OwnerScalarAsync("SELECT payload::text FROM grainledger.capture_business_events WHERE id=(SELECT event_id FROM grainledger.capture_procurements WHERE id=$1)", procurementId);
         var location = await SetupRowAsync(s, "locations", s.LocationId);
         var locationVersion = location.GetProperty("version").GetString();
         await RejectedAsync(s.Admin, HttpMethod.Put, $"/api/ledger/locations/{s.LocationId}", new { name = "Keep source", kind = "ISOLATION", version = locationVersion }, HttpStatusCode.Conflict);
         await RejectedAsync(s.Admin, HttpMethod.Put, $"/api/ledger/locations/{s.LocationId}", new { name = "Keep source", facilityId = s.ForeignFacilityId, version = locationVersion }, HttpStatusCode.Conflict);
         var renamed = await SendAsync(s.Admin, HttpMethod.Put, $"/api/ledger/locations/{s.LocationId}", new { name = "Safe renamed source", version = locationVersion });
-        var locationState = await OwnerScalarAsync("SELECT row_to_json(x)::text FROM ledger.locations x WHERE id=$1", s.LocationId);
+        var locationState = await OwnerScalarAsync("SELECT row_to_json(x)::text FROM grainledger.ledger_locations x WHERE id=$1", s.LocationId);
         await RejectedAsync(s.Admin, HttpMethod.Delete, $"/api/ledger/locations/{s.LocationId}", new { version = renamed.GetProperty("version").GetString() }, HttpStatusCode.Conflict);
-        Assert.Equal(locationState, await OwnerScalarAsync("SELECT row_to_json(x)::text FROM ledger.locations x WHERE id=$1", s.LocationId));
+        Assert.Equal(locationState, await OwnerScalarAsync("SELECT row_to_json(x)::text FROM grainledger.ledger_locations x WHERE id=$1", s.LocationId));
         var facility = await SetupRowAsync(s, "facilities", s.FacilityId);
         var renamedFacility = await SendAsync(s.Admin, HttpMethod.Put, $"/api/ledger/facilities/{s.FacilityId}", new { name = "Safe mill rename", version = facility.GetProperty("version").GetString() });
-        var facilityState = await OwnerScalarAsync("SELECT row_to_json(x)::text FROM ledger.facilities x WHERE id=$1", s.FacilityId);
+        var facilityState = await OwnerScalarAsync("SELECT row_to_json(x)::text FROM grainledger.ledger_facilities x WHERE id=$1", s.FacilityId);
         await RejectedAsync(s.Admin, HttpMethod.Delete, $"/api/ledger/facilities/{s.FacilityId}", new { version = renamedFacility.GetProperty("version").GetString() }, HttpStatusCode.Conflict);
-        Assert.Equal(facilityState, await OwnerScalarAsync("SELECT row_to_json(x)::text FROM ledger.facilities x WHERE id=$1", s.FacilityId));
+        Assert.Equal(facilityState, await OwnerScalarAsync("SELECT row_to_json(x)::text FROM grainledger.ledger_facilities x WHERE id=$1", s.FacilityId));
         var source = Lots(await s.ReceiptAsync("10"))[0];
         await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
         var equipment = await SetupRowAsync(s, "equipment", s.EquipmentId);
         await RejectedAsync(s.Admin, HttpMethod.Put, $"/api/ledger/equipment/{s.EquipmentId}", new { name = "Keep equipment", facilityId = s.ForeignFacilityId, version = equipment.GetProperty("version").GetString() }, HttpStatusCode.Conflict);
         var renamedEquipment = await SendAsync(s.Admin, HttpMethod.Put, $"/api/ledger/equipment/{s.EquipmentId}", new { name = "Safe equipment rename", version = equipment.GetProperty("version").GetString() });
-        var equipmentState = await OwnerScalarAsync("SELECT row_to_json(x)::text FROM ledger.equipment x WHERE id=$1", s.EquipmentId);
+        var equipmentState = await OwnerScalarAsync("SELECT row_to_json(x)::text FROM grainledger.ledger_equipment x WHERE id=$1", s.EquipmentId);
         await RejectedAsync(s.Admin, HttpMethod.Delete, $"/api/ledger/equipment/{s.EquipmentId}", new { version = renamedEquipment.GetProperty("version").GetString() }, HttpStatusCode.Conflict);
-        Assert.Equal(equipmentState, await OwnerScalarAsync("SELECT row_to_json(x)::text FROM ledger.equipment x WHERE id=$1", s.EquipmentId));
-        Assert.Equal(sourceSnapshot, await OwnerScalarAsync("SELECT payload::text FROM capture.business_events WHERE id=(SELECT event_id FROM capture.procurements WHERE id=$1)", procurementId));
-        Assert.Equal(true, await OwnerScalarAsync("SELECT ledger.procurement_package_complete($1)", procurementId));
+        Assert.Equal(equipmentState, await OwnerScalarAsync("SELECT row_to_json(x)::text FROM grainledger.ledger_equipment x WHERE id=$1", s.EquipmentId));
+        Assert.Equal(sourceSnapshot, await OwnerScalarAsync("SELECT payload::text FROM grainledger.capture_business_events WHERE id=(SELECT event_id FROM grainledger.capture_procurements WHERE id=$1)", procurementId));
+        Assert.Equal(true, await OwnerScalarAsync("SELECT grainledger.ledger_procurement_package_complete($1)", procurementId));
     }
 
     [Fact]
@@ -115,10 +115,10 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         await RejectedAsync(s.Admin, HttpMethod.Delete, newRoute, new { version }, HttpStatusCode.Conflict);
         await SendAsync(s.Admin, HttpMethod.Delete, newRoute, new { version = edited.GetProperty("version").GetString() });
         Assert.DoesNotContain((await GetAsync(s.Admin, "/api/ledger/setup")).GetProperty("assignments").EnumerateArray(), x => x.GetProperty("userId").GetGuid() == operatorId);
-        Assert.Equal(true, await OwnerScalarAsync("SELECT is_deleted FROM ledger.assignments WHERE user_id=$1 AND facility_id=$2", operatorId, s.ForeignFacilityId));
-        Assert.Equal(false, await OwnerScalarAsync("SELECT ledger.assigned($1,$2)", operatorId, s.ForeignFacilityId));
-        Assert.Equal(s.Accounts["admin"].User.Id, await OwnerScalarAsync("SELECT created_by FROM ledger.assignments WHERE user_id=$1 AND facility_id=$2", operatorId, s.ForeignFacilityId));
-        Assert.NotEqual(edited.GetProperty("version").GetString(), await OwnerScalarAsync("SELECT version::text FROM ledger.assignments WHERE user_id=$1 AND facility_id=$2", operatorId, s.ForeignFacilityId));
+        Assert.Equal(true, await OwnerScalarAsync("SELECT is_deleted FROM grainledger.ledger_assignments WHERE user_id=$1 AND facility_id=$2", operatorId, s.ForeignFacilityId));
+        Assert.Equal(false, await OwnerScalarAsync("SELECT grainledger.ledger_assigned($1,$2)", operatorId, s.ForeignFacilityId));
+        Assert.Equal(s.Accounts["admin"].User.Id, await OwnerScalarAsync("SELECT created_by FROM grainledger.ledger_assignments WHERE user_id=$1 AND facility_id=$2", operatorId, s.ForeignFacilityId));
+        Assert.NotEqual(edited.GetProperty("version").GetString(), await OwnerScalarAsync("SELECT version::text FROM grainledger.ledger_assignments WHERE user_id=$1 AND facility_id=$2", operatorId, s.ForeignFacilityId));
         await RejectedAsync(s.Admin, HttpMethod.Post, "/api/ledger/assignments", new { userId = operatorId, facilityId = s.ForeignFacilityId }, HttpStatusCode.Conflict);
     }
 
@@ -191,9 +191,9 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         var source = Lots(await s.ReceiptAsync("10"))[0];
         var draft = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
         var id = draft.GetProperty("id").GetGuid();
-        await OwnerSqlAsync("UPDATE ledger.facilities SET created_by=NULL WHERE id=$1", s.FacilityId);
-        await OwnerSqlAsync("UPDATE ledger.operations SET created_by=NULL WHERE id=$1", id);
-        await OwnerSqlAsync("UPDATE ledger.assignments SET created_by=NULL WHERE user_id=$1 AND facility_id=$2", s.Accounts["operator"].User.Id, s.FacilityId);
+        await OwnerSqlAsync("UPDATE grainledger.ledger_facilities SET created_by=NULL WHERE id=$1", s.FacilityId);
+        await OwnerSqlAsync("UPDATE grainledger.ledger_operations SET created_by=NULL WHERE id=$1", id);
+        await OwnerSqlAsync("UPDATE grainledger.ledger_assignments SET created_by=NULL WHERE user_id=$1 AND facility_id=$2", s.Accounts["operator"].User.Id, s.FacilityId);
         var facility = await SetupRowAsync(s, "facilities", s.FacilityId);
         Assert.Equal(JsonValueKind.Null, facility.GetProperty("createdBy").ValueKind);
         Assert.False(facility.GetProperty("canEdit").GetBoolean());
@@ -220,7 +220,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(other.Id, "draft_delete", new { id, version }))).SqlState);
         Assert.Equal(PostgresErrorCodes.CheckViolation, (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(s.Accounts["operator"].User.Id, "draft_delete", new { id, version = Guid.NewGuid() }))).SqlState);
         Assert.Equal(PostgresErrorCodes.InvalidParameterValue, (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(s.Accounts["admin"].User.Id, "facilities", new { id = Guid.NewGuid(), name = "Forged", createdBy = other.Id }))).SqlState);
-        await OwnerSqlAsync("UPDATE identity.users SET \"IsActive\"=false WHERE \"Id\"=$1", other.Id);
+        await OwnerSqlAsync("UPDATE grainledger.identity_users SET \"IsActive\"=false WHERE \"Id\"=$1", other.Id);
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(other.Id, "facilities", new { id = Guid.NewGuid(), name = "Inactive" }))).SqlState);
         var assignment = (await GetAsync(s.Admin, "/api/ledger/setup")).GetProperty("assignments").EnumerateArray()
             .Single(x => x.GetProperty("userId").GetGuid() == s.Accounts["operator"].User.Id && x.GetProperty("facilityId").GetGuid() == s.FacilityId);
@@ -228,7 +228,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(s.Accounts["operator"].User.Id, "draft_delete", new { id, version }))).SqlState);
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
         await runtime.OpenAsync();
-        foreach (var sql in new[] { "DELETE FROM ledger.operations", "SELECT ledger.record_in_use('operations',gen_random_uuid())" })
+        foreach (var sql in new[] { "DELETE FROM grainledger.ledger_operations", "SELECT grainledger.ledger_record_in_use('operations',gen_random_uuid())" })
         {
             await using var denied = new NpgsqlCommand(sql, runtime);
             Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, (await Assert.ThrowsAsync<PostgresException>(() => denied.ExecuteNonQueryAsync())).SqlState);
@@ -255,18 +255,18 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         body["equipmentId"] = s.EquipmentId.ToString();
         body["outputs"]!.AsArray()[0]!.AsObject()["locationId"] = s.SecondLocationId.ToString();
         await SendAsync(s.Operator, HttpMethod.Put, $"/api/ledger/operations/{id}", body);
-        var reviewSnapshot = await OwnerScalarAsync("SELECT details::text FROM ledger.events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", id);
-        var eventCount = await OwnerScalarAsync("SELECT count(*) FROM ledger.events WHERE operation_id=$1", id);
+        var reviewSnapshot = await OwnerScalarAsync("SELECT details::text FROM grainledger.ledger_events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", id);
+        var eventCount = await OwnerScalarAsync("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=$1", id);
         foreach (var (resource, recordId) in new[] { ("locations", locationId), ("equipment", equipmentId) })
         {
             var record = await SetupRowAsync(s, resource, recordId);
-            var state = await OwnerScalarAsync($"SELECT row_to_json(x)::text FROM ledger.{resource} x WHERE id=$1", recordId);
+            var state = await OwnerScalarAsync($"SELECT row_to_json(x)::text FROM grainledger.ledger_{resource} x WHERE id=$1", recordId);
             await RejectedAsync(s.Admin, HttpMethod.Delete, $"/api/ledger/{resource}/{recordId}", new { version = record.GetProperty("version").GetString() }, HttpStatusCode.Conflict);
             await RejectedAsync(s.Admin, HttpMethod.Put, $"/api/ledger/{resource}/{recordId}", new { name = "History retained", facilityId = s.ForeignFacilityId, version = record.GetProperty("version").GetString() }, HttpStatusCode.Conflict);
-            Assert.Equal(state, await OwnerScalarAsync($"SELECT row_to_json(x)::text FROM ledger.{resource} x WHERE id=$1", recordId));
+            Assert.Equal(state, await OwnerScalarAsync($"SELECT row_to_json(x)::text FROM grainledger.ledger_{resource} x WHERE id=$1", recordId));
         }
-        Assert.Equal(reviewSnapshot, await OwnerScalarAsync("SELECT details::text FROM ledger.events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", id));
-        Assert.Equal(eventCount, await OwnerScalarAsync("SELECT count(*) FROM ledger.events WHERE operation_id=$1", id));
+        Assert.Equal(reviewSnapshot, await OwnerScalarAsync("SELECT details::text FROM grainledger.ledger_events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", id));
+        Assert.Equal(eventCount, await OwnerScalarAsync("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=$1", id));
         Assert.Equal(100m, Quantity(await s.LotAsync(source)));
     }
 
@@ -279,7 +279,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         var catalogId = created.GetProperty("id").GetGuid();
         var commodity = (await GetAsync(s.Admin, "/api/ledger/setup")).GetProperty("commodities").EnumerateArray()
             .Single(x => x.GetProperty("catalogId").ValueKind == JsonValueKind.String && x.GetProperty("catalogId").GetGuid() == catalogId).GetProperty("id").GetGuid();
-        await OwnerSqlAsync("UPDATE catalog.commodities SET is_archived=true WHERE id=$1", catalogId);
+        await OwnerSqlAsync("UPDATE grainledger.catalog_commodities SET is_archived=true WHERE id=$1", catalogId);
         var id = Guid.NewGuid();
         var body = DraftEditBody(s, id, source, null);
         body.Remove("version");
@@ -343,12 +343,12 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         using var s = await CreateAsync(factory);
         var receipt = await s.ReceiptAsync("10");
         var id = receipt.GetProperty("id").GetGuid();
-        await OwnerSqlAsync("UPDATE catalog.commodities SET is_archived=true WHERE id=$1", s.CatalogCommodityId);
+        await OwnerSqlAsync("UPDATE grainledger.catalog_commodities SET is_archived=true WHERE id=$1", s.CatalogCommodityId);
         try
         {
             await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
             await runtime.OpenAsync();
-            await using var register = new NpgsqlCommand("SELECT ledger.register_pending_procurement($1,$2)", runtime);
+            await using var register = new NpgsqlCommand("SELECT grainledger.ledger_register_pending_procurement($1,$2)", runtime);
             register.Parameters.AddWithValue(s.Accounts["purchaser"].User.Id);
             register.Parameters.AddWithValue(id);
             var error = await Assert.ThrowsAsync<PostgresException>(() => register.ExecuteNonQueryAsync());
@@ -356,13 +356,13 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Equal("Active PADDY commodity required for new procurement", error.MessageText);
             await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
             await owner.OpenAsync();
-            await using var package = new NpgsqlCommand("SELECT ledger.procurement_package_complete($1)", owner);
+            await using var package = new NpgsqlCommand("SELECT grainledger.ledger_procurement_package_complete($1)", owner);
             package.Parameters.AddWithValue(id);
             Assert.Equal(true, await package.ExecuteScalarAsync());
         }
         finally
         {
-            await OwnerSqlAsync("UPDATE catalog.commodities SET is_archived=false WHERE id=$1", s.CatalogCommodityId);
+            await OwnerSqlAsync("UPDATE grainledger.catalog_commodities SET is_archived=false WHERE id=$1", s.CatalogCommodityId);
         }
     }
 
@@ -385,9 +385,9 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         await SendAsync(s.Admin, HttpMethod.Delete, $"/api/ledger/facilities/{facilityId}", new { version = facility.GetProperty("version").GetString() });
         foreach (var (resource, id, original) in new[] { ("facilities", facilityId, facility), ("locations", locationId, location), ("equipment", equipmentId, equipment) })
             await AssertRetainedAsync(resource, id, original.GetProperty("version").GetString(), s.Accounts["admin"].User.Id);
-        Assert.Equal(facilityId, await OwnerScalarAsync("SELECT facility_id FROM ledger.locations WHERE id=$1", locationId));
-        Assert.Equal(true, await OwnerScalarAsync("SELECT is_deleted FROM ledger.assignments WHERE user_id=$1 AND facility_id=$2", operatorId, facilityId));
-        Assert.Equal(false, await OwnerScalarAsync("SELECT ledger.assigned($1,$2)", operatorId, facilityId));
+        Assert.Equal(facilityId, await OwnerScalarAsync("SELECT facility_id FROM grainledger.ledger_locations WHERE id=$1", locationId));
+        Assert.Equal(true, await OwnerScalarAsync("SELECT is_deleted FROM grainledger.ledger_assignments WHERE user_id=$1 AND facility_id=$2", operatorId, facilityId));
+        Assert.Equal(false, await OwnerScalarAsync("SELECT grainledger.ledger_assigned($1,$2)", operatorId, facilityId));
         await RejectedAsync(s.Admin, HttpMethod.Post, "/api/ledger/locations", new { id = Guid.NewGuid(), facilityId, name = "No retired parent", kind = "STORE" }, HttpStatusCode.Conflict);
         await RejectedAsync(s.Admin, HttpMethod.Post, "/api/ledger/assignments", new { userId = operatorId, facilityId }, HttpStatusCode.Conflict);
         await RejectedAsync(s.Admin, HttpMethod.Post, "/api/ledger/evidence", new { id = Guid.NewGuid(), ownerId = s.OwnerId, facilityId, fileName = "retired.txt", contentType = "text/plain", contentBase64 = "eA==" }, HttpStatusCode.Conflict);
@@ -434,19 +434,19 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         var replacement = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "9")], "1");
         var replacementId = replacement.GetProperty("id").GetGuid();
         await SendAsync(s.Operator, HttpMethod.Delete, $"/api/ledger/operations/{replacementId}", new { version = replacement.GetProperty("version").GetString() });
-        var currentVersion = await OwnerScalarAsync("SELECT version::text FROM ledger.operations WHERE id=$1", replacementId);
+        var currentVersion = await OwnerScalarAsync("SELECT version::text FROM grainledger.ledger_operations WHERE id=$1", replacementId);
         var correctionId = Guid.NewGuid();
         await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/corrections", new { id = correctionId, operationId = originalId, reason = "Retired replacement regression" });
-        var eventsBefore = await OwnerScalarAsync("SELECT count(*) FROM ledger.events WHERE operation_id=$1", originalId);
+        var eventsBefore = await OwnerScalarAsync("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=$1", originalId);
         await RejectedAsync(s.Manager, HttpMethod.Post, $"/api/ledger/corrections/{correctionId}/reconcile", new
         {
             evidenceId = s.EvidenceId, replacementOperationId = replacementId, replacementVersion = currentVersion,
             reconciliation = new[] { new { lotId = Output(original), locationId = s.LocationId, quantityKg = "10" } },
             reason = "Retired replacement must not bind"
         }, HttpStatusCode.Conflict);
-        Assert.Equal("REQUESTED", await OwnerScalarAsync("SELECT status FROM ledger.corrections WHERE id=$1", correctionId));
-        Assert.Equal(DBNull.Value, await OwnerScalarAsync("SELECT replacement_operation_id FROM ledger.corrections WHERE id=$1", correctionId));
-        Assert.Equal(eventsBefore, await OwnerScalarAsync("SELECT count(*) FROM ledger.events WHERE operation_id=$1", originalId));
+        Assert.Equal("REQUESTED", await OwnerScalarAsync("SELECT status FROM grainledger.ledger_corrections WHERE id=$1", correctionId));
+        Assert.Equal(DBNull.Value, await OwnerScalarAsync("SELECT replacement_operation_id FROM grainledger.ledger_corrections WHERE id=$1", correctionId));
+        Assert.Equal(eventsBefore, await OwnerScalarAsync("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=$1", originalId));
         Assert.Equal(0m, Quantity(await s.LotAsync(source)));
         Assert.Equal(10m, Quantity(await s.LotAsync(Output(original))));
     }
@@ -466,19 +466,19 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
             "farmers" => s.FarmerId,
             "crop_seasons" => s.SeasonId,
             "plot_seasons" => s.PlotSeasonId,
-            _ => (Guid)(await OwnerScalarAsync("SELECT plot_id FROM capture.plot_seasons WHERE id=$1", s.PlotSeasonId))!
+            _ => (Guid)(await OwnerScalarAsync("SELECT plot_id FROM grainledger.capture_plot_seasons WHERE id=$1", s.PlotSeasonId))!
         };
-        await OwnerSqlAsync($"UPDATE capture.{resource} SET is_deleted=true WHERE id=$1", referenceId);
+        await OwnerSqlAsync($"UPDATE grainledger.capture_{resource} SET is_deleted=true WHERE id=$1", referenceId);
         try
         {
             var error = await Assert.ThrowsAsync<PostgresException>(() => DirectPendingAsync(s.Accounts["purchaser"].User.Id, id));
             Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
             Assert.Equal("Active farmer, plot and season references required for new procurement", error.MessageText);
-            Assert.Equal(true, await OwnerScalarAsync("SELECT ledger.procurement_package_complete($1)", id));
+            Assert.Equal(true, await OwnerScalarAsync("SELECT grainledger.ledger_procurement_package_complete($1)", id));
         }
         finally
         {
-            await OwnerSqlAsync($"UPDATE capture.{resource} SET is_deleted=false WHERE id=$1", referenceId);
+            await OwnerSqlAsync($"UPDATE grainledger.capture_{resource} SET is_deleted=false WHERE id=$1", referenceId);
         }
     }
 
@@ -488,20 +488,20 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         using var s = await CreateAsync(factory);
         var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(Guid.NewGuid(), ["10"]));
         var id = receipt.GetProperty("id").GetGuid();
-        await OwnerSqlAsync("UPDATE catalog.measurement_units SET is_deleted=true WHERE code='KG'");
+        await OwnerSqlAsync("UPDATE grainledger.catalog_measurement_units SET is_deleted=true WHERE code='KG'");
         try
         {
             var error = await Assert.ThrowsAsync<PostgresException>(() => DirectPendingAsync(s.Accounts["purchaser"].User.Id, id));
             Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
             Assert.Equal("Active mass units required for new procurement", error.MessageText);
             await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/receiving/{id}/measurements", MeasurementBody(receipt), HttpStatusCode.Conflict);
-            Assert.Equal(true, await OwnerScalarAsync("SELECT ledger.procurement_package_complete($1)", id));
-            Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM ledger.arrival_measurement_sets WHERE procurement_id=$1", id));
-            Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM ledger.lots WHERE receipt_id=$1", id));
+            Assert.Equal(true, await OwnerScalarAsync("SELECT grainledger.ledger_procurement_package_complete($1)", id));
+            Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM grainledger.ledger_arrival_measurement_sets WHERE procurement_id=$1", id));
+            Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=$1", id));
         }
         finally
         {
-            await OwnerSqlAsync("UPDATE catalog.measurement_units SET is_deleted=false WHERE code='KG'");
+            await OwnerSqlAsync("UPDATE grainledger.catalog_measurement_units SET is_deleted=false WHERE code='KG'");
         }
     }
 
@@ -513,7 +513,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         using var s = await CreateAsync(factory);
         var receipt = await s.ReceiptAsync("10");
         var referenceId = resource == "facilities" ? s.FacilityId : s.LocationId;
-        await OwnerSqlAsync($"UPDATE ledger.{resource} SET is_deleted=true WHERE id=$1", referenceId);
+        await OwnerSqlAsync($"UPDATE grainledger.ledger_{resource} SET is_deleted=true WHERE id=$1", referenceId);
         try
         {
             var error = await Assert.ThrowsAsync<PostgresException>(() => DirectPendingAsync(s.Accounts["purchaser"].User.Id, receipt.GetProperty("id").GetGuid()));
@@ -522,7 +522,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         }
         finally
         {
-            await OwnerSqlAsync($"UPDATE ledger.{resource} SET is_deleted=false WHERE id=$1", referenceId);
+            await OwnerSqlAsync($"UPDATE grainledger.ledger_{resource} SET is_deleted=false WHERE id=$1", referenceId);
         }
     }
 
@@ -547,7 +547,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
             (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(other.Id, "equipment_retire", new { id = s.EquipmentId, version }))).SqlState);
         var actor = s.Accounts["admin"].User.Id;
-        await OwnerSqlAsync("UPDATE identity.users SET \"Role\"='MillOperator' WHERE \"Id\"=$1", actor);
+        await OwnerSqlAsync("UPDATE grainledger.identity_users SET \"Role\"='MillOperator' WHERE \"Id\"=$1", actor);
         try
         {
             await RejectedAsync(s.Admin, HttpMethod.Post, route, new { version }, HttpStatusCode.Forbidden);
@@ -556,9 +556,9 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         }
         finally
         {
-            await OwnerSqlAsync("UPDATE identity.users SET \"Role\"='Administrator' WHERE \"Id\"=$1", actor);
+            await OwnerSqlAsync("UPDATE grainledger.identity_users SET \"Role\"='Administrator' WHERE \"Id\"=$1", actor);
         }
-        await OwnerSqlAsync("UPDATE identity.users SET \"IsActive\"=false WHERE \"Id\"=$1", other.Id);
+        await OwnerSqlAsync("UPDATE grainledger.identity_users SET \"IsActive\"=false WHERE \"Id\"=$1", other.Id);
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
             (await Assert.ThrowsAsync<PostgresException>(() => DirectAsync(other.Id, "equipment_retire", new { id = s.EquipmentId, version }))).SqlState);
         await SendAsync(s.Admin, HttpMethod.Post, route, new { version });
@@ -574,7 +574,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         var original = await s.CommitAsync(await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]));
         var operationId = original.GetProperty("id").GetGuid();
         var before = await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}");
-        var storedOperation = await OwnerScalarAsync("SELECT to_jsonb(op)::text FROM ledger.operations op WHERE id=$1", operationId);
+        var storedOperation = await OwnerScalarAsync("SELECT to_jsonb(op)::text FROM grainledger.ledger_operations op WHERE id=$1", operationId);
         async Task AssertDisplayAsync(string expected)
         {
             foreach (var reader in new[] { s.Operator, s.Customer })
@@ -600,8 +600,8 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
             }
         }
         await AssertDisplayAsync("Synthetic equipment");
-        var events = await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id)::text FROM ledger.events e WHERE operation_id=$1", operationId);
-        var postings = await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)::text FROM ledger.postings p JOIN ledger.events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId);
+        var events = await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id)::text FROM grainledger.ledger_events e WHERE operation_id=$1", operationId);
+        var postings = await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)::text FROM grainledger.ledger_postings p JOIN grainledger.ledger_events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId);
         var equipment = await SetupRowAsync(s, "equipment", s.EquipmentId);
         Assert.False(equipment.GetProperty("canDelete").GetBoolean());
         Assert.True(equipment.GetProperty("canRetire").GetBoolean());
@@ -620,14 +620,14 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         beforeFields.Remove("equipmentName");
         afterFields.Remove("equipmentName");
         Assert.True(JsonNode.DeepEquals(beforeFields, afterFields));
-        Assert.Equal("Synthetic equipment", await OwnerScalarAsync("SELECT name FROM ledger.equipment WHERE id=$1", s.EquipmentId));
-        Assert.Equal(storedOperation, await OwnerScalarAsync("SELECT to_jsonb(op)::text FROM ledger.operations op WHERE id=$1", operationId));
+        Assert.Equal("Synthetic equipment", await OwnerScalarAsync("SELECT name FROM grainledger.ledger_equipment WHERE id=$1", s.EquipmentId));
+        Assert.Equal(storedOperation, await OwnerScalarAsync("SELECT to_jsonb(op)::text FROM grainledger.ledger_operations op WHERE id=$1", operationId));
         using var deniedOperation = await s.ForeignCustomer.GetAsync($"/api/ledger/operations/{operationId}");
         Assert.Equal(HttpStatusCode.Forbidden, deniedOperation.StatusCode);
         Assert.Empty((await GetAsync(s.ForeignCustomer, $"/api/ledger/operations?ids={operationId}")).GetProperty("items").EnumerateArray());
         Assert.Empty((await GetAsync(s.ForeignCustomer, $"/api/ledger/history?facilityId={s.FacilityId}")).GetProperty("items").EnumerateArray());
-        Assert.Equal(events, await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id)::text FROM ledger.events e WHERE operation_id=$1", operationId));
-        Assert.Equal(postings, await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)::text FROM ledger.postings p JOIN ledger.events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId));
+        Assert.Equal(events, await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id)::text FROM grainledger.ledger_events e WHERE operation_id=$1", operationId));
+        Assert.Equal(postings, await OwnerScalarAsync("SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)::text FROM grainledger.ledger_postings p JOIN grainledger.ledger_events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId));
         Assert.Equal(10m, Quantity(await s.LotAsync(Output(original))));
         var body = s.OperationBody(Guid.NewGuid(), "DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
         await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", body, HttpStatusCode.Forbidden);
@@ -681,7 +681,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         edit["outputs"] = JsonNode.Parse(draft.GetProperty("outputs").GetRawText());
         edit["equipmentId"] = alternateId.ToString();
         await SendAsync(s.Operator, HttpMethod.Put, $"/api/ledger/operations/{operationId}", edit);
-        var snapshot = await OwnerScalarAsync("SELECT details::text FROM ledger.events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", operationId);
+        var snapshot = await OwnerScalarAsync("SELECT details::text FROM grainledger.ledger_events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", operationId);
         var equipment = await SetupRowAsync(s, "equipment", s.EquipmentId);
         Assert.False(equipment.GetProperty("canDelete").GetBoolean());
         Assert.True(equipment.GetProperty("canRetire").GetBoolean());
@@ -690,7 +690,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal("Synthetic equipment", reviewedBefore.GetProperty("equipmentName").GetString());
         Assert.Equal(s.EquipmentId, reviewedBefore.GetProperty("details").GetProperty("reviewedContent").GetProperty("equipmentId").GetGuid());
         await SendAsync(s.Admin, HttpMethod.Post, $"/api/ledger/equipment/{s.EquipmentId}/retire", new { version = equipment.GetProperty("version").GetString() });
-        Assert.Equal(snapshot, await OwnerScalarAsync("SELECT details::text FROM ledger.events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", operationId));
+        Assert.Equal(snapshot, await OwnerScalarAsync("SELECT details::text FROM grainledger.ledger_events WHERE operation_id=$1 AND kind='VARIANCE_CONFIRMATION'", operationId));
         var current = await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}");
         Assert.Equal("Active replacement equipment", current.GetProperty("equipmentName").GetString());
         var listed = (await GetAsync(s.Operator, $"/api/ledger/operations?ids={operationId}")).GetProperty("items").EnumerateArray().Single();
@@ -732,13 +732,13 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         if (retirement.StatusCode == HttpStatusCode.OK)
         {
             Assert.Equal(HttpStatusCode.Forbidden, draft.StatusCode);
-            Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM ledger.operations WHERE id=$1", operationId));
-            Assert.Equal(true, await OwnerScalarAsync("SELECT is_deleted FROM ledger.equipment WHERE id=$1", s.EquipmentId));
+            Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM grainledger.ledger_operations WHERE id=$1", operationId));
+            Assert.Equal(true, await OwnerScalarAsync("SELECT is_deleted FROM grainledger.ledger_equipment WHERE id=$1", s.EquipmentId));
         }
         else
         {
             Assert.Equal(HttpStatusCode.Conflict, retirement.StatusCode);
-            Assert.Equal(false, await OwnerScalarAsync("SELECT is_deleted FROM ledger.equipment WHERE id=$1", s.EquipmentId));
+            Assert.Equal(false, await OwnerScalarAsync("SELECT is_deleted FROM grainledger.ledger_equipment WHERE id=$1", s.EquipmentId));
             Assert.Equal(s.EquipmentId, (await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}")).GetProperty("equipmentId").GetGuid());
         }
     }
@@ -751,18 +751,18 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
         var draft = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
         var operationId = draft.GetProperty("id").GetGuid();
         // Simulate a pre-existing inactive reference; API retirement itself rejects active drafts.
-        await OwnerSqlAsync("UPDATE ledger.equipment SET is_deleted=true WHERE id=$1", s.EquipmentId);
+        await OwnerSqlAsync("UPDATE grainledger.ledger_equipment SET is_deleted=true WHERE id=$1", s.EquipmentId);
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{operationId}/commit", new { }, HttpStatusCode.Conflict);
         Assert.Equal("DRAFT", (await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}")).GetProperty("status").GetString());
         Assert.Equal(10m, Quantity(await s.LotAsync(source)));
-        Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM ledger.postings p JOIN ledger.events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId));
+        Assert.Equal(0L, await OwnerScalarAsync("SELECT count(*) FROM grainledger.ledger_postings p JOIN grainledger.ledger_events e ON e.id=p.event_id WHERE e.operation_id=$1", operationId));
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
         await runtime.OpenAsync();
         foreach (var sql in new[]
         {
-            "SELECT ledger.equipment_has_pending_work(gen_random_uuid())",
-            "SELECT ledger.command_before_equipment_retirement(NULL,'equipment_retire','{}')",
-            "SELECT ledger.read_before_equipment_retirement(NULL,'setup','{}')"
+            "SELECT grainledger.ledger_equipment_has_pending_work(gen_random_uuid())",
+            "SELECT grainledger.ledger_command_before_equipment_retirement(NULL,'equipment_retire','{}')",
+            "SELECT grainledger.ledger_read_before_equipment_retirement(NULL,'setup','{}')"
         })
         {
             await using var denied = new NpgsqlCommand(sql, runtime);
@@ -770,7 +770,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
                 (await Assert.ThrowsAsync<PostgresException>(() => denied.ExecuteNonQueryAsync())).SqlState);
         }
         await using var transaction = await runtime.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
-        await using var retirement = new NpgsqlCommand("SELECT ledger.command($1,'equipment_retire',$2::jsonb)", runtime, transaction);
+        await using var retirement = new NpgsqlCommand("SELECT grainledger.ledger_command($1,'equipment_retire',$2::jsonb)", runtime, transaction);
         retirement.Parameters.AddWithValue(s.Accounts["admin"].User.Id);
         retirement.Parameters.AddWithValue(JsonSerializer.Serialize(new { id = s.EquipmentId, version = Guid.NewGuid() }));
         var isolationError = await Assert.ThrowsAsync<PostgresException>(() => retirement.ExecuteNonQueryAsync());
@@ -799,7 +799,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
     {
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
         await owner.OpenAsync();
-        await using var command = new NpgsqlCommand($"SELECT is_deleted,version,created_by FROM ledger.{resource} WHERE id=$1", owner);
+        await using var command = new NpgsqlCommand($"SELECT is_deleted,version,created_by FROM grainledger.ledger_{resource} WHERE id=$1", owner);
         command.Parameters.AddWithValue(id);
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
@@ -831,7 +831,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
     {
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
         await runtime.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT ledger.register_pending_procurement($1,$2)", runtime);
+        await using var command = new NpgsqlCommand("SELECT grainledger.ledger_register_pending_procurement($1,$2)", runtime);
         command.Parameters.AddWithValue(actor);
         command.Parameters.AddWithValue(procurementId);
         await command.ExecuteNonQueryAsync();
@@ -841,7 +841,7 @@ public sealed class LedgerManagementTests(ApiFactory factory) : IClassFixture<Ap
     {
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
         await runtime.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT ledger.command($1,$2,$3::jsonb)", runtime);
+        await using var command = new NpgsqlCommand("SELECT grainledger.ledger_command($1,$2,$3::jsonb)", runtime);
         command.Parameters.AddWithValue(actor);
         command.Parameters.AddWithValue(action);
         command.Parameters.AddWithValue(JsonSerializer.Serialize(payload));

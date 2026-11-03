@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -20,7 +21,7 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
     private async Task<Farmer> SeedFarmerAsync(Guid companyId, string? code = null)
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var farmer = new Farmer
         {
             Id = Guid.NewGuid(), CompanyId = companyId, Code = code ?? Guid.NewGuid().ToString("N"),
@@ -32,13 +33,13 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     private static object PointRequest(Guid entityId, Guid farmerId, Guid operationId, decimal areaHa = 1.25m,
-        string? code = null, DateTimeOffset? capturedAt = null) => new
+        DateTimeOffset? capturedAt = null) => new
     {
         deviceId = "plot-test-device", clientOperationId = operationId,
-        capturedAt = capturedAt ?? DateTimeOffset.UtcNow, payloadSchemaVersion = 1,
+        capturedAt = capturedAt ?? DateTimeOffset.UtcNow, payloadSchemaVersion = 2,
         payload = new
         {
-            entityId, farmerId, code,
+            entityId, farmerId,
             geometry = new { type = "Point", coordinates = new[] { 106.35, 10.40 } }, areaHa
         }
     };
@@ -66,7 +67,7 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var plot = (await created.Content.ReadFromJsonAsync<PlotResponse>())!;
         Assert.Equal(entityId, plot.Id);
         Assert.Equal(farmer.Id, plot.FarmerId);
-        Assert.Equal($"TR-{entityId:N}".ToUpperInvariant(), plot.Code);
+        Assert.Equal("PLT-0001-01", plot.Code);
         Assert.Equal(1.25m, plot.AreaHa);
         Assert.Equal("Point", plot.Geometry.GetProperty("type").GetString());
         Assert.Equal(HttpStatusCode.OK, (await clientA.PostAsJsonAsync("/api/plots", input)).StatusCode);
@@ -82,7 +83,7 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.DoesNotContain(listB!.Items, x => x.Id == entityId);
 
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Plots.CountAsync(x => x.Id == entityId && x.CompanyId == companyA.Id));
         Assert.Equal(userA.Id, (await db.Plots.SingleAsync(x => x.Id == entityId)).CreatedBy);
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CompanyId == companyA.Id && x.CorrelationId == operationId));
@@ -107,7 +108,7 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var invalid = await client.PostAsJsonAsync("/api/plots", new
         {
             deviceId = "plot-test-device", clientOperationId = Guid.NewGuid(),
-            capturedAt = DateTimeOffset.UtcNow, payloadSchemaVersion = 1,
+            capturedAt = DateTimeOffset.UtcNow, payloadSchemaVersion = 2,
             payload = new
             {
                 entityId = Guid.NewGuid(), farmerId = farmerA.Id,
@@ -125,13 +126,13 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
             PointRequest(entityId, farmerA.Id, operationId, 2m, capturedAt: capturedAt))).StatusCode);
 
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Plots.CountAsync(x => x.CompanyId == companyA.Id));
         Assert.Equal(1.25m, (await db.Plots.SingleAsync(x => x.Id == entityId)).AreaHa);
     }
 
     [Fact]
-    public async Task Polygon_must_be_topologically_valid_and_code_unique_per_farmer()
+    public async Task Polygon_must_be_topologically_valid_and_codes_are_generated()
     {
         var company = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
         var farmerA = await SeedFarmerAsync(company.Id);
@@ -144,22 +145,26 @@ public sealed class PlotTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var valid = new
         {
             deviceId = "plot-test-device", clientOperationId = Guid.NewGuid(), capturedAt = DateTimeOffset.UtcNow,
-            payloadSchemaVersion = 1,
-            payload = new { entityId = Guid.NewGuid(), farmerId = farmerA.Id, code = "P-01",
+            payloadSchemaVersion = 2,
+            payload = new { entityId = Guid.NewGuid(), farmerId = farmerA.Id,
                 geometry = new { type = "Polygon", coordinates = new[] { ring } }, areaHa = 2m }
         };
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/plots", valid)).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/plots",
-            PointRequest(Guid.NewGuid(), farmerA.Id, Guid.NewGuid(), code: "P-01"))).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/plots",
-            PointRequest(Guid.NewGuid(), farmerB.Id, Guid.NewGuid(), code: "P-01"))).StatusCode);
+        var secondPlot = await client.PostAsJsonAsync("/api/plots",
+            PointRequest(Guid.NewGuid(), farmerA.Id, Guid.NewGuid()));
+        var otherFarmerPlot = await client.PostAsJsonAsync("/api/plots",
+            PointRequest(Guid.NewGuid(), farmerB.Id, Guid.NewGuid()));
+        Assert.Equal(HttpStatusCode.Created, secondPlot.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, otherFarmerPlot.StatusCode);
+        Assert.NotEqual((await secondPlot.Content.ReadFromJsonAsync<PlotResponse>())!.Code,
+            (await otherFarmerPlot.Content.ReadFromJsonAsync<PlotResponse>())!.Code);
 
         var bowTie = new[] { new[] { 106.0, 10.0 }, new[] { 107.0, 11.0 }, new[] { 106.0, 11.0 },
             new[] { 107.0, 10.0 }, new[] { 106.0, 10.0 } };
         var invalid = await client.PostAsJsonAsync("/api/plots", new
         {
             deviceId = "plot-test-device", clientOperationId = Guid.NewGuid(), capturedAt = DateTimeOffset.UtcNow,
-            payloadSchemaVersion = 1,
+            payloadSchemaVersion = 2,
             payload = new { entityId = Guid.NewGuid(), farmerId = farmerA.Id,
                 geometry = new { type = "Polygon", coordinates = new[] { bowTie } }, areaHa = 2m }
         });

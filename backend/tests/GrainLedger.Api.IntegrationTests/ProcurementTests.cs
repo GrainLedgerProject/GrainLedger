@@ -2,8 +2,9 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Ledger;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
@@ -43,7 +44,7 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(1, procurementPage.GetProperty("totalCount").GetInt32());
         Assert.False(procurementPage.GetProperty("hasMore").GetBoolean());
         Assert.Equal("PENDING_ARRIVAL", procurementPage.GetProperty("items")[0].GetProperty("status").GetString());
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=@id", id));
         var pendingSource = await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.Items[0].SourceLotId}");
         Assert.Empty(pendingSource!.CurrentStock);
         Assert.Equal(receipt.Items[0].LotCode, pendingSource.LotCode);
@@ -55,9 +56,9 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(600m, Quantity(protectedLot));
         var mappedCommodity = protectedLot.GetProperty("commodityId").GetGuid();
         Assert.NotEqual(s.CatalogCommodityId, mappedCommodity);
-        Assert.Equal(mappedCommodity, await ScalarAsync<Guid>("SELECT ledger_commodity_id FROM ledger.catalog_commodities WHERE catalog_commodity_id=@id", s.CatalogCommodityId));
-        Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
-        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM capture.offline_operations WHERE applied_event_id=@id", receipt.EventId));
+        Assert.Equal(mappedCommodity, await ScalarAsync<Guid>("SELECT ledger_commodity_id FROM grainledger.ledger_catalog_commodities WHERE catalog_commodity_id=@id", s.CatalogCommodityId));
+        Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=@id", id));
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.capture_offline_operations WHERE applied_event_id=@id", receipt.EventId));
         await s.TransferAsync(lotId, "10");
         var source = (await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{receipt.Items[0].SourceLotId}"))!;
         Assert.Equal(s.CatalogCommodityId, source.CommodityId);
@@ -69,9 +70,51 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(HttpStatusCode.NotFound, (await s.ForeignCustomer.GetAsync($"/api/source-lots/{source.Id}")).StatusCode);
         Assert.DoesNotContain((await GetAsync(s.ForeignCustomer, "/api/procurements")).GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetGuid() == id);
         using var scope = factory.Services.CreateScope();
-        Assert.Empty(await scope.ServiceProvider.GetRequiredService<IProcurementLedgerPort>().GetCurrentStockAsync(s.ForeignOwnerId, lotId, default));
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<ProcurementLedgerPort>().GetCurrentStockAsync(s.ForeignOwnerId, lotId, default));
         var wrongSource = s.ReceiptBody(Guid.NewGuid(), ["1"]);
         await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, "/api/procurements", wrongSource, HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Source_detail_uses_snapshot_references_and_includes_archived_labels()
+    {
+        using var s = await CreateAsync(factory);
+        var receipt = await s.ReceiptAsync("10");
+        var sourceId = receipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
+        var before = (await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{sourceId}"))!;
+        var replacement = await s.RegisterSourceAsync(s.Purchaser, s.OwnerId);
+        var replacementSeason = await s.RegisterSourceAsync(s.Purchaser, s.OwnerId);
+        await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
+        await connection.OpenAsync();
+        await using (var command = new NpgsqlCommand("""
+            UPDATE grainledger.capture_farmers SET name='Archived farmer',is_deleted=true WHERE id=@farmer;
+            UPDATE grainledger.capture_plots SET code='ARCHIVED-PLOT',is_deleted=true WHERE id=@plot;
+            UPDATE grainledger.capture_crop_seasons SET name='Archived season',is_deleted=true WHERE id=@season;
+            UPDATE grainledger.capture_plot_seasons
+                SET plot_id=(SELECT plot_id FROM grainledger.capture_plot_seasons WHERE id=@replacement),
+                    season_id=(SELECT season_id FROM grainledger.capture_plot_seasons WHERE id=@replacementSeason)
+                WHERE id=@plotSeason;
+            """, connection))
+        {
+            command.Parameters.AddWithValue("farmer", s.FarmerId);
+            command.Parameters.AddWithValue("plot", before.PlotId);
+            command.Parameters.AddWithValue("season", before.SeasonId);
+            command.Parameters.AddWithValue("plotSeason", before.PlotSeasonId);
+            command.Parameters.AddWithValue("replacement", replacement.PlotSeason);
+            command.Parameters.AddWithValue("replacementSeason", replacementSeason.PlotSeason);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var after = (await s.Purchaser.GetFromJsonAsync<SourceLotResponse>($"/api/source-lots/{sourceId}"))!;
+        Assert.Equal(before.PlotId, after.PlotId);
+        Assert.Equal(before.SeasonId, after.SeasonId);
+        Assert.Equal(before.PlotSeasonId, after.PlotSeasonId);
+        Assert.Equal("Archived farmer", after.FarmerName);
+        Assert.Equal(before.FarmerCode, after.FarmerCode);
+        Assert.Equal("ARCHIVED-PLOT", after.PlotCode);
+        Assert.Equal("Archived season", after.SeasonName);
+        Assert.Equal(HttpStatusCode.NotFound, (await s.ForeignCustomer.GetAsync($"/api/source-lots/{sourceId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await s.Purchaser.GetAsync($"/api/source-lots/{Guid.NewGuid()}")).StatusCode);
     }
 
     [Theory]
@@ -86,10 +129,10 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         await s.ConfirmArrivalAsync(receipt);
         var lot = Lots(receipt)[0];
         Assert.Equal(decimal.Parse(kg, CultureInfo.InvariantCulture), Quantity(await s.LotAsync(lot)));
-        Assert.Equal(decimal.Parse(measured, CultureInfo.InvariantCulture), await ScalarAsync<decimal>("SELECT (details->>'originalQuantity')::numeric FROM ledger.events WHERE lot_id=@id AND kind='RECEIPT'", lot));
-        Assert.Equal(unit, await ScalarAsync<string>("SELECT details->>'originalUnit' FROM ledger.events WHERE lot_id=@id AND kind='RECEIPT'", lot));
+        Assert.Equal(decimal.Parse(measured, CultureInfo.InvariantCulture), await ScalarAsync<decimal>("SELECT (details->>'originalQuantity')::numeric FROM grainledger.ledger_events WHERE lot_id=@id AND kind='RECEIPT'", lot));
+        Assert.Equal(unit, await ScalarAsync<string>("SELECT details->>'originalUnit' FROM grainledger.ledger_events WHERE lot_id=@id AND kind='RECEIPT'", lot));
         await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", request);
-        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE lot_id=@id", lot));
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_postings WHERE lot_id=@id", lot));
     }
 
     [Theory]
@@ -101,7 +144,7 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         using var s = await CreateAsync(factory);
         var id = Guid.NewGuid();
         await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(id, [mass], unit: unit), HttpStatusCode.BadRequest);
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurements WHERE id=@id", id));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.capture_procurements WHERE id=@id", id));
     }
 
     [Fact]
@@ -113,14 +156,14 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
         foreach (var sql in new[]
         {
-            "UPDATE capture.procurements SET status='DRAFT' WHERE id=@id",
-            "DELETE FROM capture.procurements WHERE id=@id",
-            "UPDATE capture.procurement_items SET net_mass_kg=11 WHERE procurement_id=@id",
-            "DELETE FROM capture.procurement_items WHERE procurement_id=@id",
-            "UPDATE capture.source_lots SET lot_id=gen_random_uuid() WHERE procurement_item_id IN (SELECT id FROM capture.procurement_items WHERE procurement_id=@id)",
-            "DELETE FROM capture.source_lots WHERE procurement_item_id IN (SELECT id FROM capture.procurement_items WHERE procurement_id=@id)",
-            "UPDATE capture.business_events SET payload='{}' WHERE id IN (SELECT event_id FROM capture.procurements WHERE id=@id)",
-            "UPDATE capture.offline_operations SET result_payload='{}' WHERE applied_event_id IN (SELECT event_id FROM capture.procurements WHERE id=@id)"
+            "UPDATE grainledger.capture_procurements SET status='DRAFT' WHERE id=@id",
+            "DELETE FROM grainledger.capture_procurements WHERE id=@id",
+            "UPDATE grainledger.capture_procurement_items SET net_mass_kg=11 WHERE procurement_id=@id",
+            "DELETE FROM grainledger.capture_procurement_items WHERE procurement_id=@id",
+            "UPDATE grainledger.capture_source_lots SET lot_id=gen_random_uuid() WHERE procurement_item_id IN (SELECT id FROM grainledger.capture_procurement_items WHERE procurement_id=@id)",
+            "DELETE FROM grainledger.capture_source_lots WHERE procurement_item_id IN (SELECT id FROM grainledger.capture_procurement_items WHERE procurement_id=@id)",
+            "UPDATE grainledger.capture_business_events SET payload='{}' WHERE id IN (SELECT event_id FROM grainledger.capture_procurements WHERE id=@id)",
+            "UPDATE grainledger.capture_offline_operations SET result_payload='{}' WHERE applied_event_id IN (SELECT event_id FROM grainledger.capture_procurements WHERE id=@id)"
         })
         {
             await using var command = new NpgsqlCommand(sql, runtime); command.Parameters.AddWithValue("id", id);
@@ -140,10 +183,10 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
         await using var transaction = await runtime.BeginTransactionAsync();
         await using var command = new NpgsqlCommand("""
-            INSERT INTO capture.business_events(id,company_id,actor_id,event_type,occurred_at,recorded_at,correlation_id,payload)
+            INSERT INTO grainledger.capture_business_events(id,company_id,actor_id,event_type,occurred_at,recorded_at,correlation_id,payload)
             VALUES(@ev,@company,@actor,'PROCUREMENT_COMMITTED',now(),now(),gen_random_uuid(),jsonb_build_object('procurementId',@id));
             """ + (header ? """
-            INSERT INTO capture.procurements(id,company_id,code,farmer_id,collection_site_id,received_by,received_at,status,event_id)
+            INSERT INTO grainledger.capture_procurements(id,company_id,code,farmer_id,collection_site_id,received_by,received_at,status,event_id)
             VALUES(@id,@company,'INCOMPLETE',@farmer,@site,@actor,now(),'COMMITTED',@ev);
             """ : ""), runtime, transaction);
         command.Parameters.AddWithValue("ev", ev); command.Parameters.AddWithValue("id", id);
@@ -152,8 +195,8 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         await command.ExecuteNonQueryAsync();
         var error = await Assert.ThrowsAsync<PostgresException>(() => transaction.CommitAsync());
         Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.business_events WHERE id=@id", ev));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurements WHERE id=@id", id));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.capture_business_events WHERE id=@id", ev));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.capture_procurements WHERE id=@id", id));
     }
 
     [Fact]
@@ -163,7 +206,7 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         var receipt = await s.ReceiptAsync("10");
         var item = receipt.GetProperty("items")[0];
         using var scope = factory.Services.CreateScope();
-        var port = scope.ServiceProvider.GetRequiredService<IProcurementLedgerPort>();
+        var port = scope.ServiceProvider.GetRequiredService<ProcurementLedgerPort>();
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
         foreach (var (actor, procurementId) in new[]
         {
@@ -178,7 +221,7 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
             Assert.Contains(error.SqlState, new[] { PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.NoDataFound, PostgresErrorCodes.CheckViolation });
             await transaction.RollbackAsync();
         }
-        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE lot_id=@id", Lots(receipt)[0]));
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_postings WHERE lot_id=@id", Lots(receipt)[0]));
     }
 
     [Fact]

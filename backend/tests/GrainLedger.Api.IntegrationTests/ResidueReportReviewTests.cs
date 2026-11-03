@@ -1,12 +1,12 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Ledger;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Ledger;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Xunit;
 using static GrainLedger.Api.IntegrationTests.LabReportTests;
@@ -370,16 +370,7 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
     [Fact]
     public async Task Binding_failure_rolls_back_capture_confirmation_and_selections_then_same_envelope_can_retry()
     {
-        var gate = new BindingFailureGate();
-        await using var isolated = new ApiFactory
-        {
-            ConfigureTestServices = services =>
-            {
-                services.RemoveAll<IConfirmedLabReportResidueBinder>();
-                services.AddScoped<IConfirmedLabReportResidueBinder>(sp =>
-                    new FailAfterBinding(sp.GetRequiredService<ResidueEvaluationService>(), gate));
-            }
-        };
+        await using var isolated = new ApiFactory();
         await isolated.InitializeAsync();
         using var s = await CreateAsync(isolated);
         var f = await ResidueScenario.CreateAsync(s);
@@ -387,38 +378,41 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
         await f.PublishRuleAsync(Relative(f));
         var (id, report) = await f.ReportAsync(sample, [f.Result(uncertainty: null)], confirm: false);
         var request = ConfirmRequest(report, sample);
-        await RejectedAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request, HttpStatusCode.InternalServerError);
+        await using var owner = new NpgsqlConnection(isolated.OwnerConnectionString);
+        await owner.OpenAsync();
+        await using (var trigger = new NpgsqlCommand("""
+            CREATE FUNCTION grainledger.capture_test_fail_binding()
+            RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+            SET search_path = pg_catalog, grainledger, pg_temp
+            AS $$ BEGIN RAISE EXCEPTION 'Synthetic database failure after binding'; END $$;
+            CREATE TRIGGER capture_test_fail_binding
+            AFTER INSERT ON grainledger.capture_residue_report_selections
+            FOR EACH ROW EXECUTE FUNCTION grainledger.capture_test_fail_binding();
+            """, owner))
+            await trigger.ExecuteNonQueryAsync();
+        try
+        {
+            await RejectedAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request, HttpStatusCode.InternalServerError);
+        }
+        finally
+        {
+            await using var cleanup = new NpgsqlCommand("""
+                DROP TRIGGER capture_test_fail_binding ON grainledger.capture_residue_report_selections;
+                DROP FUNCTION grainledger.capture_test_fail_binding();
+                """, owner);
+            await cleanup.ExecuteNonQueryAsync();
+        }
         var pending = await GetAsync(s.Customer, $"/api/lab-reports/{id}");
         Assert.Equal("PENDING_REVIEW", pending.GetProperty("status").GetString());
         Assert.Empty((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
-        gate.Enabled = false;
         var confirmed = await SendAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request);
         Assert.True(Assert.Single(confirmed.GetProperty("residueBindings").EnumerateArray()).GetProperty("published").GetBoolean());
         using var scope = isolated.Services.CreateScope();
-        var identity = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var identity = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var user = await identity.Users.SingleAsync(x => x.Id == s.Accounts["customer"].User.Id);
         user.IsActive = false;
         await identity.SaveChangesAsync();
         await RejectedAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request, HttpStatusCode.Unauthorized);
-    }
-
-    private sealed class BindingFailureGate
-    {
-        public bool Enabled { get; set; } = true;
-    }
-
-    private sealed class FailAfterBinding(ResidueEvaluationService inner, BindingFailureGate gate) : IConfirmedLabReportResidueBinder
-    {
-        public async Task<IReadOnlyList<LabReportResidueBinding>> BindConfirmedReportAsync(NpgsqlConnection connection,
-            NpgsqlTransaction transaction, Guid actorId, Guid companyId, Guid reportId, DateTimeOffset confirmedAt,
-            CancellationToken ct)
-        {
-            Assert.Same(connection, transaction.Connection);
-            var rows = await inner.BindConfirmedReportAsync(connection, transaction, actorId, companyId, reportId, confirmedAt, ct);
-            Assert.True(Assert.Single(rows).Published);
-            if (gate.Enabled) throw new InvalidOperationException("Synthetic failure after binding, before caller commit");
-            return rows;
-        }
     }
 
     private static JsonObject Relative(ResidueScenario f)

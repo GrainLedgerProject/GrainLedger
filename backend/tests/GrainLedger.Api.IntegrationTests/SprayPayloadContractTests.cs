@@ -1,5 +1,5 @@
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
+using GrainLedger.Api.Features.Capture;
 using Xunit;
 
 namespace GrainLedger.Api.IntegrationTests;
