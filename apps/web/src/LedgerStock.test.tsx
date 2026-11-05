@@ -142,12 +142,12 @@ it('loads and refreshes live preview separately from audit snapshots and history
   const browser = userEvent.setup();
   const residueUser = { ...user, permissions: [...user.permissions, 'residue.evaluate'] };
   const savedId = 'snapshot-1';
-  const history = [{ id: savedId, lotId: 'lot-1', snapshotAt: '2026-01-02T03:04:00Z', persistedAt: '2026-01-02T03:04:01Z', engineVersion: 'F12-exact-1' }];
+  const history = [{ id: savedId, lotId: 'lot-1', snapshotAt: '2026-01-02T03:04:00Z', persistedAt: '2026-01-02T03:04:01Z', engineVersion: 'residue-flow-as-received-3' }];
   const evaluation = (kind: 'preview' | 'saved') => ({
     ...(kind === 'saved' ? { id: savedId, persistedAt: '2026-01-02T03:04:01Z' } : {}),
     lotId: 'lot-1', companyId: 'owner-a',
     snapshotAt: kind === 'saved' ? '2026-01-02T03:04:00Z' : '2026-01-03T03:04:00Z',
-    engineVersion: 'F12-exact-1', results: [],
+    engineVersion: 'residue-flow-as-received-3', results: [],
   });
   let previews = 0, saves = 0, historyReads = 0;
   fetchMock.mockImplementation(async (input, init) => {
@@ -177,11 +177,10 @@ it('loads and refreshes live preview separately from audit snapshots and history
   const open = await screen.findByRole('button', { name: 'Open lot detail for LOT-001' });
   await browser.click(open);
   expect(await screen.findByRole('heading', { name: /Live preview/ })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /engine Residue bounds exact 1/ })).toBeInTheDocument();
   expect(previews).toBe(1);
   expect(saves).toBe(0);
 
-  await browser.click(screen.getByRole('button', { name: /engine Residue bounds exact 1/ }));
+  await browser.click(within(screen.getByRole('region', { name: 'Immutable evaluation history' })).getByRole('button'));
   expect(await screen.findByRole('heading', { name: /Historical snapshot/ })).toBeInTheDocument();
   await browser.click(screen.getByRole('button', { name: 'Refresh live preview' }));
   expect(await screen.findByRole('heading', { name: /Live preview/ })).toBeInTheDocument();

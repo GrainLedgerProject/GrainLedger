@@ -83,7 +83,8 @@ internal static class BlendAssessment
                 if (legal is null || bound is null || bound.Status != "COMPLETE" ||
                     !decimal.TryParse(bound.Upper, NumberStyles.AllowDecimalPoint,
                         CultureInfo.InvariantCulture, out var upper) ||
-                    bound.Unit != legal.Unit || bound.Basis != policy.ResidueBasis)
+                    bound.Unit != legal.Unit || policy.ResidueBasis != "AS_RECEIVED" ||
+                    bound.CommodityId != policy.CommodityId)
                 {
                     Add("RESIDUE_COVERAGE_INCOMPLETE", "INCOMPLETE", reference: substance.ToString());
                     continue;

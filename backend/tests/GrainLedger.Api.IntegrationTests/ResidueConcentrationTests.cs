@@ -51,6 +51,19 @@ public sealed class ResidueConcentrationTests
     }
 
     [Fact]
+    public void One_profile_resolves_numeric_below_limit_and_not_detected_forms()
+    {
+        var f = Fixture();
+        var numeric = f.Resolve(f.Result with { Uncertainty = "±0.05 as reported" }, f.Selection with { AbsoluteUncertainty = "0.05" });
+        var below = f.Resolve(f.Result with { ResultKind = "BELOW_LIMIT" }, f.Selection);
+        var notDetected = f.Resolve(f.Result with { ResultKind = "NOT_DETECTED", NumericValue = null }, f.Selection);
+        Assert.Equal("0.1", numeric.Lower); Assert.Equal("0.2", numeric.Upper);
+        Assert.Equal("0", below.Lower); Assert.Equal("0.15", below.Upper);
+        Assert.Equal("0", notDetected.Lower); Assert.Equal("0.01", notDetected.Upper);
+        Assert.Empty(numeric.Reasons); Assert.Empty(below.Reasons); Assert.Empty(notDetected.Reasons);
+    }
+
+    [Fact]
     public void Relative_percent_stays_dimensionless_and_raw_uncertainty_never_gets_parsed()
     {
         var f = Fixture("NUMERIC_RELATIVE_UNCERTAINTY");
@@ -99,16 +112,19 @@ public sealed class ResidueConcentrationTests
         var node = new ResidueNode(lot, company, Guid.NewGuid(), "RAW_PADDY", "RAW_PADDY", at.AddDays(-1), "SOURCE", null, null, []);
         var source = new ResidueSource(sourceId, lot, company, node.At, node.Stage, node.ProductIdentity);
         var result = new ResidueLabEvidence(sourceId, lot, Guid.NewGuid(), Guid.NewGuid(), resultId, Guid.NewGuid(), substance,
-            "NUMERIC", "0.15", "mg/kg", "0.01", "0.02", "EXACT_METHOD", null, at, null, null, null, null, null, false);
-        var selection = new ResidueReportSelection(Guid.NewGuid(), company, sourceId, substance, resultId, [],
-            "AS_RECEIVED", "ANALYTE", null, null, from, null, null, "Synthetic evidence", "Synthetic applicability",
-            "Reviewer", "Test authority", from);
-        var rule = new ResidueRuleVersion(Guid.NewGuid(), "SYNTHETIC", 1, "INTERPRETATION", substance, "ANALYTE",
-            node.Stage, node.Stage, "AS_RECEIVED", "AS_RECEIVED", "", "", "", "mg/kg", 12, kind, threshold,
-            null, null, null, false, from, null, null, "Synthetic evidence", "Synthetic applicability", "Reviewer", "Test authority", from,
-            CommodityId: node.CommodityId, AnalyticalMethod: "EXACT_METHOD", RelativeUncertaintyPercent: kind == "NUMERIC_RELATIVE_UNCERTAINTY" ? "10" : null);
+            "NUMERIC", "0.15", "mg/kg", "0.01", "0.02", "EXACT_METHOD", null, at, null, null, null, null, false);
+        var rule = new ResidueProfileVersion(Guid.NewGuid(), "SYNTHETIC", 1, "FLOW", 2, substance, node.CommodityId,
+            "ANALYTE", "mg/kg", 12,
+            [new ResidueLaboratorySettings("EXACT_METHOD",
+                kind == "NUMERIC_RELATIVE_UNCERTAINTY" ? kind : "NUMERIC_ABSOLUTE_UNCERTAINTY",
+                kind == "NUMERIC_RELATIVE_UNCERTAINTY" ? "10" : null, false, true, threshold ?? "LOD")],
+            [], true, from, null, null, "Synthetic evidence", "Synthetic applicability", "Reviewer", "Test authority", from);
         var setting = new ResiduePolicySettingVersion(Guid.NewGuid(), company, rule.Code, 1, "SYSTEM_DEFAULT", from,
             null, null, "Synthetic adoption", "Synthetic applicability", "Reviewer", "Test authority", from);
+        var selection = new ResidueReportSelection(Guid.NewGuid(), company, sourceId, substance, resultId, [],
+            "ANALYTE", null, null, from, null, null, "Synthetic evidence", "Synthetic applicability",
+            "Reviewer", "Test authority", from, ProfileRuleId: rule.Id, ProfileSettingId: setting.Id,
+            SchemaVersion: 2, AsReceivedConfirmed: true, ProfileCode: rule.Code, LaboratoryMethod: "EXACT_METHOD");
         return new(node, source, result, selection, new([rule], [setting]), at);
     }
 }

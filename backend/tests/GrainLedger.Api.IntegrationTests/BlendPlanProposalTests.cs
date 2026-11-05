@@ -22,10 +22,14 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         var receipt = await scenario.ReceiptAsync("20");
         var sample = await SampleAsync(scenario, receipt);
         var (_, report) = await f.ReportAsync(sample);
-        await f.PublishRuleAsync();
+        var profile = f.RuleBody();
+        ResidueScenario.AddStep(profile, "DRYING", "RAW_PADDY", "DRIED_PADDY");
+        ResidueScenario.AddStep(profile, "MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
+        ResidueScenario.AddStep(profile, "MILLING", "DRIED_PADDY", "BROKEN_RICE", "0.5", "0.5");
+        ResidueScenario.AddStep(profile, "BLENDING", "HEAD_RICE", "BLENDED_RICE");
+        ResidueScenario.AddStep(profile, "BLENDING", "BROKEN_RICE", "BLENDED_RICE");
+        await f.PublishRuleAsync(profile);
         await f.SelectAsync(sample, report);
-        await f.ProcessRuleAsync("DRYING", "RAW_PADDY", "DRIED_PADDY");
-        await f.ProcessRuleAsync("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
         var drying = await scenario.DraftAsync("DRYING", [(sample.LotId, "20")],
             [("DRIED_PADDY", "20")]);
         await scenario.CommitAsync(drying);
@@ -70,7 +74,7 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         var policy = await scenario.Customer.PostAsJsonAsync("/api/blend-assessment-policies",
             new PublishBlendAssessmentPolicyRequest(Guid.NewGuid(), marketId,
                 scenario.CatalogCommodityId, 1, DateTimeOffset.UtcNow.AddMinutes(-1),
-                null, [f.SubstanceId], "0.1", ResidueScenario.Basis,
+                null, [f.SubstanceId], "0.1", "AS_RECEIVED",
                 [new PublishedQualityPropagationRule(attributeId, "%", "MASS_WEIGHTED_MEAN")],
                 "Synthetic approved policy", "Synthetic reviewer",
                 "Synthetic authority", DateTimeOffset.UtcNow.AddMinutes(-2)));
@@ -158,9 +162,6 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             $"/api/blend-plans/{draft.Id}/proposal")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await scenario.ForeignCustomer.GetAsync(
             $"/api/blend-plans/{draft.Id}/proposal")).StatusCode);
-        await f.ProcessRuleAsync("MILLING", "DRIED_PADDY", "BROKEN_RICE", "0.5", "0.5");
-        await f.ProcessRuleAsync("BLENDING", "HEAD_RICE", "BLENDED_RICE");
-        await f.ProcessRuleAsync("BLENDING", "BROKEN_RICE", "BLENDED_RICE");
         var compatibilityId = Guid.NewGuid();
         await LedgerScenario.SendAsync(scenario.Admin, HttpMethod.Post,
             "/api/ledger/compatibilities", new

@@ -193,7 +193,7 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
     {
         if (request.Id == Guid.Empty || request.CompanyId == Guid.Empty || request.SourceId == Guid.Empty
             || request.SubstanceId == Guid.Empty || request.SelectedResultId == Guid.Empty
-            || string.IsNullOrWhiteSpace(request.MaterialBasis) || string.IsNullOrWhiteSpace(request.ResidueDefinition)
+            || request.SchemaVersion != 2 || string.IsNullOrWhiteSpace(request.ProfileCode) || string.IsNullOrWhiteSpace(request.ResidueDefinition)
             || request.EffectiveTo is { } end && end <= request.EffectiveFrom
             || request.SupersededResultIds is null || request.SupersededResultIds.Length > 1000
             || request.SupersededResultIds.Contains(request.SelectedResultId)
@@ -230,7 +230,21 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
             && (!evidence.Selections.Any(x => x.Id == prior && x.SourceId == request.SourceId && x.SubstanceId == request.SubstanceId)
                 || evidence.Selections.Any(x => x.SupersedesId == prior)))
             throw new LedgerException(409, "Selection ID or reviewed supersession conflicts with history");
+        if (!request.AsReceivedConfirmed)
+        {
+            await tx.CommitAsync(ct);
+            return new ResidueSourceBound(lotId, request.SubstanceId, null, null, null, null,
+                ["As-received concentration confirmation required for residue bounds"], [], []);
+        }
         var policies = await policyReader.ReadAsync(connection, tx, sourceNode.CompanyId, substances, snapshotAt, ct);
+        var source = evidence.Sources.Single(x => x.SourceId == request.SourceId);
+        var selectedPolicy = ResidueEvidenceResolver.SelectPolicy(policies, request.CompanyId, source.ReceivedAt,
+            sourceNode.CommodityId, request.SubstanceId, request.ProfileCode);
+        if (selectedPolicy.Reason is null && selectedPolicy.Rules.Count == 1)
+        {
+            var binding = selectedPolicy.Rules[0];
+            request = request with { ProfileRuleId = binding.Rule.Id, ProfileSettingId = binding.Setting.Id, LaboratoryMethod = selected.Method };
+        }
         var proposed = evidence with { Selections = evidence.Selections.Append(request).ToArray() };
         var preview = ResidueEvidenceResolver.Resolve([sourceNode], substances, proposed, policies, snapshotAt).Single();
         await tx.CommitAsync(ct);

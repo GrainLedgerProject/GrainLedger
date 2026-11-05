@@ -17,6 +17,44 @@ namespace GrainLedger.Api.IntegrationTests;
 
 public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Confirmation_without_as_received_attestation_allows_identity_but_requires_manual_review(bool omitted)
+    {
+        using var s = await CreateAsync(factory);
+        var f = await ResidueScenario.CreateAsync(s);
+        var sample = await SampleAsync(s, await s.ReceiptAsync("10"));
+        await f.PublishRuleAsync(Relative(f));
+        var (id, report) = await f.ReportAsync(sample, [f.Result(uncertainty: null)], confirm: false);
+        var request = ConfirmRequest(report, sample);
+        if (omitted) request["payload"]!.AsObject().Remove("asReceivedConfirmed");
+        else request["payload"]!["asReceivedConfirmed"] = false;
+        var confirmed = await SendAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", request);
+        Assert.Equal("CONFIRMED", confirmed.GetProperty("status").GetString());
+        var binding = Assert.Single(confirmed.GetProperty("residueBindings").EnumerateArray());
+        Assert.False(binding.GetProperty("published").GetBoolean());
+        Assert.Contains(binding.GetProperty("reasons").EnumerateArray(), reason =>
+            reason.GetString() == "As-received concentration confirmation required for residue bounds");
+        Assert.Empty((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
+        Unresolved(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId));
+
+        var preview = await Preview(s, id);
+        var manual = Confirmation(s, preview);
+        manual["asReceivedConfirmed"] = false;
+        var unattested = await SendAsync(s.Customer, HttpMethod.Post, Route(id, "preview"), manual);
+        Assert.Contains(unattested.GetProperty("rows")[0].GetProperty("reasons").EnumerateArray(), reason =>
+            reason.GetString() == "As-received concentration confirmation required for residue bounds");
+        await RejectedAsync(s.Customer, HttpMethod.Post, Route(id, "confirm"), manual, HttpStatusCode.BadRequest);
+        Assert.Empty((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
+
+        manual["asReceivedConfirmed"] = true;
+        var reviewed = await SendAsync(s.Customer, HttpMethod.Post, Route(id, "preview"), manual);
+        Assert.Empty(reviewed.GetProperty("rows")[0].GetProperty("reasons").EnumerateArray());
+        await SendAsync(s.Customer, HttpMethod.Post, Route(id, "confirm"), Confirmation(s, reviewed));
+        Complete(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId), 0.135m, 0.165m);
+    }
+
     [Fact]
     public async Task Confirmed_multi_sample_report_reuses_scientific_review_and_appends_atomic_replayable_bindings()
     {
@@ -39,7 +77,7 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
         {
             Assert.Empty(row.GetProperty("reasons").EnumerateArray());
             Assert.Equal(ruleId, row.GetProperty("profile").GetProperty("id").GetGuid());
-            Assert.Equal("SYNTHETIC_AS_RECEIVED", row.GetProperty("assessment").GetProperty("basis").GetString());
+            Assert.False(row.GetProperty("assessment").TryGetProperty("basis", out _));
             Assert.Equal(0.135m, Decimal(row.GetProperty("assessment").GetProperty("lower")));
         }
         var confirmation = Confirmation(s, preview);
@@ -52,6 +90,12 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
             Assert.Equal(s.Accounts["customer"].User.Id, selection.GetProperty("publishedBy").GetGuid());
             Assert.Equal(reportId, selection.GetProperty("bindingReportId").GetGuid());
             Assert.Equal(ruleId, selection.GetProperty("profileRuleId").GetGuid());
+            Assert.Equal(2, selection.GetProperty("schemaVersion").GetInt32());
+            Assert.True(selection.GetProperty("asReceivedConfirmed").GetBoolean());
+            Assert.Equal(rule["code"]!.GetValue<string>(), selection.GetProperty("profileCode").GetString());
+            Assert.NotEqual(Guid.Empty, selection.GetProperty("profileSettingId").GetGuid());
+            Assert.Equal("SYNTHETIC_METHOD", selection.GetProperty("laboratoryMethod").GetString());
+            Assert.False(selection.TryGetProperty("materialBasis", out _));
         }
         await SendAsync(s.Customer, HttpMethod.Post, Route(reportId, "confirm"), confirmation);
         Assert.Equal(published.GetRawText(), (await GetAsync(s.Customer, "/api/residue-report-selections")).GetRawText());
@@ -74,7 +118,7 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
     [InlineData("wrong-unit")]
     [InlineData("adoption-after-source")]
     [InlineData("missing-override")]
-    [InlineData("ambiguous-basis")]
+    [InlineData("ambiguous-profile")]
     [InlineData("reported-uncertainty")]
     [InlineData("pending-report")]
     public async Task Authoritative_matching_and_uncertainty_fail_closed(string mismatch)
@@ -86,19 +130,21 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
             [f.Result(uncertainty: mismatch == "reported-uncertainty" ? "±0.05 laboratory expanded uncertainty" : null,
                 unit: mismatch == "wrong-unit" ? "ppb" : "mg/kg")], confirm: mismatch != "pending-report");
         var rule = Relative(f);
-        if (mismatch == "wrong-method") rule["analyticalMethod"] = "OTHER_METHOD";
+        if (mismatch == "wrong-method") rule["laboratory"]![0]!["analyticalMethod"] = "OTHER_METHOD";
         await f.PublishRuleAsync(rule, adopt: false);
         if (mismatch != "missing-adoption")
         {
             var setting = f.SettingBody(rule["code"]!.GetValue<string>());
             if (mismatch == "missing-override") setting["mode"] = "COMPANY_OVERRIDE";
             if (mismatch == "adoption-after-source") setting["effectiveFrom"] = DateTimeOffset.UtcNow.AddSeconds(1);
-            await f.PublishSettingAsync(setting);
+            if (mismatch == "missing-override")
+                await RejectedAsync(s.Customer, HttpMethod.Post, "/api/residue-policy-settings", setting, HttpStatusCode.BadRequest);
+            else
+                await f.PublishSettingAsync(setting);
         }
-        if (mismatch == "ambiguous-basis")
+        if (mismatch == "ambiguous-profile")
         {
-            var other = Relative(f); other["inputBasis"] = "OTHER_REVIEWED_BASIS"; other["outputBasis"] = "OTHER_REVIEWED_BASIS";
-            await f.PublishRuleAsync(other);
+            await f.PublishRuleAsync(Relative(f));
         }
         var preview = await Preview(s, reportId);
         Assert.NotEmpty(preview.GetProperty("rows")[0].GetProperty("reasons").EnumerateArray());
@@ -418,15 +464,17 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
     private static JsonObject Relative(ResidueScenario f)
     {
         var rule = f.RuleBody("NUMERIC_RELATIVE_UNCERTAINTY");
-        rule["relativeUncertaintyPercent"] = "10"; rule["relativeUncertaintyAtZero"] = false;
+        rule["laboratory"]![0]!["relativeUncertaintyPercent"] = "10";
+        rule["laboratory"]![0]!["relativeUncertaintyAtZero"] = false;
         return rule;
     }
     private static string Route(Guid id, string action) => $"/api/lab-reports/{id}/residue-review/{action}";
     private static Task<JsonElement> Preview(LedgerScenario s, Guid id) => SendAsync(s.Customer, HttpMethod.Post, Route(id, "preview"),
-        new { companyId = s.OwnerId, effectiveFrom = (DateTimeOffset?)null, rows = Array.Empty<object>() });
+        new { companyId = s.OwnerId, effectiveFrom = (DateTimeOffset?)null, rows = Array.Empty<object>(), asReceivedConfirmed = true });
     private static JsonObject Confirmation(LedgerScenario s, JsonElement preview) => new()
     {
         ["companyId"] = s.OwnerId, ["effectiveFrom"] = JsonNode.Parse(preview.GetProperty("effectiveFrom").GetRawText()),
+        ["asReceivedConfirmed"] = true,
         ["rows"] = new JsonArray(preview.GetProperty("rows").EnumerateArray().Select(row => JsonNode.Parse(row.GetProperty("input").GetRawText())).ToArray())
     };
 }

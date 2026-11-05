@@ -18,7 +18,7 @@ type Provenance = {
   canonicalUnit?: string | null;
   concentrationScale?: string | null;
 };
-type RuleReference = { id: string; version: number; kind: string; evidenceReference: string; policyOrigin?: string | null; policySettingId?: string | null; policySettingVersion?: number | null; ruleCode?: string | null };
+type RuleReference = { id: string; version: number; kind: string; componentKey: string; evidenceReference: string; policyOrigin?: string | null; policySettingId?: string | null; policySettingVersion?: number | null; ruleCode?: string | null };
 type Dependency = {
   lotId: string;
   parentLotId?: string | null;
@@ -33,7 +33,10 @@ type ResidueResult = {
   lower: string | null;
   upper: string | null;
   unit: string | null;
-  basis: string | null;
+  profileCode: string | null;
+  commodityId: string | null;
+  productStage: string | null;
+  productIdentity: string | null;
   reasons: string[];
   provenance: Provenance[];
   rules: RuleReference[];
@@ -152,7 +155,7 @@ export function ResidueBounds({ lotId, allowed }: { lotId: string; allowed: bool
         <h4 id="residue-history-title">Immutable evaluation history</h4>
         {loading ? null : history.length ? <ul className="residue-history">{history.map(item => <li key={item.id}>
           <button type="button" className="secondary" disabled={busyAction !== null} aria-current={evaluation?.id === item.id ? 'true' : undefined} onClick={() => void loadEvaluation(item.id)}>
-            {new Date(item.snapshotAt).toLocaleString()} · engine {item.engineVersion === 'F12-exact-1' ? 'Residue bounds exact 1' : item.engineVersion}
+            {new Date(item.snapshotAt).toLocaleString()} · engine {item.engineVersion}
           </button>
           <span>Persisted {new Date(item.persistedAt).toLocaleString()}</span>
         </li>)}</ul> : <p className="empty">No saved evaluations for this lot.</p>}
@@ -182,12 +185,12 @@ function EvaluationDetail({ evaluation, substances, kind }: { evaluation: Evalua
   };
   return <article className="residue-snapshot">
     <h4>{kind === 'preview' ? 'Live preview' : kind === 'history' ? 'Historical snapshot' : 'Saved snapshot'} · {new Date(evaluation.snapshotAt).toLocaleString()}</h4>
-    <dl><dt>Engine version</dt><dd>{evaluation.engineVersion === 'F12-exact-1' ? 'Residue bounds exact 1' : evaluation.engineVersion}</dd>{evaluation.persistedAt && <><dt>Persisted at</dt><dd>{new Date(evaluation.persistedAt).toLocaleString()}</dd></>}</dl>
+    <dl><dt>Engine version</dt><dd>{evaluation.engineVersion}</dd>{evaluation.persistedAt && <><dt>Persisted at</dt><dd>{new Date(evaluation.persistedAt).toLocaleString()}</dd></>}</dl>
     <p className="notice pending">{kind === 'preview' ? 'Captured current policy and evidence; not saved to history. Refresh lot detail to recalculate.' : 'Snapshot records evidence visible at calculation time. No PASS or market-compliance status is implied.'}</p>
     {evaluation.results.map((result, index) => <section className="residue-result" key={`${result.substanceId}-${index}`}>
       <div className="residue-result-heading"><h5>{label(result.substanceId)}</h5><span className={`badge${result.status === 'UNRESOLVED' ? ' inactive' : ''}`}>{result.status}</span></div>
       {result.status === 'COMPLETE' ? <p className="residue-interval">[{result.lower ?? '—'}, {result.upper ?? '—'}] {result.unit || 'unit unavailable'}</p> : <p className="notice pending">No finite interval established.</p>}
-      <dl><dt>Analytical basis</dt><dd>{result.basis || 'Not specified'}</dd></dl>
+      <p>Concentrations are mg/kg as received at each material stage.</p>
       {result.reasons.length > 0 && <><h6>Reasons</h6><ul>{result.reasons.map((reason, reasonIndex) => <li key={`${reason}-${reasonIndex}`}>{reason}</li>)}</ul></>}
       {result.provenance.length > 0 && <><h6>Evidence provenance</h6><ul>{result.provenance.map((source, sourceIndex) => <li key={`${source.kind}-${sourceIndex}`}>
         {source.kind === 'DIRECT' ? 'Direct confirmed evidence' : source.kind === 'GROUP_FALLBACK' ? 'Approved source-group fallback' : source.kind === 'INHERITED' ? 'Inherited through lot lineage' : source.kind}
@@ -195,7 +198,7 @@ function EvaluationDetail({ evaluation, substances, kind }: { evaluation: Evalua
         {source.concentrationScale && source.concentrationScale !== '1' && source.originalUnit && source.canonicalUnit && ` · ${source.originalUnit} × ${source.concentrationScale} → ${source.canonicalUnit}`}
         {source.uncertaintyMode && ` · uncertainty ${source.uncertaintyMode}`}{source.relativeUncertaintyPercent !== undefined && source.relativeUncertaintyPercent !== null && ` · ${source.relativeUncertaintyPercent}%`}{source.absoluteUncertainty !== undefined && source.absoluteUncertainty !== null && ` · derived absolute uncertainty ${source.absoluteUncertainty}`}
       </li>)}</ul></>}
-      {result.rules.length > 0 && <><h6>Applied rules and policy settings</h6><ul>{result.rules.map((rule, ruleIndex) => <li key={`${rule.id}-${ruleIndex}`}>{rule.policyOrigin ? `${rule.policyOrigin === 'SYSTEM_DEFAULT' ? 'System default' : 'Company override'} · ` : ''}{rule.ruleCode ? `${rule.ruleCode} · ` : `Rule ${rule.id} · `}version {rule.version}{rule.policySettingVersion !== undefined && rule.policySettingVersion !== null ? ` · setting v${rule.policySettingVersion}` : ''}{rule.policySettingId ? ` (${rule.policySettingId})` : ''} · {rule.kind}{rule.evidenceReference && ` · evidence ${rule.evidenceReference}`}</li>)}</ul></>}
+      {result.rules.length > 0 && <><h6>Applied profiles and policy settings</h6><ul>{result.rules.map((rule, ruleIndex) => <li key={`${rule.id}-${rule.componentKey}-${ruleIndex}`}>{rule.policyOrigin ? `${rule.policyOrigin === 'SYSTEM_DEFAULT' ? 'System default' : 'Company override'} · ` : ''}{rule.ruleCode ? `${rule.ruleCode} · ` : `Profile ${rule.id} · `}version {rule.version} · component {rule.componentKey}{rule.policySettingVersion !== undefined && rule.policySettingVersion !== null ? ` · setting v${rule.policySettingVersion}` : ''}{rule.policySettingId ? ` (${rule.policySettingId})` : ''} · {rule.kind}{rule.evidenceReference && ` · evidence ${rule.evidenceReference}`}</li>)}</ul></>}
       {result.dependencies.length > 0 && <details><summary>Lineage dependencies</summary><ul>{result.dependencies.map((dependency, dependencyIndex) => <li key={`${dependency.lotId}-${dependencyIndex}`}>Lot {dependency.lotId}{dependency.parentLotId && ` ← parent ${dependency.parentLotId}`}{dependency.operationId && ` · operation ${dependency.operationId}`}{dependency.eventId && ` · event ${dependency.eventId}`}{dependency.kind && ` · ${dependency.kind}`}{dependency.quantityKg && ` · ${dependency.quantityKg} kg`}</li>)}</ul></details>}
     </section>)}
   </article>;

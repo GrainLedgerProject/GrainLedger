@@ -16,7 +16,7 @@ public sealed record ResiduePolicySettingVersion(Guid Id, Guid CompanyId, string
     string EvidenceRef, string ApplicabilityStatement, string ReviewedBy, string ReviewAuthority,
     DateTimeOffset ReviewedAt, Guid? PublishedBy = null, DateTimeOffset? PublishedAt = null);
 
-public sealed record ResiduePolicySnapshot(IReadOnlyList<ResidueRuleVersion> Rules,
+public sealed record ResiduePolicySnapshot(IReadOnlyList<ResidueProfileVersion> Rules,
     IReadOnlyList<ResiduePolicySettingVersion> Settings);
 
 public sealed record ResiduePolicySettingBatch(IReadOnlyList<ResiduePolicySettingVersion> Items);
@@ -77,7 +77,12 @@ public static class ResiduePolicySettingEndpoints
         {
             var stored = new Dictionary<Guid, ResiduePolicySettingVersion>();
             await using (var read = new NpgsqlCommand("""
-                SELECT payload::text FROM grainledger.catalog_residue_policy_setting_versions WHERE id=ANY($1) AND company_id=$2
+                SELECT s.payload::text FROM grainledger.catalog_residue_policy_setting_versions s
+                WHERE s.id=ANY($1) AND s.company_id=$2 AND EXISTS (
+                    SELECT 1 FROM grainledger.catalog_residue_rule_versions r
+                    WHERE r.code=s.rule_code AND r.payload->>'Kind'='FLOW' AND r.payload->>'SchemaVersion'='2'
+                        AND (s.payload->>'Mode'='SYSTEM_DEFAULT' AND r.company_id IS NULL OR
+                             s.payload->>'Mode'='COMPANY_OVERRIDE' AND r.company_id=s.company_id))
                 """, connection, transaction))
             {
                 read.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Uuid, requests.Select(item => item.Id).ToArray());
@@ -136,8 +141,12 @@ public static class ResiduePolicySettingEndpoints
         var scope = await ResidueReview.ReadScopeAsync(http, connection, transaction, ct);
         if (!scope.Allowed || scope.CompanyId is null) return Results.Forbid();
         await using var command = new NpgsqlCommand("""
-            SELECT payload::text FROM grainledger.catalog_residue_policy_setting_versions
-            WHERE company_id=$1 AND ($2::uuid IS NULL OR id=$2) ORDER BY rule_code,version_no
+            SELECT s.payload::text FROM grainledger.catalog_residue_policy_setting_versions s
+            WHERE s.company_id=$1 AND ($2::uuid IS NULL OR s.id=$2)
+              AND EXISTS (SELECT 1 FROM grainledger.catalog_residue_rule_versions r
+                  WHERE r.code=s.rule_code AND (r.company_id IS NULL OR r.company_id=s.company_id)
+                    AND r.payload->>'Kind'='FLOW' AND r.payload->>'SchemaVersion'='2')
+            ORDER BY s.rule_code,s.version_no
             """, connection, transaction);
         command.Parameters.AddWithValue(scope.CompanyId.Value);
         command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)id ?? DBNull.Value });

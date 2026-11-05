@@ -42,13 +42,13 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
   const label = (code: string) => {
     const rule = source(code) || eligible.find(item => item.code === code);
     if (!rule) return code;
-    return `${name(substances, rule.substanceId)} · ${name(commodities, rule.commodityId)} · ${rule.kind === 'INTERPRETATION' ? rule.interpretationKind : rule.process} · ${rule.residueDefinition} · ${rule.inputStage}/${rule.inputBasis} → ${rule.outputStage}/${rule.outputBasis} · ${rule.outputFraction || 'No output fraction'} · ${rule.analyticalMethod || 'No analytical method'} · ${rule.conditions || 'No conditions'} · ${rule.factorSemantics || ''} · ${code}`;
+    return `${name(substances, rule.substanceId)} · ${name(commodities, rule.commodityId)} · ${rule.residueDefinition} · ${rule.laboratory.map(item => item.analyticalMethod).join(' ')} · ${rule.steps.map(item => `${item.process} ${item.inputStage} ${item.outputStage} ${item.outputFraction} ${item.conditions}`).join(' ')} · ${code}`;
   };
   const filteredCodes = codes.filter(code => {
     const rule = source(code) || eligible.find(item => item.code === code)!;
     const tips = settings.filter(item => item.ruleCode === code && !settings.some(next => next.supersedesId === item.id));
     return (!profileSearch.trim() || label(code).toLowerCase().includes(profileSearch.trim().toLowerCase())) &&
-      (!profileTask || (profileTask === 'INTERPRETATION' ? rule.kind === profileTask : rule.process === profileTask)) &&
+      (!profileTask || rule.steps.some(step => step.process === profileTask)) &&
       (!profileStatus || (profileStatus === 'selected' ? drafts.some(item => item.ruleCode === code) : profileStatus === 'unavailable' ? !source(code) : profileStatus === 'unadopted' ? tips.length === 0 : tips.some(item => item.mode === profileStatus)));
   }).sort((a, b) => label(a).localeCompare(label(b)));
   const settingGroups = Array.from(new Set(settings.map(item => item.ruleCode))).map(code => {
@@ -114,44 +114,32 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
       <h2 id="policy-settings-title">Use reviewed profiles</h2>
       {loading && <p role="status">Loading residue profiles…</p>}{error && <div className="notice error" role="alert">{error}<button type="button" className="secondary" disabled={loading} onClick={() => setReload(value => value + 1)}>Retry loading adoption settings</button></div>}
       {!settings.length && !loading && <p className="empty">No policy settings published. System profiles are not implicitly adopted.</p>}
-      {!codes.length && !loading && !error && <p className="notice pending">No reviewed profile available. Use Create rule for expert setup; missing policy leaves bounds unresolved.</p>}
+      {!codes.length && !loading && !error && <p className="notice pending">No reviewed profile available. Use Create profile for expert setup; missing policy leaves bounds unresolved.</p>}
       {codes.length > 0 && <form onSubmit={publish} onChange={() => setConfirmed(false)}>
         <fieldset disabled={action.busy || loading || !!error}><legend>Choose reusable profiles</legend>
           <label>Setting mode<select value={mode} onChange={event => changeMode(event.target.value as Setting['mode'])}><option value="SYSTEM_DEFAULT">Adopt / return to system default</option><option value="COMPANY_OVERRIDE">Use reviewed company override</option></select></label>
           <div className="residue-toolbar">
             <label>Find profiles to adopt<input type="search" value={profileSearch} onChange={event => setProfileSearch(event.target.value)} /></label>
-            <label>Adoption task<select value={profileTask} onChange={event => setProfileTask(event.target.value)}><option value="">All tasks</option><option value="INTERPRETATION">Interpretation</option>{Array.from(new Set(eligible.filter(rule => rule.kind === 'PROCESS').map(rule => rule.process))).sort().map(task => <option key={task}>{task}</option>)}</select></label>
+            <label>Operation<select value={profileTask} onChange={event => setProfileTask(event.target.value)}><option value="">All operations</option>{Array.from(new Set(eligible.flatMap(rule => rule.steps.map(step => step.process)))).sort().map(operation => <option key={operation}>{operation}</option>)}</select></label>
             <label>Adoption status<select value={profileStatus} onChange={event => setProfileStatus(event.target.value)}><option value="">All statuses</option><option value="selected">Selected for review</option><option value="unadopted">No adoption setting</option><option value="SYSTEM_DEFAULT">System default setting</option><option value="COMPANY_OVERRIDE">Company override setting</option><option value="unavailable">Unavailable / conflicting source</option></select></label>
           </div>
           <p>{filteredCodes.length} of {codes.length} profile series shown · {drafts.length} explicitly selected (including selections outside filters). Filters never select or discard profiles.</p>
-          {!filteredCodes.length && <p className="empty">No profiles match these filters. Clear search or change task/status.</p>}
+          {!filteredCodes.length && <p className="empty">No profiles match these filters. Clear search or change operation/status.</p>}
           <fieldset aria-label="Residue profiles"><legend>Residue profiles</legend><div className="residue-profile-choices">{filteredCodes.map(code => {
             const selectedSource = source(code), rule = selectedSource || eligible.find(item => item.code === code)!;
             const substance = substances.find(item => item.id === rule.substanceId), commodity = commodities.find(item => item.id === rule.commodityId);
-            const stage = (rule.inputStage === rule.outputStage ? [rule.inputStage] : [rule.inputStage, rule.outputStage]).map(value => value.replaceAll('_', ' ').toLowerCase()).join(' → ');
-            let approach: string;
-            if (rule.kind === 'PROCESS') {
-              approach = rule.factorLower === null || rule.factorUpper === null ? `${rule.process} · factor unspecified`
-                : `${rule.process} · ${rule.factorLower}${rule.factorUpper === rule.factorLower ? '' : `–${rule.factorUpper}`}×`;
-            } else {
-              switch (rule.interpretationKind) {
-                case 'NUMERIC_RELATIVE_UNCERTAINTY': approach = rule.relativeUncertaintyPercent == null ? 'Numeric · relative uncertainty unspecified' : `Numeric ±${rule.relativeUncertaintyPercent}%`; break;
-                case 'NUMERIC_ABSOLUTE_UNCERTAINTY': approach = 'Numeric · absolute uncertainty'; break;
-                case 'BELOW_LIMIT': approach = 'Below analytical limit'; break;
-                case 'ND': approach = `ND · ${rule.ndThresholdKind || 'threshold policy unspecified'}`; break;
-                default: approach = rule.interpretationKind || 'Interpretation unspecified';
-              }
-            }
+            const operations = Array.from(new Set(rule.steps.map(step => step.process))).join(', ') || 'Source only';
+            const methods = rule.laboratory.map(item => item.analyticalMethod).join(', ') || 'No laboratory methods';
             return <label key={code} className="residue-profile-choice">
               <input type="checkbox" checked={drafts.some(item => item.ruleCode === code)} disabled={!selectedSource} onChange={event => chooseCodes(event.target.checked ? [...drafts.map(item => item.ruleCode), code] : drafts.filter(item => item.ruleCode !== code).map(item => item.ruleCode))} />
               <span className="residue-profile-choice-text">
-                <strong className="residue-profile-choice-primary">{substance?.name || rule.substanceId} · {stage} · {approach}</strong>{' '}
-                <small className="muted residue-profile-choice-secondary">{commodity?.name || rule.commodityId} · {rule.residueDefinition} · {rule.analyticalMethod || 'No analytical method'} · {rule.inputBasis} → {rule.outputBasis} · product {rule.outputFraction || 'not applicable'} · {rule.conditions || 'No conditions'} · {rule.factorSemantics || 'Interpretation'} · {code} · {selectedSource ? `latest published tip v${rule.versionNo} · ${effectiveWindowLabel(rule)}` : 'Reviewed profile unavailable in this mode; metadata is not a selected source'}</small>
+                <strong className="residue-profile-choice-primary">{substance?.name || rule.substanceId} · {operations}</strong>{' '}
+                <small className="muted residue-profile-choice-secondary">{commodity?.name || rule.commodityId} · {rule.residueDefinition} · {methods} · {code} · {selectedSource ? `latest published tip v${rule.versionNo} · ${effectiveWindowLabel(rule)}` : 'Reviewed profile unavailable in this mode; metadata is not a selected source'}</small>
               </span>
             </label>;
           })}</div></fieldset>
           <p>Select one or more profiles. Adoption applies to each whole series, not a copied or pinned scientific rule.</p>
-          {codes.filter(code => !source(code)).length > 0 && <details><summary>Unavailable or conflicting profile sources</summary>{codes.filter(code => !source(code)).map(code => <section key={code}><h3>{code}</h3>{eligible.filter(rule => rule.code === code && (mode === 'SYSTEM_DEFAULT' ? !rule.companyId : rule.companyId === companyId) && !eligible.some(next => next.supersedesId === rule.id && (next.companyId || null) === (rule.companyId || null))).map(rule => <p key={rule.id}>Conflicting applicability / unavailable unique source · {rule.code} v{rule.versionNo} · {rule.inputStage}/{rule.inputBasis} → {rule.outputStage}/{rule.outputBasis} · {rule.outputFraction || rule.analyticalMethod} · {rule.evidenceRef}</p>)}</section>)}</details>}
+          {codes.filter(code => !source(code)).length > 0 && <details><summary>Unavailable or conflicting profile sources</summary>{codes.filter(code => !source(code)).map(code => <section key={code}><h3>{code}</h3>{eligible.filter(rule => rule.code === code && (mode === 'SYSTEM_DEFAULT' ? !rule.companyId : rule.companyId === companyId) && !eligible.some(next => next.supersedesId === rule.id && (next.companyId || null) === (rule.companyId || null))).map(rule => <p key={rule.id}>Conflicting applicability / unavailable unique source · {rule.code} v{rule.versionNo} · {rule.evidenceRef}</p>)}</section>)}</details>}
           {drafts.length > 0 && <>
             <button type="button" className="secondary" disabled={sourceChanged} onClick={() => { setDrafts(drafts.map(item => draftFor(item.ruleCode))); setReview(blankReview()); setConfirmed(false); }}>Start new setting revisions</button>
             {sourceChanged && <div className="notice pending" role="status">
@@ -165,8 +153,9 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
                 {!rule ? <p className="notice pending">Reviewed profile unavailable. Publish same-code scientific profile in this scope first. No system fallback.</p> : <>
                   <dl className="residue-rule-detail-grid">
                     <div><dt>Reviewed scientific version</dt><dd>{rule.code} v{rule.versionNo} · {rule.reviewedBy} · {rule.reviewAuthority} · {rule.reviewedAt}</dd></div>
-                    <div><dt>Applicability</dt><dd>{rule.residueDefinition} · {rule.inputStage} / {rule.inputBasis} → {rule.outputStage} / {rule.outputBasis} · {rule.analyticalMethod || 'No analytical method'} · {rule.unit} · {rule.decimalPlaces} decimal places</dd></div>
-                    <div><dt>Scientific policy</dt><dd>{rule.kind === 'INTERPRETATION' ? `${rule.interpretationKind} · ${rule.ndThresholdKind || 'No ND threshold'}${rule.relativeUncertaintyPercent == null ? '' : ` · ±${rule.relativeUncertaintyPercent}% · reviewed at zero: ${rule.relativeUncertaintyAtZero ? 'Yes' : 'No'}`}` : `${rule.factorLower}–${rule.factorUpper}× · ${rule.factorSemantics} · ${rule.process} · ${rule.conditions} · ${rule.outputFraction} · homogeneous mixing: ${rule.homogeneousMixing ? 'reviewed' : 'not reviewed'}`}</dd></div>
+                    <div><dt>Applicability</dt><dd>{rule.residueDefinition} · {rule.unit} as received · {rule.decimalPlaces} decimal places</dd></div>
+                    <div><dt>Laboratory methods</dt><dd>{rule.laboratory.map(item => `${item.analyticalMethod}: ${[item.numericInterpretationKind, item.belowLimit ? 'below limit' : null, item.ndThresholdKind ? `ND ${item.ndThresholdKind}` : null].filter(Boolean).join(', ')}`).join('; ') || 'No laboratory methods'}</dd></div>
+                    <div><dt>Processing steps</dt><dd>{rule.steps.map(step => `${step.process} ${step.inputStage} → ${step.outputStage} / ${step.outputFraction}: ${step.factorLower}–${step.factorUpper}× · ${step.factorSemantics} · ${step.conditions} · homogeneous mixing: ${step.homogeneousMixing ? 'reviewed' : 'not reviewed'}`).join('; ') || 'Source only'}</dd></div>
                     <div><dt>Scientific effective period</dt><dd>{rule.effectiveFrom} — {rule.effectiveTo || 'No stated end'}</dd></div>
                     <div><dt>Evidence / applicability statement</dt><dd>{draft.evidenceRef} · {draft.applicabilityStatement}</dd></div>
                     <div><dt>Setting revision</dt><dd>v{draft.versionNo} · {draft.supersedesId ? 'Replaces previous setting; history retained' : 'First explicit adoption'}</dd></div>

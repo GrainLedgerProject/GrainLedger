@@ -22,7 +22,7 @@ public sealed class BlendAssessmentTests
         MarketId: Market, CommodityId: Commodity);
     private static ResidueResult Bound(decimal upper) => new(Substance, "COMPLETE", "0",
         upper.ToString(System.Globalization.CultureInfo.InvariantCulture), "mg/kg",
-        "AS_RECEIVED", [], [], [], []);
+        [], [], [], [], "synthetic-profile", Commodity, "BLENDED_RICE", "BLENDED_RICE");
     private static SpecificationLimit QualityLimit => new()
     {
         Id = Guid.NewGuid(), AttributeId = Attribute, AttributeCode = "MOISTURE",
@@ -67,6 +67,22 @@ public sealed class BlendAssessmentTests
     }
 
     [Fact]
+    public void Residue_bound_must_match_assessment_commodity_and_reviewed_convention()
+    {
+        foreach (var (policy, bound) in new[]
+        {
+            (Policy, Bound(0.001m) with { CommodityId = Guid.NewGuid() }),
+            (Policy with { ResidueBasis = "DRY_WEIGHT" }, Bound(0.001m))
+        })
+        {
+            var result = BlendAssessment.Evaluate("DIRECT_STOCK", 10m, Allocation,
+                null, policy, Mrl, [bound], [], [], []);
+            Assert.Equal("INCOMPLETE", result.Status);
+            Assert.Contains(result.Findings, x => x.Code == "RESIDUE_COVERAGE_INCOMPLETE");
+        }
+    }
+
+    [Fact]
     public void ConflictingQualityEvidenceCannotBeChosenSilently()
     {
         var result = BlendAssessment.Evaluate("DIRECT_STOCK", 10m, Allocation,
@@ -100,5 +116,25 @@ public sealed class BlendAssessmentTests
         var bounds = DirectStockResidueAssessment.ConservativeBounds(
             [first, second], [Substance]);
         Assert.Equal("0.0091", Assert.Single(bounds).Upper);
+    }
+
+    [Fact]
+    public void Direct_lots_with_different_target_metadata_are_incomplete()
+    {
+        var first = new ResidueEvaluationPreview(Guid.NewGuid(), Guid.NewGuid(),
+            DateTimeOffset.UtcNow, "synthetic", [Bound(0.001m)]);
+        foreach (var different in new[]
+        {
+            Bound(0.002m) with { CommodityId = Guid.NewGuid() },
+            Bound(0.002m) with { ProductStage = "HEAD_RICE" },
+            Bound(0.002m) with { ProductIdentity = "HEAD_RICE" }
+        })
+        {
+            var second = first with { LotId = Guid.NewGuid(), Results = [different] };
+            var result = Assert.Single(DirectStockResidueAssessment.ConservativeBounds(
+                [first, second], [Substance]));
+            Assert.Equal("INCOMPLETE", result.Status);
+            Assert.Null(result.Upper);
+        }
     }
 }

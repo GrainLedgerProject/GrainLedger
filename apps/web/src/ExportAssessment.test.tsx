@@ -28,7 +28,7 @@ it('publishes the reviewed market policy from the Customer Manager form', async 
   await user.selectOptions(field.getByLabelText('Commodity'), 'commodity-1');
   await user.type(field.getByLabelText('MRL safety margin fraction'), '0.1');
   fireEvent.change(field.getByLabelText('Effective from'), { target: { value: '2026-10-27T10:00' } });
-  await user.type(field.getByLabelText('Comparable residue material basis'), 'finished rice');
+  await user.selectOptions(field.getByLabelText('Comparable residue convention'), 'AS_RECEIVED');
   await user.click(field.getByRole('checkbox', { name: /S1 · Substance 1/ }));
   await user.selectOptions(field.getByLabelText('Add attribute'), 'attribute-1');
   await user.type(field.getByLabelText('Approved source or evidence reference'), 'Approved review 123');
@@ -39,7 +39,7 @@ it('publishes the reviewed market policy from the Customer Manager form', async 
   await user.click(field.getByRole('button', { name: 'Publish policy' }));
   await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === '/api/blend-assessment-policies' && init?.method === 'POST')).toBe(true));
   const request = fetchMock.mock.calls.find(([path, init]) => String(path) === '/api/blend-assessment-policies' && init?.method === 'POST');
-  expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ marketId: 'market-1', commodityId: 'commodity-1', requiredSubstanceIds: ['substance-1'], mrlMarginFraction: '0.1', qualityRules: [{ attributeId: 'attribute-1', unit: '%', calculation: 'MASS_WEIGHTED_MEAN' }] });
+  expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ marketId: 'market-1', commodityId: 'commodity-1', requiredSubstanceIds: ['substance-1'], mrlMarginFraction: '0.1', residueBasis: 'AS_RECEIVED', qualityRules: [{ attributeId: 'attribute-1', unit: '%', calculation: 'MASS_WEIGHTED_MEAN' }] });
 });
 
 it('confirms a new version of measured quality for a finished lot', async () => {

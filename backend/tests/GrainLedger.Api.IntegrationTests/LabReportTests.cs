@@ -657,6 +657,9 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
         var alteredConfirmation = confirmation.DeepClone().AsObject();
         alteredConfirmation["payload"]!["matches"]![0]!["evidenceRef"] = "Changed evidence";
         await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", alteredConfirmation, HttpStatusCode.Conflict);
+        var changedConvention = confirmation.DeepClone().AsObject();
+        changedConvention["payload"]!["asReceivedConfirmed"] = false;
+        await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", changedConvention, HttpStatusCode.Conflict);
         await ExpectAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{id}/confirm", ConfirmRequest(detail, sample), HttpStatusCode.Conflict);
         var list = await GetAsync(s.Customer, $"/api/lab-reports?sampleId={sample.Id}");
         Assert.Single(list.GetProperty("items").EnumerateArray());
@@ -781,7 +784,7 @@ public sealed class LabReportTests(ApiFactory factory) : IClassFixture<ApiFactor
 
     internal static JsonObject ConfirmRequest(JsonElement report, params SampleIdentity[] samples) => Envelope(new
     {
-        identityChecked = true, transcriptionChecked = true,
+        identityChecked = true, transcriptionChecked = true, asReceivedConfirmed = true,
         matches = report.GetProperty("resultSets").EnumerateArray().Select((set, index) => new
         {
             resultSetId = set.GetProperty("id").GetGuid(), sampleId = samples[index].Id, identityBasis = "SAMPLE_CODE", evidenceRef = (string?)null
