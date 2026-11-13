@@ -26,7 +26,8 @@ public static partial class ExportModule
         ICurrentAccess access, AppDbContext db, LedgerService ledger,
         ResidueEvaluationService residue, ApplicableMrlRead applicableMrl,
         BlendAssessmentPolicyRead assessmentPolicies, TimeProvider clock,
-        bool issueReference, string requiredPermission, CancellationToken ct)
+        bool issueReference, string requiredPermission, CancellationToken ct, GreedyStockSelection.Result? savedSelection = null,
+        IReadOnlyDictionary<(Guid LotId, Guid LocationId), decimal>? ownReservations = null)
     {
         var scope = await ScopeAsync(http, db, access, requiredPermission, ct);
         if (scope is null) return Results.Forbid();
@@ -46,7 +47,7 @@ public static partial class ExportModule
             return Problem(409, "PLAN_TARGET_MISSING", "Create a draft with a target product.");
         PlanningCandidateSnapshot snapshot;
         try { snapshot = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
-            request.FacilityId, db, ledger, ct, withCompatibility: true); }
+            request.FacilityId, db, ledger, ct, withCompatibility: true, ownReservations: ownReservations); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
         { return CandidateFailure(ex); }
         var revision = PlanScopeRevision(snapshot, plan, target);
@@ -89,84 +90,93 @@ public static partial class ExportModule
         }
         string? passingDependencyRevision = null;
         object? passingEvidenceSnapshot = null;
-        var result = await AssessedGreedySearch.SearchAsync(snapshot.Candidates,
-            plan.TargetMassKg, target, snapshot.CatalogCommodityId,
-            snapshot.Compatibilities.Value, async (selection, token) =>
+        async Task<BlendAssessmentResult> AssessAsync(GreedyStockSelection.Result selection, CancellationToken token)
+        {
+            var selected = selection.Allocations.Select(x => new CandidateGroupItem(
+                x.LotId, x.LocationId, x.QuantityKg, x.CandidateRevision)).ToArray();
+            var yield = selection.CompatibilityPolicyId is { } compatibilityId &&
+                yieldByCompatibility.TryGetValue(compatibilityId, out var found) ? found : null;
+            var group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = revision },
+                selected, target, selection.Mode, revision,
+                selection.CompatibilityPolicyId, yield is not null);
+            if (group.Status == "INVALID") return new BlendAssessmentResult("FAIL", null,
+                group.Findings.Select(x => new BlendAssessmentFinding(x, "FAIL", null,
+                    null, null, null)).ToArray());
+            IReadOnlyList<ResidueResult>? bounds = null;
+            DateTimeOffset evidenceAt = snapshot.ObservedAt;
+            if (policy is { RequiredSubstanceIds.Length: > 0 })
             {
-                var selected = selection.Allocations.Select(x => new CandidateGroupItem(
-                    x.LotId, x.LocationId, x.QuantityKg, x.CandidateRevision)).ToArray();
-                var yield = selection.CompatibilityPolicyId is { } compatibilityId &&
-                    yieldByCompatibility.TryGetValue(compatibilityId, out var found) ? found : null;
-                var group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = revision },
-                    selected, target, selection.Mode, revision,
-                    selection.CompatibilityPolicyId, yield is not null);
-                if (group.Status == "INVALID") return new BlendAssessmentResult("FAIL", null,
-                    group.Findings.Select(x => new BlendAssessmentFinding(x, "FAIL", null,
-                        null, null, null)).ToArray());
-                IReadOnlyList<ResidueResult>? bounds = null;
-                DateTimeOffset evidenceAt = snapshot.ObservedAt;
-                if (policy is { RequiredSubstanceIds.Length: > 0 })
+                Guid? outputCommodity = null;
+                if (selection.CompatibilityPolicyId is { } selectedPolicy)
                 {
-                    Guid? outputCommodity = null;
-                    if (selection.CompatibilityPolicyId is { } selectedPolicy)
-                    {
-                        var matching = snapshot.Compatibilities.Value.EnumerateArray()
-                            .Single(x => x.GetProperty("id").GetGuid() == selectedPolicy);
-                        if (matching.TryGetProperty("outputLedgerCommodityId", out var value) &&
-                            value.ValueKind == System.Text.Json.JsonValueKind.String)
-                            outputCommodity = value.GetGuid();
-                    }
-                    var evidence = await residue.PreviewSelectionAsync(selected.GroupBy(x => x.LotId)
-                        .Select(x => new HypotheticalBlendInput(x.Key,
-                            ExportRules.Text(x.Sum(y => y.QuantityKg)))).ToArray(),
-                        outputCommodity, policy.RequiredSubstanceIds, token);
-                    evidenceAt = evidence.SnapshotAt;
-                    bounds = selection.Mode == "DIRECT_STOCK"
-                        ? DirectStockResidueAssessment.ConservativeBounds(evidence.Inputs,
-                            policy.RequiredSubstanceIds)
-                        : evidence.HypotheticalBlend?.Results;
+                    var matching = snapshot.Compatibilities.Value.EnumerateArray()
+                        .Single(x => x.GetProperty("id").GetGuid() == selectedPolicy);
+                    if (matching.TryGetProperty("outputLedgerCommodityId", out var value) &&
+                        value.ValueKind == System.Text.Json.JsonValueKind.String)
+                        outputCommodity = value.GetGuid();
                 }
-                var mrl = await applicableMrl.ResolveAsync(order.MarketId,
-                    order.CommodityId, evidenceAt, token);
-                var yieldRule = yield is null ? null : new BlendYieldRule(yield.Id,
-                    yield.VersionNo, decimal.Parse(yield.OutputFraction,
-                        CultureInfo.InvariantCulture), yield.EvidenceId.ToString());
-                IReadOnlyList<BlendQualityObservation> observations;
-                try
+                var evidence = await residue.PreviewSelectionAsync(selected.GroupBy(x => x.LotId)
+                    .Select(x => new HypotheticalBlendInput(x.Key,
+                        ExportRules.Text(x.Sum(y => y.QuantityKg)))).ToArray(),
+                    outputCommodity, policy.RequiredSubstanceIds, token);
+                evidenceAt = evidence.SnapshotAt;
+                bounds = selection.Mode == "DIRECT_STOCK"
+                    ? DirectStockResidueAssessment.ConservativeBounds(evidence.Inputs,
+                        policy.RequiredSubstanceIds)
+                    : evidence.HypotheticalBlend?.Results;
+            }
+            var mrl = await applicableMrl.ResolveAsync(order.MarketId,
+                order.CommodityId, evidenceAt, token);
+            var yieldRule = yield is null ? null : new BlendYieldRule(yield.Id,
+                yield.VersionNo, decimal.Parse(yield.OutputFraction,
+                    CultureInfo.InvariantCulture), yield.EvidenceId.ToString());
+            IReadOnlyList<BlendQualityObservation> observations;
+            try
+            {
+                var quality = await ledger.ReadPlanningQualityObservationsAsync(
+                    scope.Value.Company, request.FacilityId,
+                    selected.Select(x => x.LotId).Distinct().ToArray(), evidenceAt, token);
+                observations = quality.Select(x => new BlendQualityObservation(x.LotId,
+                    x.AttributeId, decimal.Parse(x.MeasuredValue,
+                        CultureInfo.InvariantCulture), x.Unit, x.Id, x.VersionNo)).ToArray();
+            }
+            catch (LedgerException ex) when (ex.StatusCode == 503)
+            {
+                observations = [];
+            }
+            var assessment = BlendAssessment.Evaluate(selection.Mode, plan.TargetMassKg,
+                selected, yieldRule, assessmentRule, mrl, bounds, limits,
+                qualityRules, observations);
+            if (assessment.Status == "PASS")
+            {
+                passingDependencyRevision = ExportRules.Hash("blend-assessment-dependencies",
+                    new { mrl, policy, yield, bounds, observations });
+                passingEvidenceSnapshot = new
                 {
-                    var quality = await ledger.ReadPlanningQualityObservationsAsync(
-                        scope.Value.Company, request.FacilityId,
-                        selected.Select(x => x.LotId).Distinct().ToArray(), evidenceAt, token);
-                    observations = quality.Select(x => new BlendQualityObservation(x.LotId,
-                        x.AttributeId, decimal.Parse(x.MeasuredValue,
-                            CultureInfo.InvariantCulture), x.Unit, x.Id, x.VersionNo)).ToArray();
-                }
-                catch (LedgerException ex) when (ex.StatusCode == 503)
-                {
-                    observations = [];
-                }
-                var assessment = BlendAssessment.Evaluate(selection.Mode, plan.TargetMassKg,
-                    selected, yieldRule, assessmentRule, mrl, bounds, limits,
-                    qualityRules, observations);
-                if (assessment.Status == "PASS")
-                {
-                    passingDependencyRevision = ExportRules.Hash("blend-assessment-dependencies",
-                        new { mrl, policy, yield, bounds, observations });
-                    passingEvidenceSnapshot = new
-                    {
-                        applicableMrl = mrl,
-                        assessmentPolicy = policy,
-                        outputYieldRule = yield,
-                        residueBounds = bounds,
-                        qualityObservations = observations
-                    };
-                }
-                return assessment;
-            }, request.MaxIterations, ct, InputTarget, snapshot.OrderCommodityCode);
+                    applicableMrl = mrl,
+                    assessmentPolicy = policy,
+                    outputYieldRule = yield,
+                    residueBounds = bounds,
+                    qualityObservations = observations
+                };
+            }
+            return assessment;
+        }
+
+        AssessedGreedySearch.Result result;
+        if (savedSelection is null)
+            result = await AssessedGreedySearch.SearchAsync(snapshot.Candidates, plan.TargetMassKg,
+                target, snapshot.CatalogCommodityId, snapshot.Compatibilities.Value, AssessAsync,
+                request.MaxIterations, ct, InputTarget, snapshot.OrderCommodityCode);
+        else
+        {
+            var assessment = await AssessAsync(savedSelection, ct);
+            result = new(assessment.Status, 1, savedSelection, assessment, []);
+        }
 
         PlanningCandidateSnapshot refreshed;
         try { refreshed = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
-            request.FacilityId, db, ledger, ct, withCompatibility: true); }
+            request.FacilityId, db, ledger, ct, withCompatibility: true, ownReservations: ownReservations); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
         { return CandidateFailure(ex); }
         var currentPlan = await db.BlendPlanDrafts.AsNoTracking().SingleAsync(x => x.Id == id, ct);

@@ -172,6 +172,24 @@ public static class LedgerDatabase
              TO {role};
             """, connection, transaction);
         await grant.ExecuteNonQueryAsync(ct);
+        await using var approvalGrants = new NpgsqlCommand("""
+            DO $grants$
+            DECLARE runtime_role text := current_setting('grainledger.runtime_role');
+            BEGIN
+                IF to_regclass('grainledger.exports_blend_plan_decisions') IS NOT NULL THEN
+                    EXECUTE format('GRANT SELECT, INSERT ON grainledger.exports_blend_plan_decisions TO %I', runtime_role);
+                    EXECUTE format('GRANT SELECT, INSERT, DELETE ON grainledger.exports_active_blend_approvals TO %I', runtime_role);
+                    EXECUTE format('GRANT SELECT ON grainledger.ledger_blend_reservations, grainledger.ledger_blend_reservation_events TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_reserve_approved_blend(uuid,uuid)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_reserve_approved_blend(uuid,uuid) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_release_revoked_blend(uuid,uuid)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_release_revoked_blend(uuid,uuid) TO %I', runtime_role);
+                END IF;
+            END $grants$;
+            """, connection, transaction);
+        await approvalGrants.ExecuteNonQueryAsync(ct);
         await EnsureRuntimeRoleAsync(connection, transaction, runtimeRole, ct);
         await transaction.CommitAsync(ct);
     }
@@ -287,6 +305,11 @@ public static class LedgerDatabase
               ('ledger_receiving_threshold_history',false,false,false,false),
               ('ledger_receiving_threshold_overrides',false,false,false,false),
               ('ledger_residue_evaluations',false,false,false,false)
+            ), optional_table(name,can_select,can_insert,can_update,can_delete) AS (VALUES
+              ('exports_blend_plan_decisions',true,true,false,false),
+              ('exports_active_blend_approvals',true,true,false,true),
+              ('ledger_blend_reservations',true,false,false,false),
+              ('ledger_blend_reservation_events',true,false,false,false)
             ), expected_function(signature) AS (VALUES
               ('grainledger.ledger_command(uuid,text,jsonb)'),
               ('grainledger.ledger_read(uuid,text,jsonb)'),
@@ -323,6 +346,8 @@ public static class LedgerDatabase
               ('grainledger.ledger_assigned(uuid,uuid)'),
               ('grainledger.ledger_own(uuid,uuid)'),
               ('grainledger.ledger_role(uuid)')
+            ), optional_function(signature) AS (VALUES ('grainledger.ledger_reserve_approved_blend(uuid,uuid)'),
+              ('grainledger.ledger_release_revoked_blend(uuid,uuid)')
             ), expected_sequence(name,can_usage,can_select,can_update) AS (VALUES
               ('identity_audit_events_Id_seq',true,true,false),
               ('ledger_lot_code_serial',false,false,false)
@@ -352,7 +377,7 @@ public static class LedgerDatabase
              OR NOT coalesce(has_schema_privilege($1,to_regnamespace('grainledger'),'USAGE'),false)
              OR coalesce(has_schema_privilege($1,to_regnamespace('grainledger'),'CREATE'),false)
              OR EXISTS (SELECT 1 FROM expected_table e LEFT JOIN app_tables t ON t.relname=e.name WHERE t.oid IS NULL)
-             OR EXISTS (SELECT 1 FROM app_tables t LEFT JOIN expected_table e ON e.name=t.relname WHERE
+             OR EXISTS (SELECT 1 FROM app_tables t LEFT JOIN (SELECT * FROM expected_table UNION ALL SELECT * FROM optional_table) e ON e.name=t.relname WHERE
                 has_table_privilege($1,t.oid,'SELECT') IS DISTINCT FROM coalesce(e.can_select,false)
                 OR has_table_privilege($1,t.oid,'INSERT') IS DISTINCT FROM coalesce(e.can_insert,false)
                 OR has_table_privilege($1,t.oid,'UPDATE') IS DISTINCT FROM coalesce(e.can_update,false)
@@ -363,7 +388,8 @@ public static class LedgerDatabase
                 OR (NOT coalesce(e.can_update,false) AND has_any_column_privilege($1,t.oid,'UPDATE'))
                 OR has_any_column_privilege($1,t.oid,'REFERENCES'))
              OR EXISTS (SELECT 1 FROM expected_function e WHERE to_regprocedure(e.signature) IS NULL OR NOT has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
-             OR EXISTS (SELECT 1 FROM app_functions f WHERE has_function_privilege($1,f.oid,'EXECUTE') AND NOT EXISTS (SELECT 1 FROM expected_function e WHERE to_regprocedure(e.signature)=f.oid))
+             OR EXISTS (SELECT 1 FROM optional_function e WHERE to_regprocedure(e.signature) IS NOT NULL AND NOT has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
+             OR EXISTS (SELECT 1 FROM app_functions f WHERE has_function_privilege($1,f.oid,'EXECUTE') AND NOT EXISTS (SELECT 1 FROM (SELECT * FROM expected_function UNION ALL SELECT * FROM optional_function) e WHERE to_regprocedure(e.signature)=f.oid))
              OR EXISTS (SELECT 1 FROM expected_sequence e LEFT JOIN app_sequences s ON s.relname=e.name WHERE s.oid IS NULL)
              OR EXISTS (SELECT 1 FROM app_sequences s LEFT JOIN expected_sequence e ON e.name=s.relname WHERE
                 has_sequence_privilege($1,s.oid,'USAGE') IS DISTINCT FROM coalesce(e.can_usage,false)
@@ -375,7 +401,7 @@ public static class LedgerDatabase
                 SELECT 1 FROM reachable_roles reachable
                 WHERE (
                     coalesce(has_schema_privilege(reachable.oid,to_regnamespace('grainledger'),'CREATE'),false)
-                    OR EXISTS (SELECT 1 FROM app_tables t LEFT JOIN expected_table e ON e.name=t.relname WHERE
+                    OR EXISTS (SELECT 1 FROM app_tables t LEFT JOIN (SELECT * FROM expected_table UNION ALL SELECT * FROM optional_table) e ON e.name=t.relname WHERE
                         (NOT coalesce(e.can_select,false) AND (has_table_privilege(reachable.oid,t.oid,'SELECT') OR has_any_column_privilege(reachable.oid,t.oid,'SELECT')))
                         OR (NOT coalesce(e.can_insert,false) AND (has_table_privilege(reachable.oid,t.oid,'INSERT') OR has_any_column_privilege(reachable.oid,t.oid,'INSERT')))
                         OR (NOT coalesce(e.can_update,false) AND (has_table_privilege(reachable.oid,t.oid,'UPDATE') OR has_any_column_privilege(reachable.oid,t.oid,'UPDATE')))
@@ -383,7 +409,7 @@ public static class LedgerDatabase
                         OR has_table_privilege(reachable.oid,t.oid,'TRUNCATE,REFERENCES,TRIGGER')
                         OR has_any_column_privilege(reachable.oid,t.oid,'REFERENCES'))
                     OR EXISTS (SELECT 1 FROM app_functions f WHERE has_function_privilege(reachable.oid,f.oid,'EXECUTE')
-                        AND NOT EXISTS (SELECT 1 FROM expected_function e WHERE to_regprocedure(e.signature)=f.oid))
+                        AND NOT EXISTS (SELECT 1 FROM (SELECT * FROM expected_function UNION ALL SELECT * FROM optional_function) e WHERE to_regprocedure(e.signature)=f.oid))
                     OR EXISTS (SELECT 1 FROM app_sequences s LEFT JOIN expected_sequence e ON e.name=s.relname WHERE
                         (NOT coalesce(e.can_usage,false) AND has_sequence_privilege(reachable.oid,s.oid,'USAGE'))
                         OR (NOT coalesce(e.can_select,false) AND has_sequence_privilege(reachable.oid,s.oid,'SELECT'))
