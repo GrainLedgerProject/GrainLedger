@@ -24,6 +24,7 @@
     <EmbeddedResource Include="Data/Sql/InitialSchema.sql" LogicalName="GrainLedger.Data.Sql.InitialSchema.sql" />
     <EmbeddedResource Include="Data/Sql/InitialReferenceData.sql" LogicalName="GrainLedger.Data.Sql.InitialReferenceData.sql" />
     <EmbeddedResource Include="Data/Sql/InitialConstraints.sql" LogicalName="GrainLedger.Data.Sql.InitialConstraints.sql" />
+    <EmbeddedResource Include="Data/Sql/BlendApprovalReservation.sql" LogicalName="GrainLedger.Data.Sql.BlendApprovalReservation.sql" />
     <InternalsVisibleTo Include="GrainLedger.Api.IntegrationTests" />
   </ItemGroup>
 </Project>

@@ -67,6 +67,11 @@ public static partial class ExportModule
             .WithDescription("Runs bounded deterministic selection and fail-closed assessment. A PASS result receives a short-lived server-owned reference for proposal.");
         plans.MapPost("/propose", ProposeBlendPlanAsync).RequireAuthorization(Permissions.BlendPropose);
         plans.MapGet("/proposal", GetBlendPlanProposalAsync).RequireAuthorization(Permissions.ExportOrdersRead);
+        plans.MapGet("/decision", GetBlendPlanDecisionAsync).RequireAuthorization(Permissions.ExportOrdersRead)
+            .WithDescription("Reads the scoped proposal decision and recorded reservations.");
+        plans.MapPost("/reject", RejectBlendPlanAsync).RequireAuthorization(Permissions.BlendApprove);
+        plans.MapPost("/approve", ApproveBlendPlanAsync).RequireAuthorization(Permissions.BlendApprove);
+        plans.MapPost("/revoke", RevokeBlendPlanAsync).RequireAuthorization(Permissions.BlendApprove);
         plans.MapPost("/cancel", CancelPlanDraftAsync).RequireAuthorization(Permissions.BlendPropose);
     }
 

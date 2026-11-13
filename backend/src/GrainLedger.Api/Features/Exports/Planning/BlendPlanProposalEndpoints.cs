@@ -4,6 +4,7 @@ using GrainLedger.Api.Features.Identity;
 using GrainLedger.Api.Features.Ledger;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace GrainLedger.Api.Features.Exports;
 
@@ -118,6 +119,21 @@ public static partial class ExportModule
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == plan.OrderId, ct);
         var storedPreview = await db.BlendPlanPreviews.AsNoTracking()
             .SingleAsync(x => x.Id == proposal.PreviewId && x.CompanyId == scope.Value.Company, ct);
+        // F14 availability excludes reservations, including this plan's own.
+        // The decision endpoint reports recorded reservation state; execution revalidates separately.
+        try
+        {
+            var decision = await ReadBlendDecisionRowsAsync(db, id, scope.Value.Company, ct);
+            if (decision.Count > 0 && decision[0].Status != "PENDING")
+                return Results.Ok(new { proposal.Id, proposal.PlanId, proposal.PreviewId,
+                    proposal.ProposedAt, assessment = JsonSerializer.Deserialize<JsonElement>(proposal.SnapshotJson),
+                    demandCurrent = DemandIsCurrent(plan, order, container),
+                    stockAndEvidenceCurrent = (bool?)null, freshness = "NOT_RECHECKED",
+                    freshnessReasons = Array.Empty<string>(),
+                    stockReserved = decision.Any(row => row.ReservedKg > row.ReleasedKg + row.ConsumedKg) });
+        }
+        catch (PostgresException ex) when (DecisionStorageUnavailable(ex)) { }
+
         var storedRequest = JsonSerializer.Deserialize<PreviewBlendPlanRequest>(storedPreview.RequestJson);
         var reasons = new List<string>();
         if (!DemandIsCurrent(plan, order, container)) reasons.Add("DEMAND_CHANGED");

@@ -220,3 +220,102 @@ describe('F14 planning workflow', () => {
     expect(screen.queryByRole('button', { name: 'Cancel draft' })).not.toBeInTheDocument();
   });
 });
+
+describe('F15 proposal decisions', () => {
+  const recordedAt = '2026-11-13T00:00:00Z';
+  const saved = { id: 'proposal-1', proposedAt: recordedAt, assessment: preview };
+  function mockDecision({ failOnce = false, unavailable = false, stale = false, started = false } = {}) {
+    let status = started ? 'APPROVED' : 'PENDING';
+    let reason: string | null = null;
+    let history: string[] = [];
+    const requests: string[] = [];
+    function state(action = status) {
+      return { proposalId: saved.id, status: action, decisionVersion: action === 'PENDING' ? 0 : action === 'REVOKED' ? 2 : 1,
+        reason, recordedAt: action === 'PENDING' ? null : recordedAt, activeApproval: action === 'APPROVED',
+        reservation: { status: action === 'APPROVED' ? 'HELD' : action === 'REVOKED' ? 'RELEASED' : 'NOT_RESERVED',
+          reservedKg: ['APPROVED', 'REVOKED'].includes(action) ? '1000' : '0', releasedKg: action === 'REVOKED' ? '1000' : '0',
+          consumedKg: '0', remainingKg: action === 'APPROVED' ? '1000' : '0' } };
+    }
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.endsWith('/plan-1')) return json({ ...plan, hasProposal: true });
+      if (path.endsWith('/proposal')) return json({ ...saved, freshness: status !== 'PENDING' ? 'NOT_RECHECKED' : stale ? 'STALE' : 'CURRENT' });
+      if (path.endsWith('/decision')) return unavailable ? json({ code: 'DECISION_SCHEMA_NOT_READY' }, 503) : json(state());
+      if (path.endsWith('/container-1')) return json({ status: started ? 'LOADING' : 'PLANNED' });
+      if (path.includes('/history?')) return json({ ...emptyPage, items: history.map(action => ({ action, recordedAt, actorName: 'Demo Manager' })), totalCount: history.length });
+      if (path.endsWith('/csrf')) return json({ token: 'csrf' });
+      if (init?.method === 'POST' && /\/(approve|reject|revoke)$/.test(path)) {
+        const body = String(init.body);
+        requests.push(body);
+        if (requests.length === 2 && failOnce) return json(state());
+        const action = path.split('/').at(-1);
+        status = action === 'approve' ? 'APPROVED' : action === 'reject' ? 'REJECTED' : 'REVOKED';
+        reason = JSON.parse(body).reason ?? null;
+        history = [`PLAN_${status}`, ...history];
+        if (failOnce && requests.length === 1) throw new TypeError('Network failure');
+        return json(state());
+      }
+      return json({}, 404);
+    });
+    return requests;
+  }
+
+  function open(canApprove = true) {
+    render(<BlendPlanWorkspace planId="plan-1" userId={canApprove ? 'manager' : 'staff'} canApprove={canApprove} canPropose={false} canReadLedger={false} onNavigate={vi.fn()} />);
+  }
+
+  it('retries the exact approval after a lost response, then revokes and refreshes history', async () => {
+    const requests = mockDecision({ failOnce: true });
+    const user = userEvent.setup();
+    open();
+    await user.click(await screen.findByRole('button', { name: 'Approve proposal' }));
+    await user.click(screen.getByRole('button', { name: 'Approve and reserve stock' }));
+    await user.click(await screen.findByRole('button', { name: 'Retry same decision' }));
+    await user.click(await screen.findByRole('button', { name: 'Revoke approval' }));
+    expect(requests[1]).toBe(requests[0]);
+    expect(JSON.parse(requests[0])).toMatchObject({ proposalId: saved.id, expectedDecisionVersion: 0 });
+    expect(screen.getByText('Still held').nextElementSibling).toHaveTextContent('1000 kg');
+    const revoke = screen.getByRole('button', { name: 'Revoke approval and release stock' });
+    expect(revoke).toBeDisabled();
+    await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Buyer cancelled');
+    await user.click(revoke);
+    expect(await screen.findByText('Plan revoked')).toBeInTheDocument();
+    expect(await screen.findByText('Buyer cancelled')).toBeInTheDocument();
+    expect(screen.getByText('Still held').nextElementSibling).toHaveTextContent('0 kg');
+    expect(JSON.parse(requests[2])).toMatchObject({ proposalId: saved.id, expectedDecisionVersion: 1, reason: 'Buyer cancelled' });
+  });
+
+  it('allows rejection with a reason even when a saved proposal is stale', async () => {
+    const requests = mockDecision({ stale: true });
+    const user = userEvent.setup();
+    open();
+    await user.click(await screen.findByRole('button', { name: 'Reject proposal' }));
+    expect(screen.queryByRole('button', { name: 'Approve proposal' })).not.toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Stock changed');
+    await user.click(screen.getByRole('button', { name: 'Reject proposal' }));
+    expect(await screen.findByText('Plan rejected')).toBeInTheDocument();
+    expect(JSON.parse(requests[0])).toMatchObject({ reason: 'Stock changed', expectedDecisionVersion: 0 });
+  });
+
+  it('lets staff read a decision without manager actions', async () => {
+    mockDecision();
+    open(false);
+    expect(await screen.findByText('Pending review')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject proposal' })).not.toBeInTheDocument();
+  });
+
+  it('hides revocation after container execution starts', async () => {
+    mockDecision({ started: true });
+    open();
+    expect(await screen.findByText('Revocation is unavailable once container execution begins.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Revoke approval' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the saved proposal visible when decision storage is unavailable', async () => {
+    mockDecision({ unavailable: true });
+    open();
+    expect(await screen.findByText(/Decision and reservation details are unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Saved proposal' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve proposal' })).not.toBeInTheDocument();
+  });
+});

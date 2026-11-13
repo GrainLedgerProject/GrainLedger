@@ -160,9 +160,9 @@ function TargetsEditor({ rows, onChange, errors, massUnits }: { rows: Target[]; 
   </section>;
 }
 
-export function ExportOrders({ canWrite, canPropose = false, canReadLedger = false, path, onNavigate, userId = 'current', listState = initialExportListState, onListStateChange = () => {} }: { canWrite: boolean; canPropose?: boolean; canReadLedger?: boolean; path: string; onNavigate: (path: string) => void; userId?: string; listState?: ExportListState; onListStateChange?: (state: ExportListState) => void }) {
+export function ExportOrders({ canWrite, canPropose = false, canApprove = false, canReadLedger = false, path, onNavigate, userId = 'current', listState = initialExportListState, onListStateChange = () => {} }: { canWrite: boolean; canPropose?: boolean; canApprove?: boolean; canReadLedger?: boolean; path: string; onNavigate: (path: string) => void; userId?: string; listState?: ExportListState; onListStateChange?: (state: ExportListState) => void }) {
   const planId = path.match(/^\/export\/blend-plans\/([^/]+)(?:\/proposal)?\/?$/)?.[1];
-  if (planId) return <BlendPlanWorkspace key={planId} planId={planId} userId={userId} canPropose={canPropose} canReadLedger={canReadLedger} onNavigate={onNavigate} />;
+  if (planId) return <BlendPlanWorkspace key={planId} planId={planId} userId={userId} canPropose={canPropose} canApprove={canApprove} canReadLedger={canReadLedger} onNavigate={onNavigate} />;
   const id = path.match(/^\/export\/orders\/([^/]+)\/?$/)?.[1];
   const containerId = path.match(/^\/export\/containers\/([^/]+)\/?$/)?.[1];
   if (containerId) return <ContainerDetail key={containerId} id={containerId} userId={userId} canWrite={canWrite} canPropose={canPropose} onNavigate={onNavigate} />;
