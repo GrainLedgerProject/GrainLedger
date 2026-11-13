@@ -159,6 +159,15 @@ public sealed class BrowserWorkflowHost
             $"/api/source-lots/{mixedReceipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()}");
         var mixedPool = traceSource!.CurrentStock.Single().CurrentStockLotId;
         await scenario.HoldAsync(mixedRoot);
+        using var containerExecution = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_CONTAINER_EXECUTION") == "true"
+            ? await ContainerExecutionScenario.CreateAsync(factory, preBlended: true) : null;
+        if (containerExecution is not null)
+        {
+            var (containerUser, containerSession) = await factory.SeedUserAsync(Roles.ExportStaff, containerExecution.Stock.OwnerId);
+            var containerClient = factory.CreateRealCookieClient(containerUser, containerSession);
+            scenario.Accounts.Add("containerExport", (containerUser, containerSession, containerClient));
+            scenario.Accounts.Add("containerCustomer", containerExecution.Stock.Accounts["customer"]);
+        }
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -340,6 +349,11 @@ public sealed class BrowserWorkflowHost
                     uncoveredSubstanceId = companyPolicy.OtherSubstanceId
                 },
                 evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(),
+                containerExecution = containerExecution is null ? null : new {
+                    id = containerExecution.ContainerId, route = containerExecution.Route, proposalId = containerExecution.ProposalId,
+                    lotId = containerExecution.LotId, locationId = containerExecution.Stock.LocationId,
+                    sourceId = containerExecution.SourceId, uiUrl = $"{uiUrl}/export/containers/{containerExecution.ContainerId}"
+                },
                 traceSourceLotId, traceOutputLotId, mixedRoot, mixedPool, accounts
             }, new JsonSerializerOptions { WriteIndented = true });
         try { await bridge.StartAsync(); await bridge.WaitForShutdownAsync(); }

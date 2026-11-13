@@ -1,5 +1,7 @@
 # Plan hiện hành: từ loading draft đến loading thật
 
+> Current execution work and remaining dependencies: [13 November execution plan](container-execution-plan-2026-11-13.md). This document preserves its earlier implementation baseline.
+
 > Cập nhật 13/11/2026: đã chuyển theo monolith trên dev. Đánh giá và thứ tự triển khai hiện hành nằm trong [báo cáo sau merge](../reports/container-completion-review-2026-11-13.md). Các mốc 10/2026 dưới đây là lịch sử, không dùng làm hướng dẫn migration hiện tại.
 
 Ngày: **25/10/2026**. Nhánh: `feat/container`, baseline `3295cb6`, đã merge dev `eecde7e`. Plan này thay **thứ tự ưu tiên** ở các roadmap cũ; [plan gốc](container-loading-implementation-plan.md) giữ yêu cầu, invariants, lịch sử và kết quả kiểm chứng.

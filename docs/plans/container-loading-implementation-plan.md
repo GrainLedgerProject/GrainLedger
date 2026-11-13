@@ -1,5 +1,7 @@
 # Kế hoạch loading và đóng container
 
+> Current execution work and remaining dependencies: [13 November execution plan](container-execution-plan-2026-11-13.md). This document preserves its earlier implementation baseline.
+
 > Cập nhật 13/11/2026: đã chuyển theo monolith trên dev. Đánh giá và thứ tự triển khai hiện hành nằm trong [báo cáo sau merge](../reports/container-completion-review-2026-11-13.md). Các mốc 10/2026 dưới đây là lịch sử, không dùng làm hướng dẫn migration hiện tại.
 
 **Plan thực thi hiện hành:** [từ loading draft đến loading thật](container-loading-next-plan.md), cập nhật 25/10/2026. Tách LOADING khỏi CLOSE; mục bên dưới giữ căn cứ và nhật ký trước đó.

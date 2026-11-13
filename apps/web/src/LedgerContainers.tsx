@@ -82,7 +82,7 @@ export function LedgerContainers({ user, active = true, onTrace }: { user: User;
   const canEvidence = user.permissions.includes('residue.evaluate');
   const canTrace = !!onTrace && user.permissions.some(permission => permission === 'trace.read.tenant' || permission === 'trace.read.all');
   return <>
-    <div className="ledger-task-intro"><h2>Containers</h2><p>Prepare loading after blending, then check the requirements for closure.</p></div>
+    <div className="ledger-task-intro"><h2>Containers</h2><p>Legacy preparation drafts. Actual loading and closure are recorded from an approved Export container.</p>{user.permissions.includes('export-orders.read') && <p><a href="/export/orders">Open Export orders to load or close a planned container</a></p>}</div>
     <Feedback error={error} />
     <p className="notice">Preparation is available. Approved order/blend outputs, stock reservations, export assessment and container restrictions are awaiting integration. Saving a draft does not hold or withdraw stock. Loading and closure are unavailable until these checks are connected.</p>
     {writable && <Panel title="Create container"><form onSubmit={create}>

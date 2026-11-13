@@ -71,6 +71,8 @@ public static partial class ExportModule
             .RequireAuthorization(Permissions.ExportOrdersWrite).AddEndpointFilter<NoStoreFilter>()
             .AddEndpointFilter<MutationAntiforgeryFilter>().AddEndpointFilter<ReadyFilter>();
         MapBlendPlanning(endpoints);
+        MapContainerExecution(endpoints);
+        MapContainerTrace(endpoints);
         return endpoints;
     }
 

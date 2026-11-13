@@ -16,7 +16,7 @@ export type TraceRelation = { relationType?: 'PROCESSING' | 'CUSTODY'; relationI
   operationId: string | null; inputLotId: string; outputLotId: string; inputConsumedKg: string; outputProducedKg: string; inputEventKg?: string;
   sourceAllocations?: { sourceLotId: string; quantityKg: string }[] | null };
 export type LabTraceOrigin = { reportId: string; resultId: string };
-export type LotTrace = { labOrigin?: LabTraceOrigin & { lotId: string; sampleId: string }; schemaVersion?: number; graphBasis?: string; positivePathCoverage?: string;
+export type LotTrace = { actualContainers?: { containerId: string; code: string; status: string; linkedLoadedKg: string; basis: string; held: boolean; restricted?: boolean }[]; containerCoverage?: string; labOrigin?: LabTraceOrigin & { lotId: string; sampleId: string }; schemaVersion?: number; graphBasis?: string; positivePathCoverage?: string;
   custodyEvents?: { id: string; action: 'INGRESS' | 'WITHDRAW'; locationId: string; revision: number; occurredAt: string; primaryOutputLotId: string }[]; traceId: string; targetLotId: string; direction: 'forward' | 'backward'; view: 'current' | 'history'; asOf: string; complete: boolean; lotCount: number; edgeCount: number;
   sourceContributionsVisible: boolean; lots: TraceLot[];
   edges: TraceRelation[];
@@ -89,6 +89,7 @@ export function LedgerTraceability({ user, active = true, initialLotId, initialL
       <Panel title="Trace result">
         <p role="status">Complete {result.direction} trace: {result.lotCount} lots, {result.edgeCount} relationships. {result.view === 'history' ? 'Historical operations include superseded records.' : 'Superseded operations excluded.'}</p>
         <p>Snapshot: {new Date(result.asOf).toLocaleString()} · Reference: {result.traceId}</p>
+        {result.direction === 'forward' && result.actualContainers && <section><h3>Actual container targets</h3><p className="muted">Committed loading linked to this material path. These are actual loaded kg, separate from planned allocations and current stock.</p>{result.actualContainers.length ? <div className="table-scroll"><table aria-label="Actual container targets"><thead><tr><th>Container</th><th>Linked loaded kg</th><th>Status</th><th>HOLD</th></tr></thead><tbody>{result.actualContainers.map(container => <tr key={container.containerId}><td><a href={`/export/containers/${container.containerId}`}>{container.code}</a></td><td>{container.linkedLoadedKg}</td><td>{container.status}</td><td>{container.held ? 'Container HOLD' : container.restricted ? 'Loaded lot restriction' : 'None'}</td></tr>)}</tbody></table></div> : <p>No actual containers on this path.</p>}</section>}
         <p>Storage generations and processing stages overlap. Do not add every row as a total mass. Recorded relationships do not establish contamination or compliance.</p>
         <div className="trace-display-options" role="group" aria-label="Trace result display"><button type="button" aria-pressed={display === 'table'} onClick={() => setDisplay('table')}>Table</button><button type="button" aria-pressed={display === 'flowchart'} onClick={() => setDisplay('flowchart')}>Flowchart</button></div>
         {display === 'flowchart' ? <TraceFlowchart key={result.traceId} trace={result} selectedId={selectedId} onSelect={selectLot} onShowTable={() => setDisplay('table')} /> : <>

@@ -176,6 +176,9 @@ public static class LedgerDatabase
             DO $grants$
             DECLARE runtime_role text := current_setting('grainledger.runtime_role');
             BEGIN
+                IF to_regprocedure('grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb), grainledger.ledger_export_container_read(uuid,uuid,text,integer,integer), grainledger.ledger_container_targets(uuid,uuid,uuid[]) TO %I', runtime_role);
+                END IF;
                 IF to_regprocedure('grainledger.ledger_container_action(uuid,text,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_action(uuid,text,jsonb) TO %I', runtime_role);
                 END IF;
@@ -309,6 +312,15 @@ public static class LedgerDatabase
               ('ledger_receiving_threshold_overrides',false,false,false,false),
               ('ledger_residue_evaluations',false,false,false,false)
             ), optional_table(name,can_select,can_insert,can_update,can_delete) AS (VALUES
+              ('ledger_container_execution',false,false,false,false),
+              ('ledger_container_loads',false,false,false,false),
+              ('ledger_container_load_lines',false,false,false,false),
+              ('ledger_container_load_sources',false,false,false,false),
+              ('ledger_container_source_balances',false,false,false,false),
+              ('ledger_container_holds',false,false,false,false),
+              ('ledger_container_closures',false,false,false,false),
+              ('ledger_container_execution_requests',false,false,false,false),
+              ('ledger_container_execution_events',false,false,false,false),
               ('ledger_containers',false,false,false,false),
               ('ledger_container_loading_drafts',false,false,false,false),
               ('ledger_container_events',false,false,false,false),
@@ -355,7 +367,10 @@ public static class LedgerDatabase
               ('grainledger.ledger_role(uuid)')
             ), optional_function(signature) AS (VALUES ('grainledger.ledger_reserve_approved_blend(uuid,uuid)'),
               ('grainledger.ledger_release_revoked_blend(uuid,uuid)'),
-              ('grainledger.ledger_container_action(uuid,text,jsonb)')
+              ('grainledger.ledger_container_action(uuid,text,jsonb)'),
+              ('grainledger.ledger_export_container_read(uuid,uuid,text,integer,integer)'),
+              ('grainledger.ledger_container_targets(uuid,uuid,uuid[])'),
+              ('grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb)')
             ), expected_sequence(name,can_usage,can_select,can_update) AS (VALUES
               ('identity_audit_events_Id_seq',true,true,false),
               ('ledger_lot_code_serial',false,false,false)

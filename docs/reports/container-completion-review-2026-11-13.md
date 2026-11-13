@@ -1,5 +1,7 @@
 # Báo cáo hoàn tất luồng container sau khi merge dev
 
+> Post-merge review baseline. Subsequent implementation is recorded in the [execution plan](../plans/container-execution-plan-2026-11-13.md), [API contract](../api/container-execution-api.md) and [verification record](container-execution-verification-2026-11-13.md). The gap inventory below describes the state before that implementation.
+
 Ngày đánh giá: **13/11/2026**. Nhánh thực hiện: `feat/container`. Nền container trước merge: `567297c`. Nền dev đã đọc và merge: **`57f247d`**, cùng toàn bộ thay đổi mới kể từ điểm chung `eecde7e`.
 
 Đây là **báo cáo hiện hành và thứ tự công việc cho lần triển khai tiếp theo**. Các plan tháng 10 được giữ làm lịch sử. Báo cáo phân biệt code đang có, phần chưa nối và quyết định nghiệp vụ chưa xác nhận; không coi trạng thái source là bằng chứng DB dùng chung đã được triển khai.

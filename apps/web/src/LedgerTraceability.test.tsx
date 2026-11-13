@@ -310,3 +310,19 @@ it('loads residue only for the requested selected node and keeps it separate fro
   expect(screen.queryByRole('heading', { name: 'Lot residue bounds' })).not.toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`${childId}/residue`))).toBe(false);
 });
+
+it('shows actual container targets separately from stock and keeps Export source composition hidden', async () => {
+  fetchMock.mockImplementation(async url => {
+    if (String(url) === '/api/auth/csrf') return response({ token: 'csrf' });
+    if (String(url).startsWith('/api/ledger/trace/starts?')) return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+    return response({ ...trace, direction: 'forward', sourceContributionsVisible: false, sources: [], containerCoverage: 'ACTUAL_LOADING',
+      actualContainers: [{ containerId: 'container-1', code: 'C1-ACTUAL', status: 'LOADING', linkedLoadedKg: '4.000001', basis: 'ACTUAL_LOADING', held: false, restricted: true }] });
+  });
+  const browser = userEvent.setup(); render(<LedgerTraceability user={{ ...actor, role: 'ExportStaff', permissions: ['trace.read.tenant'], organizationId: 'customer' }} />);
+  await browser.type(screen.getByLabelText('Ledger lot ID'), lotId);
+  await browser.click(screen.getByRole('button', { name: 'Run trace' }));
+  const targets = await screen.findByRole('table', { name: 'Actual container targets' });
+  expect(targets).toHaveTextContent('4.000001'); expect(targets).toHaveTextContent('Loaded lot restriction');
+  expect(within(targets).getByRole('link', { name: 'C1-ACTUAL' })).toHaveAttribute('href', '/export/containers/container-1');
+  expect(screen.queryByRole('table', { name: 'Traced source contributions' })).not.toBeInTheDocument();
+});

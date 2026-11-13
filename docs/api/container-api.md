@@ -1,5 +1,7 @@
 # Container preparation API and integration boundary
 
+> Legacy preparation-only contract. Approved planned-container actual loading/CLOSE now has a separate [execution API](container-execution-api.md) and [current plan](../plans/container-execution-plan-2026-11-13.md). Existing drafts are retained and are not converted into actual loading.
+
 > Cập nhật 13/11/2026: đã chuyển theo monolith trên dev. Đánh giá và thứ tự triển khai hiện hành nằm trong [báo cáo sau merge](../reports/container-completion-review-2026-11-13.md). Các mốc 10/2026 dưới đây là lịch sử, không dùng làm hướng dẫn migration hiện tại.
 
 Implementation branch: `feat/container`, originally based on `feat/trace` at `f399aa7`, now integrating dev `eecde7e` (25/10/2026). Implements container preparation and loading drafts while the order/approved blend/reservation workflow is delivered separately. **There is no inventory withdrawal, reservation consumption, successful CLOSE or dossier generation in this release.** Commit and close refuse on the backend, including direct HTTP requests.

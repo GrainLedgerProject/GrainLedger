@@ -115,6 +115,10 @@ dotnet run --project backend/src/GrainLedger.Api
 
 This merge does not migrate/reset shared Supabase, transfer old-schema preparation data or claim the monolith cutover is deployed. Migrating between the old multi-schema database and the new baseline needs a separately reviewed backup/cutover/data-retention procedure. See [completion review](reports/container-completion-review-2026-11-13.md).
 
+### Direct-stock container execution
+
+Forward AppDbContext migration `20261113000100_ContainerExecution` adds private actual loading/source complement/HOLD/closure/request records and the protected planned-container command/read/target routines. Explicit runtime setup grants only these public entries, retaining no direct table/helper writes. It does not migrate legacy preparation into actuals, implement approved blend production or auto-repair startup grants. Apply only through the approved owner migration workflow after environment-specific approval; no shared deployment is asserted. [Execution API](api/container-execution-api.md) and [web guide](guides/container-execution-web-test.md) describe current supported stock and limits.
+
 ### Historical module-era deployment notes
 
 The following migration-specific instructions preserve prior release history only. They describe old per-module schemas/migrations and must not be used as current cutover or deployment instructions. Confirm current database status independently; no reset or deployment is asserted here.

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, apiWithEtag, ApiError, errorMessage } from './api';
 import { BlendPlanWorkspace, ContainerPlans } from './BlendPlanning';
+import { ContainerExecution } from './ContainerExecution';
 
 type Page<T> = { items: T[]; page: number; pageSize: number; totalCount: number; hasMore: boolean };
 type Catalog = { id: string; code: string; name: string; unit?: string; quantityKind?: string; isDeleted?: boolean };
@@ -160,12 +161,12 @@ function TargetsEditor({ rows, onChange, errors, massUnits }: { rows: Target[]; 
   </section>;
 }
 
-export function ExportOrders({ canWrite, canPropose = false, canApprove = false, canReadLedger = false, path, onNavigate, userId = 'current', listState = initialExportListState, onListStateChange = () => {} }: { canWrite: boolean; canPropose?: boolean; canApprove?: boolean; canReadLedger?: boolean; path: string; onNavigate: (path: string) => void; userId?: string; listState?: ExportListState; onListStateChange?: (state: ExportListState) => void }) {
+export function ExportOrders({ canWrite, canPropose = false, canApprove = false, canReadLedger = false, canExecuteContainers = canWrite, canHoldContainers = false, path, onNavigate, userId = 'current', listState = initialExportListState, onListStateChange = () => {} }: { canWrite: boolean; canPropose?: boolean; canApprove?: boolean; canReadLedger?: boolean; canExecuteContainers?: boolean; canHoldContainers?: boolean; path: string; onNavigate: (path: string) => void; userId?: string; listState?: ExportListState; onListStateChange?: (state: ExportListState) => void }) {
   const planId = path.match(/^\/export\/blend-plans\/([^/]+)(?:\/proposal)?\/?$/)?.[1];
   if (planId) return <BlendPlanWorkspace key={planId} planId={planId} userId={userId} canPropose={canPropose} canApprove={canApprove} canReadLedger={canReadLedger} onNavigate={onNavigate} />;
   const id = path.match(/^\/export\/orders\/([^/]+)\/?$/)?.[1];
   const containerId = path.match(/^\/export\/containers\/([^/]+)\/?$/)?.[1];
-  if (containerId) return <ContainerDetail key={containerId} id={containerId} userId={userId} canWrite={canWrite} canPropose={canPropose} onNavigate={onNavigate} />;
+  if (containerId) return <ContainerDetail key={containerId} id={containerId} userId={userId} canWrite={canWrite} canPropose={canPropose} canExecuteContainers={canExecuteContainers} canHoldContainers={canHoldContainers} onNavigate={onNavigate} />;
   if (id === 'new') return canWrite ? <CreateOrder userId={userId} onNavigate={onNavigate} /> : <p className="notice error">You cannot create export orders.</p>;
   if (id) return <OrderDetail key={id} id={id} userId={userId} canWrite={canWrite} onNavigate={onNavigate} />;
   return <OrderList canWrite={canWrite} onNavigate={onNavigate} initialState={listState} onStateChange={onListStateChange} />;
@@ -329,7 +330,7 @@ function OrderDetail({ id, userId, canWrite, onNavigate }: { id: string; userId:
   </>;
 }
 
-function ContainerDetail({ id, userId, canWrite, canPropose, onNavigate }: { id: string; userId: string; canWrite: boolean; canPropose: boolean; onNavigate: (path: string) => void }) {
+function ContainerDetail({ id, userId, canWrite, canPropose, canExecuteContainers, canHoldContainers, onNavigate }: { id: string; userId: string; canWrite: boolean; canPropose: boolean; canExecuteContainers: boolean; canHoldContainers: boolean; onNavigate: (path: string) => void }) {
   const massUnits = useMassUnits();
   const [row, setRow] = useState<Container | null>(null); const [etag, setEtag] = useState<string | null>(null);
   const [mass, setMass] = useState(''); const [unit, setUnit] = useState('');
@@ -368,6 +369,6 @@ function ContainerDetail({ id, userId, canWrite, canPropose, onNavigate }: { id:
     {pendingMutation && <div className="notice error" role="alert">A previous change has an uncertain result. <button disabled={busy} onClick={() => void save()}>Retry same change</button></div>}
     {row ? <><div className="page-heading"><span className="eyebrow">PLANNED CONTAINER</span><h1>{row.internalCode}</h1></div><section className="panel export-section"><dl className="export-facts"><div><dt>Target mass</dt><dd>{row.targetMassKg} kg</dd></div><div><dt>Status</dt><dd>{row.status}</dd></div></dl>
       {canWrite && row.status === 'PLANNED' && (edit ? <form className="export-edit-form" onSubmit={save}><fieldset className="export-fieldset" disabled={busy || !!pendingMutation}><div className="form-columns"><label>Target mass<input value={mass} onChange={event => { setMass(event.target.value); setOperationId(makeId()); setErrors({}); }} required /><FieldError errors={errors} name="targetMass" /></label><MassUnitSelect value={unit} onChange={value => { setUnit(value); setOperationId(makeId()); setErrors({}); }} catalog={massUnits} errors={errors} name="unit" /></div><div className="admin-form-actions"><button>{busy ? 'Saving…' : 'Save target'}</button><button type="button" className="secondary" onClick={() => setEdit(false)}>Cancel</button></div></fieldset></form> : !pendingMutation && !busy && <button className="secondary" onClick={() => setEdit(true)}>Edit target</button>)}
-    </section><ContainerPlans containerId={id} userId={userId} canPropose={canPropose} onNavigate={onNavigate} /></> : !error && <p role="status">Loading container…</p>}
+    </section><ContainerExecution key={`${userId}:${id}:${canExecuteContainers}:${canHoldContainers}`} id={id} userId={userId} canWrite={canExecuteContainers} canHold={canHoldContainers} onNavigate={onNavigate} /><ContainerPlans containerId={id} userId={userId} canPropose={canPropose} onNavigate={onNavigate} /></> : !error && <p role="status">Loading container…</p>}
   </>;
 }

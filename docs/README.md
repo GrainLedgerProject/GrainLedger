@@ -12,6 +12,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## API Specifications (`docs/api/`)
 
+- [Container execution API](api/container-execution-api.md): approved direct-stock loading, HOLD, closure dossier and actual container tracing
 - [Container preparation API](api/container-api.md): draft-only preparation; actual loading/CLOSE remain blocked
 - [Catalog API](api/catalog-api.md): active substances, commodities, units, and system master data
 - [Farmer API](api/farmer-api.md): farmer profiles, household registry, and farm registration
@@ -24,6 +25,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## Guides & Walkthroughs (`docs/guides/`)
 
+- [Container execution web tests](guides/container-execution-web-test.md): direct-stock loading/closure and trace/exception scenarios
 - [Authentication & Scalar API Guide](guides/auth-email-password-scalar.md): email/password auth, JWT/refresh tokens, OTP, and Scalar UI
 - [Companion Capture Codes](guides/companion-capture-codes.md): offline client synchronization codes and short token generation
 - [Development Accounts & Demo Data](guides/development-accounts.md): seeded personas, test passwords, and demo mill stock
@@ -40,6 +42,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 ## Plans & Backlogs (`docs/plans/`)
 
 - [Admin Capture Enhancements Plan](plans/admin-capture-enhancements-plan.md): administrative capture tooling, review queue, and bulk updates
+- [Container execution plan](plans/container-execution-plan-2026-11-13.md): current implementation checklist and deferred blend/output dependencies
 - [Container completion review](reports/container-completion-review-2026-11-13.md): current post-merge gaps, questions and ordered acceptance plan
 - [Container Loading Plan](plans/container-loading-plan.md): historical scope and requirements
 - [Container implementation history](plans/container-loading-implementation-plan.md) · [previous execution plan](plans/container-loading-next-plan.md) · [integration checklist](plans/container-integration-handover.md)

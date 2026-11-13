@@ -1,5 +1,7 @@
 # Container loading and closing plan
 
+> Current execution work and remaining dependencies: [13 November execution plan](container-execution-plan-2026-11-13.md). This document preserves its earlier implementation baseline.
+
 > Historical scope document. For the current merged implementation and remaining work, use the [13 November completion review](../reports/container-completion-review-2026-11-13.md). Preparation now exists; statements below describe its original planning baseline.
 
 Status: planning only. No container workflow has been implemented by this plan. Export functionality is being built by a teammate and must not be modified as part of this work.
@@ -50,12 +52,12 @@ The proposal's 25,000 kg container is an example, not a universal capacity or cl
 
 These are repository findings, not proof of deployed migrations or runtime availability.
 
-- [Ledger endpoints](../../backend/src/GrainLedger.Modules.Ledger/LedgerEndpoints.cs) provide stock, operations, transfers, lot HOLDs, corrections and history, but no container/loading/closing routes.
-- [Ledger schema](../../backend/src/GrainLedger.Modules.Ledger/Sql/Schema.sql) has lots, positions, postings and source contributions. Current HOLDs target lots, not containers.
-- [Processing commands](../../backend/src/GrainLedger.Modules.Ledger/Sql/Operations.sql) implement atomic input debits, output credits and deterministic integer-micro-kg lineage allocation. They are not loading commands.
+- [Ledger endpoints](../../backend/src/GrainLedger.Api/Features/Ledger/Endpoints/LedgerEndpoints.cs) provide stock, operations, transfers, lot HOLDs, corrections and history, but no container/loading/closing routes.
+- [Ledger schema](../../backend/src/GrainLedger.Api/Data/Sql/InitialSchema.sql) has lots, positions, postings and source contributions. Current HOLDs target lots, not containers.
+- [Processing commands](../../backend/src/GrainLedger.Api/Data/Sql/InitialSchema.sql) implement atomic input debits, output credits and deterministic integer-micro-kg lineage allocation. They are not loading commands.
 - [Architecture](../architecture.md) requires shared advisory lock `714928352`, `READ COMMITTED`, caller-owned transactions, persisted role/scope checks and mass as decimal strings normalized to `numeric(20,6)` kg.
 - Current `ledger.blocked` checks lot HOLDs, receiving restrictions and correction restrictions. Lot HOLDs do not automatically cascade to descendants. HOLD responses do not release stock.
-- [Permission grants](../../backend/src/GrainLedger.Modules.Identity/Authorization/Permissions.cs) include `containers.write` for ExportStaff and `containers.operate` for MillOperator, but neither currently has a container endpoint. Dormant grants do not settle the business workflow.
+- [Permission grants](../../backend/src/GrainLedger.Api/Features/Identity/Authorization/Permissions.cs) include `containers.write` for ExportStaff and `containers.operate` for MillOperator, but neither currently has a container endpoint. Dormant grants do not settle the business workflow.
 - [Working app](../../apps/web/src/App.tsx) has no export/container workspace. Container pages in the nested [prototype router](../../apps/web/grainledger/src/app/router/routes.tsx) are placeholders, not implementation or approved policy.
 - [Laboratory contract](../api/sample-api.md#laboratory-report-routes) preserves immutable procurement evidence. Its current VN numeric baseline comparison is not a persisted destination assessment or authorization to load. Do not reuse it as a global PASS flag.
 - No mass reservation exists. `lot_code_reservations` reserves human lot codes, not stock.
