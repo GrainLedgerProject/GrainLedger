@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -20,7 +21,7 @@ public sealed class PlotSeasonTests(ApiFactory factory) : IClassFixture<ApiFacto
     private async Task<Plot> SeedPlotAsync(Guid companyId)
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var farmer = new Farmer { Id = Guid.NewGuid(), CompanyId = companyId, Code = Guid.NewGuid().ToString("N"),
             Name = "Test Farmer", CreatedAt = DateTimeOffset.UtcNow };
         var plot = new Plot { Id = Guid.NewGuid(), CompanyId = companyId, FarmerId = farmer.Id,
@@ -85,7 +86,7 @@ public sealed class PlotSeasonTests(ApiFactory factory) : IClassFixture<ApiFacto
         Assert.Contains(list!.Items, x => x.Id == id);
         Assert.Equal(HttpStatusCode.NotFound, (await outsiderClient.GetAsync($"/api/plot-seasons/{id}")).StatusCode);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.PlotSeasons.CountAsync(x => x.Id == id));
         Assert.Equal(purchaser.Id, (await db.PlotSeasons.SingleAsync(x => x.Id == id)).CreatedBy);
         Assert.Equal(admin.Id, (await db.CropSeasons.SingleAsync(x => x.Id == season.Id)).CreatedBy);
@@ -102,14 +103,14 @@ public sealed class PlotSeasonTests(ApiFactory factory) : IClassFixture<ApiFacto
         var foreignPlot = await SeedPlotAsync(other.Id);
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.CropSeasons.Add(new CropSeason { Id = Guid.NewGuid(), CompanyId = company.Id,
                 Name = "Season A", StartsOn = new DateOnly(2026, 11, 1), EndsOn = new DateOnly(2027, 3, 31) });
             await db.SaveChangesAsync();
         }
         Guid seasonId;
         using (var scope = factory.Services.CreateScope())
-            seasonId = await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().CropSeasons
+            seasonId = await scope.ServiceProvider.GetRequiredService<AppDbContext>().CropSeasons
                 .Where(x => x.CompanyId == company.Id).Select(x => x.Id).FirstAsync();
         var (user, session) = await factory.SeedUserAsync(Roles.PurchasingStaff, company.Id);
         using var client = factory.CreateRealCookieClient(user, session);

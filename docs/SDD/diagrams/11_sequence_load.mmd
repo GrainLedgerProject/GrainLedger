@@ -1,0 +1,34 @@
+sequenceDiagram
+ autonumber
+ actor X as Customer Export Officer
+ participant UI as :Container UI
+ participant Ctrl as :ShipmentsEndpoints (planned)
+ participant S as :ShipmentService
+ participant C as :ComplianceService
+ participant R as :ShipmentPersistence port (planned)
+ participant DB as :Database
+ X->>UI: Select approved output stock and loading mass
+ UI->>+Ctrl: loadContainer(command)
+ Ctrl->>+S: load(command, authenticatedActor)
+ S->>+R: beginAndLockLoadingScope(command)
+ R->>DB: BEGIN, lock container/order, plan authority, output stock/reservations
+ DB-->>R: Protected current loading snapshot
+ R-->>-S: Snapshot
+ S->>S: requireOpenContainerAndMatchingPlanOutputReservation()
+ S->>C: assess(LOADING, planId, loadingId, actualScope)
+ C-->>S: Current verdict, basis and findings
+ alt PASS and all owner/stock/authority/restriction checks hold
+ S->>R: appendLoadingWithdrawalAndReservationConsumption(command)
+ R->>DB: Committed loading, negative posting and exact OUTPUT CONSUME
+ S->>R: retainAssessmentAndCommitProjections()
+ R->>DB: Assessment, event, stock/reservation projections, COMMIT
+ S->>S: result = Committed(loadingId)
+ else Non-PASS or invalid loading scope
+ S->>R: rollbackLoading()
+ R->>DB: ROLLBACK, no partial stock or reservation change
+ S->>S: result = Refused(findings)
+ end
+ S-->>-Ctrl: LoadingOutcome
+ Ctrl-->>-UI: Committed loading or refusal findings
+ UI-->>X: Display result
+ Note over DB: Full target design, not a claim of implemented export or residue APIs.

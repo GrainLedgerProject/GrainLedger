@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -88,11 +89,11 @@ public sealed class CommodityTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal(HttpStatusCode.NoContent, (await adminClient.SendAsync(secondDelete)).StatusCode);
         Assert.Equal(0, (await adminClient.GetFromJsonAsync<CatalogPage<CommodityResponse>>("/api/commodities?q=RICE"))!.TotalCount);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(3, await db.CatalogEvents.CountAsync(x => x.ResourceId == commodity.Id));
         var archived = await db.Commodities.IgnoreQueryFilters().SingleAsync(x => x.Id == commodity.Id);
         Assert.True(archived.IsArchived);
-        Assert.True(await db.Database.SqlQuery<bool>($"SELECT EXISTS(SELECT 1 FROM ledger.catalog_commodities WHERE catalog_commodity_id = {commodity.Id}) AS \"Value\"").SingleAsync());
+        Assert.True(await db.Database.SqlQuery<bool>($"SELECT EXISTS(SELECT 1 FROM grainledger.ledger_catalog_commodities WHERE catalog_commodity_id = {commodity.Id}) AS \"Value\"").SingleAsync());
     }
 
     [Fact]
@@ -119,7 +120,7 @@ public sealed class CommodityTests(ApiFactory factory) : IClassFixture<ApiFactor
         using var response = await s.Admin.SendAsync(delete);
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var stored = await db.Commodities.IgnoreQueryFilters().SingleAsync(x => x.Id == commodity.Id);
         Assert.False(stored.IsArchived);
     }
@@ -127,8 +128,8 @@ public sealed class CommodityTests(ApiFactory factory) : IClassFixture<ApiFactor
     private async Task<Guid> LedgerCommodityIdAsync(Guid id)
     {
         await using var scope = factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
-        return await db.Database.SqlQuery<Guid>($"SELECT ledger_commodity_id AS \"Value\" FROM ledger.catalog_commodities WHERE catalog_commodity_id = {id}").SingleAsync();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Database.SqlQuery<Guid>($"SELECT ledger_commodity_id AS \"Value\" FROM grainledger.ledger_catalog_commodities WHERE catalog_commodity_id = {id}").SingleAsync();
     }
 
     [Fact]

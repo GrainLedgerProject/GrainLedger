@@ -1,7 +1,8 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -52,7 +53,7 @@ public sealed class MrlImportTests(ApiFactory factory) : IClassFixture<ApiFactor
             var limits = await client.GetFromJsonAsync<MrlLimitListResponse>($"/api/mrl-versions/{version.Id}/limits");
             Assert.Equal(0.01m, Assert.Single(limits!.Items).LimitValue);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal("MRL_VERSION_IMPORTED", (await db.CatalogEvents.SingleAsync(x => x.ResourceId == version.Id)).EventType);
         }
     }
@@ -77,7 +78,7 @@ public sealed class MrlImportTests(ApiFactory factory) : IClassFixture<ApiFactor
             });
             Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.False(await db.MrlVersions.AnyAsync(x => x.MarketId == marketId && x.CommodityId == commodityId));
         }
     }

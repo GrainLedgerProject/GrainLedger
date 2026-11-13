@@ -11,9 +11,14 @@ const otherRule = { ...systemRule, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', c
 const companyRule = { ...systemRule, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', companyId, relativeUncertaintyPercent: '20', evidenceRef: 'company-study' };
 let rules: Array<Record<string, unknown>>, settings: Array<Record<string, unknown>>, posted: Array<{ items: Array<Record<string, unknown>> }>, failure: number;
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+// Paste fixture text while retaining user interaction and publication checks.
+async function pasteText(user: UserEvent, input: HTMLElement, value: string) {
+  await user.click(input);
+  await user.paste(value);
+}
 async function fillReview(user: UserEvent) {
-  await user.type(screen.getByLabelText('Adoption reviewer'), 'Actual adoption reviewer');
-  await user.type(screen.getByLabelText('Review authority'), 'Company QA');
+  await pasteText(user, screen.getByLabelText('Adoption reviewer'), 'Actual adoption reviewer');
+  await pasteText(user, screen.getByLabelText('Review authority'), 'Company QA');
   fireEvent.change(screen.getByLabelText('Effective from'), { target: { value: '2026-10-23T00:00' } });
   fireEvent.change(screen.getByLabelText('Reviewed at'), { target: { value: '2026-10-22T00:00' } });
   await user.click(screen.getByRole('checkbox', { name: /I reviewed every selected profile/ }));
@@ -122,20 +127,20 @@ it('blocks checked adoption after embedded scientific revision until refreshed s
   await user.click(screen.getByRole('checkbox', { name: /RICE-RES/ }));
   await user.click(screen.getByText('Customize adoption evidence or applicability'));
   await user.clear(screen.getByLabelText('Evidence reference · RICE-RES'));
-  await user.type(screen.getByLabelText('Evidence reference · RICE-RES'), 'Company-specific adoption evidence');
+  await pasteText(user, screen.getByLabelText('Evidence reference · RICE-RES'), 'Company-specific adoption evidence');
   await fillReview(user);
   expect(screen.getByRole('button', { name: 'Publish reviewed policy settings' })).toBeEnabled();
 
   const editor = within(screen.getByRole('heading', { name: 'Company residue rules' }).closest('section')!);
   await user.click(editor.getByRole('button', { name: /^Revise rule/ }));
   await user.clear(editor.getByLabelText('Relative uncertainty (%)'));
-  await user.type(editor.getByLabelText('Relative uncertainty (%)'), '25');
+  await pasteText(user, editor.getByLabelText('Relative uncertainty (%)'), '25');
   await user.clear(editor.getByLabelText('Evidence reference'));
-  await user.type(editor.getByLabelText('Evidence reference'), 'new-scientific-study');
+  await pasteText(user, editor.getByLabelText('Evidence reference'), 'new-scientific-study');
   await user.clear(editor.getByLabelText('Applicability statement'));
-  await user.type(editor.getByLabelText('Applicability statement'), 'New reviewed rice applicability');
-  await user.type(editor.getByLabelText('Scientific reviewer'), 'Actual scientist');
-  await user.type(editor.getByLabelText('Review authority'), 'Scientific QA');
+  await pasteText(user, editor.getByLabelText('Applicability statement'), 'New reviewed rice applicability');
+  await pasteText(user, editor.getByLabelText('Scientific reviewer'), 'Actual scientist');
+  await pasteText(user, editor.getByLabelText('Review authority'), 'Scientific QA');
   fireEvent.change(editor.getByLabelText('Effective from'), { target: { value: '2026-10-23T00:00' } });
   fireEvent.change(editor.getByLabelText('Reviewed at'), { target: { value: '2026-10-22T00:00' } });
   await user.click(editor.getByLabelText('I reviewed the complete scientific profile, evidence and effective period.'));

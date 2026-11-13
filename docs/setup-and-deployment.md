@@ -30,11 +30,12 @@ This section provisions a **new, local-only** Compose database. Do not run its r
    CREATE ROLE grainledger_migration LOGIN PASSWORD 'replace-with-migration-password' NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;
    GRANT CONNECT ON DATABASE grainledger TO grainledger_runtime;
    GRANT CONNECT, CREATE ON DATABASE grainledger TO grainledger_migration;
-   GRANT USAGE, CREATE ON SCHEMA public TO grainledger_migration;
    SQL
    ```
 
-   Migration owner needs database `CREATE` to create module schemas and `public` `USAGE, CREATE` for Identity's EF migration-history table. The migration owner owns migrated objects and can grant runtime access. No membership between these roles is needed. Runtime must not be superuser, own database/module schemas/tables, or belong to owner/elevated roles.
+   The migration owner creates and owns application objects in `grainledger`; no `public` migration-history grants are needed. Runtime must not be superuser, own application objects, or belong to owner/elevated roles. The migration grant command configures explicit runtime access.
+
+   Runtime validation checks both the authenticated session role and the current role, since `SET ROLE NONE` can restore the session identity and `RESET ROLE` can restore a configured default. It rejects excess application privileges reachable through inherited, `SET`, or administrative memberships, including multi-hop paths and column-level grants. `ADMIN TRUE` can enable `SET` even when both `INHERIT` and `SET` are initially false. Review PostgreSQL 17 membership options and effective grants of reachable roles when provisioning the runtime login.
 
 3. Set root `.env` connection strings for this fresh Compose database (port `5433`) and restricted role:
 
@@ -66,52 +67,60 @@ Set only features you intend to use. Key names below correspond to `.env.example
 | `DataProtection__KeysPath` | Persistent protected ASP.NET DataProtection key directory |
 | `AllowedHosts` | Allowed public host name(s) |
 
-See [email/password, OTP, and Scalar guide](auth-email-password-scalar.md) for JWT and SMTP setup, OTP behavior, registration, and API login. Missing SMTP does not enable a bypass or default OTP; email-dependent flows need real SMTP. API Bearer tokens and React's CSRF-protected cookie session are distinct authentication flows.
+See [email/password, OTP, and Scalar guide](guides/auth-email-password-scalar.md) for JWT and SMTP setup, OTP behavior, registration, and API login. Missing SMTP does not enable a bypass or default OTP; email-dependent flows need real SMTP. API Bearer tokens and React's CSRF-protected cookie session are distinct authentication flows.
 
 For Google sign-in, create a **Web application** OAuth client, configure consent and test users as needed, then register exact local redirect URI `http://localhost:5173/signin-google`. Vite proxies `/api` and `/signin-google` to backend `http://localhost:5080`; use `localhost` consistently rather than `127.0.0.1`. Production callback is `https://YOUR_HOST/signin-google`. Follow [Google authentication for ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/social/google-logins?view=aspnetcore-10.0).
 
 ### Administrator bootstrap
 
-Set `Bootstrap__AdminEmail` before first onboarding. If no administrator exists, the matching newly provisioned Google account or email/password account verified by OTP can receive the first administrator role. After bootstrap, clear the setting and restart backend. Existing administrators retain access. Other verified sign-ups receive no business permissions until administrator assigns organization and role. See [architecture and access control](architecture.md) and [authentication guide](auth-email-password-scalar.md).
+Set `Bootstrap__AdminEmail` before first onboarding. If no administrator exists, the matching newly provisioned Google account or email/password account verified by OTP can receive the first administrator role. After bootstrap, clear the setting and restart backend. Existing administrators retain access. Other verified sign-ups receive no business permissions until administrator assigns organization and role. See [architecture and access control](architecture.md) and [authentication guide](guides/auth-email-password-scalar.md).
 
-## Explicit migrations and Development seeds
+## Approved cutover target (pending deployment confirmation)
 
-Migration and seed commands mutate their target database. First verify both connection strings point to the intended Development database that you own and control. Development environment alone does not prove database isolation. Never target production or a teammate/shared Supabase database without explicit database-owner approval.
+The approved target is one `GrainLedger.Api` project, one `AppDbContext`, one EF migration baseline, and one PostgreSQL application schema, `grainledger`. Migration creates the baseline and then applies explicit restricted-runtime grants. Normal startup does not migrate, seed, or repair grants. This target does not establish that any database reset or deployment has occurred; check with the deployment owner before relying on it.
 
-Run migrations only when deliberately installing/updating schema. This updates Identity → Catalog → Capture → Ledger; it does not seed data or automatically convert historical source records. Existing Ledger stock/history remains unchanged.
+Objects from original schemas map to `grainledger.<schema>_<name>` using schema tokens `identity`, `catalog`, `capture`, `ledger`, `exports`. Database object names, including indexes, constraints, triggers and routines, are transformed; API contracts and business values are unchanged. The single EF history table is `grainledger."__EFMigrationsHistory"`. The baseline is intentionally non-rollbackable; recovery requires the explicit database backup/reset procedure, not `Down`.
 
-The trace starting-point/lab-entry release requires Ledger `20261024000000_TraceEntryPoints` after the preceding migrations. Its approved migration workflow grants the configured restricted role EXECUTE on `ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer)` and retains the four-argument `trace_lot` grant; the metadata helper `ledger.trace_lot_metadata(uuid,uuid[])` stays private. New startup validates these boundaries and does not repair grants. This release was tested in isolated PostgreSQL and then deployed to the configured shared database on 24/10/2026 following the user’s explicit repair request; postflight runtime validation and backend `/health` passed. Future deployments remain separate approved actions. See [trace API/deployment contracts](traceability-api.md#starting-points-và-lab-entry--24102026).
+### Local migration and seeds
 
-### Shared database: avoid resetting grants from an older branch
-
-`ConfigureRuntimeRoleAsync` revokes Ledger function privileges and reapplies a finite entry-point list. Running this workflow from an older branch whose list omits tracing can remove trace EXECUTE even though the database still contains the trace function. Merely switching Git branches or restarting the API does not itself run this reset. A read-only check on 24/10/2026 found the configured runtime login matched `Ledger:RuntimeRole`, `trace_lot` existed without EXECUTE, and `trace_starts`/`trace_lot_metadata` were absent. This establishes missing grants and an unapplied feature upgrade; it does not identify who last changed the ACL.
-
-For a shared database, designate one migration/deployment owner or CI job running the agreed integrated revision. Merge the feature's migrations **and** runtime-grant configuration into that revision together, then run its approved `--migrate` workflow once and validate with the restricted runtime login. Other developers use ordinary `dotnet run` and the same agreed runtime configuration; they need no owner privileges for application use. Do not run grant reconciliation from stale branches after this deployment. Each future schema/function upgrade requires its own coordinated deployment; ordinary restarts require none. `dotnet ef database update` alone does not invoke the application's runtime-grant configuration.
-
-Do not grant EXECUTE on every Ledger function or use default EXECUTE grants as a workaround: private helpers intentionally remain inaccessible to the runtime role. Do not add owner-driven grant repair to normal startup. If permission disappears after deployment, check which migration/grant workflow ran against the shared database before applying another manual grant.
+Run migration only against a Development database you own and control. Verify migration and runtime connections address same intended database. Migration credentials stay out of normal application environment; runtime credentials remain restricted. Do not run these commands against shared Supabase without separate explicit database-owner approval and completed backup/dependency preflight.
 
 ```bash
-ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --migrate
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --migrate
 ```
 
-Seeds are optional, separate commands. `--seed-dev` creates local Identity accounts. `--seed-ledger` creates demo mill setup and stock through official workflows, and creates missing demo accounts; it requires restricted runtime connection plus `DevelopmentSeed__Password`. Do not combine flags. Seed only a development/test database you own. Detailed account, password, demo data, rerun and limitation guidance: [Development accounts and demo Ledger data](development-accounts.md).
+Seeds are separate, Development-only commands and require `DevelopmentSeed__Password` plus the restricted runtime connection. Choose one:
 
 ```bash
-ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --seed-dev
-# Or, instead, opt in to demo mill setup and stock:
-ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api -- --seed-ledger
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --seed-dev
+# Setup accounts, facility, locations, equipment and assignments only:
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --seed-setup
+# Explicit full demo, including synthetic policy/evidence and 600 kg receipt:
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --seed-ledger
 ```
 
-Normal application startup is separate and neither migrates nor seeds:
+`--seed-dev` creates six development accounts only. `--seed-setup` creates those accounts plus two organizations, one synthetic facility, three locations, two equipment rows and two assignments. It does not create demo commodities/units, farmer or procurement records, lab reports, policy/evidence, stock, postings, or export business records. Existing migration-installed reference/configuration rows, including receiving threshold baseline/history, remain. `--seed-ledger` remains separate opt-in full-demo behavior. Do not combine migration or seed flags; do not run both seed modes during deployment.
 
+Setup-only seed is intended for Development bootstrap, not proof of a completed deployment. Detailed account names, password constraints, rerun behavior and scope: [development accounts guide](guides/development-accounts.md).
+
+Normal application startup remains separate:
 
 ```bash
 dotnet run --project backend/src/GrainLedger.Api
 ```
 
-Container draft preparation v2 requires forward Ledger migration `20261025000000_ContainerDraftReadiness`. It preserves existing container/trace entry signatures and grants, adds observed pool-revision validation and correct server-side `availableOnly` paging. No startup auto-repair or new owner runtime access is introduced. Until approved deployment, older preparation detail is shown with an explicit draft-save upgrade gate; normal backend startup is not newly blocked by this optional feature upgrade. See [container API](container-api.md#draft-preparation-v2--implementation-25102026). Do not apply it to shared databases as routine verification.
+### Container preparation on the monolith branch
 
-## Mixed-bulk forward migration and activation
+`feat/container` adds forward AppDbContext migration `20261113000000_ContainerPreparation`, embedded `Data/Sql/ContainerPreparation.sql` and the finite runtime grant for `grainledger.ledger_container_action(uuid,text,jsonb)`. The four preparation tables and private helpers remain inaccessible directly to runtime. An absent optional feature migration does not newly block normal startup; its endpoint returns 503. If installed, its entry grant must pass runtime validation. Run the approved migration-owner workflow above only after separate environment approval. Old `20261021`/`20261025` Ledger-context migrations are historical, not an upgrade command for the monolith.
+
+This merge does not migrate/reset shared Supabase, transfer old-schema preparation data or claim the monolith cutover is deployed. Migrating between the old multi-schema database and the new baseline needs a separately reviewed backup/cutover/data-retention procedure. See [completion review](reports/container-completion-review-2026-11-13.md).
+
+### Historical module-era deployment notes
+
+The following migration-specific instructions preserve prior release history only. They describe old per-module schemas/migrations and must not be used as current cutover or deployment instructions. Confirm current database status independently; no reset or deployment is asserted here.
+
+## Historical mixed-bulk migration and activation
+
 
 Ledger migration `20261020000000_MixedBulkStorage` installs mixed-bulk location/pool state, protected command/safety/read routines, and restricted grants through four embedded SQL resources. It is forward-only; rollback is unsupported because custody history is immutable. Implementation is local and is not deployed to shared Supabase or production. Do not run `--migrate`, seeds, grant changes or schema changes against any shared database without explicit database-owner approval.
 
@@ -143,11 +152,9 @@ The Dockerfile builds frontend assets and ASP.NET app into a single image exposi
 
 Serve app through HTTPS reverse proxy on one origin. Configure trusted proxy addresses in `ReverseProxy__KnownProxies__0` (and indexed entries), preserve original `Host`, and forward `X-Forwarded-Proto: https`. Set `AllowedHosts` to deployed host. Production cookies require HTTPS. Configure `DataProtection__KeysPath` to durable storage with access restricted to the app identity and protected backups; instances that share cookie authentication need access to the same protected key ring. Set production Google callback to `https://YOUR_HOST/signin-google`. Compose starts local PostgreSQL only; it does not provide proxy, production secrets, or Google setup.
 
-### Receiving and unified lot-code compatibility
+### Receiving and code cutover
 
-For releases containing the current receiving/code behavior, ensure Ledger migrations include `20261017000000_UnifiedLotCodes`, `20261019000000_ReceivingLossThreshold`, and forward repair `20261019010000_RepairReceivingLotCodeBoundary` (`RepairReceivingLotCodeBoundary.sql`) in order. A database that already recorded the threshold migration may still have earlier functions that hardcode `LL-…`, rejecting schema-version-2 procurement with `Pending source package incomplete`. Editing an applied migration does not update installed functions. The forward repair replaces threshold-aware package validation and receiving detail with unified-code versions without rewriting stock, evidence, or threshold snapshots. Run through approved migration-owner job; do not rerun historical SQL or delete migration-history rows. Confirm applied migrations against target database before deployment; source code alone does not mean repair has run there.
-
-The API and database must be cut over together: pause intake and processing writes during unified-code deployment; old API instances cannot issue or validate new codes. Do not roll back to an API version that only understands `LL-…` after unified codes exist. Existing historical `LL-…` records remain unchanged. New generated codes use `TOKEN-YYYYMMDD-SERIAL`; see [unified lot-code guide](unified-lot-code-guide.md).
+Apply the current monolith migrations through an approved migration-owner job before deploying the matching API. Pause Capture and Ledger writes during cutover; inventory pending receipts without lot-code reservations and older processing drafts first. Those records cannot proceed through the new write paths without an explicit remediation plan. Stored records are not rewritten. See [lot-code guide](guides/unified-lot-code-guide.md) and [Capture code guide](guides/companion-capture-codes.md).
 
 ### External laboratory workflow
 
@@ -159,7 +166,7 @@ Unconfirmed-report editing/deletion requires the forward Capture migration `2026
 
 Apply through the approved migration-owner job, then refresh the restricted runtime role using the existing role-configuration procedure before restarting the matching API. Runtime validation requires the new table's intended least-privilege grants. Do not grant elevated application credentials or bypass validation. Verify against disposable PostgreSQL; feature implementation does not authorize shared Supabase migrations, grants, seeds or report mutations.
 
-Original files are stored durably in PostgreSQL, limited to 10 MiB per report, and served only through scoped authenticated downloads. Include Capture laboratory tables in database backup/restore procedures. No facility or external laboratory account is required. Applying migrations to shared Supabase requires explicit approval; use disposable test containers for write-based verification unless separately approved. See [laboratory API](sample-api.md#laboratory-report-routes).
+Original files are stored durably in PostgreSQL, limited to 10 MiB per report, and served only through scoped authenticated downloads. Include Capture laboratory tables in database backup/restore procedures. No facility or external laboratory account is required. Applying migrations to shared Supabase requires explicit approval; use disposable test containers for write-based verification unless separately approved. See [laboratory API](api/sample-api.md#laboratory-report-routes).
 
 ### Residue bounds
 
@@ -169,9 +176,9 @@ New reviewed system/company rule versions, policy settings, source-group/report-
 
 No shared database migration, seed, authorization grant or deployment was performed or authorized by this work. Do not treat isolated test data as seed data. Normal use requires explicit reviewed system-profile adoption or company override setting; no default adoption exists. A company override requires full compatible same-Code rule and never falls back when missing/inapplicable. Policy setting/rule versions and provenance are retained.
 
-Section 15's matrix, combined report confirmation, exact concentration-unit normalization and live preview use existing storage/grants; they add no migration or dependency. A separately approved one-time owner transaction removed exactly 12 verified unreferenced mock rule versions from the configured database on 2026-10-23, retained all three evaluation snapshots and restored immutability guards before commit. This is not standing deletion permission or feature deployment. Cleanup and isolated verification: [section 15](residue-bounds-plan.md#15-substance-matrix-single-action-report-confirmation-and-live-bounds).
+Section 15's matrix, combined report confirmation, exact concentration-unit normalization and live preview use existing storage/grants; they add no migration or dependency. A separately approved one-time owner transaction removed exactly 12 verified unreferenced mock rule versions from the configured database on 2026-10-23, retained all three evaluation snapshots and restored immutability guards before commit. This is not standing deletion permission or feature deployment. Cleanup and isolated verification: [section 15](plans/residue-bounds-plan.md#15-substance-matrix-single-action-report-confirmation-and-live-bounds).
 
-Operational numeric use requires actual reviewed interpretation, material/method/residue-definition applicability, source representation, precision and process/fraction factors. `NUMERIC_RELATIVE_UNCERTAINTY` requires an exact nonnegative percent (`10` = 10%), and zero requires explicitly reviewed `RelativeUncertaintyAtZero`; normalized reviewed absolute uncertainty takes priority. Raw nonblank uncertainty without normalized absolute uncertainty remains unresolved. Missing evidence/rules/adoption yields `UNRESOLVED` with null unknown endpoints. Synthetic rules used by isolated tests/browser harness must never be published operationally. Residue bounds are not legal PASS, HOLD release or export certification. Routes, permission matrix and behavior: [residue bounds delivered contracts](residue-bounds-plan.md#9-delivered-residue-bounds-contracts).
+Operational numeric use requires actual reviewed interpretation, material/method/residue-definition applicability, source representation, precision and process/fraction factors. `NUMERIC_RELATIVE_UNCERTAINTY` requires an exact nonnegative percent (`10` = 10%), and zero requires explicitly reviewed `RelativeUncertaintyAtZero`; normalized reviewed absolute uncertainty takes priority. Raw nonblank uncertainty without normalized absolute uncertainty remains unresolved. Missing evidence/rules/adoption yields `UNRESOLVED` with null unknown endpoints. Synthetic rules used by isolated tests/browser harness must never be published operationally. Residue bounds are not legal PASS, HOLD release or export certification. Routes, permission matrix and behavior: [residue bounds delivered contracts](plans/residue-bounds-plan.md#9-delivered-residue-bounds-contracts).
 
 For isolated Linux tests when Docker bridge/veth creation is unavailable, opt in to a disposable PostgreSQL container using host networking, a distinct port per fixture and `listen_addresses=127.0.0.1`:
 
@@ -189,7 +196,7 @@ The opt-in browser host configures console logger queue overflow as `DropWrite` 
 
 Ledger migration `20261023000000_RetireEquipment` adds protected referenced-equipment retirement without adding a second lifecycle flag or rewriting historical operations. Apply through the approved migration-owner deployment job and refresh restricted runtime grants before using the matching API build. Runtime validation requires the new private helpers and predecessor command/read routines to remain ungranted. Normal startup does not migrate.
 
-Unused equipment still uses versioned `DELETE`; referenced equipment uses versioned `POST /api/ledger/equipment/{id}/retire`. Both retain stored rows; retirement blocks new use and conflicts while active drafts or pending corrections remain. See [Ledger setup and permissions](ledger-implementation-plan.md#setup-and-permissions).
+Unused equipment still uses versioned `DELETE`; referenced equipment uses versioned `POST /api/ledger/equipment/{id}/retire`. Both retain stored rows; retirement blocks new use and conflicts while active drafts or pending corrections remain. See [Ledger setup and permissions](plans/ledger-implementation-plan.md#setup-and-permissions).
 
 For this overhaul, the user approved creating the forward migration and applying it only to disposable verification PostgreSQL. No shared Supabase migration, grant, seed or business-data mutation is authorized or performed by that approval.
 

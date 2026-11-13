@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -24,7 +25,7 @@ public sealed class CaptureDuplicateCheckTests(ApiFactory factory) : IClassFixtu
         var plotId = Guid.NewGuid();
         await using (var scope = factory.Services.CreateAsyncScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Farmers.AddRange(
                 new Farmer { Id = farmerId, CompanyId = company.Id, Code = "DUP-A", Name = "Nguyễn Văn A", Contact = "0900 123 456", CreatedAt = DateTimeOffset.UtcNow, CreatedBy = user.Id },
                 new Farmer { Id = foreignFarmerId, CompanyId = otherCompany.Id, Code = "DUP-B", Name = "Nguyễn Văn A", Contact = "0900 123 456", CreatedAt = DateTimeOffset.UtcNow },

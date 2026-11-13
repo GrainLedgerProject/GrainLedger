@@ -1,8 +1,9 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -24,12 +25,12 @@ public sealed class SampleTests(ApiFactory factory) : IClassFixture<ApiFactory>
         return (companyId, sourceLotId, client, scenario);
     }
 
-    private static object SampleRequest(Guid sourceLotId, Guid entityId, Guid operationId, string code,
+    private static object SampleRequest(Guid sourceLotId, Guid entityId, Guid operationId,
         string? materialDescription = null) => new
     {
         deviceId = "sample-test", clientOperationId = operationId,
-        capturedAt = new DateTimeOffset(2026, 10, 14, 3, 5, 0, TimeSpan.Zero), payloadSchemaVersion = 1,
-        payload = new { entityId, sourceLotId, code, sealCode = "SEAL-001",
+        capturedAt = new DateTimeOffset(2026, 10, 14, 3, 5, 0, TimeSpan.Zero), payloadSchemaVersion = 2,
+        payload = new { entityId, sourceLotId, sealCode = "SEAL-001",
             collectedAt = new DateTimeOffset(2026, 10, 14, 3, 0, 0, TimeSpan.Zero), materialDescription }
     };
 
@@ -52,7 +53,7 @@ public sealed class SampleTests(ApiFactory factory) : IClassFixture<ApiFactory>
         using var scenario = source.Scenario;
         using var client = source.Client;
         var sampleId = Guid.NewGuid(); var sampleOperation = Guid.NewGuid();
-        var request = SampleRequest(source.SourceLotId, sampleId, sampleOperation, $"S-{sampleId:N}");
+        var request = SampleRequest(source.SourceLotId, sampleId, sampleOperation);
         var created = await client.PostAsJsonAsync("/api/samples", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var sample = (await created.Content.ReadFromJsonAsync<SampleResponse>())!;
@@ -77,7 +78,7 @@ public sealed class SampleTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal("handover-proof", history.Items[0].EvidenceRef);
         Assert.Equal(handoverId, history.Items[0].Id);
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaptureDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, await db.Samples.CountAsync(x => x.Id == sampleId));
         Assert.Equal(1, await db.SampleHandovers.CountAsync(x => x.SampleId == sampleId));
         Assert.Equal(1, await db.BusinessEvents.CountAsync(x => x.CorrelationId == sampleOperation));
@@ -92,7 +93,7 @@ public sealed class SampleTests(ApiFactory factory) : IClassFixture<ApiFactory>
         using var client = source.Client;
         var sampleId = Guid.NewGuid();
         var sample = await client.PostAsJsonAsync("/api/samples",
-            SampleRequest(source.SourceLotId, sampleId, Guid.NewGuid(), $"S-{sampleId:N}", "Paddy grain"));
+            SampleRequest(source.SourceLotId, sampleId, Guid.NewGuid(), "Paddy grain"));
         Assert.Equal(HttpStatusCode.Created, sample.StatusCode);
         Assert.Equal("Paddy grain", (await sample.Content.ReadFromJsonAsync<SampleResponse>())!.MaterialDescription);
 
@@ -127,29 +128,25 @@ public sealed class SampleTests(ApiFactory factory) : IClassFixture<ApiFactory>
         using var client = source.Client;
         var sampleId = Guid.NewGuid();
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/samples",
-            SampleRequest(source.SourceLotId, sampleId, Guid.NewGuid(), $"S-{sampleId:N}"))).StatusCode);
+            SampleRequest(source.SourceLotId, sampleId, Guid.NewGuid()))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(
             $"/api/samples/{sampleId}/handovers",
             HandoverRequest(Guid.NewGuid(), Guid.NewGuid(), "LAB_DISPATCH"))).StatusCode);
     }
 
     [Fact]
-    public async Task Rejects_unaccepted_source_duplicate_code_and_changed_operation()
+    public async Task Rejects_unaccepted_source_and_changed_operation()
     {
         var source = await SeedSourceAsync();
         using var scenario = source.Scenario;
         using var client = source.Client;
-        var sampleId = Guid.NewGuid(); var operationId = Guid.NewGuid(); var code = $"S-{sampleId:N}";
-        var request = SampleRequest(source.SourceLotId, sampleId, operationId, code);
+        var sampleId = Guid.NewGuid(); var operationId = Guid.NewGuid();
+        var request = SampleRequest(source.SourceLotId, sampleId, operationId);
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/samples", request)).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/samples",
-            SampleRequest(source.SourceLotId, sampleId, operationId, code, "Changed material"))).StatusCode);
+            SampleRequest(source.SourceLotId, sampleId, operationId, "Changed material"))).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/samples",
-            SampleRequest(source.SourceLotId, sampleId, operationId, "changed"))).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/samples",
-            SampleRequest(source.SourceLotId, Guid.NewGuid(), Guid.NewGuid(), code))).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/samples",
-            SampleRequest(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "other"))).StatusCode);
+            SampleRequest(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()))).StatusCode);
     }
 
     [Fact]
@@ -160,7 +157,7 @@ public sealed class SampleTests(ApiFactory factory) : IClassFixture<ApiFactory>
         using var owner = source.Client;
         var sampleId = Guid.NewGuid();
         Assert.Equal(HttpStatusCode.Created, (await owner.PostAsJsonAsync("/api/samples",
-            SampleRequest(source.SourceLotId, sampleId, Guid.NewGuid(), $"S-{sampleId:N}"))).StatusCode);
+            SampleRequest(source.SourceLotId, sampleId, Guid.NewGuid()))).StatusCode);
         var other = await SeedSourceAsync(foreign: true);
         using var otherScenario = other.Scenario;
         using var outsider = other.Client;
@@ -168,6 +165,6 @@ public sealed class SampleTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal(HttpStatusCode.Conflict, (await outsider.PostAsJsonAsync($"/api/samples/{sampleId}/handovers",
             HandoverRequest(Guid.NewGuid(), Guid.NewGuid()))).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await outsider.PostAsJsonAsync("/api/samples",
-            SampleRequest(source.SourceLotId, Guid.NewGuid(), Guid.NewGuid(), "other-company"))).StatusCode);
+            SampleRequest(source.SourceLotId, Guid.NewGuid(), Guid.NewGuid()))).StatusCode);
     }
 }

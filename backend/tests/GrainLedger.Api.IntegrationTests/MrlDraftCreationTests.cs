@@ -1,9 +1,10 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using GrainLedger.Modules.Catalogs;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -62,7 +63,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Equal(HttpStatusCode.Created, second.StatusCode);
             Assert.Equal(2, (await second.Content.ReadFromJsonAsync<MrlVersionResponse>())!.VersionNo);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal(2, await db.MrlVersions.CountAsync(x => x.MarketId == marketId && x.CommodityId == commodityId));
             Assert.Equal("MRL_VERSION_CREATED", (await db.CatalogEvents.SingleAsync(x => x.ResourceId == draft.Id)).EventType);
         }
@@ -93,7 +94,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
 
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var version = await db.MrlVersions.SingleAsync(x => x.Id == draft.Id);
                 version.Status = "PUBLISHED";
                 version.PublishedBy = (await db.CatalogEvents.SingleAsync(x => x.ResourceId == draft.Id)).ActorId;
@@ -138,7 +139,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Empty(hidden!.Items);
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var published = await db.MrlVersions.SingleAsync(x => x.Id == first.Id);
                 published.Status = "PUBLISHED";
                 published.PublishedBy = (await db.CatalogEvents.SingleAsync(x => x.ResourceId == first.Id)).ActorId;
@@ -227,7 +228,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Equal(HttpStatusCode.PreconditionFailed, (await client.SendAsync(stale)).StatusCode);
             Assert.Equal(body, await client.GetFromJsonAsync<MrlVersionResponse>(url));
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal(1, await db.CatalogEvents.CountAsync(x =>
                 x.ResourceId == draft.Id && x.EventType == "MRL_VERSION_UPDATED"));
         }
@@ -255,7 +256,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
 
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var version = await db.MrlVersions.SingleAsync(x => x.Id == draft.Id);
                 version.Status = "PUBLISHED";
                 version.PublishedBy = (await db.CatalogEvents.SingleAsync(x => x.ResourceId == draft.Id)).ActorId;
@@ -298,7 +299,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             var secondId = (await second.Content.ReadFromJsonAsync<ActiveSubstanceResponse>())!.Id;
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 db.MrlLimits.AddRange(
                     new MrlLimit { Id = Guid.NewGuid(), MrlVersionId = draft.Id,
                         SubstanceId = firstId, LimitValue = 0.01m, Unit = "mg/kg" },
@@ -326,7 +327,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Equal(HttpStatusCode.Forbidden, (await purchaserClient.GetAsync(url)).StatusCode);
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var version = await db.MrlVersions.SingleAsync(x => x.Id == draft.Id);
                 version.Status = "PUBLISHED";
                 version.PublishedBy = (await db.CatalogEvents.SingleAsync(x => x.ResourceId == draft.Id)).ActorId;
@@ -416,7 +417,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Equal(HttpStatusCode.OK, unchanged.StatusCode);
             Assert.Equal(replaced.Headers.ETag, unchanged.Headers.ETag);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal(1, await db.MrlLimits.CountAsync(x => x.MrlVersionId == version.Id));
             Assert.Equal(2, await db.CatalogEvents.CountAsync(x => x.ResourceId == row.Id &&
                 (x.EventType == "MRL_LIMIT_CREATED" || x.EventType == "MRL_LIMIT_UPDATED")));
@@ -459,7 +460,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
 
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var row = await db.MrlVersions.SingleAsync(x => x.Id == version.Id);
                 row.Status = "PUBLISHED";
                 row.PublishedBy = (await db.CatalogEvents.SingleAsync(x => x.ResourceId == version.Id)).ActorId;
@@ -470,7 +471,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Equal(HttpStatusCode.Conflict,
                 (await PutAsync(new { limitValue = 0.01m, unit = "mg/kg" }, published.Headers.ETag)).StatusCode);
             using var scopeAfter = factory.Services.CreateScope();
-            var dbAfter = scopeAfter.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var dbAfter = scopeAfter.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.False(await dbAfter.MrlLimits.AnyAsync(x => x.MrlVersionId == version.Id));
         }
     }
@@ -508,7 +509,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Single(results, x => x.StatusCode == HttpStatusCode.Created);
             Assert.Single(results, x => x.StatusCode == HttpStatusCode.PreconditionFailed);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal(1, await db.MrlLimits.CountAsync(x => x.MrlVersionId == version.Id));
         }
     }
@@ -560,7 +561,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             repeat.Headers.IfMatch.Add(deleted.Headers.ETag!);
             Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(repeat)).StatusCode);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.False(await db.MrlLimits.AnyAsync(x => x.Id == limit.Id));
             var audit = await db.CatalogEvents.SingleAsync(x =>
                 x.ResourceId == limit.Id && x.EventType == "MRL_LIMIT_DELETED");
@@ -585,7 +586,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             var limitId = Guid.NewGuid();
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 db.MrlLimits.Add(new MrlLimit { Id = limitId, MrlVersionId = version.Id,
                     SubstanceId = substanceId, LimitValue = 0.01m, Unit = "mg/kg" });
                 var entity = await db.MrlVersions.SingleAsync(x => x.Id == version.Id);
@@ -600,7 +601,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             remove.Headers.IfMatch.Add(published.Headers.ETag!);
             Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(remove)).StatusCode);
             using var scopeAfter = factory.Services.CreateScope();
-            var dbAfter = scopeAfter.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var dbAfter = scopeAfter.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.True(await dbAfter.MrlLimits.AnyAsync(x => x.Id == limitId));
         }
     }
@@ -630,7 +631,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
                     sourceRef = "Regulation"
                 })).StatusCode);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal(0, await db.MrlVersions.CountAsync(x => x.MarketId == marketId && x.CommodityId == commodityId));
         }
     }
@@ -694,7 +695,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Equal(HttpStatusCode.Forbidden,
                 (await PublishAsync(purchaseClient, draft.Id, published.Headers.ETag!)).StatusCode);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal(1, await db.CatalogEvents.CountAsync(x =>
                 x.ResourceId == draft.Id && x.EventType == "MRL_VERSION_PUBLISHED"));
         }
@@ -731,7 +732,12 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Equal(second.Id, (await admin.GetFromJsonAsync<MrlVersionResponse>(
                 ResolveUrl(marketId, commodityId, second.EffectiveFrom)))!.Id);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var applicable = scope.ServiceProvider.GetRequiredService<ApplicableMrlRead>();
+            var atBoundary = await applicable.ResolveAsync(marketId, commodityId, second.EffectiveFrom);
+            Assert.Equal("FOUND", atBoundary.Status);
+            Assert.Equal(second.Id, atBoundary.VersionId);
+            Assert.Equal(await db.MrlLimits.CountAsync(x => x.MrlVersionId == second.Id), atBoundary.Limits.Count);
             var closeEvent = await db.CatalogEvents.SingleAsync(x =>
                 x.ResourceId == first.Id && x.EventType == "MRL_VERSION_CLOSED");
             var publishEvent = await db.CatalogEvents.SingleAsync(x =>
@@ -782,7 +788,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
 
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var row = await db.MrlVersions.SingleAsync(x => x.Id == first.Id);
                 row.PublishedAt = first.EffectiveFrom.AddHours(1);
                 await db.SaveChangesAsync();
@@ -834,7 +840,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             Assert.Single(results, x => x.StatusCode == HttpStatusCode.OK);
             Assert.Single(results, x => x.StatusCode == HttpStatusCode.Conflict);
             using var scope = factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Assert.Equal(1, await db.MrlVersions.CountAsync(x => x.MarketId == marketId &&
                 x.CommodityId == commodityId && x.Status == "PUBLISHED"));
         }
@@ -851,7 +857,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
             var (second, _) = await CreateDraftAsync(admin, marketId, commodityId, start);
             using (var scope = factory.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var rows = await db.MrlVersions.Where(x => x.Id == first.Id || x.Id == second.Id).ToListAsync();
                 var actorId = (await db.CatalogEvents.SingleAsync(x => x.ResourceId == first.Id)).ActorId;
                 foreach (var row in rows)
@@ -880,7 +886,7 @@ public sealed class MrlDraftCreationTests(ApiFactory factory) : IClassFixture<Ap
     private async Task SeedValidLimitAsync(Guid versionId)
     {
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         if (!await db.MeasurementUnits.AnyAsync(x => x.Code == "MG/KG"))
             db.MeasurementUnits.Add(new MeasurementUnit
             { Id = Guid.NewGuid(), Code = "MG/KG", Name = "Milligram per kilogram", QuantityKind = "RESIDUE_CONCENTRATION" });

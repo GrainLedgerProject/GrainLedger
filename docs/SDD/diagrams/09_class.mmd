@@ -1,0 +1,133 @@
+classDiagram
+direction TB
+class Sample {
+ <<planned>>
+ +UUID sample_id
+ +UUID paddy_lot_id
+ +UUID collected_by
+ +String sample_code
+ +String seal_code
+ +DateTime collected_at
+ +matchesSourceLot(lotId) Boolean
+}
+class LabReport {
+ <<planned>>
+ +UUID lab_report_id
+ +UUID sample_id
+ +UUID supersedes_id
+ +String certificate_number
+ +String laboratory_name
+ +String evidence_ref
+ +DateTime issued_at
+ +DateTime registered_at
+ +canSupersede(original) Boolean
+}
+class LabResult {
+ <<planned>>
+ +UUID lab_result_id
+ +UUID lab_report_id
+ +UUID substance_id
+ +Decimal measured_value
+ +String qualifier
+ +Decimal detection_limit
+ +Decimal quantification_limit
+ +interpretUpperBound(rule) BoundOutcome
+}
+class Cohort {
+ <<planned>>
+ +UUID cohort_id
+ +UUID cohort_policy_id
+ +UUID company_id
+ +UUID collection_site_id
+ +UUID season_id
+ +DateTime window_start
+ +DateTime window_end
+ +matchesScope(lot, policy) Boolean
+}
+class CohortMember {
+ <<planned>>
+ +UUID membership_id
+ +UUID cohort_id
+ +UUID paddy_lot_id
+ +isIncludedIn(snapshot) Boolean
+}
+class CohortSubstanceBound {
+ <<planned>>
+ +UUID cohort_bound_id
+ +UUID cohort_id
+ +UUID substance_id
+ +Integer version_no
+ +Decimal bound_value
+ +String unit
+ +String immutable_membership_ref
+ +String evidence_ref
+ +DateTime confirmed_at
+ +isSupportedBy(evidence) Boolean
+}
+class LotResidueBoundVersion {
+ <<planned>>
+ +UUID bound_id
+ +UUID lot_id
+ +UUID substance_id
+ +Integer version_no
+ +Decimal bound_value
+ +String source_type
+ +String calculation_basis_ref
+ +isEligibleFor(lot, substance, time) Boolean
+}
+class ResidueEvidenceLink {
+ <<planned>>
+ +UUID evidence_link_id
+ +UUID bound_id
+ +UUID lab_result_id
+ +UUID cohort_bound_id
+ +UUID input_bound_id
+ +Decimal source_mass_kg
+ +hasExactlyOneSource() Boolean
+}
+class PropagationPolicyVersion {
+ <<planned>>
+ +UUID propagation_policy_id
+ +UUID commodity_id
+ +String input_stage
+ +String output_stage
+ +String conversion_type
+ +Integer version_no
+ +String calculation_rule
+ +supports(conversion, output) Boolean
+}
+class ComplianceAssessment {
+ <<planned>>
+ +UUID assessment_id
+ +UUID container_id
+ +UUID plan_id
+ +UUID loading_id
+ +String purpose
+ +String verdict
+ +UUID mrl_version_id
+ +UUID safety_margin_policy_id
+ +String immutable_basis_ref
+ +isPassFor(scope, revision) Boolean
+}
+class SafetyMarginPolicyVersion {
+ <<planned>>
+ +UUID safety_margin_policy_id
+ +UUID company_id
+ +UUID market_id
+ +UUID commodity_id
+ +Decimal margin_value
+ +String margin_mode
+ +String unit
+ +threshold(mrl, concentrationUnit) Decimal
+}
+Sample "1" --> "0..*" LabReport : tested
+LabReport "1" --> "0..*" LabResult : contains
+LabReport "0..1" --> "0..1" LabReport : superseded_by
+Cohort "1" --> "0..*" CohortMember : contains
+Cohort "1" --> "0..*" CohortSubstanceBound : bounded_by
+PropagationPolicyVersion "0..1" --> "0..*" LotResidueBoundVersion : calculated_using
+LotResidueBoundVersion "1" --> "0..*" ResidueEvidenceLink : supported_by
+LabResult "0..1" --> "0..*" ResidueEvidenceLink : lab_source
+CohortSubstanceBound "0..1" --> "0..*" ResidueEvidenceLink : cohort_source
+LotResidueBoundVersion "0..1" --> "0..*" ResidueEvidenceLink : input_bound_source
+SafetyMarginPolicyVersion "1" --> "0..*" ComplianceAssessment : margin_basis

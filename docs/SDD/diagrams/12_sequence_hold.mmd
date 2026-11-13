@@ -1,0 +1,24 @@
+sequenceDiagram
+ autonumber
+ actor C as CustomerManager
+ actor M as MillManager
+ participant UI as :LedgerStock
+ participant E as :LedgerEndpoints
+ participant S as :LedgerService
+ participant DB as :PostgreSQL protected routines
+ C->>UI: Issue explicit lot HOLD
+ UI->>E: POST /api/ledger/holds
+ E->>S: CommandAsync(hold, payload)
+ S->>DB: ledger.command(actor, hold, payload)
+ DB->>DB: Validate owner, lot, scope and retain HOLD plus scoped notices atomically
+ DB-->>S: Active lot HOLD
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ M->>UI: Read notices or record physical response
+ UI->>E: POST /notifications/{id}/read or /holds/{id}/respond
+ E->>S: CommandAsync(notification_read or hold_response, payload)
+ S->>DB: Validate persisted grant/facility and retain action
+ DB-->>S: Notice read or response retained, HOLD still active
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ Note over E,DB: Current lot HOLD does not automatically cascade to descendants.<br/>Container HOLD, complete target traversal and planned authority/reservation effects are target extensions.

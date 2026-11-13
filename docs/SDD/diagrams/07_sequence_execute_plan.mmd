@@ -1,0 +1,48 @@
+sequenceDiagram
+ autonumber
+ actor O as Mill Operator
+ participant UI as :Operations UI
+ participant Ctrl as :OperationsEndpoints (planned)
+ participant S as :LedgerService
+ participant V as :LedgerValidator
+ participant R as :LedgerPersistence port (planned)
+ participant DB as :Database
+ O->>UI: Record actual operation and optional approved plan
+ UI->>+Ctrl: postOperation(command)
+ Ctrl->>+S: commitOperation(command, actor)
+ S->>+R: beginAndLockOperationScope(command)
+ R->>DB: BEGIN, lock stock, reservations, authority and restrictions
+ DB-->>R: Protected current snapshot
+ R-->>-S: Snapshot
+ S->>V: validateOwnerStageStockHoldAndBalance(command, snapshot)
+ opt Nonzero signed variance within percent tolerance
+ V->>V: requireManagerConfirmation(reason, retainedEvidence)
+ end
+ alt Any required validation fails
+ S->>R: rollback()
+ R->>DB: ROLLBACK all business changes
+ S->>S: result = Rejected(findings)
+ else Operation valid
+ alt Unchanged-lot transfer
+ S->>R: appendEqualLocationPostingsAndEvent(command)
+ R->>DB: Equal withdrawal/deposit, same lot, no new lineage
+ else Processing conversion
+ opt Approved-plan execution
+ S->>V: requireCurrentScopeAndExactInputReservations(plan)
+ end
+ S->>R: appendConversionPostingsAndSourceContributions(command)
+ R->>DB: Inputs, new outputs, loss, signed variance and lineage
+ opt Approved-plan output
+ S->>R: appendInputConsumptionAndOutputEarmarking(plan)
+ R->>DB: Matching reservation events and output allocations
+ end
+ end
+ S->>R: commitWithProjections()
+ R->>DB: COMMIT event, postings, lineage and reservation changes
+ S->>S: result = Committed(eventId)
+ end
+ S-->>-Ctrl: CommitOutcome
+ Ctrl-->>-UI: Balances or validation findings
+ UI-->>O: Display operation outcome
+ Note over S,DB: Any failure in the protected posting rolls back the whole operation
+ Note over DB: Planned full-scope extension over the existing Ledger protected transaction boundary.

@@ -1,0 +1,25 @@
+sequenceDiagram
+ autonumber
+ actor A as Mill Administrator
+ participant UI as :CatalogScreen
+ participant E as :MrlVersionEndpoints
+ participant C as :CatalogDbContext
+ participant DB as :PostgreSQL
+ A->>UI: Publish prepared MRL draft
+ UI->>E: POST /api/mrl-versions/{id}/publish, If-Match, CSRF
+ E->>E: Require platform.configure and current actor
+ E->>C: BeginTransactionAsync, lock version and market/commodity pair
+ C->>DB: BEGIN, advisory locks, load draft/limits/published intervals
+ DB-->>E: Current MRL snapshot
+ E->>E: Check ETag, source, mg/kg limits, effectivity and publication order
+ alt Missing/stale ETag or invalid publication
+ E-->>UI: 428 / 412 / 409 ProblemDetails, no publication
+ else Valid successor
+ E->>C: Close open predecessor interval when applicable, append correlated CatalogEvents
+ E->>C: Mark draft PUBLISHED, SaveChangesAsync
+ C->>DB: Save predecessor interval, new publication and events atomically
+ E->>C: CommitAsync
+ E-->>UI: Published version and ETag
+ end
+ UI-->>A: Show outcome
+ Note over E,DB: Limits/source of published predecessor remain retained.<br/>Resolver is existing infrastructure, not a completed residue assessment.

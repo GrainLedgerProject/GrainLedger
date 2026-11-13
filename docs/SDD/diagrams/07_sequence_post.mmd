@@ -1,0 +1,36 @@
+sequenceDiagram
+ autonumber
+ actor O as MillOperator
+ actor M as MillManager
+ participant UI as :LedgerOperations
+ participant E as :LedgerEndpoints
+ participant S as :LedgerService
+ participant DB as :PostgreSQL protected routines
+ O->>UI: Prepare physical operation draft
+ UI->>E: POST /api/ledger/operations
+ E->>S: CommandAsync(draft, payload)
+ S->>DB: ledger.command(authenticatedActor, draft, payload)
+ DB-->>S: Draft ID and version, no stock posting
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ opt Nonzero in-tolerance signed processing variance
+ M->>E: POST /operations/{id}/confirm with reason/evidence
+ E->>S: CommandAsync(confirm, payload)
+ S->>DB: Retain scoped manager confirmation bound to current draft
+ end
+ O->>UI: Commit actual physical operation
+ UI->>E: POST /api/ledger/operations/{id}/commit
+ E->>S: CommandAsync(commit, payload)
+ S->>DB: ledger.command(actor, commit, payload)
+ DB->>DB: lock_writes at READ COMMITTED, commit_operation checks
+ alt Missing current policy, owner/stage/HOLD/stock/variance failure
+ DB-->>S: Protected SQL exception, transaction rolled back
+ S-->>E: Mapped 400 / 403 / 409 ProblemDetails
+ E-->>UI: ProblemDetails / result
+ else Valid physical conversion
+ DB->>DB: Append postings/events and micro-kg source contributions, update positions atomically
+ DB-->>S: Committed operation and actual balances
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ end
+ Note over E,DB: Existing physical blending is not export approval.<br/>Planned approved-plan execution must add matching INPUT/OUTPUT reservation checks inside this boundary.

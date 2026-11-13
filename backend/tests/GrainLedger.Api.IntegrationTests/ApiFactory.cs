@@ -3,11 +3,12 @@ using System.Net.Sockets;
 using System.Security.Claims;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Ledger;
-using Npgsql;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Catalogs;
+using GrainLedger.Api.Data;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Ledger;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Catalogs;
+using GrainLedger.Api.Features.Exports;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -22,6 +23,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -104,7 +106,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ConnectionStrings:GrainLedger"] = OwnerConnectionString,
+            ["ConnectionStrings:GrainLedger"] = RuntimeConnectionString,
             ["ConnectionStrings:GrainLedgerMigration"] = OwnerConnectionString,
             ["Ledger:RuntimeRole"] = "grainledger_test_runtime",
             ["Authentication:Google:ClientId"] = "tests-client",
@@ -143,18 +145,19 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
-        using var scope = Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
-        await scope.ServiceProvider.GetRequiredService<CatalogDbContext>().Database.MigrateAsync();
-        await scope.ServiceProvider.GetRequiredService<CaptureDbContext>().Database.MigrateAsync();
-        await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql(OwnerConnectionString, npgsql => npgsql.MigrationsAssembly("GrainLedger.Api")
+                .MigrationsHistoryTable("__EFMigrationsHistory", "grainledger"))
+            .Options;
+        await using (var db = new AppDbContext(options))
+            await db.Database.MigrateAsync();
         await using var owner = new NpgsqlConnection(OwnerConnectionString);
         await owner.OpenAsync();
         await using (var command = new NpgsqlCommand("CREATE ROLE grainledger_test_runtime LOGIN PASSWORD 'test-runtime' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT", owner))
             await command.ExecuteNonQueryAsync();
         await LedgerDatabase.ConfigureRuntimeRoleAsync(OwnerConnectionString, "grainledger_test_runtime");
         RuntimeConnectionString = new NpgsqlConnectionStringBuilder(OwnerConnectionString) { Username = "grainledger_test_runtime", Password = "test-runtime" }.ConnectionString;
-        Services.GetRequiredService<IConfiguration>()["ConnectionStrings:GrainLedger"] = RuntimeConnectionString;
+        _ = Services;
         await LedgerDatabase.ValidateRuntimeAsync(RuntimeConnectionString);
     }
 
@@ -183,7 +186,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public async Task<(User User, LoginSession Session)> SeedUserAsync(string? role, Guid? organizationId = null, bool active = true)
     {
-        using var scope = Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        using var scope = Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var user = new User { Provider = "google", ProviderSubject = Guid.NewGuid().ToString(), Email = $"{Guid.NewGuid():N}@example.com", DisplayName = "Test User", Role = role, OrganizationId = organizationId, IsActive = active };
         var session = new LoginSession { User = user, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15) };
         db.AddRange(user, session); await db.SaveChangesAsync(); return (user, session);
@@ -191,14 +194,14 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public async Task<LoginSession> SeedSessionAsync(User user)
     {
-        using var scope = Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        using var scope = Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var session = new LoginSession { UserId = user.Id, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15) };
         db.Sessions.Add(session); await db.SaveChangesAsync(); return session;
     }
 
     public async Task<Organization> SeedOrganizationAsync(OrganizationKind kind, string? name = null)
     {
-        using var scope = Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        using var scope = Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         if (kind == OrganizationKind.Mill)
         {
             var existing = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(x => x.Kind == OrganizationKind.Mill);

@@ -1,0 +1,61 @@
+classDiagram
+direction TB
+class Organization {
+ <<existing CLR>>
+ +Guid Id
+ +string Name
+ +OrganizationKind Kind
+ +DateTimeOffset CreatedAt
+}
+class User {
+ <<existing CLR>>
+ +Guid Id
+ +string Email
+ +string DisplayName
+ +stringNullable Role
+ +GuidNullable OrganizationId
+ +bool IsActive
+ +Guid Version
+}
+class MrlVersion {
+ <<existing CLR>>
+ +Guid Id
+ +Guid MarketId
+ +Guid CommodityId
+ +int VersionNo
+ +string Status
+ +DateTimeOffset EffectiveFrom
+ +DateTimeOffsetNullable EffectiveTo
+ +GuidNullable PublishedBy
+ +DateTimeOffsetNullable PublishedAt
+}
+class MrlLimit {
+ <<existing CLR>>
+ +Guid Id
+ +Guid MrlVersionId
+ +Guid SubstanceId
+ +decimal LimitValue
+ +string Unit
+}
+class Commodity {
+ <<existing CLR>>
+ +Guid Id
+ +string Code
+ +string Name
+ +GuidNullable CreatedBy
+ +bool IsArchived
+ +uint Version
+}
+class MeasurementUnit {
+ <<existing CLR>>
+ +Guid Id
+ +string Code
+ +string Name
+ +string QuantityKind
+ +GuidNullable CreatedBy
+ +bool IsDeleted
+ +uint Version
+}
+Organization "0..1" --> "0..*" User : current organization
+MrlVersion "1" --> "0..*" MrlLimit : limits
+Commodity "1" --> "0..*" MrlVersion : commodity

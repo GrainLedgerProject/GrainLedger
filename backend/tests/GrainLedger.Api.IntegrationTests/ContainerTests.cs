@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Identity;
 using Npgsql;
 using Xunit;
 using static GrainLedger.Api.IntegrationTests.LedgerScenario;
@@ -52,7 +52,7 @@ public sealed class ContainerTests(ApiFactory factory) : IClassFixture<ApiFactor
         var history = await export.GetFromJsonAsync<JsonElement>($"/api/ledger/containers/{id}/history");
         Assert.Equal(3, history.GetProperty("totalCount").GetInt32()); // create, metadata, draft; retries/refusals do not mutate.
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
-        await using var denied = new NpgsqlCommand("UPDATE ledger.containers SET status='CLOSED'", runtime);
+        await using var denied = new NpgsqlCommand("UPDATE grainledger.ledger_containers SET status='CLOSED'", runtime);
         Assert.Equal("42501", (await Assert.ThrowsAsync<PostgresException>(() => denied.ExecuteNonQueryAsync())).SqlState);
     }
 
@@ -98,18 +98,18 @@ public sealed class ContainerTests(ApiFactory factory) : IClassFixture<ApiFactor
         var id = Guid.NewGuid(); var c = await Post(export, "", Create(id, s.FacilityId));
         await using var holder = new NpgsqlConnection(factory.OwnerConnectionString); await holder.OpenAsync();
         await using var tx = await holder.BeginTransactionAsync();
-        await using (var locked = new NpgsqlCommand("SELECT ledger.lock_writes()", holder, tx)) await locked.ExecuteNonQueryAsync();
+        await using (var locked = new NpgsqlCommand("SELECT grainledger.ledger_lock_writes()", holder, tx)) await locked.ExecuteNonQueryAsync();
         var pending = export.PostAsJsonAsync($"/api/ledger/containers/{id}/metadata", new { requestId = Guid.NewGuid(), version = c.GetProperty("version"), containerNumber = "REVOKED", sealNumber = "S" });
         await using var observer = new NpgsqlConnection(factory.OwnerConnectionString); await observer.OpenAsync();
         var waiting = false;
         for (var i = 0; i < 150; i++)
         {
-            await using var probe = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND query LIKE '%ledger.container_action%' AND wait_event='advisory')", observer);
+            await using var probe = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND query LIKE '%grainledger.ledger_container_action%' AND wait_event='advisory')", observer);
             if (Equals(await probe.ExecuteScalarAsync(), true)) { waiting = true; break; }
             await Task.Delay(20);
         }
         Assert.True(waiting, "Mutation must reach the advisory lock before authority is revoked");
-        await using (var revoke = new NpgsqlCommand("UPDATE identity.users SET \"Role\"='CustomerManager' WHERE \"Id\"=$1", observer))
+        await using (var revoke = new NpgsqlCommand("UPDATE grainledger.identity_users SET \"Role\"='CustomerManager' WHERE \"Id\"=$1", observer))
         { revoke.Parameters.AddWithValue(user.Id); await revoke.ExecuteNonQueryAsync(); }
         await tx.CommitAsync();
         using var response = await pending;

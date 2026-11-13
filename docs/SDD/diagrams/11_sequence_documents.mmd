@@ -1,0 +1,33 @@
+sequenceDiagram
+ autonumber
+ actor X as Customer Export Officer
+ participant View as :UI (Web / Field)
+ participant Ctrl as :DocumentEndpoints (planned)
+ participant D as :DocumentService
+ participant C as :ImmutableContentStore
+ participant Repo as :DocumentPersistence port (planned)
+ participant DB as :Database
+ X->>View: Retrieve authorized container dossier
+ View->>Ctrl: Submit request
+ Ctrl->>D: Retrieve authorized container dossier
+ D->>+Repo: Check scope and read unique retained dossier
+ Repo->>+DB: Check scope and read unique retained dossier
+ DB-->>-Repo: Transaction result
+ Repo-->>-D: Result / transaction status
+ D->>C: Fetch verified immutable snapshot
+ D-->>Ctrl: Original closing snapshot
+ Ctrl-->>View: Operation result and findings
+ View-->>X: Display outcome
+ opt Later evidence supplement
+ X->>View: Append evidence reference and reason
+ View->>Ctrl: Submit request
+ Ctrl->>D: Append evidence reference and reason
+ D->>+Repo: Validate scope, append supplement, actor/time and business event atomically
+ Repo->>+DB: Validate scope, append supplement, actor/time and business event atomically
+ DB-->>-Repo: Transaction result
+ Repo-->>-D: Result / transaction status
+ D-->>Ctrl: Supplement ID, original dossier and CLOSED state retained
+ Ctrl-->>View: Operation result and findings
+ View-->>X: Display outcome
+ end
+ Note over DB: Full target design, not a claim of implemented export or residue APIs.

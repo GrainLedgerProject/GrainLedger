@@ -2,9 +2,9 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
-using GrainLedger.Modules.Ledger;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Ledger;
 using Npgsql;
 using Xunit;
 using static GrainLedger.Api.IntegrationTests.LedgerScenario;
@@ -64,7 +64,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
     private async Task<decimal> PositionAsync(Guid lotId, Guid locationId)
     {
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT COALESCE((SELECT quantity_kg FROM ledger.positions WHERE lot_id=$1 AND location_id=$2),0)", owner);
+        await using var command = new NpgsqlCommand("SELECT COALESCE((SELECT quantity_kg FROM grainledger.ledger_positions WHERE lot_id=$1 AND location_id=$2),0)", owner);
         command.Parameters.AddWithValue(lotId); command.Parameters.AddWithValue(locationId);
         return (decimal)(await command.ExecuteScalarAsync())!;
     }
@@ -80,7 +80,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
     private async Task<(Guid LotId, long Revision)> PoolAsync(Guid locationId)
     {
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT lot_id,revision FROM ledger.mixed_bulk_pools WHERE location_id=$1", owner);
+        await using var command = new NpgsqlCommand("SELECT lot_id,revision FROM grainledger.ledger_mixed_bulk_pools WHERE location_id=$1", owner);
         command.Parameters.AddWithValue(locationId);
         await using var row = await command.ExecuteReaderAsync();
         Assert.True(await row.ReadAsync(), "Mixed-bulk location must have current-pool state");
@@ -90,7 +90,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
     private async Task<Dictionary<Guid, decimal>> SharesAsync(Guid lotId)
     {
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT source_lot_id,quantity_kg FROM ledger.contributions WHERE lot_id=$1 AND quantity_kg>0 ORDER BY source_lot_id", owner);
+        await using var command = new NpgsqlCommand("SELECT source_lot_id,quantity_kg FROM grainledger.ledger_contributions WHERE lot_id=$1 AND quantity_kg>0 ORDER BY source_lot_id", owner);
         command.Parameters.AddWithValue(lotId);
         await using var rows = await command.ExecuteReaderAsync();
         var shares = new Dictionary<Guid, decimal>();
@@ -156,7 +156,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         await SendAsync(export, HttpMethod.Post, "/api/ledger/containers", new { id, requestId = Guid.NewGuid(), code = $"LEGACY-{id:N}", facilityId = s.FacilityId, targetKg = "10" });
         // Retained pre-upgrade draft shape: no pool observation. Only the disposable fixture owner inserts it.
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
-        await using var seed = new NpgsqlCommand("INSERT INTO ledger.container_loading_drafts(id,container_id,loaded_at,lines,recorded_by) VALUES($1,$2,now(),$3,$4)", owner);
+        await using var seed = new NpgsqlCommand("INSERT INTO grainledger.ledger_container_loading_drafts(id,container_id,loaded_at,lines,recorded_by) VALUES($1,$2,now(),$3,$4)", owner);
         seed.Parameters.AddWithValue(draftId); seed.Parameters.AddWithValue(id);
         seed.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new[] { new { lotId = pool, locationId = site.LocationId, quantityKg = "1.000000" } }));
         seed.Parameters.AddWithValue(user.Id); await seed.ExecuteNonQueryAsync();
@@ -221,7 +221,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         using var denied = await s.Operator.GetAsync("/api/ledger/trace/starts"); Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using var malformed = await s.Customer.GetAsync("/api/ledger/trace/starts?ownerId=" + s.ForeignOwnerId); Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT ledger.trace_lot_metadata($1,NULL)", runtime); command.Parameters.AddWithValue(s.Accounts["customer"].User.Id);
+        await using var command = new NpgsqlCommand("SELECT grainledger.ledger_trace_lot_metadata($1,NULL)", runtime); command.Parameters.AddWithValue(s.Accounts["customer"].User.Id);
         Assert.Equal("42501", (await Assert.ThrowsAsync<PostgresException>(async () => await command.ExecuteScalarAsync())).SqlState);
     }
 
@@ -270,8 +270,8 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         var result = report.GetProperty("resultSets")[0].GetProperty("results")[0].GetProperty("id").GetGuid();
         using var response = await s.Customer.PostAsJsonAsync("/api/ledger/trace/from-lab", new { reportId = id, resultId = result });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE id=$1", sample.LotId));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE kind='TRACEBACK' AND lot_id=$1", sample.LotId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE id=$1", sample.LotId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE kind='TRACEBACK' AND lot_id=$1", sample.LotId));
     }
 
     private static Task<JsonElement> TraceAsync(HttpClient client, Guid lotId, string direction = "forward", string view = "current") =>
@@ -388,7 +388,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.True(configuredLocation.GetProperty("mixedBulk").GetBoolean());
         await RejectedAsync(s.Purchaser, HttpMethod.Put, $"/api/ledger/locations/{site.LocationId}",
             new { version = configuredLocation.GetProperty("version").GetString(), mixedBulk = false }, HttpStatusCode.Forbidden);
-        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM ledger.mixed_bulk_policies WHERE location_id=$1", site.LocationId));
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_mixed_bulk_policies WHERE location_id=$1", site.LocationId));
 
         using var noPolicy = await CreateAsync(factory);
         var location = Guid.NewGuid();
@@ -399,7 +399,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         using var failed = await RawAsync(noPolicy.Operator, HttpMethod.Post,
             $"/api/ledger/receiving/{receipt.GetProperty("id").GetGuid()}/measurements", MeasurementBody(receipt));
         Assert.False(failed.IsSuccessStatusCode);
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.custody_events WHERE location_id=$1", location));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_custody_events WHERE location_id=$1", location));
         var source = await noPolicy.Purchaser.GetFromJsonAsync<SourceLotResponse>(
             $"/api/source-lots/{receipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()}");
         Assert.NotNull(source);
@@ -419,7 +419,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
             quantityKg = "10", occurredAt = DateTimeOffset.UtcNow
         });
         Assert.Equal(10m, await PositionAsync(output, s.LocationId));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.custody_events WHERE location_id=$1", site.LocationId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_custody_events WHERE location_id=$1", site.LocationId));
         Assert.Equal(Guid.Empty, (await PoolAsync(site.LocationId)).LotId);
     }
     [Fact]
@@ -445,7 +445,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", body);
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{opId}/commit", new { });
         Assert.Equal(20m, (await SharesAsync((await PoolAsync(site.LocationId)).LotId)).Values.Sum());
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.custody_events WHERE command_id=$1", opId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_custody_events WHERE command_id=$1", opId));
     }
 
     [Fact]
@@ -677,7 +677,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", invalid);
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{invalidId}/commit", new { });
         Assert.Equal(100m, (await SharesAsync(pool)).Values.Sum());
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE operation_id=$1 AND kind='DRYING'", invalidId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=$1 AND kind='DRYING'", invalidId));
         var id = Guid.NewGuid();
         var body = System.Text.Json.JsonSerializer.SerializeToNode(
             s.OperationBody(id, "DRYING", [(pool, "40")], [("DRIED_PADDY", "40")],
@@ -688,12 +688,12 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         var saved = await GetAsync(s.Operator, $"/api/ledger/operations/{id}");
         Assert.Equal(pool, saved.GetProperty("inputs")[0].GetProperty("lotId").GetGuid());
         Assert.Equal(draft.GetProperty("inputs")[0].GetProperty("lotId").GetGuid(), pool);
-        var resolved = await ScalarJsonAsync("SELECT details->'resolvedInputs' FROM ledger.events WHERE operation_id=$1 AND kind='DRYING'", id);
+        var resolved = await ScalarJsonAsync("SELECT details->'resolvedInputs' FROM grainledger.ledger_events WHERE operation_id=$1 AND kind='DRYING'", id);
         Assert.Equal(pool, resolved[0].GetProperty("logicalLotId").GetGuid());
         var actualLot = resolved[0].GetProperty("actualLotId").GetGuid();
         Assert.NotEqual(pool, actualLot);
         Assert.Equal(actualLot, await ScalarAsync<Guid>(
-            "SELECT input_lot_id FROM ledger.custody_processing_allocations WHERE operation_id=$1", id));
+            "SELECT input_lot_id FROM grainledger.ledger_custody_processing_allocations WHERE operation_id=$1", id));
         var responseResolution = committed.GetProperty("resolvedInputs")[0];
         Assert.Equal(pool, responseResolution.GetProperty("logicalLotId").GetGuid());
         Assert.Equal(actualLot, responseResolution.GetProperty("actualLotId").GetGuid());
@@ -724,7 +724,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         var saved = await GetAsync(s.Operator, $"/api/ledger/operations/{opId}");
         Assert.Equal(logicalInput, saved.GetProperty("inputs")[0].GetProperty("lotId").GetGuid());
         Assert.Equal(55m, (await SharesAsync((await PoolAsync(site.LocationId)).LotId)).Values.Sum());
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE operation_id=$1 AND kind='DRYING'", opId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=$1 AND kind='DRYING'", opId));
     }
 
     [Fact]
@@ -739,7 +739,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         var zeroSource = roots.Single(root => !aliquotSources.Contains(root));
         Assert.Single(aliquotSources);
         Assert.Equal(await ScalarAsync<Guid>(
-            "SELECT source_lot_id FROM ledger.contributions WHERE lot_id=$1 ORDER BY source_lot_id LIMIT 1", pool),
+            "SELECT source_lot_id FROM grainledger.ledger_contributions WHERE lot_id=$1 ORDER BY source_lot_id LIMIT 1", pool),
             aliquotSources.Single());
         await s.HoldAsync(zeroSource);
         Assert.Equal(0.000001m, Quantity(await s.LotAsync(aliquot), "availableKg"));
@@ -867,12 +867,13 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         var receipt = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/procurements",
             s.ReceiptBody(Guid.NewGuid(), ["25"], site.LocationId));
         var sourceId = receipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
-        var sampleId = Guid.NewGuid(); var sampleCode = $"S-{sampleId:N}"; var seal = $"SEAL-{sampleId:N}";
-        await SendAsync(s.Purchaser, HttpMethod.Post, "/api/samples", CaptureCommand(new
+        var sampleId = Guid.NewGuid(); var seal = $"SEAL-{sampleId:N}";
+        var sample = await SendAsync(s.Purchaser, HttpMethod.Post, "/api/samples", CaptureCommand(new
         {
-            entityId = sampleId, sourceLotId = sourceId, code = sampleCode, sealCode = seal,
+            entityId = sampleId, sourceLotId = sourceId, sealCode = seal,
             collectedAt = DateTimeOffset.UtcNow, materialDescription = "Synthetic pre-pooling sample"
-        }));
+        }, 2));
+        var sampleCode = sample.GetProperty("code").GetString();
         await site.Scenario.ConfirmArrivalAsync(receipt);
         var reportId = Guid.NewGuid();
         await SendAsync(s.Customer, HttpMethod.Post, "/api/lab-reports", CaptureCommand(new
@@ -928,7 +929,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         body["inputs"]![0]!["poolRevision"] = revision;
         await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", body);
         var committed = await SendAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{opId}/commit", new { });
-        var resolved = await ScalarJsonAsync("SELECT details->'resolvedInputs' FROM ledger.events WHERE operation_id=$1 AND kind='DRYING'", opId);
+        var resolved = await ScalarJsonAsync("SELECT details->'resolvedInputs' FROM grainledger.ledger_events WHERE operation_id=$1 AND kind='DRYING'", opId);
         var intermediate = resolved[0].GetProperty("actualLotId").GetGuid();
         var output = Output(committed);
         await s.HoldAsync(intermediate);
@@ -1011,7 +1012,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         finally { foreach (var response in responses) response.Dispose(); }
         var (pool, _) = await PoolAsync(site.LocationId);
         Assert.Equal(40m, (await SharesAsync(pool)).Values.Sum());
-        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM ledger.positions WHERE location_id=$1 AND quantity_kg>0", site.LocationId));
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_positions WHERE location_id=$1 AND quantity_kg>0", site.LocationId));
     }
 
     [Fact]
@@ -1055,7 +1056,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
             toLocationId = site.LocationId, quantityKg = "1", occurredAt = DateTimeOffset.UtcNow
         });
         Assert.Equal(1m, await PositionAsync(foreignLot, s.SecondLocationId));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.custody_events WHERE command_id=$1", foreignTransferId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_custody_events WHERE command_id=$1", foreignTransferId));
         await PolicyAsync(s, site.LocationId, site.CommodityId, "DRIED_PADDY", "DRIED_PADDY");
         var productChangeId = Guid.NewGuid();
         var productChange = s.OperationBody(productChangeId, "DRYING", [(evacuated, "25")], [("DRIED_PADDY", "25")],
@@ -1130,20 +1131,20 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
         foreach (var sql in new[]
         {
-            "INSERT INTO ledger.mixed_bulk_policies DEFAULT VALUES",
-            "DELETE FROM ledger.mixed_bulk_policies",
-            "INSERT INTO ledger.mixed_bulk_pools(location_id) VALUES(gen_random_uuid())",
-            "UPDATE ledger.mixed_bulk_pools SET revision=revision+1",
-            "DELETE FROM ledger.custody_events",
-            "INSERT INTO ledger.custody_events DEFAULT VALUES",
-            "INSERT INTO ledger.custody_edges(event_id,input_lot_id,output_lot_id,quantity_kg) VALUES(gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),1)",
-            "DELETE FROM ledger.custody_edges",
-            "INSERT INTO ledger.custody_allocations(event_id,input_lot_id,output_lot_id,source_lot_id,quantity_kg) VALUES(gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),1)",
-            "DELETE FROM ledger.custody_allocations",
-            "INSERT INTO ledger.custody_processing_allocations(event_id,operation_id,input_lot_id,output_lot_id,source_lot_id,quantity_kg) VALUES(gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),1)",
-            "DELETE FROM ledger.custody_processing_allocations",
-            "SELECT ledger.pool_ingress(gen_random_uuid(),gen_random_uuid(),'TEST',gen_random_uuid(),gen_random_uuid(),1)",
-            "SELECT ledger.pool_withdraw(gen_random_uuid(),gen_random_uuid(),'TEST',gen_random_uuid(),gen_random_uuid(),1,NULL)"
+            "INSERT INTO grainledger.ledger_mixed_bulk_policies DEFAULT VALUES",
+            "DELETE FROM grainledger.ledger_mixed_bulk_policies",
+            "INSERT INTO grainledger.ledger_mixed_bulk_pools(location_id) VALUES(gen_random_uuid())",
+            "UPDATE grainledger.ledger_mixed_bulk_pools SET revision=revision+1",
+            "DELETE FROM grainledger.ledger_custody_events",
+            "INSERT INTO grainledger.ledger_custody_events DEFAULT VALUES",
+            "INSERT INTO grainledger.ledger_custody_edges(event_id,input_lot_id,output_lot_id,quantity_kg) VALUES(gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),1)",
+            "DELETE FROM grainledger.ledger_custody_edges",
+            "INSERT INTO grainledger.ledger_custody_allocations(event_id,input_lot_id,output_lot_id,source_lot_id,quantity_kg) VALUES(gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),1)",
+            "DELETE FROM grainledger.ledger_custody_allocations",
+            "INSERT INTO grainledger.ledger_custody_processing_allocations(event_id,operation_id,input_lot_id,output_lot_id,source_lot_id,quantity_kg) VALUES(gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),1)",
+            "DELETE FROM grainledger.ledger_custody_processing_allocations",
+            "SELECT grainledger.ledger_pool_ingress(gen_random_uuid(),gen_random_uuid(),'TEST',gen_random_uuid(),gen_random_uuid(),1)",
+            "SELECT grainledger.ledger_pool_withdraw(gen_random_uuid(),gen_random_uuid(),'TEST',gen_random_uuid(),gen_random_uuid(),1,NULL)"
         })
         {
             await using var command = new NpgsqlCommand(sql, runtime);
@@ -1152,9 +1153,9 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         }
         var tables = new[]
         {
-            "ledger.mixed_bulk_policies", "ledger.mixed_bulk_pools", "ledger.custody_events",
-            "ledger.custody_edges", "ledger.custody_allocations", "ledger.custody_processing_allocations",
-            "ledger.mixed_bulk_command_results"
+            "grainledger.ledger_mixed_bulk_policies", "grainledger.ledger_mixed_bulk_pools", "grainledger.ledger_custody_events",
+            "grainledger.ledger_custody_edges", "grainledger.ledger_custody_allocations", "grainledger.ledger_custody_processing_allocations",
+            "grainledger.ledger_mixed_bulk_command_results"
         };
         foreach (var table in tables)
         foreach (var privilege in new[] { "SELECT", "INSERT", "UPDATE", "REFERENCES" })
@@ -1174,11 +1175,11 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         await using var functionCheck = new NpgsqlCommand("""
             SELECT count(*) >= 4 AND bool_and(NOT has_function_privilege(current_user,p.oid,'EXECUTE'))
             FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-            WHERE n.nspname='ledger' AND p.proname=ANY($1)
+            WHERE n.nspname='grainledger' AND p.proname=ANY($1)
             """, runtime);
-        functionCheck.Parameters.AddWithValue(new[] { "pool_ingress", "pool_withdraw", "command_pre_mixed", "read_before_mixed_bulk" });
+        functionCheck.Parameters.AddWithValue(new[] { "ledger_pool_ingress", "ledger_pool_withdraw", "ledger_command_pre_mixed", "ledger_read_before_mixed_bulk" });
         Assert.True((bool)(await functionCheck.ExecuteScalarAsync())!, "Runtime role retains protected function EXECUTE");
-        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM ledger.custody_events WHERE location_id=$1", site.LocationId));
+        Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_custody_events WHERE location_id=$1", site.LocationId));
     }
     [Fact]
     public async Task Runtime_validation_rejects_inherited_mixed_bulk_column_and_helper_privileges()
@@ -1191,15 +1192,15 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         try
         {
             await using (var grant = new NpgsqlCommand($"""
-                GRANT UPDATE(revision) ON ledger.mixed_bulk_pools TO {group};
-                GRANT EXECUTE ON FUNCTION ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric) TO {group};
+                GRANT UPDATE(revision) ON grainledger.ledger_mixed_bulk_pools TO {group};
+                GRANT EXECUTE ON FUNCTION grainledger.ledger_pool_ingress(uuid,uuid,text,uuid,uuid,numeric) TO {group};
                 GRANT {group} TO grainledger_test_runtime WITH INHERIT TRUE
                 """, owner))
                 await grant.ExecuteNonQueryAsync();
             await using (var effective = new NpgsqlCommand($"""
-                SELECT has_column_privilege('grainledger_test_runtime','ledger.mixed_bulk_pools','revision','UPDATE')
+                SELECT has_column_privilege('grainledger_test_runtime','grainledger.ledger_mixed_bulk_pools','revision','UPDATE')
                    AND has_function_privilege('grainledger_test_runtime',
-                       'ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
+                       'grainledger.ledger_pool_ingress(uuid,uuid,text,uuid,uuid,numeric)','EXECUTE')
                 """, owner))
                 Assert.Equal(true, await effective.ExecuteScalarAsync());
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -1211,8 +1212,8 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         {
             await using var cleanup = new NpgsqlCommand($"""
                 REVOKE {group} FROM grainledger_test_runtime;
-                REVOKE UPDATE(revision) ON ledger.mixed_bulk_pools FROM {group};
-                REVOKE EXECUTE ON FUNCTION ledger.pool_ingress(uuid,uuid,text,uuid,uuid,numeric) FROM {group};
+                REVOKE UPDATE(revision) ON grainledger.ledger_mixed_bulk_pools FROM {group};
+                REVOKE EXECUTE ON FUNCTION grainledger.ledger_pool_ingress(uuid,uuid,text,uuid,uuid,numeric) FROM {group};
                 DROP ROLE {group}
                 """, owner);
             await cleanup.ExecuteNonQueryAsync();
@@ -1229,7 +1230,7 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         await using (var owner = new NpgsqlConnection(factory.OwnerConnectionString))
         {
             await owner.OpenAsync();
-            await using var trigger = new NpgsqlCommand("CREATE FUNCTION ledger.test_mixed_bulk_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF EXISTS(SELECT 1 FROM ledger.events WHERE id=NEW.event_id AND kind='POOL_INGRESS') THEN RAISE EXCEPTION 'Test-induced mixed-bulk posting failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER test_mixed_bulk_failure BEFORE INSERT ON ledger.postings FOR EACH ROW EXECUTE FUNCTION ledger.test_mixed_bulk_failure();", owner);
+            await using var trigger = new NpgsqlCommand("CREATE FUNCTION grainledger.ledger_test_mixed_bulk_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF EXISTS(SELECT 1 FROM grainledger.ledger_events WHERE id=NEW.event_id AND kind='POOL_INGRESS') THEN RAISE EXCEPTION 'Test-induced mixed-bulk posting failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER test_mixed_bulk_failure BEFORE INSERT ON grainledger.ledger_postings FOR EACH ROW EXECUTE FUNCTION grainledger.ledger_test_mixed_bulk_failure();", owner);
             await trigger.ExecuteNonQueryAsync();
         }
         try
@@ -1240,11 +1241,11 @@ public sealed class MixedBulkTests(ApiFactory factory) : IClassFixture<ApiFactor
         finally
         {
             await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
-            await using var remove = new NpgsqlCommand("DROP TRIGGER test_mixed_bulk_failure ON ledger.postings; DROP FUNCTION ledger.test_mixed_bulk_failure()", owner);
+            await using var remove = new NpgsqlCommand("DROP TRIGGER test_mixed_bulk_failure ON grainledger.ledger_postings; DROP FUNCTION grainledger.ledger_test_mixed_bulk_failure()", owner);
             await remove.ExecuteNonQueryAsync();
         }
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.custody_events WHERE location_id=$1", site.LocationId));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE id=$1", Lots(receipt).Single()));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_custody_events WHERE location_id=$1", site.LocationId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE id=$1", Lots(receipt).Single()));
         await SendAsync(s.Operator, HttpMethod.Post, $"/api/ledger/receiving/{receipt.GetProperty("id").GetGuid()}/measurements", request);
         var (pool, _) = await PoolAsync(site.LocationId);
         Assert.Equal(10m, (await SharesAsync(pool)).Values.Sum());

@@ -1,0 +1,31 @@
+sequenceDiagram
+ autonumber
+ actor O as MillOperator
+ actor M as MillManager
+ participant UI as :LedgerOperations
+ participant E as :LedgerEndpoints
+ participant S as :LedgerService
+ participant DB as :PostgreSQL protected routines
+ O->>UI: Request correction of committed operation
+ UI->>E: POST /api/ledger/corrections
+ E->>S: CommandAsync(correction_request, payload)
+ S->>DB: Retain correction and block original outputs
+ M->>UI: Review physical positions and complete replacement content
+ UI->>E: POST /api/ledger/corrections/{id}/reconcile
+ E->>S: CommandAsync(correction_reconcile, payload)
+ S->>DB: Lock writes, validate assigned manager/evidence/current positions
+ alt Original confirmed correct
+ M->>E: POST /corrections/{id}/cancel with verified evidence
+ E->>S: CommandAsync(correction_cancel, payload)
+ S->>DB: Retain verified cancellation, remove correction restriction only
+ else Eligible physical correction
+ DB->>DB: Bind reconciliation to positions and exact replacement version/content
+ DB-->>S: Reconciled correction, original history retained
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ else Downstream consumption or loading prevents correction
+ DB-->>S: Reject correction posting, retain restriction/investigation
+ S-->>E: Operation result
+ E-->>UI: Operation result
+ end
+ Note over S,DB: Reconciliation does not edit committed stock or release a HOLD.<br/>Changing the replacement invalidates prior reconciliation.

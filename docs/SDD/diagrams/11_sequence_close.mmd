@@ -1,0 +1,34 @@
+sequenceDiagram
+ autonumber
+ actor X as Customer Export Officer
+ participant UI as :Container UI
+ participant Ctrl as :ShipmentsEndpoints (planned)
+ participant S as :ShipmentService
+ participant C as :ComplianceService
+ participant R as :ShipmentPersistence port (planned)
+ participant DB as :Database
+ X->>UI: Close container
+ UI->>+Ctrl: closeContainer(containerId)
+ Ctrl->>+S: close(containerId, authenticatedActor)
+ S->>+R: beginAndLockContainerOrderAndEvidence(containerId)
+ R->>DB: BEGIN, lock container/order and evidence/eligibility revision
+ DB-->>R: ALL committed loading across plan versions and old authorizations
+ R-->>-S: Whole-container snapshot
+ S->>S: requireExactTargetOrderCapAndNoRestriction(snapshot)
+ S->>C: assess(CLOSE, containerId, planId=null, loadingId=null)
+ C-->>S: Whole-container verdict and current immutable basis
+ alt Non-PASS, wrong quantity or changed decision basis
+ S->>R: rollbackCloseOrRetryWithFreshBasis()
+ R->>DB: No CLOSED state or successful dossier committed
+ S->>S: result = RefusedOrReassessmentRequired(findings)
+ else Current PASS and all closure conditions hold
+ S->>R: appendCloseAssessmentStateAndImmutableDossier(basis)
+ R->>DB: One transaction: assessment + CLOSED + unique snapshot/dossier + event
+ R->>DB: COMMIT
+ S->>S: result = Closed(dossierId)
+ end
+ S-->>-Ctrl: CloseOutcome
+ Ctrl-->>-UI: CLOSED with dossier or refusal findings
+ UI-->>X: Display closure result
+ Note over S,DB: Snapshot/hash may be persisted in the same transaction as the supplied DB model
+ Note over DB: Full target design, not a claim of implemented export or residue APIs.

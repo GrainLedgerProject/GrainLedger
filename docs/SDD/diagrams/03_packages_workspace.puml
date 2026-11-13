@@ -1,0 +1,45 @@
+@startuml
+title Frontend Package Diagram — apps/web
+skinparam packageStyle folder
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 16
+skinparam packageBackgroundColor White
+skinparam packageBorderColor #5D6D7E
+skinparam rectangleBorderColor #5D6D7E
+skinparam ArrowColor #44566A
+skinparam nodesep 45
+skinparam ranksep 65
+skinparam linetype polyline
+' Hidden arrows below are layout constraints only, never dependencies.
+package "apps/web/src — existing flat source directory" as Web #DBE8FB {
+folder "main.tsx / App.tsx" as W0
+folder "api.ts / auth-errors.ts" as W1
+folder "LocalAuth.tsx / Administration.tsx" as W2
+folder "CatalogScreen.tsx" as W3
+folder "LedgerWorkspace.tsx" as W4
+folder "LedgerReceiving.tsx" as W5
+folder "LedgerOperations.tsx" as W6
+folder "LedgerSetup.tsx" as W7
+folder "LedgerStock.tsx / LedgerLotPicker.tsx" as W8
+folder "ledger-ui.tsx / styles.css" as W9
+W0 -[hidden]right-> W1
+W1 -[hidden]right-> W2
+W2 -[hidden]right-> W3
+W4 -[hidden]right-> W5
+W5 -[hidden]right-> W6
+W6 -[hidden]right-> W7
+W8 -[hidden]right-> W9
+W0 -[hidden]down-> W4
+W1 -[hidden]down-> W5
+W2 -[hidden]down-> W6
+W3 -[hidden]down-> W7
+W4 -[hidden]down-> W8
+W5 -[hidden]down-> W9
+}
+rectangle "Compliance / export screens:\nplanned source groups" as Compliance #FFF5D9;line.dashed
+rectangle "Offline capture / reconciliation:\nplanned source groups" as Offline #FFF5D9;line.dashed
+W8 -[hidden]down-> Compliance
+W9 -[hidden]down-> Offline
+Compliance -[hidden]right-> Offline
+@enduml

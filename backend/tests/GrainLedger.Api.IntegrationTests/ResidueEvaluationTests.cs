@@ -1,11 +1,11 @@
+using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using GrainLedger.Modules.Capture;
-using GrainLedger.Modules.Identity;
+using GrainLedger.Api.Features.Capture;
+using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Xunit;
 using static GrainLedger.Api.IntegrationTests.LedgerScenario;
@@ -244,7 +244,7 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         {
             await owner.OpenAsync();
             await using var contribution = new NpgsqlCommand(
-                "SELECT quantity_kg FROM ledger.contributions WHERE lot_id=$1 AND source_lot_id=$2", owner);
+                "SELECT quantity_kg FROM grainledger.ledger_contributions WHERE lot_id=$1 AND source_lot_id=$2", owner);
             contribution.Parameters.AddWithValue(dried);
             contribution.Parameters.AddWithValue(sources[2].Lot);
             Assert.Equal(0m, (decimal)(await contribution.ExecuteScalarAsync())!);
@@ -399,7 +399,7 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
             new { id = Guid.NewGuid(), substanceIds = new[] { f.SubstanceId } }, HttpStatusCode.Forbidden, HttpStatusCode.NotFound);
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var user = await db.Users.SingleAsync(x => x.Id == s.Accounts["customer"].User.Id);
             user.OrganizationId = s.ForeignOwnerId; await db.SaveChangesAsync();
         }
@@ -407,7 +407,7 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
             Assert.Contains(moved.StatusCode, new[] { HttpStatusCode.Forbidden, HttpStatusCode.NotFound });
         using (var scope = factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var user = await db.Users.SingleAsync(x => x.Id == s.Accounts["operator"].User.Id);
             user.IsActive = false; await db.SaveChangesAsync();
         }
@@ -475,10 +475,10 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
         foreach (var (table, id) in new[]
         {
-            ("catalog.residue_rule_versions", rule), ("capture.residue_report_selections", selection),
-            ("catalog.residue_policy_setting_versions", setting),
-            ("capture.residue_source_group_versions", group["id"]!.GetValue<Guid>()),
-            ("ledger.residue_evaluations", evaluationId)
+            ("grainledger.catalog_residue_rule_versions", rule), ("grainledger.capture_residue_report_selections", selection),
+            ("grainledger.catalog_residue_policy_setting_versions", setting),
+            ("grainledger.capture_residue_source_group_versions", group["id"]!.GetValue<Guid>()),
+            ("grainledger.ledger_residue_evaluations", evaluationId)
         })
         {
             foreach (var sql in new[] { $"UPDATE {table} SET id=id WHERE id=$1", $"DELETE FROM {table} WHERE id=$1" })
@@ -495,7 +495,7 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
             surviving.Parameters.AddWithValue(id);
             Assert.Equal(1L, (long)(await surviving.ExecuteScalarAsync())!);
         }
-        await using (var directRead = new NpgsqlCommand("SELECT snapshot FROM ledger.residue_evaluations WHERE id=$1", runtime))
+        await using (var directRead = new NpgsqlCommand("SELECT snapshot FROM grainledger.ledger_residue_evaluations WHERE id=$1", runtime))
         {
             directRead.Parameters.AddWithValue(evaluationId);
             Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
@@ -508,27 +508,24 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
     [Fact]
     public async Task Concurrent_policy_and_selection_commits_do_not_create_hybrid_read_snapshot()
     {
-        var gate = new SnapshotGate();
-        await using var isolated = new ApiFactory
-        {
-            ConfigureTestServices = services =>
-            {
-                services.RemoveAll<IResidueEvidenceReader>();
-                services.AddSingleton<IResidueEvidenceReader>(new BlockingEvidenceReader(gate));
-            }
-        };
+        await using var isolated = new ApiFactory();
         await isolated.InitializeAsync();
         using var s = await CreateAsync(isolated);
         var f = await ResidueScenario.CreateAsync(s);
         var sample = await SampleAsync(s, await s.ReceiptAsync("100")); var (_, report) = await f.ReportAsync(sample);
-        gate.Enabled = true;
+        await using var owner = new NpgsqlConnection(isolated.OwnerConnectionString);
+        await owner.OpenAsync();
+        await using var tx = await owner.BeginTransactionAsync();
+        await using (var lockTable = new NpgsqlCommand(
+            "LOCK TABLE grainledger.ledger_residue_evaluations IN ACCESS EXCLUSIVE MODE", owner, tx))
+            await lockTable.ExecuteNonQueryAsync();
+
         var calculating = f.EvaluateAsync(sample.LotId);
-        await gate.Captured.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await WaitForBlockedReplayAsync(owner);
         try { await f.PublishRuleAsync(); await f.SelectAsync(sample, report); }
-        finally { gate.Release.TrySetResult(); }
+        finally { await tx.CommitAsync(); }
         var captured = await calculating;
         Unresolved(ResultOf(captured, f.SubstanceId));
-        gate.Enabled = false;
         Complete(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId), 0.1m, 0.2m);
         Assert.Equal(captured.GetRawText(), (await GetAsync(s.Customer,
             $"/api/ledger/lots/{sample.LotId}/residue-evaluations/{captured.GetProperty("id").GetGuid()}")).GetRawText());
@@ -537,62 +534,54 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
     [Fact]
     public async Task Scope_revoked_after_read_snapshot_prevents_persistence_in_separate_command()
     {
-        var gate = new SnapshotGate();
-        await using var isolated = new ApiFactory
-        {
-            ConfigureTestServices = services =>
-            {
-                services.RemoveAll<IResidueEvidenceReader>();
-                services.AddSingleton<IResidueEvidenceReader>(new BlockingEvidenceReader(gate));
-            }
-        };
+        await using var isolated = new ApiFactory();
         await isolated.InitializeAsync();
         using var s = await CreateAsync(isolated);
         var f = await ResidueScenario.CreateAsync(s); var sample = await SampleAsync(s, await s.ReceiptAsync("100"));
-        var id = Guid.NewGuid(); gate.Enabled = true;
+        var id = Guid.NewGuid();
+        await using var owner = new NpgsqlConnection(isolated.OwnerConnectionString);
+        await owner.OpenAsync();
+        await using var tx = await owner.BeginTransactionAsync();
+        await using (var lockTable = new NpgsqlCommand(
+            "LOCK TABLE grainledger.ledger_residue_evaluations IN ACCESS EXCLUSIVE MODE", owner, tx))
+            await lockTable.ExecuteNonQueryAsync();
+
         var request = RawAsync(s.Customer, HttpMethod.Post, $"/api/ledger/lots/{sample.LotId}/residue-evaluations",
             new { id, substanceIds = new[] { f.SubstanceId } });
-        await gate.Captured.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await WaitForBlockedReplayAsync(owner);
         try
         {
             using var scope = isolated.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var user = await db.Users.SingleAsync(x => x.Id == s.Accounts["customer"].User.Id);
             user.OrganizationId = s.ForeignOwnerId; await db.SaveChangesAsync();
         }
-        finally { gate.Release.TrySetResult(); }
+        finally { await tx.CommitAsync(); }
         using var denied = await request;
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        await using var owner = new NpgsqlConnection(isolated.OwnerConnectionString); await owner.OpenAsync();
-        await using var count = new NpgsqlCommand("SELECT count(*) FROM ledger.residue_evaluations WHERE id=$1", owner);
+        await using var count = new NpgsqlCommand("SELECT count(*) FROM grainledger.ledger_residue_evaluations WHERE id=$1", owner);
         count.Parameters.AddWithValue(id);
         Assert.Equal(0L, (long)(await count.ExecuteScalarAsync())!);
     }
 
-    private sealed class SnapshotGate
+    private static async Task WaitForBlockedReplayAsync(NpgsqlConnection owner)
     {
-        public bool Enabled { get; set; }
-        public TaskCompletionSource Captured { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    }
-
-    private sealed class BlockingEvidenceReader(SnapshotGate gate) : IResidueEvidenceReader
-    {
-        private readonly ResidueEvidenceReader _inner = new();
-        public async Task<ResidueEvidenceSnapshot> ReadAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
-            Guid companyId, IReadOnlyCollection<Guid> lotIds, IReadOnlyCollection<Guid> substanceIds, DateTimeOffset snapshotAt, CancellationToken ct)
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
         {
-            var snapshot = await _inner.ReadAsync(connection, transaction, companyId, lotIds, substanceIds, snapshotAt, ct);
-            if (gate.Enabled)
-            {
-                await using var command = new NpgsqlCommand("SELECT current_setting('transaction_isolation'), current_setting('transaction_read_only')", connection, transaction);
-                await using (var reader = await command.ExecuteReaderAsync(ct))
-                {
-                    Assert.True(await reader.ReadAsync(ct)); Assert.Equal("repeatable read", reader.GetString(0)); Assert.Equal("on", reader.GetString(1));
-                }
-                gate.Captured.TrySetResult(); await gate.Release.Task.WaitAsync(TimeSpan.FromSeconds(30), ct);
-            }
-            return snapshot;
+            // pg_stat_activity is cached for the lifetime of the owner's transaction.
+            await using var clear = new NpgsqlCommand("SELECT pg_stat_clear_snapshot()", owner);
+            await clear.ExecuteNonQueryAsync();
+            await using var command = new NpgsqlCommand("""
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_stat_activity
+                    WHERE datname=current_database() AND wait_event_type='Lock'
+                      AND pg_backend_pid() = ANY(pg_blocking_pids(pid))
+                      AND query LIKE '%ledger_residue_replay%')
+                """, owner);
+            if ((bool)(await command.ExecuteScalarAsync())!) return;
+            await Task.Delay(25);
         }
+        Assert.True(false, "Residue replay did not block on the locked evaluation table.");
     }
 }

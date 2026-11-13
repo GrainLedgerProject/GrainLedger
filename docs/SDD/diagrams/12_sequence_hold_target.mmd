@@ -1,0 +1,42 @@
+sequenceDiagram
+ autonumber
+ actor M as Customer Manager
+ actor MM as Mill Manager
+ participant UI as :HOLD UI
+ participant Ctrl as :HoldsEndpoints (planned)
+ participant S as :HoldService
+ participant R as :HoldPersistence port (planned)
+ participant DB as :Database
+ M->>UI: Issue HOLD on one owned lot or container
+ UI->>+Ctrl: issueHold(command)
+ Ctrl->>+S: issue(command, authenticatedActor)
+ S->>+R: beginAndLockTargetAuthorityAndRecipientScope(command)
+ R->>DB: BEGIN, lock target, unfinished authority and responsible assignments
+ DB-->>R: Target owner and scoped recipients
+ R-->>-S: Protected HOLD snapshot
+ S->>S: requireExactOneTargetAndAllResponsibleRecipients()
+ alt Invalid target/grant or required recipients missing
+ S->>R: rollback()
+ R->>DB: ROLLBACK, no false successful notice result
+ S->>S: result = RejectedOrConfigurationError
+ else Valid HOLD and recipients
+ S->>R: appendHoldNoticesAndAuthorityRestrictions(command)
+ R->>DB: HOLD + unique recipient notices + event + unused reservation releases
+ R->>DB: COMMIT
+ S->>S: result = Issued(holdId)
+ end
+ S-->>-Ctrl: HoldOutcome
+ Ctrl-->>-UI: HOLD outcome and retained notices
+ UI-->>M: Display result
+ MM->>UI: ACKNOWLEDGE / ISOLATE / RECORD_RESPONSE
+ UI->>Ctrl: recordHandling(command)
+ Ctrl->>S: recordHandling(command, actor)
+ opt Authorized isolation
+ S->>S: Invoke ledger contract for equal location transfer
+ end
+ S->>R: appendHandlingWithEvidence(command)
+ R->>DB: Retain handling event atomically with any isolation postings
+ S-->>Ctrl: Handling recorded, HOLD remains active
+ Ctrl-->>UI: Handling outcome
+ Note over S,DB: Reading notices or handling a HOLD never releases it
+ Note over DB: Planned full-scope extension over the existing Ledger protected transaction boundary.

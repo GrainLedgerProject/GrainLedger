@@ -22,7 +22,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         await s.CommitAsync(draft);
         Assert.Equal(0m, Quantity(await s.LotAsync(source)));
         var hold = await s.HoldAsync(source);
-        var (unassigned, session) = await factory.SeedUserAsync(GrainLedger.Modules.Identity.Roles.MillManager, s.Accounts["manager"].User.OrganizationId);
+        var (unassigned, session) = await factory.SeedUserAsync(GrainLedger.Api.Features.Identity.Roles.MillManager, s.Accounts["manager"].User.OrganizationId);
         using var unassignedClient = factory.CreateRealCookieClient(unassigned, session);
         await CsrfAsync(unassignedClient);
         await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/assignments", new { userId = unassigned.Id, facilityId = s.ForeignFacilityId });
@@ -36,7 +36,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         foreach (var actor in new[] { s.Accounts["customer"].User.Id, unassigned.Id })
         {
             await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
-            await using var command = new NpgsqlCommand("SELECT ledger.command($1,$2,$3::jsonb)", runtime);
+            await using var command = new NpgsqlCommand("SELECT grainledger.ledger_command($1,$2,$3::jsonb)", runtime);
             command.Parameters.AddWithValue(actor); command.Parameters.AddWithValue("hold_response");
             command.Parameters.AddWithValue(JsonSerializer.Serialize(new { id = hold, evidenceId = s.EvidenceId, response = "Runtime role or scope bypass", status = "ACKNOWLEDGED" }));
             var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync());
@@ -61,14 +61,14 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
             await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
             await runtime.OpenAsync();
             await using var transaction = await runtime.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
-            await using (var snapshot = new NpgsqlCommand("SELECT count(*) FROM ledger.holds WHERE lot_id=$1", runtime, transaction))
+            await using (var snapshot = new NpgsqlCommand("SELECT count(*) FROM grainledger.ledger_holds WHERE lot_id=$1", runtime, transaction))
             {
                 snapshot.Parameters.AddWithValue(source);
                 Assert.Equal(0L, await snapshot.ExecuteScalarAsync());
             }
             // Independent HTTP connection commits HOLD after RR snapshot has been established.
             await s.HoldAsync(source);
-            await using var command = new NpgsqlCommand("SELECT ledger.command($1,$2,$3::jsonb)", runtime, transaction);
+            await using var command = new NpgsqlCommand("SELECT grainledger.ledger_command($1,$2,$3::jsonb)", runtime, transaction);
             command.Parameters.AddWithValue(s.Accounts["operator"].User.Id);
             command.Parameters.AddWithValue("commit");
             command.Parameters.AddWithValue(JsonSerializer.Serialize(new { id = operationId }));
@@ -79,9 +79,9 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(10m, Quantity(await s.LotAsync(source)));
         Assert.Equal(0m, Quantity(await s.LotAsync(source), "availableKg"));
         Assert.Equal("DRAFT", (await GetAsync(s.Operator, $"/api/ledger/operations/{operationId}")).GetProperty("status").GetString());
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE operation_id=@id", operationId));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE operation_id=@id", operationId));
-        Assert.Equal(10m, await ScalarAsync<decimal>("SELECT sum(quantity_kg) FROM ledger.postings WHERE lot_id=@id", source));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=@id", operationId));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE operation_id=@id", operationId));
+        Assert.Equal(10m, await ScalarAsync<decimal>("SELECT sum(quantity_kg) FROM grainledger.ledger_postings WHERE lot_id=@id", source));
         await AssertProjectionAsync();
     }
 
@@ -112,12 +112,12 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         var replies = await Task.WhenAll(RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", body), RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", body));
         foreach (var reply in replies) { Assert.True(reply.IsSuccessStatusCode, await reply.Content.ReadAsStringAsync()); reply.Dispose(); }
         var receipt = await GetAsync(s.Purchaser, $"/api/procurements/{id}");
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=@id", id));
         await s.ConfirmArrivalAsync(receipt);
         Assert.Equal(2, Lots(receipt).Distinct().Count());
         Assert.Equal(12m, (await Task.WhenAll(Lots(receipt).Select(l => s.LotAsync(l)))).Sum(l => Quantity(l)));
         await RejectedAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(id, ["99"]), HttpStatusCode.Conflict);
-        Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
+        Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=@id", id));
         await AssertProjectionAsync();
     }
 
@@ -132,13 +132,13 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         {
             using var result = await RawAsync(s.Operator, HttpMethod.Post, $"/api/ledger/receiving/{id}/measurements", measurement);
             Assert.False(result.IsSuccessStatusCode);
-            Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurements WHERE id=@id", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE receipt_id=@id", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE details->>'receiptId'=CAST(@id AS text)", id));
-            Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM capture.procurement_items WHERE procurement_id=@id", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.arrival_measurement_sets WHERE procurement_id=@id", id));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.arrival_operations WHERE procurement_id=@id", id));
-            Assert.Equal("PENDING_ARRIVAL", await ScalarAsync<string>("SELECT status FROM ledger.receiving WHERE procurement_id=@id", id));
+            Assert.Equal(1L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.capture_procurements WHERE id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE receipt_id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE details->>'receiptId'=CAST(@id AS text)", id));
+            Assert.Equal(2L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.capture_procurement_items WHERE procurement_id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_arrival_measurement_sets WHERE procurement_id=@id", id));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_arrival_operations WHERE procurement_id=@id", id));
+            Assert.Equal("PENDING_ARRIVAL", await ScalarAsync<string>("SELECT status FROM grainledger.ledger_receiving WHERE procurement_id=@id", id));
         });
         await SendAsync(s.Operator, HttpMethod.Post, $"/api/ledger/receiving/{id}/measurements", measurement);
         Assert.Equal(12m, (await Task.WhenAll(Lots(receipt).Select(l => s.LotAsync(l)))).Sum(l => Quantity(l)));
@@ -156,8 +156,8 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
             using var response = await RawAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{op.GetProperty("id").GetGuid()}/commit", new { });
             Assert.False(response.IsSuccessStatusCode);
             Assert.Equal(10m, Quantity(await s.LotAsync(source)));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.lots WHERE operation_id=@id", op.GetProperty("id").GetGuid()));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE operation_id=@id", op.GetProperty("id").GetGuid()));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_lots WHERE operation_id=@id", op.GetProperty("id").GetGuid()));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=@id", op.GetProperty("id").GetGuid()));
         });
         await s.CommitAsync(op);
         await AssertProjectionAsync();
@@ -173,7 +173,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Contains("policy", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(10m, Quantity(await s.LotAsync(source)));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.events WHERE operation_id=@id", op.GetProperty("id").GetGuid()));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=@id", op.GetProperty("id").GetGuid()));
         await s.PolicyAsync("DRYING", "0");
         // Draft predates policy entry, but policy explicitly effective before occurrence.
         await s.CommitAsync(op);
@@ -316,16 +316,16 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
             Assert.False(response.IsSuccessStatusCode);
             Assert.Equal(0m, Quantity(await s.LotAsync(source)));
             Assert.Equal(9m, Quantity(await s.LotAsync(Output(original))));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings p JOIN ledger.events e ON e.id=p.event_id WHERE e.operation_id=@id AND p.reverses_posting_id IS NOT NULL", original.GetProperty("id").GetGuid()));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_postings p JOIN grainledger.ledger_events e ON e.id=p.event_id WHERE e.operation_id=@id AND p.reverses_posting_id IS NOT NULL", original.GetProperty("id").GetGuid()));
         });
         await SendAsync(s.Operator, HttpMethod.Post, route, body);
         Assert.Equal(0m, Quantity(await s.LotAsync(source)));
         Assert.Equal(0m, Quantity(await s.LotAsync(Output(original))));
         Assert.Equal(8m, Quantity(await s.LotAsync(Output(replacement))));
-        var reversals = await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE reverses_posting_id IS NOT NULL");
+        var reversals = await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_postings WHERE reverses_posting_id IS NOT NULL");
         using var duplicate = await RawAsync(s.Operator, HttpMethod.Post, route, body);
         Assert.Contains(duplicate.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.Conflict });
-        Assert.Equal(reversals, await ScalarAsync<long>("SELECT count(*) FROM ledger.postings WHERE reverses_posting_id IS NOT NULL"));
+        Assert.Equal(reversals, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_postings WHERE reverses_posting_id IS NOT NULL"));
         var history = (await GetAsync(s.Operator, $"/api/ledger/history?lotId={source}&pageSize=100")).GetProperty("items");
         foreach (var old in oldHistory.EnumerateArray()) Assert.Contains(history.EnumerateArray(), current => current.GetProperty("id").GetGuid() == old.GetProperty("id").GetGuid());
         await AssertProjectionAsync();
@@ -384,7 +384,7 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         Assert.Equal(code, retried.GetProperty("outputs")[0].GetProperty("code").GetString());
         Assert.Matches(@"^DRY-\d{8}-\d{6,}$", code!);
         Assert.Equal(1L, await ScalarAsync<long>(
-            "SELECT count(*) FROM ledger.lot_code_reservations WHERE context_id=@id", operationId));
+            "SELECT count(*) FROM grainledger.ledger_lot_code_reservations WHERE context_id=@id", operationId));
         await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations", new
         {
             id = Guid.NewGuid(), ownerId = s.OwnerId, facilityId = s.FacilityId, kind = "DRYING",
@@ -397,16 +397,16 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     }
 
     [Fact]
-    public async Task Runtime_cannot_bypass_code_issuer_or_call_legacy_command()
+    public async Task Runtime_cannot_bypass_code_issuer_or_call_core_command()
     {
         using var s = await CreateAsync(factory);
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString);
         await runtime.OpenAsync();
         foreach (var sql in new[]
         {
-            "SELECT nextval('ledger.lot_code_serial')",
-            "SELECT ledger.reserve_lot_code_internal($1,$2,'OPERATION',$3,'DRIED_PADDY','DRIED_PADDY')",
-            "SELECT ledger.command_legacy($1,'draft','{}'::jsonb)"
+            "SELECT nextval('grainledger.ledger_lot_code_serial')",
+            "SELECT grainledger.ledger_reserve_lot_code_internal($1,$2,'OPERATION',$3,'DRIED_PADDY','DRIED_PADDY')",
+            "SELECT grainledger.ledger_command_core($1,'draft','{}'::jsonb)"
         })
         {
             await using var command = new NpgsqlCommand(sql, runtime);
@@ -419,6 +419,32 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
             var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync());
             Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
         }
+    }
+
+    [Fact]
+    public async Task Legacy_draft_cannot_commit_and_missing_source_reservation_fails_closed()
+    {
+        using var s = await CreateAsync(factory);
+        var source = Lots(await s.ReceiptAsync("10"))[0];
+        var draft = await s.DraftAsync("DRYING", [(source, "10")], [("DRIED_PADDY", "10")]);
+        var id = draft.GetProperty("id").GetGuid();
+        await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
+        await owner.OpenAsync();
+        await using (var markLegacy = new NpgsqlCommand("UPDATE grainledger.ledger_operations SET lot_code_scheme='LEGACY' WHERE id=$1", owner))
+        {
+            markLegacy.Parameters.AddWithValue(id);
+            await markLegacy.ExecuteNonQueryAsync();
+        }
+        await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/operations",
+            s.OperationBody(id, "DRYING", [(source, "10")], [("DRIED_PADDY", "10")]));
+        await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{id}/commit", new { });
+        Assert.Equal(10m, Quantity(await s.LotAsync(source)));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_events WHERE operation_id=@id", id));
+        await using var missing = new NpgsqlCommand("SELECT grainledger.ledger_source_lot_code($1,$2)", owner);
+        missing.Parameters.AddWithValue(Guid.NewGuid());
+        missing.Parameters.AddWithValue(Guid.NewGuid());
+        var error = await Assert.ThrowsAsync<PostgresException>(() => missing.ExecuteScalarAsync());
+        Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
     }
 
     [Fact]
@@ -482,13 +508,13 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         await using var runtime = new NpgsqlConnection(factory.RuntimeConnectionString); await runtime.OpenAsync();
         foreach (var sql in new[]
         {
-            "UPDATE ledger.positions SET quantity_kg=999 WHERE lot_id=@id",
-            "DELETE FROM ledger.postings WHERE lot_id=@id",
-            "UPDATE ledger.lots SET owner_id=NULL WHERE id=@id",
-            "UPDATE ledger.evidence SET content=decode('00','hex')",
-            "UPDATE ledger.policies SET tolerance_percent=100",
-            "UPDATE ledger.operations SET status='COMMITTED'",
-            "SELECT ledger.post(gen_random_uuid(),@id,gen_random_uuid(),1)"
+            "UPDATE grainledger.ledger_positions SET quantity_kg=999 WHERE lot_id=@id",
+            "DELETE FROM grainledger.ledger_postings WHERE lot_id=@id",
+            "UPDATE grainledger.ledger_lots SET owner_id=NULL WHERE id=@id",
+            "UPDATE grainledger.ledger_evidence SET content=decode('00','hex')",
+            "UPDATE grainledger.ledger_policies SET tolerance_percent=100",
+            "UPDATE grainledger.ledger_operations SET status='COMMITTED'",
+            "SELECT grainledger.ledger_post(gen_random_uuid(),@id,gen_random_uuid(),1)"
         })
         {
             await using var command = new NpgsqlCommand(sql, runtime); command.Parameters.AddWithValue("id", lot);
@@ -550,30 +576,30 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
         using var s = await CreateAsync(factory);
         var lot = Lots(await s.ReceiptAsync("10"))[0]; var hold = Guid.NewGuid();
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
-        await using (var command = new NpgsqlCommand("CREATE FUNCTION ledger.test_notification_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Test-induced notification failure'; END $$; CREATE TRIGGER test_notification_failure BEFORE INSERT ON ledger.notifications FOR EACH ROW EXECUTE FUNCTION ledger.test_notification_failure();", owner))
+        await using (var command = new NpgsqlCommand("CREATE FUNCTION grainledger.ledger_test_notification_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Test-induced notification failure'; END $$; CREATE TRIGGER test_notification_failure BEFORE INSERT ON grainledger.ledger_notifications FOR EACH ROW EXECUTE FUNCTION grainledger.ledger_test_notification_failure();", owner))
             await command.ExecuteNonQueryAsync();
         try
         {
             using var result = await RawAsync(s.Customer, HttpMethod.Post, "/api/ledger/holds", new { id = hold, lotId = lot, reason = "Synthetic atomic HOLD" });
             Assert.False(result.IsSuccessStatusCode);
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.holds WHERE id=@id", hold));
-            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.notifications WHERE hold_id=@id", hold));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_holds WHERE id=@id", hold));
+            Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_notifications WHERE hold_id=@id", hold));
             Assert.Equal(10m, Quantity(await s.LotAsync(lot), "availableKg"));
         }
         finally
         {
-            await using var command = new NpgsqlCommand("DROP TRIGGER test_notification_failure ON ledger.notifications; DROP FUNCTION ledger.test_notification_failure();", owner);
+            await using var command = new NpgsqlCommand("DROP TRIGGER test_notification_failure ON grainledger.ledger_notifications; DROP FUNCTION grainledger.ledger_test_notification_failure();", owner);
             await command.ExecuteNonQueryAsync();
         }
         await SendAsync(s.Customer, HttpMethod.Post, "/api/ledger/holds", new { id = hold, lotId = lot, reason = "Synthetic atomic HOLD" });
-        Assert.True(await ScalarAsync<long>("SELECT count(*) FROM ledger.notifications WHERE hold_id=@id", hold) >= 2);
+        Assert.True(await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_notifications WHERE hold_id=@id", hold) >= 2);
         Assert.Equal(0m, Quantity(await s.LotAsync(lot), "availableKg"));
     }
 
     private async Task AssertProjectionAsync()
     {
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM (SELECT lot_id,location_id,sum(quantity_kg) quantity FROM ledger.postings GROUP BY lot_id,location_id) p FULL JOIN ledger.positions s USING(lot_id,location_id) WHERE coalesce(p.quantity,0)<>coalesce(s.quantity_kg,0)"));
-        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM ledger.positions WHERE quantity_kg<0"));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM (SELECT lot_id,location_id,sum(quantity_kg) quantity FROM grainledger.ledger_postings GROUP BY lot_id,location_id) p FULL JOIN grainledger.ledger_positions s USING(lot_id,location_id) WHERE coalesce(p.quantity,0)<>coalesce(s.quantity_kg,0)"));
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.ledger_positions WHERE quantity_kg<0"));
     }
 
     private async Task<T> ScalarAsync<T>(string sql, Guid? id = null)
@@ -587,9 +613,9 @@ public sealed class LedgerAcceptanceTests(ApiFactory factory) : IClassFixture<Ap
     {
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString); await owner.OpenAsync();
         // Reject 7 kg receipt credit after lot/event insertion; processing debit precedes output rejection.
-        const string create = "CREATE FUNCTION ledger.test_posting_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.quantity_kg>6 THEN RAISE EXCEPTION 'Test-induced mid-posting failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER test_posting_failure BEFORE INSERT ON ledger.postings FOR EACH ROW EXECUTE FUNCTION ledger.test_posting_failure();";
+        const string create = "CREATE FUNCTION grainledger.ledger_test_posting_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.quantity_kg>6 THEN RAISE EXCEPTION 'Test-induced mid-posting failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER test_posting_failure BEFORE INSERT ON grainledger.ledger_postings FOR EACH ROW EXECUTE FUNCTION grainledger.ledger_test_posting_failure();";
         await using (var command = new NpgsqlCommand(create, owner)) await command.ExecuteNonQueryAsync();
         try { await action(); }
-        finally { await using var command = new NpgsqlCommand("DROP TRIGGER test_posting_failure ON ledger.postings; DROP FUNCTION ledger.test_posting_failure();", owner); await command.ExecuteNonQueryAsync(); }
+        finally { await using var command = new NpgsqlCommand("DROP TRIGGER test_posting_failure ON grainledger.ledger_postings; DROP FUNCTION grainledger.ledger_test_posting_failure();", owner); await command.ExecuteNonQueryAsync(); }
     }
 }
