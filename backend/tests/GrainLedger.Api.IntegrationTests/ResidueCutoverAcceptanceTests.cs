@@ -173,9 +173,18 @@ public sealed class ResidueCutoverAcceptanceTests
             "SELECT grainledger.ledger_residue_history($1,$2,$3)::text", Guid.NewGuid(), ids.Lot, ids.Evaluation));
         Assert.Equal("42501", denied.SqlState);
         var newId = Guid.NewGuid();
-        var snapshot = JsonSerializer.Serialize(new { id = newId, lotId = ids.Lot, companyId = ids.Company, engineVersion = "residue-flow-as-received-3" });
-        var appended = await CallAsync(runtime, "SELECT grainledger.ledger_residue_append($1,$2,$3,$4::jsonb,$5::jsonb)::text", ids.Actor, ids.Lot, newId, "{}", snapshot);
-        var replay = await CallAsync(runtime, "SELECT grainledger.ledger_residue_replay($1,$2,$3,$4::jsonb)::text", ids.Actor, ids.Lot, newId, "{}");
+        var request = JsonSerializer.Serialize(new { id = newId, substanceIds = new[] { ids.Substance } });
+        var snapshotAt = DateTimeOffset.UtcNow;
+        var incompleteSnapshot = JsonSerializer.Serialize(new { id = newId, lotId = ids.Lot, companyId = ids.Company, snapshotAt, engineVersion = "residue-flow-as-received-3" });
+        var stale = await Assert.ThrowsAsync<PostgresException>(() => CallAsync(runtime,
+            "SELECT grainledger.ledger_residue_append($1,$2,$3,$4::jsonb,$5::jsonb)::text", ids.Actor, ids.Lot, newId, request, incompleteSnapshot));
+        Assert.Equal(PostgresErrorCodes.SerializationFailure, stale.SqlState);
+        var snapshot = JsonSerializer.Serialize(new { id = newId, lotId = ids.Lot, companyId = ids.Company, snapshotAt,
+            engineVersion = "residue-flow-as-received-3", retiredProfileIds = Array.Empty<Guid>() });
+        var appended = await CallAsync(runtime, "SELECT grainledger.ledger_residue_append($1,$2,$3,$4::jsonb,$5::jsonb)::text", ids.Actor, ids.Lot, newId, request, snapshot);
+        using (var parsed = JsonDocument.Parse(appended!))
+            Assert.False(parsed.RootElement.TryGetProperty("retiredProfileIds", out _));
+        var replay = await CallAsync(runtime, "SELECT grainledger.ledger_residue_replay($1,$2,$3,$4::jsonb)::text", ids.Actor, ids.Lot, newId, request);
         Assert.Equal(appended, replay);
         Assert.Equal(appended, await CallAsync(runtime, "SELECT grainledger.ledger_residue_history($1,$2,$3)::text", ids.Actor, ids.Lot, newId));
         var rejectedId = Guid.NewGuid();
