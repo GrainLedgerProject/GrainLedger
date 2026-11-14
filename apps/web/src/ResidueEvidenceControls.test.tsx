@@ -143,3 +143,20 @@ it('shows unresolved prerequisites and named conflicts; editing invalidates prev
   expect(confirm).toBeDisabled();
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/residue-review/confirm'))).toBe(false);
 });
+
+it('shows scoped method mismatch guidance without enabling confirmation or suggesting it for other failures', async () => {
+  reviewRows = [
+    { ...reviewRow, profile: null, setting: null, assessment: null, reasons: ['Method mismatch. Reported method: LAB X. Eligible adopted profile methods: METHOD A, METHOD B'] },
+    { ...reviewRow, input: { ...reviewRow.input, resultId: 'result-two', sourceId: 'source-two' }, label: 'Other result', profile: null, setting: null, assessment: null, reasons: ["No compatible adopted profile for this result's unit, stage or result kind"] },
+  ];
+  const user = userEvent.setup();
+  render(<ResidueEvidenceControls active allowed companyId="company-1" report={confirmedReport} />);
+  const diagnostic = await screen.findByText('Method mismatch. Reported method: LAB X. Eligible adopted profile methods: METHOD A, METHOD B');
+  const firstRow = diagnostic.closest('article')!;
+  expect(within(firstRow).getByText('Compare the reported method with eligible adopted profile methods; no method is selected automatically.')).toBeVisible();
+  const otherRow = screen.getByText('Other result').closest('article')!;
+  expect(within(otherRow).queryByText(/no method is selected automatically/)).not.toBeInTheDocument();
+  await user.click(screen.getByText('Resolve exceptions or bind after policy adoption', { selector: 'summary' }));
+  expect(screen.getByRole('button', { name: 'Review and confirm compatible results' })).toBeDisabled();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/residue-review/confirm'))).toBe(false);
+});

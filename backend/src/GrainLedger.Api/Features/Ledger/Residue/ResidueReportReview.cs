@@ -222,10 +222,27 @@ public sealed partial class ResidueEvaluationService
                             && (selected.ResultKind == "NUMERIC" ? lab.NumericInterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY"
                                 : selected.ResultKind == "BELOW_LIMIT" ? lab.BelowLimit
                                 : selected.ResultKind == "NOT_DETECTED" && lab.NdThresholdKind is not null))).ToArray();
-                    if (resolution.Reason is not null || compatible.Length != 1)
-                        reasons.Add(resolution.Reason ?? (compatible.Length == 0
-                            ? $"No compatible adopted profile: method {selected.Method ?? "(not reported)"}, unit {selected.Unit ?? "(not reported)"}, commodity {node.CommodityId}, stage {source.ProductStage}, source received {source.ReceivedAt:O}"
-                            : "Multiple compatible adopted profiles; expert applicability review required"));
+                    if (resolution.Reason is not null)
+                        reasons.Add(resolution.Reason);
+                    else if (compatible.Length == 0)
+                    {
+                        var eligibleMethods = resolution.Rules
+                            .Where(x => source.ProductStage == "RAW_PADDY"
+                                && x.Rule.Unit == ResidueConcentration.CanonicalUnit(selected.Unit))
+                            .SelectMany(x => x.Rule.Laboratory)
+                            .Where(lab => selected.ResultKind == "NUMERIC" ? lab.NumericInterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY"
+                                : selected.ResultKind == "BELOW_LIMIT" ? lab.BelowLimit
+                                : selected.ResultKind == "NOT_DETECTED" && lab.NdThresholdKind is not null)
+                            .Select(lab => lab.AnalyticalMethod).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+                        if (eligibleMethods.Length > 0 && !eligibleMethods.Contains(selected.Method, StringComparer.Ordinal))
+                            reasons.Add($"Method mismatch. Reported method: {selected.Method ?? "(not reported)"}. Eligible adopted profile methods: {string.Join(", ", eligibleMethods)}");
+                        else
+                            reasons.Add(resolution.Rules.Count == 0
+                                ? "No valid adopted profile for this source and substance"
+                                : "No compatible adopted profile for this result's unit, stage or result kind");
+                    }
+                    else if (compatible.Length > 1)
+                        reasons.Add("Multiple compatible adopted profiles; expert applicability review required");
                     else (rule, setting) = compatible[0];
                     conflicts.AddRange(candidates.Where(x => x.ResultId != row.ResultId).Select(x => new ResidueReportResultChoice(x.ResultId, labels[x.ResultId])));
                     var active = activeByScope.GetValueOrDefault(scope) ?? [];

@@ -223,3 +223,54 @@ it('shows complete published details and resets review information in revision p
   expect(preview.queryByText('Dr A')).not.toBeInTheDocument();
   expect(preview.getAllByText('Not specified').length).toBeGreaterThan(0);
 });
+
+it('suggests exact visible methods while retaining arbitrary method text on publication', async () => {
+  rules = [profile, { ...profile, id: 'other', code: 'OTHER', laboratory: [{ ...profile.laboratory[0], analyticalMethod: 'lc-ms/ms' }] }];
+  const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
+  await openNew(user);
+  const input = screen.getByLabelText('Exact analytical method') as HTMLInputElement;
+  expect(Array.from(input.list!.options).map(option => option.value)).toEqual(['LC-MS/MS', 'lc-ms/ms']);
+  change('Exact analytical method', '  Custom Method  ');
+  change('Concentration factor', '1'); await confirm(user); submit();
+  await waitFor(() => expect(posts()).toHaveLength(1));
+  expect(body().laboratory[0].analyticalMethod).toBe('  Custom Method  ');
+});
+
+it('filters profile history by exact analytical method', async () => {
+  rules = [profile, { ...profile, id: 'other', code: 'OTHER', laboratory: [{ ...profile.laboratory[0], analyticalMethod: 'lc-ms/ms' }] }];
+  const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create profile' })).toBeEnabled());
+  await user.selectOptions(screen.getByLabelText('Analytical method'), 'lc-ms/ms');
+  const table = within(screen.getByRole('region', { name: 'Published residue profiles' }));
+  expect(table.getAllByText('OTHER').length).toBeGreaterThan(0);
+  expect(table.queryByText('RICE-RES')).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText('Analytical method'), '');
+  expect(table.getAllByText('RICE-RES').length).toBeGreaterThan(0);
+});
+
+it('links setup issues to editable sections and updates preview as values change', async () => {
+  const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create profile' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Create profile' }));
+  const issues = within(screen.getByRole('region', { name: 'Setup issues' }));
+  await user.click(issues.getByRole('link', { name: /outward precision/ }));
+  expect(screen.getByText('Advanced profile settings').closest('details')).toHaveAttribute('open');
+  expect(document.activeElement).toHaveAttribute('id', 'residue-setup-precision');
+  await user.click(screen.getByRole('button', { name: 'Add laboratory method' }));
+  expect(issues.getByText(/select at least one supported result form/)).toBeVisible();
+  const preview = within(screen.getByRole('region', { name: 'Live profile preview' }));
+  expect(preview.getByText('Method not specified')).toBeVisible();
+  change('Exact analytical method', 'Exact-1');
+  await user.selectOptions(screen.getByLabelText('Numeric results'), 'NUMERIC_RELATIVE_UNCERTAINTY');
+  expect(preview.getAllByText('Relative uncertainty').length).toBeGreaterThan(0);
+  await user.click(screen.getByLabelText('Support below-limit results'));
+  await user.selectOptions(screen.getByLabelText('ND threshold'), 'REPORTING_THRESHOLD');
+  expect(preview.getByText('Supported (reported below a limit)')).toBeVisible();
+  expect(preview.getByText('Reporting threshold')).toBeVisible();
+  expect(issues.getByText(/enter a valid relative uncertainty/)).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Add processing step' }));
+  await user.click(issues.getByRole('link', { name: /specify reviewed conditions/ }));
+  expect(screen.getByText('Advanced step settings').closest('details')).toHaveAttribute('open');
+  expect(preview.getByText('Operation not specified')).toBeVisible();
+  expect(posts()).toHaveLength(0);
+});

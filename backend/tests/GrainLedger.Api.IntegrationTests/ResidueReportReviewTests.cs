@@ -148,6 +148,15 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
         }
         var preview = await Preview(s, reportId);
         Assert.NotEmpty(preview.GetProperty("rows")[0].GetProperty("reasons").EnumerateArray());
+        var reasons = preview.GetProperty("rows")[0].GetProperty("reasons").EnumerateArray().Select(x => x.GetString()!).ToArray();
+        if (mismatch == "wrong-method")
+            Assert.Contains("Method mismatch. Reported method: SYNTHETIC_METHOD. Eligible adopted profile methods: OTHER_METHOD", reasons);
+        if (mismatch is "wrong-unit" or "missing-adoption" or "adoption-after-source")
+        {
+            Assert.DoesNotContain(reasons, reason => reason.StartsWith("Method mismatch.", StringComparison.Ordinal));
+            if (mismatch is "missing-adoption" or "adoption-after-source")
+                Assert.Contains("No valid adopted profile for this source and substance", reasons);
+        }
         if (mismatch != "pending-report")
             await RejectedAsync(s.Customer, HttpMethod.Post, Route(reportId, "confirm"), Confirmation(s, preview), HttpStatusCode.Conflict);
         Assert.Empty((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
@@ -162,6 +171,48 @@ public sealed class ResidueReportReviewTests(ApiFactory factory) : IClassFixture
             await SendAsync(s.Customer, HttpMethod.Post, Route(reportId, "confirm"), Confirmation(s, reviewed));
             Complete(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId), 0.10m, 0.20m);
         }
+    }
+
+    [Fact]
+    public async Task Method_diagnostics_only_include_eligible_adopted_methods_for_this_row()
+    {
+        using var s = await CreateAsync(factory);
+        var f = await ResidueScenario.CreateAsync(s);
+        var sample = await SampleAsync(s, await s.ReceiptAsync("10"));
+        var missingMethod = JsonSerializer.SerializeToNode(f.Result(uncertainty: null))!.AsObject();
+        missingMethod["method"] = null;
+        var (id, _) = await f.ReportAsync(sample, [
+            f.Result(uncertainty: null),
+            f.Result(uncertainty: null, unit: "ppb"),
+            f.Result(null, null, "NOT_DETECTED"),
+            missingMethod
+        ]);
+        var rule = Relative(f);
+        rule["laboratory"]![0]!["analyticalMethod"] = "METHOD_B";
+        var second = rule["laboratory"]![0]!.DeepClone();
+        second["analyticalMethod"] = "METHOD_A";
+        rule["laboratory"]!.AsArray().Add(second);
+        await f.PublishRuleAsync(rule);
+        var unadopted = Relative(f);
+        unadopted["laboratory"]![0]!["analyticalMethod"] = "UNADOPTED_PRIVATE_METHOD";
+        await f.PublishRuleAsync(unadopted, adopt: false);
+        var other = Relative(f);
+        other["substanceId"] = f.OtherSubstanceId;
+        other["laboratory"]![0]!["analyticalMethod"] = "OTHER_SUBSTANCE_METHOD";
+        await f.PublishRuleAsync(other);
+
+        var preview = await Preview(s, id);
+        var rows = preview.GetProperty("rows").EnumerateArray().ToArray();
+        var diagnostic = rows[0].GetProperty("reasons").EnumerateArray().Select(x => x.GetString()!).ToArray();
+        Assert.Contains("Method mismatch. Reported method: SYNTHETIC_METHOD. Eligible adopted profile methods: METHOD_A, METHOD_B", diagnostic);
+        Assert.DoesNotContain("PRIVATE_METHOD", preview.GetRawText());
+        Assert.DoesNotContain("OTHER_SUBSTANCE_METHOD", preview.GetRawText());
+        foreach (var row in rows.Skip(1).Take(2))
+            Assert.DoesNotContain(row.GetProperty("reasons").EnumerateArray(), x => x.GetString()!.StartsWith("Method mismatch.", StringComparison.Ordinal));
+        Assert.Contains("Method mismatch. Reported method: (not reported). Eligible adopted profile methods: METHOD_A, METHOD_B",
+            rows[3].GetProperty("reasons").EnumerateArray().Select(x => x.GetString()));
+        await RejectedAsync(s.Customer, HttpMethod.Post, Route(id, "confirm"), Confirmation(s, preview), HttpStatusCode.Conflict);
+        Assert.Empty((await GetAsync(s.Customer, "/api/residue-report-selections")).GetProperty("items").EnumerateArray());
     }
 
     [Theory]
