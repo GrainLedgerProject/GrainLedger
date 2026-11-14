@@ -238,7 +238,8 @@ public static partial class ExportModule
 
     private static async Task<PlanningCandidateSnapshot> CandidateSnapshotAsync(Guid id, Guid company,
         Guid facilityId, AppDbContext db, LedgerService ledger, CancellationToken ct,
-        bool withCompatibility = false)
+        bool withCompatibility = false,
+        IReadOnlyDictionary<(Guid LotId, Guid LocationId), decimal>? ownReservations = null)
     {
         var container = await db.Containers.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == company, ct);
@@ -279,13 +280,25 @@ public static partial class ExportModule
         // Exclude the observation time and pagination from the canonical fingerprint.
         // The Ledger arrays are ordered by stable IDs; the position projection strips
         // the unordered display-only positions array from lot_json.
+        string? AvailableForPlan(JsonElement lot, JsonElement position)
+        {
+            var available = position.GetProperty("availableKg").GetString();
+            if (ownReservations is null || lot.GetProperty("restrictions").GetArrayLength() != 0 ||
+                !ownReservations.TryGetValue((lot.GetProperty("id").GetGuid(),
+                    position.GetProperty("locationId").GetGuid()), out var held))
+                return available;
+            var mass = LedgerMass(position.GetProperty("availableKg")) + held;
+            if (mass > LedgerMass(lot.GetProperty("onHandKg")))
+                throw new CandidateDemandChangedException();
+            return mass.ToString("0.000000", CultureInfo.InvariantCulture);
+        }
+
         var canonicalPositions = positions.Select(p => new
         {
             lotId = p.GetProperty("id").GetGuid(), locationId = p.GetProperty("locationId").GetGuid(),
             onHand = p.GetProperty("onHandKg").GetString(),
-            available = p.GetProperty("positions").EnumerateArray()
-                .FirstOrDefault(x => x.GetProperty("locationId").GetGuid() == p.GetProperty("locationId").GetGuid())
-                .GetProperty("availableKg").GetString(),
+            available = AvailableForPlan(p, p.GetProperty("positions").EnumerateArray()
+                .First(x => x.GetProperty("locationId").GetGuid() == p.GetProperty("locationId").GetGuid())),
             mapping = p.GetProperty("catalogCommodityId"), restrictions = p.GetProperty("restrictions"),
             poolRevision = p.GetProperty("positionPoolRevision"), currentPool = p.GetProperty("isCurrentPoolAtLocation"),
             cleared = p.GetProperty("locationCleared"), owner = p.GetProperty("locationOwnerId")
@@ -306,7 +319,8 @@ public static partial class ExportModule
             if (position.ValueKind == JsonValueKind.Undefined)
                 throw new InvalidOperationException("Ledger candidate position is missing from lot inventory.");
             var onHand = LedgerMass(p.GetProperty("onHandKg"));
-            var available = LedgerMass(position.GetProperty("availableKg"));
+            var available = ownReservations is null ? LedgerMass(position.GetProperty("availableKg"))
+                : decimal.Parse(AvailableForPlan(p, position)!, CultureInfo.InvariantCulture);
             var restrictions = p.GetProperty("restrictions").EnumerateArray().Select(x => x.GetString()!).ToArray();
             var composition = compositions.GetValueOrDefault(lotId, []);
             var ancestry = Ancestors(lotId, byOutput, allNodes);

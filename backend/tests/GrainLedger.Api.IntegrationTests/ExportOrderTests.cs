@@ -838,6 +838,90 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Empty(plans!.Items);
     }
 
+    [Fact]
+    public async Task Decision_read_requires_visible_proposal_and_reports_pending_then_rejected()
+    {
+        var (writer, order, _, _) = await EditableOrderAsync();
+        using var client = writer;
+        var container = Assert.Single((await client.GetFromJsonAsync<ExportPage<ExportContainerDto>>(
+            $"/api/export-orders/{order.Id}/containers"))!.Items);
+        using var created = await client.PostAsJsonAsync($"/api/export-containers/{container.Id}/blend-plans/drafts",
+            new CreateBlendPlanDraftRequest(Guid.NewGuid(), order.Version, container.Version, "HEAD_RICE"));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var draft = (await created.Content.ReadFromJsonAsync<BlendPlanDraftDto>())!;
+        var route = $"/api/blend-plans/{draft.Id}/decision";
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(route)).StatusCode);
+
+        // Seed the immutable F14 proposal boundary without running the planner.
+        var proposalId = Guid.NewGuid();
+        var previewId = Guid.NewGuid();
+        await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
+        await owner.OpenAsync();
+        await using var seed = new NpgsqlCommand("""
+            WITH preview AS (
+                INSERT INTO grainledger.exports_blend_plan_previews
+                    (id, company_id, plan_id, actor_id, request_json, snapshot_json, fingerprint, created_at, expires_at)
+                SELECT $1, company_id, id, created_by, '{}', '{}', repeat('A', 64), now(), now() + interval '1 minute'
+                FROM grainledger.exports_blend_plan_drafts WHERE id = $2
+                RETURNING id, company_id, plan_id, actor_id
+            )
+            INSERT INTO grainledger.exports_blend_plan_proposals
+                (id, company_id, plan_id, preview_id, actor_id, snapshot_json, proposed_at)
+            SELECT $3, company_id, plan_id, id, actor_id, '{}', now() FROM preview
+            """, owner);
+        seed.Parameters.AddWithValue(previewId);
+        seed.Parameters.AddWithValue(draft.Id);
+        seed.Parameters.AddWithValue(proposalId);
+        await seed.ExecuteNonQueryAsync();
+
+        var pending = await client.GetFromJsonAsync<JsonElement>(route);
+        Assert.Equal(proposalId, pending.GetProperty("proposalId").GetGuid());
+        Assert.Equal("PENDING", pending.GetProperty("status").GetString());
+        Assert.Equal(0, pending.GetProperty("decisionVersion").GetInt32());
+        Assert.Equal("0", pending.GetProperty("reservation").GetProperty("remainingKg").GetString());
+
+        var outsiderOrg = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
+        var (outsider, session) = await factory.SeedUserAsync(Roles.ExportStaff, outsiderOrg.Id);
+        using var outsideClient = factory.CreateRealCookieClient(outsider, session);
+        Assert.Equal(HttpStatusCode.NotFound, (await outsideClient.GetAsync(route)).StatusCode);
+
+        await using var tenant = new NpgsqlCommand(
+            "SELECT company_id FROM grainledger.exports_blend_plan_proposals WHERE id = $1", owner);
+        tenant.Parameters.AddWithValue(proposalId);
+        var company = (Guid)(await tenant.ExecuteScalarAsync())!;
+        var (manager, managerSession) = await factory.SeedUserAsync(Roles.CustomerManager, company);
+        using var managerClient = factory.CreateRealCookieClient(manager, managerSession);
+        var csrf = await managerClient.GetFromJsonAsync<JsonElement>("/api/auth/csrf");
+        managerClient.DefaultRequestHeaders.Add("X-CSRF-TOKEN", csrf.GetProperty("token").GetString());
+
+        var rejectRoute = $"/api/blend-plans/{draft.Id}/reject";
+        var request = new RejectBlendPlanRequest(Guid.NewGuid(), proposalId, 0, "Fixture reason");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(rejectRoute, request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await managerClient.PostAsJsonAsync(rejectRoute,
+            request with { ExpectedDecisionVersion = 1 })).StatusCode);
+
+        using var first = await managerClient.PostAsJsonAsync(rejectRoute, request);
+        using var replay = await managerClient.PostAsJsonAsync(rejectRoute, request);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        var replayBody = await replay.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(JsonElement.DeepEquals(firstBody, replayBody));
+        Assert.Equal(manager.Id, firstBody.GetProperty("actorId").GetGuid());
+        Assert.Equal(HttpStatusCode.Conflict, (await managerClient.PostAsJsonAsync(rejectRoute,
+            request with { Reason = "Changed reason" })).StatusCode);
+
+        var history = await client.GetFromJsonAsync<JsonElement>($"/api/blend-plans/{draft.Id}/history");
+        Assert.Single(history.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("action").GetString() == "PLAN_REJECTED");
+        var rejected = await client.GetFromJsonAsync<JsonElement>(route);
+        Assert.Equal("REJECTED", rejected.GetProperty("status").GetString());
+        Assert.Equal(1, rejected.GetProperty("decisionVersion").GetInt32());
+        Assert.Equal("Fixture reason", rejected.GetProperty("reason").GetString());
+        Assert.False(rejected.GetProperty("activeApproval").GetBoolean());
+        Assert.Equal("NOT_RESERVED", rejected.GetProperty("reservation").GetProperty("status").GetString());
+    }
+
     private async Task<(long Positions, decimal Mass, long Postings)> StockSnapshotAsync()
     {
         await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);

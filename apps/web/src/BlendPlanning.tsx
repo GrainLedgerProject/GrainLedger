@@ -136,7 +136,154 @@ function AssessmentView({ assessment, locations }: { assessment: Assessment; loc
   </div>;
 }
 
-export function BlendPlanWorkspace({ planId, userId, canPropose, canReadLedger, onNavigate }: { planId: string; userId: string; canPropose: boolean; canReadLedger: boolean; onNavigate: (path: string) => void }) {
+type DecisionAction = 'approve' | 'reject' | 'revoke';
+type Decision = {
+  proposalId: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'REVOKED';
+  decisionVersion: number;
+  recordedAt: string | null;
+  reason: string | null;
+  activeApproval: boolean;
+  reservation: { status: string; reservedKg: string; releasedKg: string; consumedKg: string; remainingKg: string };
+};
+
+function ProposalDecision({ planId, containerId, proposal, userId, canApprove, proposalLoading, reload, onDecisionChange }: {
+  planId: string; containerId: string; proposal: Proposal; userId: string; canApprove: boolean; proposalLoading: boolean; reload: number; onDecisionChange: () => void;
+}) {
+  const route = `/api/blend-plans/${planId}`;
+  const key = `grainledger.f15.${userId}.${planId}.decision`;
+  const [pending, setPending] = useState(() => {
+    const request = readPending(key);
+    return request && ['approve', 'reject', 'revoke'].some(action => request.route === `${route}/${action}`) ? request : null;
+  });
+  const [decision, setDecision] = useState<Decision | null>(null);
+  const [containerStatus, setContainerStatus] = useState('');
+  const [action, setAction] = useState<DecisionAction | null>(null);
+  const [reason, setReason] = useState('');
+  const [readError, setReadError] = useState('');
+  const [writeError, setWriteError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    const options = { signal: controller.signal };
+    async function read() {
+      setReadError('');
+      setDecision(null);
+      setContainerStatus('');
+      setAction(null);
+      setReason('');
+      try {
+        const value = await api<Decision>(`${route}/decision`, options);
+        if (controller.signal.aborted) return;
+        if (!value || value.proposalId !== proposal.id) throw new Error('The decision does not match this proposal. Refresh and try again.');
+        setDecision(value);
+        if (canApprove && value.status === 'APPROVED' && value.activeApproval) {
+          const container = await api<{ status: string }>(`/api/export-containers/${containerId}`, options);
+          if (!controller.signal.aborted) setContainerStatus(container.status);
+        }
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        setReadError(cause instanceof ApiError && cause.code === 'DECISION_SCHEMA_NOT_READY'
+          ? 'Decision and reservation details are unavailable until the database update is deployed.'
+          : errorMessage(cause));
+      }
+    }
+    void read();
+    return () => controller.abort();
+  }, [route, proposal.id, containerId, canApprove, reload]);
+
+  function refreshDecision() {
+    setDecision(null);
+    setContainerStatus('');
+    onDecisionChange();
+  }
+
+  async function submit() {
+    if (!canApprove || busy) return;
+    if (!pending && (!decision || !action || (action === 'approve' ? proposalLoading || proposal.freshness !== 'CURRENT' : !reason.trim()))) return;
+    const request = pending ?? {
+      route: `${route}/${action}`,
+      body: JSON.stringify({
+        operationId: crypto.randomUUID(),
+        proposalId: decision!.proposalId,
+        expectedDecisionVersion: decision!.decisionVersion,
+        ...(action !== 'approve' && { reason: reason.trim() }),
+      }),
+    };
+    setBusy(true);
+    setWriteError('');
+    try {
+      sessionStorage.setItem(key, JSON.stringify(request));
+      const result = await api<Decision>(request.route, { method: 'POST', body: request.body });
+      if (result?.proposalId !== proposal.id) throw new Error('The decision response could not be confirmed.');
+      sessionStorage.removeItem(key);
+      setPending(null);
+      setAction(null);
+      setReason('');
+      refreshDecision();
+    } catch (cause) {
+      if (uncertain(cause)) {
+        setPending(request);
+        refreshDecision();
+      } else {
+        sessionStorage.removeItem(key);
+        setPending(null);
+        setAction(null);
+        setReason('');
+        setWriteError(errorMessage(cause));
+        refreshDecision();
+      }
+    } finally { setBusy(false); }
+  }
+
+  const reservation = decision?.reservation;
+  const canRevoke = decision?.status === 'APPROVED' && decision.activeApproval &&
+    containerStatus === 'PLANNED' && /^0(?:\\.0+)?$/.test(decision.reservation.consumedKg);
+  const actions: Record<DecisionAction, string> = {
+    approve: 'Approve and reserve stock',
+    reject: 'Reject proposal',
+    revoke: 'Revoke approval and release stock',
+  };
+  return <div className="f14-assessment">
+    <div className="section-toolbar"><h3>Proposal decision</h3>{readError && <button className="secondary" disabled={busy} onClick={refreshDecision}>Reload decision</button>}</div>
+    <Notice error={readError} />
+    <Notice error={writeError} />
+    {!decision && !readError && <p role="status">Loading decision…</p>}
+    {decision && reservation && <>
+      <dl className="export-facts">
+        <div><dt>Decision</dt><dd>{decision.status === 'PENDING' ? 'Pending review' : label(decision.status)}</dd></div>
+        <div><dt>Reservation</dt><dd>{label(reservation.status)}</dd></div>
+        <div><dt>Reserved</dt><dd>{reservation.reservedKg} kg</dd></div>
+        <div><dt>Still held</dt><dd>{reservation.remainingKg} kg</dd></div>
+        <div><dt>Released</dt><dd>{reservation.releasedKg} kg</dd></div>
+        <div><dt>Consumed</dt><dd>{reservation.consumedKg} kg</dd></div>
+      </dl>
+      {decision.recordedAt && <p className="muted">Decided {new Date(decision.recordedAt).toLocaleString()}</p>}
+      {decision.reason && <p><strong>Reason</strong> {decision.reason}</p>}
+      {canApprove && decision.status === 'PENDING' && proposal.freshness === 'STALE' && <p className="notice">The proposal is out of date. Prepare a new proposal before approval.</p>}
+      {canApprove && decision.status === 'APPROVED' && containerStatus && !canRevoke && <p className="notice">Revocation is unavailable once container execution begins.</p>}
+      {canApprove && !pending && !action && <div className="f14-actions">
+        {decision.status === 'PENDING' && <>
+          {!proposalLoading && proposal.freshness === 'CURRENT' && <button onClick={() => setAction('approve')}>Approve proposal</button>}
+          <button className="secondary" onClick={() => setAction('reject')}>Reject proposal</button>
+        </>}
+        {canRevoke && <button className="secondary" onClick={() => setAction('revoke')}>Revoke approval</button>}
+      </div>}
+    </>}
+    {canApprove && pending && <div className="notice pending" role="status">
+      The decision outcome is uncertain. <button disabled={busy} onClick={() => void submit()}>Retry same decision</button>
+    </div>}
+    {canApprove && !pending && action && decision && <form className="f14-actions" onSubmit={event => { event.preventDefault(); void submit(); }}>
+      {action === 'approve' ? <p>The server will recheck this proposal and reserve its selected stock.</p>
+        : <label>Reason<textarea required maxLength={1000} value={reason} disabled={busy} onChange={event => setReason(event.target.value)} /></label>}
+      <button type="submit" disabled={busy || (action === 'approve' ? proposalLoading || proposal.freshness !== 'CURRENT' : !reason.trim())}>{actions[action]}</button>
+      <button type="button" className="secondary" disabled={busy} onClick={() => { setAction(null); setReason(''); }}>Cancel</button>
+    </form>}
+  </div>;
+}
+
+
+export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = false, canReadLedger, onNavigate }: { planId: string; userId: string; canPropose: boolean; canApprove?: boolean; canReadLedger: boolean; onNavigate: (path: string) => void }) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [etag, setEtag] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
@@ -169,7 +316,7 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canReadLedger, 
   const [pendingCancel, setPendingCancel] = useState<Pending | null>(() => readPending(cancelKey));
   const [pendingPropose, setPendingPropose] = useState<Pending | null>(() => readPending(proposeKey));
   useEffect(() => {
-    const controller = new AbortController(); setError(''); setProposal(null); setProposalLoading(true);
+    const controller = new AbortController(); setError(''); setProposalLoading(true);
     void apiWithEtag<Plan>(`/api/blend-plans/${planId}`, { signal: controller.signal })
       .then(result => { setPlan(result.data); setEtag(result.etag); })
       .catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause)); });
@@ -288,7 +435,7 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canReadLedger, 
     </section>
     {proposalError && <p className="notice error" role="alert">Proposal status could not be checked: {proposalError}</p>}
     {pendingPropose && <section className="panel export-section"><h2>Proposal request</h2><Notice error={previewError} /><p className="notice error">Proposal outcome is uncertain. <button disabled={busy} onClick={() => void propose()}>Retry same proposal</button></p></section>}
-    {proposal && <section className="panel export-section"><h2>Saved proposal</h2><p>Recorded {new Date(proposal.proposedAt).toLocaleString()} · Freshness: <strong>{proposal.freshness}</strong></p>{proposal.freshness === 'STALE' && <p className="notice error">Planning inputs changed: {(proposal.freshnessReasons ?? []).map(label).join(', ')}. <button className="text-button" onClick={() => onNavigate(`/export/containers/${plan.containerId}`)}>Open container to create a new draft</button></p>}<p className="muted">Stock reserved: No</p><AssessmentView assessment={proposal.assessment} locations={locations} /></section>}
+    {proposal && <section className="panel export-section"><h2>Saved proposal</h2><p>Recorded {new Date(proposal.proposedAt).toLocaleString()} · Freshness: <strong>{proposal.freshness === 'NOT_RECHECKED' ? 'See decision' : proposal.freshness}</strong></p>{proposal.freshness === 'STALE' && <p className="notice error">Planning inputs changed: {(proposal.freshnessReasons ?? []).map(label).join(', ')}. <button className="text-button" onClick={() => onNavigate(`/export/containers/${plan.containerId}`)}>Open container to create a new draft</button></p>}<AssessmentView assessment={proposal.assessment} locations={locations} /><ProposalDecision key={`${userId}-${proposal.id}`} planId={planId} containerId={plan.containerId} proposal={proposal} userId={userId} canApprove={canApprove} proposalLoading={proposalLoading} reload={reload} onDecisionChange={() => { setHistoryPage(1); setReload(n => n + 1); }} /></section>}
     {active && <section className="panel export-section"><h2>Stock and sources</h2><p className="muted">Facility is the mill. A location is a silo or store within it. A lot or mixed pool is stock at a location. Physical stock status does not confirm that its product matches this plan.</p>
       <Notice error={stockError} />
       {!canReadLedger && <p className="notice">Facility lookups are unavailable for this role.</p>}

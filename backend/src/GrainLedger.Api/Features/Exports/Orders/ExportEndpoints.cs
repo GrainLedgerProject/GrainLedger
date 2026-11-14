@@ -420,6 +420,7 @@ public static partial class ExportModule
         var order = await db.Orders.SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == scope.Value.Company, ct);
         if (order is null) return Results.NotFound();
         if (!Matches(http, order.Version)) return Problem(412, "EXPORT_VERSION_STALE", "Reload the order before editing.");
+        if (await HasActiveBlendApprovalAsync(db, scope.Value.Company, order.Id, ct)) return ActiveBlendApprovalConflict();
         var allocated = await db.Containers.Where(x => x.OrderId == id).SumAsync(x => (decimal?)x.TargetMassKg, ct) ?? 0m;
         if (mass < allocated) return Invalid(new() { ["requiredMass"] = ["Required mass is below allocated container targets."] });
         order.MarketId = request.MarketId; order.CommodityId = request.CommodityId;
@@ -459,6 +460,7 @@ public static partial class ExportModule
         var order = await db.Orders.SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == scope.Value.Company, ct);
         if (order is null) return Results.NotFound();
         if (!Matches(http, order.Version)) return Problem(412, "EXPORT_VERSION_STALE", "Reload the order before changing specifications.");
+        if (await HasActiveBlendApprovalAsync(db, scope.Value.Company, order.Id, ct)) return ActiveBlendApprovalConflict();
         order.CurrentSpecificationVersion++; order.Version++;
         var now = clock.GetUtcNow();
         await AddSpecificationRowsAsync(db, order, order.CurrentSpecificationVersion,
@@ -497,6 +499,7 @@ public static partial class ExportModule
         var order = await db.Orders.SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == scope.Value.Company, ct);
         if (order is null) return Results.NotFound();
         if (!Matches(http, order.Version)) return Problem(412, "EXPORT_VERSION_STALE", "Reload the order before adding containers.");
+        if (await HasActiveBlendApprovalAsync(db, scope.Value.Company, order.Id, ct)) return ActiveBlendApprovalConflict();
         var allocated = await db.Containers.Where(x => x.OrderId == id).SumAsync(x => (decimal?)x.TargetMassKg, ct) ?? 0m;
         if (allocated + mass > order.RequiredMassKg)
             return Invalid(new() { ["containers"] = ["Container targets exceed the required mass."] });
@@ -539,6 +542,7 @@ public static partial class ExportModule
         if (row is null) return Results.NotFound();
         if (!Matches(http, row.Version)) return Problem(412, "EXPORT_VERSION_STALE", "Reload the container before editing.");
         if (row.Status != "PLANNED") return Problem(409, "CONTAINER_IN_USE", "Only planned container targets may be edited.");
+        if (await HasActiveBlendApprovalAsync(db, scope.Value.Company, row.OrderId, ct)) return ActiveBlendApprovalConflict();
         var order = await db.Orders.SingleAsync(x => x.Id == row.OrderId, ct);
         var allocated = await db.Containers.Where(x => x.OrderId == row.OrderId).SumAsync(x => (decimal?)x.TargetMassKg, ct) ?? 0m;
         if (allocated - row.TargetMassKg + mass > order.RequiredMassKg)
