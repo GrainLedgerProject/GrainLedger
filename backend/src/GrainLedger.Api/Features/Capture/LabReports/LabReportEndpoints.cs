@@ -29,7 +29,8 @@ public sealed record CaptureLabReportRequest(string? DeviceId, Guid ClientOperat
 public sealed record DeleteLabReportRequest(string? DeviceId, Guid ClientOperationId, DateTimeOffset CapturedAt,
     int PayloadSchemaVersion);
 public sealed record LabReportMatchInput(Guid ResultSetId, Guid SampleId, string? IdentityBasis, string? EvidenceRef = null);
-public sealed record ConfirmLabReportInput(bool IdentityChecked, bool TranscriptionChecked, IReadOnlyList<LabReportMatchInput>? Matches);
+public sealed record ConfirmLabReportInput(bool IdentityChecked, bool TranscriptionChecked, IReadOnlyList<LabReportMatchInput>? Matches,
+    bool AsReceivedConfirmed = false);
 public sealed record ConfirmLabReportRequest(string? DeviceId, Guid ClientOperationId, DateTimeOffset CapturedAt,
     int PayloadSchemaVersion, ConfirmLabReportInput? Payload);
 public sealed record LabResultResponse(Guid Id, string TestLabel, Guid? SubstanceId, string OriginalResultText,
@@ -310,7 +311,11 @@ public static class LabReportEndpoints
             errors["payload.matches"] = ["Supply a sample and supported identity basis for every result set."];
         if (errors.Count != 0) return Results.ValidationProblem(errors);
         var actor = Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var canonical = JsonSerializer.Serialize(new { operationType = "LAB_REPORT_CONFIRMED", reportId = id, request.CapturedAt, request.PayloadSchemaVersion, payload = p });
+        // Keep pre-attestation confirmation hashes stable; true must remain part of the operation identity.
+        object canonicalPayload = p!.AsReceivedConfirmed
+            ? p
+            : new { p.IdentityChecked, p.TranscriptionChecked, p.Matches };
+        var canonical = JsonSerializer.Serialize(new { operationType = "LAB_REPORT_CONFIRMED", reportId = id, request.CapturedAt, request.PayloadSchemaVersion, payload = canonicalPayload });
         var hash = Hash(canonical);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
@@ -360,7 +365,7 @@ public static class LabReportEndpoints
                 ResultSetId = match.ResultSetId, SampleId = match.SampleId, IdentityBasis = match.IdentityBasis!, EvidenceRef = match.EvidenceRef });
         await db.SaveChangesAsync(ct);
         var bindings = await residueBinder.BindConfirmedReportAsync((NpgsqlConnection)db.Database.GetDbConnection(),
-            (NpgsqlTransaction)transaction.GetDbTransaction(), actor, company.Value, id, now, ct);
+            (NpgsqlTransaction)transaction.GetDbTransaction(), actor, company.Value, id, now, p.AsReceivedConfirmed, ct);
         var response = (await ResponsesAsync(db, company.Value, [id], ct))[0] with { ResidueBindings = bindings };
         await AddOperationAsync(db, company.Value, actor, request.DeviceId.Trim(), request.ClientOperationId, request.CapturedAt, now, "LAB_REPORT_CONFIRMED", canonical, hash, response, ct);
         await db.SaveChangesAsync(ct);

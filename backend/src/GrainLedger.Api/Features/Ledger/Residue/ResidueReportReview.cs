@@ -17,10 +17,10 @@ public sealed record ResidueReportReviewRow(Guid Id, Guid ResultId, Guid SourceI
     string? PreviewFingerprint = null);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ResidueReportReviewRequest(Guid CompanyId, DateTimeOffset? EffectiveFrom,
-    ResidueReportReviewRow[] Rows);
+    ResidueReportReviewRow[] Rows, bool AsReceivedConfirmed);
 public sealed record ResidueReportResultChoice(Guid ResultId, string Label, Guid? SelectionId = null);
 public sealed record ResidueReportReviewItem(ResidueReportReviewRow Input, string Label, string? RawUncertainty,
-    ResidueRuleVersion? Profile, ResiduePolicySettingVersion? Setting, ResidueSourceBound? Assessment,
+    ResidueProfileVersion? Profile, ResiduePolicySettingVersion? Setting, ResidueSourceBound? Assessment,
     IReadOnlyList<string> Reasons, IReadOnlyList<ResidueReportResultChoice> ConflictingResults,
     IReadOnlyList<ResidueReportResultChoice> ExistingSelections, bool Published = false);
 public sealed record ResidueReportReviewResponse(Guid ReportId, DateTimeOffset EffectiveFrom,
@@ -51,6 +51,8 @@ public sealed partial class ResidueEvaluationService
         else await ExecuteAsync(connection, tx, "SET TRANSACTION READ ONLY", ct);
         if (!await ResidueReview.AuthorizeAsync(connection, tx, actor, "residue.evidence.manage", request.CompanyId, ct))
             throw new LedgerException(403, "Residue evidence company access denied");
+        if (publish && !request.AsReceivedConfirmed)
+            throw new LedgerException(400, "As-received concentration confirmation required for residue bounds");
         var response = await ReviewReportInTransactionAsync(connection, tx, actor, reportId, request, publish, false, true, ct);
         await tx.CommitAsync(ct);
         return response;
@@ -58,12 +60,12 @@ public sealed partial class ResidueEvaluationService
 
     public async Task<IReadOnlyList<LabReportResidueBinding>> BindConfirmedReportAsync(NpgsqlConnection connection,
         NpgsqlTransaction transaction, Guid actorId, Guid companyId, Guid reportId, DateTimeOffset confirmedAt,
-        CancellationToken ct)
+        bool asReceivedConfirmed, CancellationToken ct)
     {
         var authorized = await ResidueReview.AuthorizeAsync(connection, transaction, actorId,
             "residue.evidence.manage", companyId, ct);
         var response = await ReviewReportInTransactionAsync(connection, transaction, actorId, reportId,
-            new(companyId, confirmedAt, []), true, true, authorized, ct);
+            new(companyId, confirmedAt, [], asReceivedConfirmed), true, true, authorized, ct);
         return response.Rows.Select(row => new LabReportResidueBinding(row.Input.ResultId, row.Input.SourceId,
             row.Published, row.Reasons)).ToArray();
     }
@@ -110,7 +112,10 @@ public sealed partial class ResidueEvaluationService
         if (!authorized)
             return new(reportId, effectiveFrom, reportRows.Select(row => new ResidueReportReviewItem(
                 new(Guid.NewGuid(), row.ResultId, row.SourceId), row.Label, row.Uncertainty, null, null, null,
-                ["Residue evidence permission required; identity and transcription remain confirmed"], [], [])).ToArray());
+                request.AsReceivedConfirmed
+                    ? ["Residue evidence permission required; identity and transcription remain confirmed"]
+                    : ["Residue evidence permission required; identity and transcription remain confirmed",
+                        "As-received concentration confirmation required for residue bounds"], [], [])).ToArray());
         var reportByKey = reportRows.ToDictionary(x => (x.ResultId, x.SourceId));
         if (requestedByKey.Keys.Any(key => !reportByKey.ContainsKey(key)))
             throw new LedgerException(400, "Every requested row must belong to this report and its confirmed source association");
@@ -169,10 +174,10 @@ public sealed partial class ResidueEvaluationService
         {
             var requestedInput = requestedByKey.GetValueOrDefault((row.ResultId, row.SourceId));
             var input = requestedInput ?? new ResidueReportReviewRow(Guid.NewGuid(), row.ResultId, row.SourceId);
-            var canonical = JsonSerializer.Serialize(new { reportId, request.CompanyId, effectiveFrom,
+            var canonical = JsonSerializer.Serialize(new { reportId, request.CompanyId, effectiveFrom, request.AsReceivedConfirmed,
                 row = input with { PreviewFingerprint = null, SupersededResultIds = (input.SupersededResultIds ?? []).Order().ToArray() } }, Json);
             var prior = selectionsById.GetValueOrDefault(input.Id);
-            if (prior is not null)
+            if (prior is not null && request.AsReceivedConfirmed)
             {
                 if (prior.BindingRequest != canonical || prior.BindingFingerprint != input.PreviewFingerprint || prior.PublishedBy != actor)
                     throw new LedgerException(409, "Selection UUID already used for another report binding");
@@ -182,7 +187,9 @@ public sealed partial class ResidueEvaluationService
                 continue;
             }
             var reasons = new List<string>();
-            ResidueRuleVersion? rule = null; ResiduePolicySettingVersion? setting = null; ResidueSourceBound? assessment = null;
+            if (!request.AsReceivedConfirmed)
+                reasons.Add("As-received concentration confirmation required for residue bounds");
+            ResidueProfileVersion? rule = null; ResiduePolicySettingVersion? setting = null; ResidueSourceBound? assessment = null;
             var conflicts = new List<ResidueReportResultChoice>();
             var existing = new List<ResidueReportResultChoice>();
             if (row.SubstanceId is null || row.SourceId == Guid.Empty)
@@ -192,8 +199,8 @@ public sealed partial class ResidueEvaluationService
                 if (!sourcesById.TryGetValue(row.SourceId, out var source)
                     || !nodes.TryGetValue(row.LotId, out var node) || node.CompanyId != request.CompanyId)
                 {
-                    output.Add(new(input, row.Label, row.Uncertainty, null, null, null,
-                        ["Original owned source lot required"], [], []));
+                    reasons.Add("Original owned source lot required");
+                    output.Add(new(input, row.Label, row.Uncertainty, null, null, null, reasons, [], []));
                     continue;
                 }
                 var selected = resultsByKey.GetValueOrDefault((row.SourceId, row.ResultId));
@@ -207,17 +214,36 @@ public sealed partial class ResidueEvaluationService
                     var history = scopedEvidence.Selections;
                     var scopedGroups = scopedEvidence.Groups;
                     var scopedPolicy = policyBySubstance.GetValueOrDefault(row.SubstanceId.Value) ?? emptyPolicy;
-                    var resolution = ResidueEvidenceResolver.SelectPolicy(scopedPolicy, request.CompanyId, source.ReceivedAt, x =>
-                        x.Kind == "INTERPRETATION" && x.SubstanceId == row.SubstanceId && x.CommodityId == node.CommodityId
-                        && x.InputStage == source.ProductStage && x.OutputStage == source.ProductStage
-                        && x.InputBasis == x.OutputBasis && x.Unit == ResidueConcentration.CanonicalUnit(selected.Unit) && x.AnalyticalMethod == selected.Method
-                        && (selected.ResultKind == "NUMERIC" ? x.InterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY"
-                            : x.InterpretationKind == (selected.ResultKind == "BELOW_LIMIT" ? "BELOW_LIMIT" : selected.ResultKind == "NOT_DETECTED" ? "ND" : "UNSUPPORTED")));
-                    if (resolution.Reason is not null || resolution.Rules.Count != 1)
-                        reasons.Add(resolution.Reason ?? (resolution.Rules.Count == 0
-                            ? $"No compatible adopted interpretation profile: method {selected.Method ?? "(not reported)"}, unit {selected.Unit ?? "(not reported)"}, commodity {node.CommodityId}, stage {source.ProductStage}, source received {source.ReceivedAt:O}"
-                            : "Multiple compatible adopted profiles; expert applicability review required"));
-                    else (rule, setting) = resolution.Rules[0];
+                    var resolution = ResidueEvidenceResolver.SelectPolicy(scopedPolicy, request.CompanyId, source.ReceivedAt,
+                        node.CommodityId, row.SubstanceId.Value);
+                    var compatible = resolution.Rules.Where(x =>
+                        source.ProductStage == "RAW_PADDY" && x.Rule.Unit == ResidueConcentration.CanonicalUnit(selected.Unit)
+                        && x.Rule.Laboratory.Any(lab => lab.AnalyticalMethod == selected.Method
+                            && (selected.ResultKind == "NUMERIC" ? lab.NumericInterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY"
+                                : selected.ResultKind == "BELOW_LIMIT" ? lab.BelowLimit
+                                : selected.ResultKind == "NOT_DETECTED" && lab.NdThresholdKind is not null))).ToArray();
+                    if (resolution.Reason is not null)
+                        reasons.Add(resolution.Reason);
+                    else if (compatible.Length == 0)
+                    {
+                        var eligibleMethods = resolution.Rules
+                            .Where(x => source.ProductStage == "RAW_PADDY"
+                                && x.Rule.Unit == ResidueConcentration.CanonicalUnit(selected.Unit))
+                            .SelectMany(x => x.Rule.Laboratory)
+                            .Where(lab => selected.ResultKind == "NUMERIC" ? lab.NumericInterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY"
+                                : selected.ResultKind == "BELOW_LIMIT" ? lab.BelowLimit
+                                : selected.ResultKind == "NOT_DETECTED" && lab.NdThresholdKind is not null)
+                            .Select(lab => lab.AnalyticalMethod).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+                        if (eligibleMethods.Length > 0 && !eligibleMethods.Contains(selected.Method, StringComparer.Ordinal))
+                            reasons.Add($"Method mismatch. Reported method: {selected.Method ?? "(not reported)"}. Eligible adopted profile methods: {string.Join(", ", eligibleMethods)}");
+                        else
+                            reasons.Add(resolution.Rules.Count == 0
+                                ? "No valid adopted profile for this source and substance"
+                                : "No compatible adopted profile for this result's unit, stage or result kind");
+                    }
+                    else if (compatible.Length > 1)
+                        reasons.Add("Multiple compatible adopted profiles; expert applicability review required");
+                    else (rule, setting) = compatible[0];
                     conflicts.AddRange(candidates.Where(x => x.ResultId != row.ResultId).Select(x => new ResidueReportResultChoice(x.ResultId, labels[x.ResultId])));
                     var active = activeByScope.GetValueOrDefault(scope) ?? [];
                     existing.AddRange(active.Select(x => new ResidueReportResultChoice(x.SelectedResultId, labels.GetValueOrDefault(x.SelectedResultId, "Historical selected report result"), x.Id)));
@@ -249,12 +275,13 @@ public sealed partial class ResidueEvaluationService
                     if (rule is not null && setting is not null)
                     {
                         var selection = new ResidueReportSelection(input.Id, request.CompanyId, row.SourceId, row.SubstanceId.Value,
-                            row.ResultId, (input.SupersededResultIds ?? []).Order().ToArray(), rule.InputBasis, rule.ResidueDefinition,
+                            row.ResultId, (input.SupersededResultIds ?? []).Order().ToArray(), rule.ResidueDefinition,
                             input.AbsoluteUncertainty, input.ReportingThreshold, effectiveFrom, null, input.SupersedesId,
                             $"{rule.EvidenceRef}; company adoption: {setting.EvidenceRef}",
                             $"{rule.ApplicabilityStatement}; company adoption: {setting.ApplicabilityStatement}",
                             rule.ReviewedBy, rule.ReviewAuthority, rule.ReviewedAt, actor, now,
-                            reportId, rule.Id, setting.Id, canonical, BindingNote: input.Note);
+                            reportId, rule.Id, setting.Id, canonical, BindingNote: input.Note, SchemaVersion: 2,
+                            AsReceivedConfirmed: true, ProfileCode: rule.Code, LaboratoryMethod: selected.Method);
                         var proposed = scopedEvidence with { Selections = history.Append(selection).ToArray() };
                         assessment = ResidueEvidenceResolver.Resolve([node], [row.SubstanceId.Value], proposed, scopedPolicy, now).Single();
                         reasons.AddRange(assessment.Reasons);

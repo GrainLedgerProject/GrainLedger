@@ -19,9 +19,7 @@ export function groupRuleSeries(rules: Rule[]) {
 // Exact candidates include policy values, not merely matching substance or applicability.
 export function exactDuplicateCandidates(rules: Rule[]) {
   const key = (rule: Rule) => JSON.stringify([rule.companyId || null, rule.kind, rule.substanceId, rule.commodityId, rule.residueDefinition,
-    rule.inputStage, rule.outputStage, rule.inputBasis, rule.outputBasis, rule.outputFraction, rule.process, rule.conditions, rule.analyticalMethod || null,
-    rule.unit, rule.decimalPlaces, rule.interpretationKind, rule.ndThresholdKind, rule.factorLower, rule.factorUpper, rule.factorSemantics,
-    rule.homogeneousMixing, rule.relativeUncertaintyPercent || null, !!rule.relativeUncertaintyAtZero]);
+    rule.unit, rule.decimalPlaces, rule.laboratory, rule.steps.map(({ id: _id, ...step }) => step)]);
   const groups = new Map<string, Rule[]>();
   for (const rule of rules) {
     const identity = key(rule), group = groups.get(identity);

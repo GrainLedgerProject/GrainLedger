@@ -12,7 +12,7 @@ type ResultSet = { id: string; sampleId: string | null; confirmedSampleId: strin
 type ResidueBinding = { resultId: string; sourceId: string; published: boolean; reasons: string[] };
 export type Report = { id: string; laboratoryName: string; reportNumber: string; issuedOn: string; receivedAt: string; reportKind: ReportKind; status: 'UNRESOLVED' | 'PENDING_REVIEW' | 'CONFIRMED' | 'SUPERSEDED' | 'DELETED'; replacementReportId?: string | null; fileName: string; contentType: string; fileSize: number; sha256: string; recordedBy: string; capturedAt: string; recordedAt: string; confirmedBy: string | null; confirmedAt: string | null; resultSets: ResultSet[]; laboratoryConclusion?: string | null; statedStandard?: string | null; assessmentStatus: AssessmentStatus; suggestedMarketCode: string; assessmentReasons: string[]; relatedReportId?: string | null; relationshipReason?: string | null; relatedReports?: Array<{ id: string; reportKind: ReportKind; relationshipReason: string | null }> };
 type SampleOption = { id: string; code: string; sealCode: string; sourceLotId: string; materialDescription?: string | null };
-type ConfirmPayload = { identityChecked: true; transcriptionChecked: true; matches: Array<{ resultSetId: string; sampleId: string; identityBasis: 'SAMPLE_CODE' | 'SEAL_CODE' | 'LAB_REFERENCE'; evidenceRef?: string }> };
+type ConfirmPayload = { identityChecked: true; transcriptionChecked: true; asReceivedConfirmed: boolean; matches: Array<{ resultSetId: string; sampleId: string; identityBasis: 'SAMPLE_CODE' | 'SEAL_CODE' | 'LAB_REFERENCE'; evidenceRef?: string }> };
 type IntakePayload = { entityId: string; laboratoryName: string; reportNumber: string; issuedOn: string; receivedAt: string; reportKind: ReportKind; relatedReportId?: string; relationshipReason?: string; fileName: string; contentType: string; contentBase64: string | null; companyOnlyConfirmed: true; laboratoryConclusion?: string; statedStandard?: string; resultSets: Array<{ entityId: string; sampleId?: string; laboratorySampleReference?: string; statedSampleCode?: string; statedSealCode?: string; sectionReference?: string; results: LabCsvRow[] }> };
 
 const resultKinds = ['NUMERIC', 'BELOW_LIMIT', 'NOT_DETECTED', 'QUALITATIVE', 'OTHER'] as const;
@@ -326,6 +326,15 @@ function ReportIntake({ canWrite, initialSampleId, initialLaboratory, relatedRep
 function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBack, onOpenReport, onOpenSample, onOpenSourceLot, onTraceResult }: { id: string; canWrite: boolean; canManageResidueEvidence: boolean; companyId: string; onBack: () => void; onOpenReport: (id: string) => void; onOpenSample?: (id: string) => void; onOpenSourceLot?: (id: string) => void; onTraceResult?: (origin: LabTraceOrigin) => void }) {
   const [report, setReport] = useState<Report | null>(null), [error, setError] = useState(''), [retry, setRetry] = useState(0), [confirmOpen, setConfirmOpen] = useState(false), [identityChecked, setIdentity] = useState(false), [transcriptionChecked, setTranscription] = useState(false), [matches, setMatches] = useState<Record<string, { sampleId: string; identityBasis: string; evidenceRef: string }>>({}), [selectedSamples, setSelectedSamples] = useState<Record<string, SampleOption>>({}), [substances, setSubstances] = useState<Record<string, { code: string; name: string }>>({}), [confirmPending, setConfirmPending] = useState<Envelope<ConfirmPayload> | null>(null), [busy, setBusy] = useState(false), [mutationError, setMutationError] = useState(''), [relationship, setRelationship] = useState<ReportKind | null>(null);
   const [residueBindings, setResidueBindings] = useState<ResidueBinding[] | null>(null);
+  const [asReceivedConfirmed, setAsReceivedConfirmed] = useState(false);
+  const confirmDialog = useRef<HTMLElement>(null);
+  const confirmTrigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!confirmOpen) return;
+    confirmDialog.current?.focus();
+    return () => { confirmTrigger.current?.focus(); };
+  }, [confirmOpen]);
+  useEffect(() => { setAsReceivedConfirmed(false); }, [id]);
   const [editing, setEditing] = useState(false), [deleteOpen, setDeleteOpen] = useState(false), [deletePending, setDeletePending] = useState<Envelope<null> | null>(null), [deleteBusy, setDeleteBusy] = useState(false), [deleteError, setDeleteError] = useState('');
   useEffect(() => {
     let active = true;
@@ -370,6 +379,7 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
     const payload = confirmPending?.payload ?? {
       identityChecked: true as const,
       transcriptionChecked: true as const,
+      asReceivedConfirmed,
       matches: report.resultSets.map(set => ({
         resultSetId: set.id,
         sampleId: matches[set.id]?.sampleId || set.sampleId || '',
@@ -446,7 +456,7 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
       <div className="lab-hero-actions">
         <span className={statusPillClass(report.status)}>{report.status}</span>
         <button className="secondary" onClick={() => void download()}>Download original · {report.fileName}</button>
-        {canWrite && ['UNRESOLVED', 'PENDING_REVIEW'].includes(report.status) && <><button className="secondary" onClick={() => setEditing(true)}>Edit draft</button><button className="secondary" onClick={() => { setDeleteError(''); setDeleteOpen(true); }}>Delete draft</button><button onClick={() => { setMutationError(''); setConfirmOpen(true); }}>Review and confirm</button></>}
+        {canWrite && ['UNRESOLVED', 'PENDING_REVIEW'].includes(report.status) && <><button className="secondary" onClick={() => setEditing(true)}>Edit draft</button><button className="secondary" onClick={() => { setDeleteError(''); setDeleteOpen(true); }}>Delete draft</button><button ref={confirmTrigger} onClick={() => { setMutationError(''); setConfirmOpen(true); }}>Review and confirm</button></>}
         {canWrite && !['SUPERSEDED', 'DELETED'].includes(report.status) && (['SUPPLEMENTARY','AMENDMENT','RETEST'] as const).map(kind => <button className="secondary" key={kind} onClick={() => setRelationship(kind)}>Create linked {kind.toLowerCase()}</button>)}
         {report.status === 'SUPERSEDED' && report.replacementReportId && <button className="secondary" onClick={() => onOpenReport(report.replacementReportId!)}>Open replacement draft ↗</button>}
       </div>
@@ -583,12 +593,21 @@ function ReportDetail({ id, canWrite, canManageResidueEvidence, companyId, onBac
     {editing && ['UNRESOLVED', 'PENDING_REVIEW'].includes(report.status) && canWrite && <ReportIntake key={`edit-${report.id}`} canWrite={canWrite} report={report} onCancel={() => setEditing(false)} onCreated={replacementId => { setEditing(false); onOpenReport(replacementId); }} />}
     {deleteOpen && canWrite && ['UNRESOLVED', 'PENDING_REVIEW'].includes(report.status) && <div className="farmer-modal-backdrop"><section className="farmer-modal lab-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-report-title"><div className="farmer-modal-heading"><h2 id="delete-report-title">Delete draft report?</h2><button className="farmer-modal-close" type="button" aria-label="Close delete confirmation" disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>×</button></div><p className="notice pending">This hides draft from active report register. Original file, results, and audit history remain retained; delete does not erase evidence.</p>{deleteError && <div className="notice error" role="alert">{deleteError}</div>}<div className="form-footer"><button className="secondary" type="button" disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>Cancel</button><button type="button" disabled={deleteBusy} onClick={() => void deleteDraft()}>{deleteBusy ? 'Deleting…' : deletePending ? 'Retry exact deletion' : 'Delete draft'}</button></div></section></div>}
     {relationship && <ReportIntake canWrite={canWrite} initialSampleId={initialSampleId} initialLaboratory={report.laboratoryName} relatedReportId={report.id} initialKind={relationship} onCancel={() => setRelationship(null)} onCreated={createdId => { setRelationship(null); onOpenReport(createdId); }} />}
-    {confirmOpen && <div className="farmer-modal-backdrop"><section className="farmer-modal capture-modal-wide lab-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-report-title">
+    {confirmOpen && <div className="farmer-modal-backdrop"><section ref={confirmDialog} tabIndex={-1} className="farmer-modal capture-modal-wide lab-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-report-title" aria-busy={busy} onKeyDown={event => {
+      if (event.key === 'Escape') { event.preventDefault(); if (!busy) setConfirmOpen(false); }
+      if (event.key !== 'Tab') return;
+      const controls = Array.from(confirmDialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') || []).filter(item => item.getClientRects().length > 0);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === confirmDialog.current)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === confirmDialog.current)) { event.preventDefault(); first.focus(); }
+    }}>
       <div className="farmer-modal-heading"><h2 id="confirm-report-title">Review report transcription</h2><button type="button" className="farmer-modal-close" aria-label="Close confirmation" disabled={busy} onClick={() => setConfirmOpen(false)}>×</button></div>
       <p className="muted">Check every printed sample identity against registered custody history. This one confirmation also binds unique compatible residue rows using adopted policy. Missing policy, unsupported uncertainty and retests remain visible exceptions; identity stays confirmed. No scientific values are inferred.</p>
       <form onSubmit={confirm}>
         <label className="checkbox-label"><input type="checkbox" checked={identityChecked} onChange={e => setIdentity(e.target.checked)} /> I checked sample/seal identity against original report and custody evidence.</label>
         <label className="checkbox-label"><input type="checkbox" checked={transcriptionChecked} onChange={e => setTranscription(e.target.checked)} /> I checked all result text, qualifiers, units, limits, and references against original file.</label>
+        <label className="checkbox-label"><input type="checkbox" checked={asReceivedConfirmed} disabled={busy || !!confirmPending} onChange={e => setAsReceivedConfirmed(e.target.checked)} /> Concentrations are as received (required for residue bounds)</label>
         {report.resultSets.map((set, i) => (
           <div className="lab-result-set" key={set.id}>
             <h3>Section {i + 1}</h3>

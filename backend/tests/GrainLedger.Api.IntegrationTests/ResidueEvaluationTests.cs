@@ -37,7 +37,7 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         var result = ResultOf(evaluation, f.SubstanceId);
         Complete(result, decimal.Parse(lower, System.Globalization.CultureInfo.InvariantCulture), decimal.Parse(upper, System.Globalization.CultureInfo.InvariantCulture));
         Assert.Equal("mg/kg", result.GetProperty("unit").GetString());
-        Assert.Equal(Basis, result.GetProperty("basis").GetString());
+        Assert.False(result.TryGetProperty("basis", out _));
         var provenance = Assert.Single(result.GetProperty("provenance").EnumerateArray());
         Assert.Equal(reportId, provenance.GetProperty("reportId").GetGuid());
         Assert.Equal(sample.LotId, provenance.GetProperty("sourceLotId").GetGuid());
@@ -55,7 +55,6 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
     [InlineData("missing-selection")]
     [InlineData("missing-uncertainty")]
     [InlineData("unknown-unit")]
-    [InlineData("wrong-basis")]
     [InlineData("nd-without-threshold")]
     [InlineData("nd-missing-reviewed-lod")]
     public async Task Unsupported_measurement_never_invents_finite_bound(string missing)
@@ -71,9 +70,11 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         if (missing != "missing-policy")
             await f.PublishRuleAsync(f.RuleBody(nd ? "ND" : "NUMERIC_ABSOLUTE_UNCERTAINTY",
                 nd ? missing == "nd-missing-reviewed-lod" ? "LOD" : "REPORTING_THRESHOLD" : null));
-        if (missing is not ("pending-identity" or "missing-selection"))
-            await f.SelectAsync(sample, report, missing == "missing-uncertainty" || nd ? null : "0.05",
-                basis: missing == "wrong-basis" ? "UNAPPROVED_DRY_MATTER" : Basis);
+        if (missing == "unknown-unit")
+            await RejectedAsync(s.Customer, HttpMethod.Post, "/api/residue-report-selections",
+                f.SelectionBody(sample, report), HttpStatusCode.BadRequest);
+        else if (missing is not ("pending-identity" or "missing-selection" or "missing-policy"))
+            await f.SelectAsync(sample, report, missing == "missing-uncertainty" || nd ? null : "0.05");
         Unresolved(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId));
     }
 
@@ -165,31 +166,64 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         var f = await ResidueScenario.CreateAsync(s);
         var first = await SampleAsync(s, await s.ReceiptAsync("60"));
         var second = await SampleAsync(s, await s.ReceiptAsync("40"));
-        var (_, a) = await f.ReportAsync(first); var (_, b) = await f.ReportAsync(second, [f.Result("0.55", "±0.25")]);
-        await f.PublishRuleAsync(); await f.SelectAsync(first, a); await f.SelectAsync(second, b, "0.25");
-        await f.ProcessRuleAsync("DRYING", "RAW_PADDY", "DRIED_PADDY");
-        await f.ProcessRuleAsync("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
-        await f.ProcessRuleAsync("BLENDING", "HEAD_RICE", "BLENDED_RICE");
-        await f.ProcessRuleAsync("CUSTODY_INGRESS", "BLENDED_RICE", "BLENDED_RICE");
-        await f.ProcessRuleAsync("CUSTODY_WITHDRAW", "BLENDED_RICE", "BLENDED_RICE");
+        var (_, a) = await f.ReportAsync(first);
+        var (reportBId, b) = await f.ReportAsync(second, [f.Result("0.55", "±0.25")], confirm: false);
+        var profile = f.RuleBody();
+        profile["laboratory"]![0]!["belowLimit"] = true;
+        profile["laboratory"]![0]!["ndThresholdKind"] = "REPORTING_THRESHOLD";
+        AddStep(profile, "DRYING", "RAW_PADDY", "DRIED_PADDY");
+        AddStep(profile, "MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
+        AddStep(profile, "BLENDING", "HEAD_RICE", "BLENDED_RICE");
+        AddStep(profile, "CUSTODY_INGRESS", "BLENDED_RICE", "BLENDED_RICE");
+        AddStep(profile, "CUSTODY_WITHDRAW", "BLENDED_RICE", "BLENDED_RICE");
+        var profileId = await f.PublishRuleAsync(profile); await f.SelectAsync(first, a);
         await f.BlendCompatibilityAsync("HEAD_RICE");
         var driedA = Output(await s.CommitAsync(await s.DraftAsync("DRYING", [(first.LotId, "60")], [("DRIED_PADDY", "60")])));
         var driedB = Output(await s.CommitAsync(await s.DraftAsync("DRYING", [(second.LotId, "40")], [("DRIED_PADDY", "40")])));
         var headA = Output(await s.CommitAsync(await s.DraftAsync("MILLING", [(driedA, "60")], [("HEAD_RICE", "60")])));
         var headB = Output(await s.CommitAsync(await s.DraftAsync("MILLING", [(driedB, "40")], [("HEAD_RICE", "40")])));
         var blended = Output(await s.CommitAsync(await s.DraftAsync("BLENDING", [(headA, "60"), (headB, "40")], [("BLENDED_RICE", "100")])));
-        Complete(ResultOf(await f.EvaluateAsync(blended), f.SubstanceId), 0.09m, 0.22m);
+        var unresolvedId = Guid.NewGuid();
+        var unresolved = await f.EvaluateAsync(blended, unresolvedId);
+        Unresolved(ResultOf(unresolved, f.SubstanceId));
         var location = await f.MixedLocationAsync(); await s.TransferAsync(blended, "100", to: location);
         var (pool, revision) = await f.PoolAsync(location);
         var aliquot = await f.WithdrawAsync(location, pool, revision, "25");
         var (remainder, _) = await f.PoolAsync(location);
+        foreach (var lot in new[] { pool, aliquot, remainder })
+            Unresolved(ResultOf(await f.EvaluateAsync(lot), f.SubstanceId));
+        await SendAsync(s.Customer, HttpMethod.Post, $"/api/lab-reports/{reportBId}/confirm", ConfirmRequest(b, second));
+        await f.SelectAsync(second, b, "0.25");
+        Assert.Equal(unresolved.GetRawText(), (await f.EvaluateAsync(blended, unresolvedId)).GetRawText());
+        Complete(ResultOf(await f.EvaluateAsync(blended), f.SubstanceId), 0.09m, 0.22m);
         foreach (var lot in new[] { pool, aliquot, remainder })
         {
             var result = ResultOf(await f.EvaluateAsync(lot), f.SubstanceId);
             Complete(result, 0.09m, 0.22m);
             Assert.Contains(result.GetProperty("dependencies").EnumerateArray(), x => x.GetProperty("lotId").GetGuid() == first.LotId);
             Assert.Contains(result.GetProperty("dependencies").EnumerateArray(), x => x.GetProperty("lotId").GetGuid() == second.LotId);
+            if (lot == aliquot)
+            {
+                var references = result.GetProperty("rules").EnumerateArray()
+                    .Where(x => x.GetProperty("id").GetGuid() == profileId).ToArray();
+                Assert.Equal(6, references.Length);
+                Assert.All(references, x => Assert.Equal(f.ProfileCode, x.GetProperty("ruleCode").GetString()));
+                Assert.Equal(6, references.Select(x => x.GetProperty("componentKey").GetString()).Distinct().Count());
+            }
         }
+        var finiteId = Guid.NewGuid();
+        var finite = await f.EvaluateAsync(aliquot, finiteId);
+        var revised = Revise(profile, profileId);
+        revised["steps"]!.AsArray().RemoveAt(1);
+        await f.PublishRuleAsync(revised);
+        var unrelated = f.RuleBody();
+        AddStep(unrelated, "MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
+        await f.PublishRuleAsync(unrelated);
+        var missingMilling = ResultOf(await f.EvaluateAsync(aliquot), f.SubstanceId);
+        Unresolved(missingMilling);
+        Assert.Contains(missingMilling.GetProperty("reasons").EnumerateArray(),
+            x => x.GetString()!.Contains("DRIED_PADDY to HEAD_RICE", StringComparison.Ordinal));
+        Assert.Equal(finite.GetRawText(), (await f.EvaluateAsync(aliquot, finiteId)).GetRawText());
         Assert.Equal(0m, Quantity(await s.LotAsync(first.LotId)));
         Assert.Equal(0m, Quantity(await s.LotAsync(second.LotId)));
     }
@@ -200,15 +234,18 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         using var s = await CreateAsync(factory);
         var f = await ResidueScenario.CreateAsync(s);
         var sample = await SampleAsync(s, await s.ReceiptAsync("100"));
-        var (_, report) = await f.ReportAsync(sample); await f.PublishRuleAsync(); await f.SelectAsync(sample, report);
+        var (_, report) = await f.ReportAsync(sample);
         var cut = DateTimeOffset.UtcNow.AddHours(-2);
-        var firstRule = f.RuleBody("DRYING", kind: "PROCESS", input: "RAW_PADDY", output: "DRIED_PADDY", lower: "0.5", upper: "0.5");
+        var firstRule = f.RuleBody();
+        AddStep(firstRule, "DRYING", "RAW_PADDY", "DRIED_PADDY", "0.5", "0.5");
+        AddStep(firstRule, "MERGE", "DRIED_PADDY", "DRIED_PADDY");
         firstRule["effectiveTo"] = System.Text.Json.Nodes.JsonValue.Create(cut);
-        await f.PublishRuleAsync(firstRule);
-        var secondRule = f.RuleBody("DRYING", kind: "PROCESS", input: "RAW_PADDY", output: "DRIED_PADDY", lower: "2", upper: "2");
-        secondRule["effectiveFrom"] = System.Text.Json.Nodes.JsonValue.Create(cut);
-        await f.PublishRuleAsync(secondRule);
-        await f.ProcessRuleAsync("MERGE", "DRIED_PADDY", "DRIED_PADDY");
+        var firstId = await f.PublishRuleAsync(firstRule);
+        var secondRule = (System.Text.Json.Nodes.JsonObject)firstRule.DeepClone();
+        secondRule["id"] = Guid.NewGuid(); secondRule["versionNo"] = 2; secondRule["supersedesId"] = firstId;
+        secondRule["effectiveFrom"] = System.Text.Json.Nodes.JsonValue.Create(cut); secondRule["effectiveTo"] = null;
+        secondRule["steps"]![0]!["factorLower"] = "2"; secondRule["steps"]![0]!["factorUpper"] = "2";
+        await f.PublishRuleAsync(secondRule); await f.SelectAsync(sample, report);
         var paths = new List<(Guid LotId, string Mass)>();
         foreach (var (mass, occurredAt) in new[] { ("60", cut.AddHours(-1)), ("40", cut.AddHours(1)) })
         {
@@ -235,9 +272,11 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         var receipts = new[] { await s.ReceiptAsync("0.000001"), await s.ReceiptAsync("0.000001"), await s.ReceiptAsync("0.000001") };
         var sources = receipts.Select(r => (Lot: Lots(r).Single(), Source: r.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()))
             .OrderBy(x => x.Lot.ToString("D"), StringComparer.Ordinal).ToArray();
+        var profile = f.RuleBody();
+        AddStep(profile, "DRYING", "RAW_PADDY", "DRIED_PADDY");
+        await f.PublishRuleAsync(profile);
         await SendAsync(s.Customer, HttpMethod.Post, "/api/residue-source-groups",
             f.GroupBody(sources.Take(2).Select(x => x.Source).ToArray(), [], "0", "0"));
-        await f.ProcessRuleAsync("DRYING", "RAW_PADDY", "DRIED_PADDY");
         var dried = Output(await s.CommitAsync(await s.DraftAsync("DRYING",
             sources.Select(x => (x.Lot, "0.000001")).ToArray(), [("DRIED_PADDY", "0.000001")], "0.000002")));
         await using (var owner = new NpgsqlConnection(factory.OwnerConnectionString))
@@ -263,17 +302,22 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         using var s = await CreateAsync(factory);
         var f = await ResidueScenario.CreateAsync(s);
         var sample = await SampleAsync(s, await s.ReceiptAsync("100"));
-        var (_, report) = await f.ReportAsync(sample); await f.PublishRuleAsync(); await f.SelectAsync(sample, report);
+        var (_, report) = await f.ReportAsync(sample);
+        var profile = f.RuleBody();
+        var profileId = await f.PublishRuleAsync(profile); await f.SelectAsync(sample, report);
         var dried = Output(await s.CommitAsync(await s.DraftAsync("DRYING", [(sample.LotId, "100")], [("DRIED_PADDY", "80")], "20")));
         Unresolved(ResultOf(await f.EvaluateAsync(dried), f.SubstanceId));
-        await f.ProcessRuleAsync("DRYING", "RAW_PADDY", "DRIED_PADDY");
+        AddStep(profile, "DRYING", "RAW_PADDY", "DRIED_PADDY");
+        AddStep(profile, "MILLING", "DRIED_PADDY", "HEAD_RICE");
+        profile = Revise(profile, profileId);
+        profileId = await f.PublishRuleAsync(profile);
         Complete(ResultOf(await f.EvaluateAsync(dried), f.SubstanceId), 0.1m, 0.2m);
-        await f.ProcessRuleAsync("MILLING", "DRIED_PADDY", "HEAD_RICE");
         var head = Output(await s.CommitAsync(await s.DraftAsync("MILLING", [(dried, "80")], [("HEAD_RICE", "80")])));
         var bagged = Output(await s.CommitAsync(await s.DraftAsync("BAGGING", [(head, "40")], [("BAGGED_RICE", "40")], productIdentity: "HEAD_RICE")));
         Unresolved(ResultOf(await f.EvaluateAsync(bagged), f.SubstanceId));
-        var rule = f.RuleBody("BAGGING", kind: "PROCESS", input: "HEAD_RICE", output: "BAGGED_RICE");
-        rule["outputFraction"] = "HEAD_RICE"; await f.PublishRuleAsync(rule);
+        AddStep(profile, "BAGGING", "HEAD_RICE", "BAGGED_RICE");
+        profile["steps"]!.AsArray().Last()!["outputFraction"] = "HEAD_RICE";
+        await f.PublishRuleAsync(Revise(profile, profileId));
         Complete(ResultOf(await f.EvaluateAsync(bagged), f.SubstanceId), 0.1m, 0.2m);
         await s.TransferAsync(head, "20");
         Complete(ResultOf(await f.EvaluateAsync(head), f.SubstanceId), 0.1m, 0.2m);
@@ -285,7 +329,8 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         using var s = await CreateAsync(factory);
         var f = await ResidueScenario.CreateAsync(s);
         var sample = await SampleAsync(s, await s.ReceiptAsync("100"));
-        await f.PublishRuleAsync(); await f.ProcessRuleAsync("DRYING", "RAW_PADDY", "DRIED_PADDY");
+        var profile = f.RuleBody(); AddStep(profile, "DRYING", "RAW_PADDY", "DRIED_PADDY");
+        await f.PublishRuleAsync(profile);
         var dried = Output(await s.CommitAsync(await s.DraftAsync("DRYING", [(sample.LotId, "100")], [("DRIED_PADDY", "100")])));
         await s.HoldAsync(dried);
         var id = Guid.NewGuid(); var before = await f.EvaluateAsync(dried, id, [f.SubstanceId, f.OtherSubstanceId]);
@@ -338,8 +383,10 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         var f = await ResidueScenario.CreateAsync(s);
         var first = await SampleAsync(s, await s.ReceiptAsync("10")); var second = await SampleAsync(s, await s.ReceiptAsync("10"));
         var (_, a) = await f.ReportAsync(first); var (_, b) = await f.ReportAsync(second, [f.Result("0.55", "±0.25")]);
-        await f.PublishRuleAsync(); await f.SelectAsync(first, a); await f.SelectAsync(second, b, "0.25");
-        await f.ProcessRuleAsync("DRYING", "RAW_PADDY", "DRIED_PADDY");
+        var profile = f.RuleBody();
+        AddStep(profile, "DRYING", "RAW_PADDY", "DRIED_PADDY");
+        AddStep(profile, "MILLING", "DRIED_PADDY", "HEAD_RICE");
+        await f.PublishRuleAsync(profile); await f.SelectAsync(first, a); await f.SelectAsync(second, b, "0.25");
         var original = await s.CommitAsync(await s.DraftAsync("DRYING", [(first.LotId, "10")], [("DRIED_PADDY", "10")]));
         var originalId = Output(original);
         var history = await f.EvaluateAsync(originalId);
@@ -350,7 +397,6 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         Complete(ResultOf(await f.EvaluateAsync(Output(replacement)), f.SubstanceId), 0.3m, 0.8m);
         Complete(ResultOf(await f.EvaluateAsync(originalId), f.SubstanceId), 0.1m, 0.2m);
         Assert.Equal(history.GetRawText(), (await GetAsync(s.Customer, $"/api/ledger/lots/{originalId}/residue-evaluations/{history.GetProperty("id").GetGuid()}")).GetRawText());
-        await f.ProcessRuleAsync("MILLING", "DRIED_PADDY", "HEAD_RICE");
         await s.CommitAsync(await s.DraftAsync("MILLING", [(Output(replacement), "10")], [("HEAD_RICE", "10")]));
         var blockedCorrection = await SendAsync(s.Operator, HttpMethod.Post, "/api/ledger/corrections", new
         {
@@ -423,10 +469,12 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         var sample = await SampleAsync(s, await s.ReceiptAsync("100")); var (_, report) = await f.ReportAsync(sample);
         var rule = f.RuleBody(); rule["reviewAuthority"] = "";
         await RejectedAsync(s.Admin, HttpMethod.Post, "/api/residue-rules", rule, HttpStatusCode.BadRequest);
-        var reversed = f.RuleBody("DRYING", kind: "PROCESS", input: "RAW_PADDY", output: "DRIED_PADDY",
-            lower: "100000000000000000000000.000000000000000002", upper: "100000000000000000000000.000000000000000001");
+        var reversed = f.RuleBody();
+        AddStep(reversed, "DRYING", "RAW_PADDY", "DRIED_PADDY",
+            "100000000000000000000000.000000000000000002", "100000000000000000000000.000000000000000001");
         await RejectedAsync(s.Admin, HttpMethod.Post, "/api/residue-rules", reversed, HttpStatusCode.BadRequest);
         await RejectedAsync(s.Customer, HttpMethod.Post, "/api/residue-rules", f.RuleBody(), HttpStatusCode.Forbidden);
+        await f.PublishRuleAsync();
         var selection = f.SelectionBody(sample, report);
         await RejectedAsync(s.Admin, HttpMethod.Post, "/api/residue-report-selections", selection, HttpStatusCode.Forbidden);
         await RejectedAsync(s.ForeignCustomer, HttpMethod.Post, "/api/residue-report-selections", selection, HttpStatusCode.Forbidden);
@@ -562,6 +610,15 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         await using var count = new NpgsqlCommand("SELECT count(*) FROM grainledger.ledger_residue_evaluations WHERE id=$1", owner);
         count.Parameters.AddWithValue(id);
         Assert.Equal(0L, (long)(await count.ExecuteScalarAsync())!);
+    }
+
+    private static System.Text.Json.Nodes.JsonObject Revise(System.Text.Json.Nodes.JsonObject profile, Guid priorId)
+    {
+        var revision = (System.Text.Json.Nodes.JsonObject)profile.DeepClone();
+        revision["id"] = Guid.NewGuid();
+        revision["versionNo"] = revision["versionNo"]!.GetValue<int>() + 1;
+        revision["supersedesId"] = priorId;
+        return revision;
     }
 
     private static async Task WaitForBlockedReplayAsync(NpgsqlConnection owner)

@@ -1,5 +1,15 @@
+/* Hallmark · shape: app screen · scope: residue profiles · critique: familiar workbench, restrained existing palette; render not verified */
+:root {
+  --residue-border: #dce2d7;
+  --residue-field-border: #718477;
+  --residue-surface: #fff;
+  --residue-soft: #eaf0e6;
+  --residue-text: #213d31;
+  --residue-muted: #526557;
+  --residue-accent: #21573f;
+}
 .residue-dialog-backdrop { z-index: 120; }
-.residue-dialog { width: min(1100px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; overflow-wrap: anywhere; }
+.residue-dialog { width: min(1100px, calc(100% - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; overflow-wrap: anywhere; }
 .residue-dialog .farmer-modal-close { width: 44px; height: 44px; }
 .residue-dialog fieldset { min-width: 0; }
 .residue-rule-maintenance label, .residue-company-policies label { min-width: 0; }
@@ -8,12 +18,78 @@
 .residue-toolbar label { flex: 1 1 150px; min-width: 0; }
 .residue-toolbar input, .residue-toolbar select { width: 100%; }
 .residue-profile-list { display: grid; gap: 1rem; }
-.residue-profile-list > section, .residue-history-series { border: 1px solid var(--border, #d6dce4); border-radius: .5rem; padding: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.residue-profile-list > section, .residue-history-series { border: 1px solid var(--ledger-border, var(--residue-border)); border-radius: .5rem; padding: 1rem; min-width: 0; overflow-wrap: anywhere; }
 .residue-history-series { margin-block: .75rem; }
 .residue-history-series li { margin-block: .75rem; }
 .residue-counts { font-variant-numeric: tabular-nums; }
-.residue-rule-history-heading td { background: var(--surface-alt, #f4f6f8); }
+.residue-rule-history-heading td { background: var(--ledger-soft, var(--residue-soft)); }
+.residue-rule-maintenance th, .residue-rule-maintenance .table-subtitle,
+.residue-company-policies .page-heading :is(.eyebrow, .muted) { color: var(--residue-muted); }
+.residue-rule-maintenance table { font-size: 13px; }
+.residue-rule-maintenance th, .residue-rule-maintenance .table-subtitle { font-size: 12px; }
+.residue-rule-maintenance .residue-rule-table-scroll:focus-visible { outline: 3px solid var(--residue-accent); outline-offset: 3px; }
+.residue-rule-maintenance :is(input:not([type='checkbox']):not([type='radio']), select, textarea),
+.residue-company-policies :is(input:not([type='checkbox']):not([type='radio']), select, textarea),
+.residue-dialog :is(input:not([type='checkbox']):not([type='radio']), select, textarea) { border-color: var(--residue-field-border); }
+.residue-dialog :is(button, input, select, textarea, summary):focus-visible,
+.residue-rule-maintenance :is(button, input, select, textarea, summary):focus-visible { outline: 3px solid var(--ledger-accent, var(--residue-accent)); outline-offset: 2px; }
+.residue-profile-editor button:active:not(:disabled), .residue-rule-maintenance button:active:not(:disabled) { filter: brightness(.9); }
+.residue-profile-editor :disabled, .residue-rule-maintenance button:disabled { cursor: not-allowed; }
+.residue-profile-editor > fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.residue-profile-editor > fieldset > div > fieldset { border: 0; border-top: 1px solid var(--ledger-border, var(--residue-border)); padding: 1.25rem 0; margin: 0; }
+.residue-profile-editor > fieldset > div > fieldset > legend { padding: 0 .5rem 0 0; font-size: 1.1rem; font-weight: 700; }
+.residue-profile-editor fieldset fieldset { margin: 1rem 0; }
+.residue-profile-editor .ledger-form-grid { gap: 1rem; }
+.residue-profile-editor label { min-width: 0; }
+.residue-profile-editor :is(input:not([type="checkbox"]), select, textarea) { max-width: 100%; }
+.residue-issues { padding: 1rem; border: 1px solid var(--ledger-border, var(--residue-border)); border-radius: .5rem; background: var(--ledger-soft, var(--residue-soft)); }
+.residue-issues h3, .residue-issues p { margin: 0 0 .5rem; }
+.residue-issues ul { margin: 0; padding-left: 1.5rem; }
+.residue-issues li + li { margin-top: .35rem; }
+.residue-issues a { color: var(--ledger-accent, var(--residue-accent)); }
+.residue-profile-editor [id^="residue-setup-"]:focus { outline: 3px solid var(--ledger-accent, var(--residue-accent)); outline-offset: 2px; }
+.residue-readout { margin: 1.5rem 0; padding: 1.25rem; background: var(--ledger-soft, var(--residue-soft)); color: var(--ledger-text, var(--residue-text)); border-radius: .5rem; }
+.residue-readout h3 { margin: 0 0 .5rem; }
+.residue-readout h4 { margin: 0 0 .75rem; }
+.residue-readout p { margin: .35rem 0 .75rem; }
+.residue-readout-section { border-top: 1px solid var(--ledger-border, var(--residue-border)); padding-top: 1rem; margin-top: 1rem; }
+.residue-readout dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .75rem 1.25rem; margin: 0; }
+.residue-readout dl > div { min-width: 0; }
+.residue-readout dt { font-size: .875rem; color: var(--ledger-muted, var(--residue-muted)); }
+.residue-readout dd { margin: .15rem 0 0; overflow-wrap: anywhere; }
+.residue-readout ol { margin: 0; padding-left: 1.5rem; }
+.residue-readout li + li { margin-top: 1rem; }
+.residue-readout li > strong { display: block; margin-bottom: .5rem; text-transform: none; }
+.residue-readout-published { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem 1.25rem; padding: 1rem; }
+.residue-readout-published > h3, .residue-readout-published > .residue-readout-section:first-of-type, .residue-readout-published > .residue-readout-section:last-of-type { grid-column: 1 / -1; }
+.residue-readout-published > h3 { margin: 0; }
+.residue-readout-published .residue-readout-section { min-width: 0; margin: 0; padding-top: .75rem; }
+.residue-readout-published h4 { margin-bottom: .4rem; }
+.residue-readout-published p { margin: 0 0 .5rem; }
+.residue-readout-published dl { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: .4rem .75rem; }
+.residue-readout-published ol { padding-left: 1.25rem; }
+.residue-readout-published li + li { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--ledger-border, var(--residue-border)); }
+.residue-readout-published li > strong { margin-bottom: .35rem; }
+@media (max-width: 800px) {
+  .residue-readout-published { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 600px) {
-  .residue-dialog { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; }
+  .residue-dialog { width: calc(100% - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; }
   .residue-toolbar label { flex-basis: 100%; }
+  .residue-rule-maintenance .residue-rule-table { min-width: 0; table-layout: auto; }
+  .residue-rule-maintenance .residue-rule-table, .residue-rule-maintenance .residue-rule-table tbody,
+  .residue-rule-maintenance .residue-rule-table tr, .residue-rule-maintenance .residue-rule-table td { display: block; width: 100%; }
+  .residue-rule-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .residue-rule-maintenance .residue-rule-table th:nth-child(n), .residue-rule-maintenance .residue-rule-table td:nth-child(n) { width: 100%; }
+  .residue-rule-table tr:not(.residue-rule-history-heading) > td:not([colspan]) { padding: .5rem .75rem; border-bottom: 0; }
+  .residue-rule-table tr:not(.residue-rule-history-heading) > td:not([colspan])::before { display: block; margin-bottom: .25rem; color: var(--residue-muted); font-size: 12px; font-weight: 700; }
+  .residue-rule-table tr > td:nth-child(1):not([colspan])::before { content: 'Profile'; }
+  .residue-rule-table tr > td:nth-child(2)::before { content: 'Applies to'; }
+  .residue-rule-table tr > td:nth-child(3)::before { content: 'Operations'; }
+  .residue-rule-table tr > td:nth-child(4)::before { content: 'Effective period'; }
+  .residue-rule-table tr > td:nth-child(5)::before { content: 'Status'; }
+  .residue-rule-table tr > td:nth-child(6)::before { content: 'Actions'; }
+  .residue-rule-maintenance .residue-rule-table tr > td.admin-row-actions { display: block; padding-bottom: 1rem; border-bottom: 1px solid var(--residue-border); }
+  .residue-rule-table td.admin-row-actions button { margin: .25rem .25rem .25rem 0; }
+  .residue-rule-maintenance .residue-rule-details-panel { position: static; width: 100%; }
 }

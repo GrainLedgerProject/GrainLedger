@@ -103,7 +103,7 @@ One CSV import belongs to the selected report section only. This generator repre
 2. Click **Review and confirm**.
 3. Check sample identity against the registered sample and custody history; check every transcribed result against original file.
 4. Select verified sample. Compare printed and registered identifiers; review suggested identity basis. **SAMPLE_CODE** works when printed sample code matches and any printed seal code also agrees. Leading/trailing whitespace is ignored; real contradictions require corrected evidence, not a different basis.
-5. Check identity and transcription attestations, then click **Confirm checked record**.
+5. Check identity and transcription attestations. For residue bounds, check **Concentrations are as received (required for residue bounds)** only when supported by the synthetic scenario; otherwise leave it unchecked. Confirm the checked record. Without the as-received attestation, identity confirmation remains possible but residue binding stays unresolved.
 6. Reopen the sample or original procurement source lot to review linked confirmed results.
 
 `LAB_REFERENCE` is not an arbitrary alternative: it requires matching persisted dispatch/acknowledgement laboratory name, sample reference and supporting evidence reference. Merely passing `--lab-sample-reference` does not create that evidence.

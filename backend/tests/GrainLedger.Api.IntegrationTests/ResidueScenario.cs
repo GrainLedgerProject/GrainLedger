@@ -13,7 +13,7 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
     public LedgerScenario Ledger { get; } = ledger;
     public Guid SubstanceId { get; private set; }
     public Guid OtherSubstanceId { get; private set; }
-    public const string Basis = "SYNTHETIC_AS_RECEIVED";
+    public string? ProfileCode { get; set; }
     public const string Review = "SYNTHETIC TEST ONLY; isolated regression fixture, not operational scientific approval.";
 
     public static async Task<ResidueScenario> CreateAsync(LedgerScenario ledger)
@@ -80,31 +80,41 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
     }
 
     public JsonObject RuleBody(string interpretation = "NUMERIC_ABSOLUTE_UNCERTAINTY", string? ndThreshold = null,
-        string kind = "INTERPRETATION", string input = "RAW_PADDY", string output = "RAW_PADDY",
-        string lower = "1", string upper = "1", string semantics = "STEP_CONCENTRATION",
-        string? basis = null, Guid? supersedesId = null, int version = 1, string? code = null) =>
+        Guid? supersedesId = null, int version = 1, string? code = null) =>
         JsonSerializer.SerializeToNode(new
         {
-            id = Guid.NewGuid(), code = code ?? $"SYNTHETIC-{Guid.NewGuid():N}", versionNo = version, kind,
-            commodityId = (Guid?)Ledger.CatalogCommodityId, substanceId = SubstanceId,
-            residueDefinition = "SYNTHETIC_ANALYTE", inputStage = input, outputStage = output,
-            inputBasis = basis ?? Basis, outputBasis = basis ?? Basis,
-            outputFraction = kind == "PROCESS" ? output : "", process = kind == "PROCESS" ? interpretation : "",
-            conditions = kind == "PROCESS" ? "UNCONDITIONAL" : "", analyticalMethod = kind == "INTERPRETATION" ? "SYNTHETIC_METHOD" : "",
-            unit = "mg/kg", decimalPlaces = 12,
-            interpretationKind = kind == "INTERPRETATION" ? interpretation : null,
-            ndThresholdKind = ndThreshold,
-            factorLower = kind == "PROCESS" ? lower : null, factorUpper = kind == "PROCESS" ? upper : null,
-            factorSemantics = kind == "PROCESS" ? semantics : null, homogeneousMixing = kind == "PROCESS",
+            id = Guid.NewGuid(), code = code ?? $"SYNTHETIC-{Guid.NewGuid():N}", versionNo = version,
+            kind = "FLOW", schemaVersion = 2, commodityId = (Guid?)Ledger.CatalogCommodityId, substanceId = SubstanceId,
+            residueDefinition = "SYNTHETIC_ANALYTE", unit = "mg/kg", decimalPlaces = 12,
+            laboratory = new[] { new {
+                analyticalMethod = "SYNTHETIC_METHOD",
+                numericInterpretationKind = interpretation.StartsWith("NUMERIC_", StringComparison.Ordinal) ? interpretation : null,
+                relativeUncertaintyPercent = interpretation == "NUMERIC_RELATIVE_UNCERTAINTY" ? "10" : null,
+                relativeUncertaintyAtZero = false, belowLimit = interpretation == "BELOW_LIMIT",
+                ndThresholdKind = interpretation == "ND" ? ndThreshold : null
+            } },
+            steps = Array.Empty<object>(), asReceivedConfirmed = true,
             effectiveFrom = DateTimeOffset.UtcNow.AddYears(-1), effectiveTo = (DateTimeOffset?)null, supersedesId,
             evidenceRef = Review, applicabilityStatement = Review, reviewedBy = "Synthetic reviewer",
             reviewAuthority = "Isolated integration test", reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
         })!.AsObject();
 
+    public static void AddStep(JsonObject body, string process, string input, string output, string lower = "1",
+        string upper = "1", string semantics = "STEP_CONCENTRATION", string? anchorStage = null)
+    {
+        body["steps"]!.AsArray().Add(JsonSerializer.SerializeToNode(new
+        {
+            id = Guid.NewGuid(), process, inputStage = input, outputStage = output, outputFraction = output,
+            conditions = "UNCONDITIONAL", factorLower = lower, factorUpper = upper,
+            factorSemantics = semantics, anchorStage, homogeneousMixing = true
+        }));
+    }
+
     public async Task<Guid> PublishRuleAsync(JsonObject? body = null, bool adopt = true)
     {
         var request = body ?? RuleBody();
         await SendAsync(Ledger.Admin, HttpMethod.Post, "/api/residue-rules", request);
+        ProfileCode = request["code"]!.GetValue<string>();
         if (adopt && request["companyId"] is null)
         {
             var settings = await GetAsync(Ledger.Customer, "/api/residue-policy-settings");
@@ -130,19 +140,16 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
         return request["id"]!.GetValue<Guid>();
     }
 
-    public Task<Guid> ProcessRuleAsync(string process, string input, string output, string lower = "1", string upper = "1",
-        string semantics = "STEP_CONCENTRATION") =>
-        PublishRuleAsync(RuleBody(process, kind: "PROCESS", input: input, output: output, lower: lower, upper: upper, semantics: semantics));
 
     public JsonObject SelectionBody(SampleIdentity sample, JsonElement report, string? uncertainty = "0.05",
-        string? threshold = null, string? basis = null, Guid[]? supersededResults = null, Guid? supersedesId = null,
+        string? threshold = null, Guid[]? supersededResults = null, Guid? supersedesId = null,
         Guid? substanceId = null) => JsonSerializer.SerializeToNode(new
         {
             id = Guid.NewGuid(), companyId = Ledger.OwnerId, sourceId = sample.SourceLotId,
             substanceId = substanceId ?? SubstanceId,
             selectedResultId = report.GetProperty("resultSets")[0].GetProperty("results").EnumerateArray()
                 .Single(x => x.GetProperty("substanceId").GetGuid() == (substanceId ?? SubstanceId)).GetProperty("id").GetGuid(),
-            supersededResultIds = supersededResults ?? [], materialBasis = basis ?? Basis,
+            supersededResultIds = supersededResults ?? [], schemaVersion = 2, asReceivedConfirmed = true, profileCode = ProfileCode,
             residueDefinition = "SYNTHETIC_ANALYTE", absoluteUncertainty = uncertainty, reportingThreshold = threshold,
             effectiveFrom = DateTimeOffset.UtcNow.AddYears(-1), effectiveTo = (DateTimeOffset?)null, supersedesId,
             evidenceRef = Review, applicabilityStatement = Review, reviewedBy = "Synthetic reviewer",
@@ -150,9 +157,9 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
         })!.AsObject();
 
     public async Task<Guid> SelectAsync(SampleIdentity sample, JsonElement report, string? uncertainty = "0.05",
-        string? threshold = null, string? basis = null, Guid[]? supersededResults = null, Guid? supersedesId = null)
+        string? threshold = null, Guid[]? supersededResults = null, Guid? supersedesId = null)
     {
-        var body = SelectionBody(sample, report, uncertainty, threshold, basis, supersededResults, supersedesId);
+        var body = SelectionBody(sample, report, uncertainty, threshold, supersededResults, supersedesId);
         await SendAsync(Ledger.Customer, HttpMethod.Post, "/api/residue-report-selections", body);
         return body["id"]!.GetValue<Guid>();
     }
@@ -162,7 +169,8 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
         {
             id = Guid.NewGuid(), companyId = Ledger.OwnerId, code = $"SYNTHETIC-GROUP-{Guid.NewGuid():N}", versionNo = 1,
             substanceId = SubstanceId, sourceIds, productStage = "RAW_PADDY", productIdentity = "RAW_PADDY",
-            materialBasis = Basis, residueDefinition = "SYNTHETIC_ANALYTE", lower, upper, unit = "mg/kg", precedence,
+            schemaVersion = 2, asReceivedConfirmed = true, profileCode = ProfileCode,
+            residueDefinition = "SYNTHETIC_ANALYTE", lower, upper, unit = "mg/kg", precedence,
             decimalPlaces = 12,
             supportingResultIds, effectiveFrom = DateTimeOffset.UtcNow.AddYears(-1), effectiveTo = (DateTimeOffset?)null,
             supersedesId = (Guid?)null, evidenceRef = Review, applicabilityStatement = Review,
