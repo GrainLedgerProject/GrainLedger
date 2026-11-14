@@ -212,6 +212,8 @@ public static class ResidueEvidenceResolver
             { reason = "Unsupported company policy setting"; continue; }
             var scope = setting.Mode == "COMPANY_OVERRIDE" ? (Guid?)companyId : null;
             var candidates = applicable.Where(x => x.CompanyId == scope).ToArray();
+            if (history.Any(x => x.Code == adoption.Key && x.CompanyId == scope && x.Retirement is not null))
+            { reason = "Adopted residue profile series is retired"; continue; }
             if (candidates.Length == 0)
             { reason = setting.Mode == "COMPANY_OVERRIDE" ? "Intended company override is missing or inapplicable" : "Adopted system profile is missing or inapplicable"; continue; }
             selected.AddRange(candidates.Select(x => (x, setting)));

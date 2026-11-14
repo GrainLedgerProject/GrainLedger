@@ -260,6 +260,7 @@ Laboratory originals, rows and confirmed procurement associations remain immutab
 | GET | `/api/residue-rules` | Return shared system rules plus caller's own company rules; Administrator sees system rules only. |
 | GET | `/api/residue-rules/{id}` | Read a visible system or own-company rule; foreign company rules are not exposed. |
 | POST | `/api/residue-rules` | Publish reviewed system rule (`residue.policy.manage`, Administrator) or own-company rule (`residue.company-policy.manage`, CustomerManager). Cookie mutations require CSRF. |
+| POST | `/api/residue-rules/{id}/retire` | Immediately retire the scoped profile series with `{ "reason": "..." }`; same publisher authorization and cookie CSRF requirements. |
 | GET | `/api/residue-policy-settings` | Return `{ "items": [...] }` for authenticated caller's own company only. No setting means no adopted profile. |
 | GET | `/api/residue-policy-settings/{id}` | Read own-company setting; out-of-scope IDs return not found. |
 | POST | `/api/residue-policy-settings` | Publish immutable, reviewed own-company profile setting (`residue.company-policy.manage`, CustomerManager); cookie mutations require CSRF. |
@@ -269,6 +270,10 @@ Laboratory originals, rows and confirmed procurement associations remain immutab
 | POST | `/api/lab-reports/{reportId}/residue-review/confirm` | Explicitly bind reviewed compatible report rows to adopted profiles; revalidate and publish individual selections atomically, without changing originals, stock, HOLDs or saved evaluations. |
 
 One profile Code covers a complete `kind: "FLOW"`, `schemaVersion: 2` profile for one substance and commodity. Shared fields include scope, version, review, effective window, `residueDefinition`, fixed `unit: "mg/kg"`, `decimalPlaces` and `asReceivedConfirmed: true`. Required `laboratory` and `steps` arrays cannot both be empty. Old per-stage and analytical-basis fields are not accepted.
+
+Retirement requires a trimmed, nonempty reason of at most 1,000 characters. The profile ID identifies a visible version; retirement applies to its entire scoped Code series. A successful request returns 200 with `{ "profileId", "code", "companyId", "reason", "retiredBy", "retiredAt" }`; actor and timestamp are server-assigned. Invalid reason returns 400, unauthorized callers 403, invisible or missing IDs 404, and an already retired series 409. List and detail retain all visible versions and add a `retirement` object with those fields to each version of a retired series; the property is omitted when not retired.
+
+Retirement preserves published profile history and saved evaluation snapshots. New evaluations fail closed for a retired adopted series, including evaluations of earlier event times; they do not fall back to older versions. Publication and new evidence cannot use the retired series. See [profile field guide](../guides/residue-rules-entry-guide.md#retire-a-profile-series).
 
 Each laboratory entry identifies an exact `analyticalMethod` and explicitly enabled result forms: `numericInterpretationKind`, `relativeUncertaintyPercent`, `relativeUncertaintyAtZero`, `belowLimit` and `ndThresholdKind`. Each process step has a stable UUID `id`, `process`, immediate `inputStage`, `outputStage`, `outputFraction`, explicit `conditions`, `factorLower`, `factorUpper`, `factorSemantics`, `anchorStage` and `homogeneousMixing`. Cumulative factors use an explicit supported ancestor anchor; overlapping applicability and duplicate methods are rejected. Source stage is `RAW_PADDY`. Missing components remain unresolved, not filled from another Code.
 

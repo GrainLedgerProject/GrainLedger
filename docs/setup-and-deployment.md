@@ -172,6 +172,10 @@ Plan fresh reviewed `FLOW` schema-2 profiles with new Codes, explicit company ad
 
 Keep runtime credentials restricted; publication and evaluation use protected commands rather than direct table mutation. Apply any necessary runtime grants only through the approved migration-owner procedure; never give owner credentials to normal application startup. Synthetic examples are not operational policy. Export market `residueBasis` is independently reviewed and must be `AS_RECEIVED` for compatible coverage; unsupported conventions remain incomplete. Residue bounds are not legal PASS, HOLD release or export certification. See [profile field guide](guides/residue-rules-entry-guide.md) and [laboratory API](api/sample-api.md#residue-bounds-for-derived-lots).
 
+Profile retirement requires forward migration `20261114000000_ResidueProfileRetirement`, its embedded `ResidueProfileRetirement.sql` resource and matching API/web builds. After backup and deployment-owner approval, apply it through the existing migration-owner job and configure restricted runtime grants through the established role procedure before starting the matching API. Normal startup does not migrate or repair grants. Migration rollback is unsupported; plan recovery using an approved backup/restore procedure. No shared database migration, grant change or write is implied by this implementation; check installed migration history and obtain explicit database-owner approval before touching shared Supabase.
+
+The migration adds append-only retirement history and protected retirement commands and guards. Include retirement records in backups. Retirement preserves published versions and saved evaluation snapshots; new evaluations cannot use a retired series or fall back to an older version. See the [retirement API](api/sample-api.md#residue-bounds-for-derived-lots) and [profile field guide](guides/residue-rules-entry-guide.md#retire-a-profile-series).
+
 For isolated Linux tests when Docker bridge/veth creation is unavailable, opt in to a disposable PostgreSQL container using host networking, a distinct port per fixture and `listen_addresses=127.0.0.1`:
 
 ```bash

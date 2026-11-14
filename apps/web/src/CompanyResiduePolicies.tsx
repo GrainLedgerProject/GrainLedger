@@ -35,7 +35,7 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
   const source = (code: string, selectedMode = mode) => {
     const series = eligible.filter(rule => rule.code === code && (selectedMode === 'SYSTEM_DEFAULT' ? !rule.companyId : rule.companyId === companyId));
     const current = series.filter(rule => !series.some(next => next.supersedesId === rule.id));
-    return current.length === 1 ? current[0] : undefined;
+    return current.length === 1 && !current[0].retirement ? current[0] : undefined;
   };
   const sourceChanged = drafts.some(item => item.sourceRuleId !== (source(item.ruleCode)?.id || null));
   const name = (items: CatalogItem[], id: string) => { const item = items.find(value => value.id === id); return item ? `${item.code} · ${item.name}` : id; };
@@ -134,7 +134,7 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
               <input type="checkbox" checked={drafts.some(item => item.ruleCode === code)} disabled={!selectedSource} onChange={event => chooseCodes(event.target.checked ? [...drafts.map(item => item.ruleCode), code] : drafts.filter(item => item.ruleCode !== code).map(item => item.ruleCode))} />
               <span className="residue-profile-choice-text">
                 <strong className="residue-profile-choice-primary">{substance?.name || rule.substanceId} · {operations}</strong>{' '}
-                <small className="muted residue-profile-choice-secondary">{commodity?.name || rule.commodityId} · {rule.residueDefinition} · {methods} · {code} · {selectedSource ? `latest published tip v${rule.versionNo} · ${effectiveWindowLabel(rule)}` : 'Reviewed profile unavailable in this mode; metadata is not a selected source'}</small>
+                <small className="muted residue-profile-choice-secondary">{commodity?.name || rule.commodityId} · {rule.residueDefinition} · {methods} · {code} · {selectedSource ? `latest published tip v${rule.versionNo} · ${effectiveWindowLabel(rule)}` : 'Reviewed profile unavailable in this mode (retired, missing or conflicting); metadata is not a selected source'}</small>
               </span>
             </label>;
           })}</div></fieldset>
@@ -150,7 +150,7 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
               const rule = source(draft.ruleCode);
               return <section key={draft.id} aria-label={`Selected profile ${draft.ruleCode}`}>
                 <h3>{label(draft.ruleCode)}</h3>
-                {!rule ? <p className="notice pending">Reviewed profile unavailable. Publish same-code scientific profile in this scope first. No system fallback.</p> : <>
+                {!rule ? <p className="notice pending">Reviewed profile unavailable in this scope (retired, missing or conflicting). No fallback to earlier versions or another scope.</p> : <>
                   <dl className="residue-rule-detail-grid">
                     <div><dt>Reviewed scientific version</dt><dd>{rule.code} v{rule.versionNo} · {rule.reviewedBy} · {rule.reviewAuthority} · {rule.reviewedAt}</dd></div>
                     <div><dt>Applicability</dt><dd>{rule.residueDefinition} · {rule.unit} as received · {rule.decimalPlaces} decimal places</dd></div>

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 using GrainLedger.Api.Features.Capture;
 using GrainLedger.Api.Features.Catalogs;
 using GrainLedger.Api.Features.Identity;
@@ -57,11 +58,22 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
         var results = CalculateResults(lotId, substances, materialized.Nodes, materialized.Evidence, materialized.Policies, snapshotAt);
         var snapshot = new ResidueEvaluation(request.Id, lotId, materialized.Nodes.Single(x => x.LotId == lotId).CompanyId,
             snapshotAt, null, ResidueCalculator.EngineVersion, results);
+        var appendSnapshot = JsonSerializer.SerializeToNode(snapshot, Json)!.AsObject();
+        appendSnapshot["retiredProfileIds"] = JsonSerializer.SerializeToNode(materialized.Policies.Rules
+            .Where(x => x.Retirement is not null).Select(x => x.Retirement!.ProfileId).Distinct().ToArray(), Json);
         await using var persist = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        var appended = (string)(await ExecuteAsync(connection, persist,
-            "SELECT grainledger.ledger_residue_append($1,$2,$3,$4,$5)::text", ct, actor, lotId, request.Id,
-            JsonSerializer.SerializeToElement(new { substanceIds = substances }, Json),
-            JsonSerializer.SerializeToElement(snapshot, Json)))!;
+        string appended;
+        try
+        {
+            appended = (string)(await ExecuteAsync(connection, persist,
+                "SELECT grainledger.ledger_residue_append($1,$2,$3,$4,$5)::text", ct, actor, lotId, request.Id,
+                JsonSerializer.SerializeToElement(new { substanceIds = substances }, Json),
+                JsonSerializer.SerializeToElement(appendSnapshot, Json)))!;
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.SerializationFailure)
+        {
+            throw new LedgerException(409, "Residue policy changed during evaluation; submit a new evaluation.");
+        }
         await persist.CommitAsync(ct);
         return Parse(appended);
     }

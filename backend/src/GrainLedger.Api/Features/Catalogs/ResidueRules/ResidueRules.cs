@@ -25,7 +25,13 @@ public sealed record ResidueProfileVersion(Guid Id, string Code, int VersionNo, 
     DateTimeOffset EffectiveFrom, DateTimeOffset? EffectiveTo, Guid? SupersedesId,
     string EvidenceRef, string ApplicabilityStatement, string ReviewedBy, string ReviewAuthority,
     DateTimeOffset ReviewedAt, Guid? PublishedBy = null, DateTimeOffset? PublishedAt = null,
-    Guid? CompanyId = null);
+    Guid? CompanyId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ResidueProfileRetirement? Retirement = null);
+
+public sealed record ResidueProfileRetirement(Guid ProfileId, string Code, Guid? CompanyId, string Reason,
+    Guid RetiredBy, DateTimeOffset RetiredAt);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record RetireResidueProfileRequest(string Reason);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ResidueLaboratorySettings(string AnalyticalMethod, string? NumericInterpretationKind,
@@ -45,11 +51,13 @@ public sealed class ResiduePolicyReader
     {
         // Keep historical effective windows: each physical graph node has its own process time.
         await using var command = new NpgsqlCommand("""
-            SELECT payload::text FROM grainledger.catalog_residue_rule_versions
-            WHERE substance_id=ANY($1) AND published_at <= $2 AND effective_from <= $2
-                AND (company_id IS NULL OR company_id=$3)
-                AND payload->>'Kind' = 'FLOW' AND payload->>'SchemaVersion' = '2'
-            ORDER BY code,company_id NULLS FIRST,version_no
+            SELECT r.payload::text, t.profile_id, t.reason, t.retired_by, t.retired_at
+            FROM grainledger.catalog_residue_rule_versions r
+            LEFT JOIN grainledger.catalog_residue_rule_retirements t ON t.code=r.code AND t.company_id IS NOT DISTINCT FROM r.company_id
+            WHERE r.substance_id=ANY($1) AND r.published_at <= $2 AND r.effective_from <= $2
+                AND (r.company_id IS NULL OR r.company_id=$3)
+                AND r.payload->>'Kind' = 'FLOW' AND r.payload->>'SchemaVersion' = '2'
+            ORDER BY r.code,r.company_id NULLS FIRST,r.version_no
             """, connection, transaction);
         command.Parameters.AddWithValue(substanceIds.ToArray());
         command.Parameters.AddWithValue(snapshotAt);
@@ -58,7 +66,7 @@ public sealed class ResiduePolicyReader
         var settings = new List<ResiduePolicySettingVersion>();
         await using (var reader = await command.ExecuteReaderAsync(ct))
         {
-            while (await reader.ReadAsync(ct)) rules.Add(JsonSerializer.Deserialize<ResidueProfileVersion>(reader.GetString(0))!);
+            while (await reader.ReadAsync(ct)) rules.Add(ResidueRuleEndpoints.ReadRule(reader));
         }
         await using var settingsCommand = new NpgsqlCommand("""
             SELECT s.payload::text FROM grainledger.catalog_residue_policy_setting_versions s
@@ -87,9 +95,51 @@ public static class ResidueRuleEndpoints
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>()
             .WithTags("Reviewed residue rules");
         group.MapPost("", PublishAsync);
+        group.MapPost("/{id:guid}/retire", RetireAsync);
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         return endpoints;
+    }
+
+    private static async Task<IResult> RetireAsync(Guid id, RetireResidueProfileRequest request, HttpContext http,
+        AppDbContext db, CancellationToken ct)
+    {
+        if (!Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var actor)) return Results.Forbid();
+        var reason = request.Reason?.Trim();
+        if (string.IsNullOrEmpty(reason) || reason.Length > 1000)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["Reason is required and must not exceed 1000 characters."] });
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
+        var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        var transaction = (NpgsqlTransaction)tx.GetDbTransaction();
+        var scope = await ResidueReview.ReadScopeAsync(http, connection, transaction, ct);
+        if (!scope.Allowed) return Results.Forbid();
+        var profile = (await ReadVersionsAsync(connection, transaction, scope.CompanyId, ct)).SingleOrDefault(x => x.Id == id);
+        if (profile is null) return Results.NotFound();
+        var permission = profile.CompanyId is null ? Permissions.ResiduePolicyManage : Permissions.ResidueCompanyPolicyManage;
+        if (!await ResidueReview.AuthorizeAsync(connection, transaction, actor, permission, profile.CompanyId, ct)) return Results.Forbid();
+        if (profile.Retirement is not null) return Conflict("Profile series is already retired.");
+        try
+        {
+            await using var command = new NpgsqlCommand("SELECT grainledger.catalog_retire_residue_rule($1,$2,$3)", connection, transaction);
+            command.Parameters.AddWithValue(actor);
+            command.Parameters.AddWithValue(id);
+            command.Parameters.AddWithValue(reason);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            await reader.ReadAsync(ct);
+            var retiredAt = reader.GetFieldValue<DateTimeOffset>(0);
+            await reader.CloseAsync();
+            await tx.CommitAsync(ct);
+            return Results.Ok(new ResidueProfileRetirement(id, profile.Code, profile.CompanyId, reason, actor, retiredAt));
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            return Conflict("Profile series is already retired.");
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+        {
+            return Results.Forbid();
+        }
     }
 
     private static async Task<IResult> PublishAsync(ResidueProfileVersion request, HttpContext http,
@@ -98,6 +148,7 @@ public static class ResidueRuleEndpoints
         if (!Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var actor)) return Results.Forbid();
         var now = clock.GetUtcNow();
         var errors = ValidateRule(request, now);
+        if (request.Retirement is not null) errors["retirement"] = ["Retirement metadata is server-owned."];
         if (errors.Count != 0) return Results.ValidationProblem(errors);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
@@ -110,6 +161,7 @@ public static class ResidueRuleEndpoints
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["substanceId"] = ["Substance and commodity must exist."] });
         var versions = await ReadVersionsAsync(connection, transaction, request.CompanyId, ct);
         var prior = versions.Where(x => x.Code == request.Code && x.CompanyId == request.CompanyId).ToArray();
+        if (prior.Any(x => x.Retirement is not null)) return Conflict("Retired profile series cannot be republished.");
         if (versions.Any(x => x.Code == request.Code && x.CompanyId is null &&
             (x.SubstanceId != request.SubstanceId || x.Kind != request.Kind || x.CommodityId != request.CommodityId)))
             return Conflict("Company override must retain system profile substance, kind and commodity applicability.");
@@ -265,16 +317,28 @@ public static class ResidueRuleEndpoints
         NpgsqlTransaction tx, Guid? companyId, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand("""
-            SELECT payload::text FROM grainledger.catalog_residue_rule_versions
-            WHERE (company_id IS NULL OR company_id=$1)
-                AND payload->>'Kind'='FLOW' AND payload->>'SchemaVersion'='2'
-            ORDER BY code,company_id NULLS FIRST,version_no
+            SELECT r.payload::text, t.profile_id, t.reason, t.retired_by, t.retired_at
+            FROM grainledger.catalog_residue_rule_versions r
+            LEFT JOIN grainledger.catalog_residue_rule_retirements t ON t.code=r.code AND t.company_id IS NOT DISTINCT FROM r.company_id
+            WHERE (r.company_id IS NULL OR r.company_id=$1)
+                AND r.payload->>'Kind'='FLOW' AND r.payload->>'SchemaVersion'='2'
+            ORDER BY r.code,r.company_id NULLS FIRST,r.version_no
             """, connection, tx);
         command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)companyId ?? DBNull.Value });
         var result = new List<ResidueProfileVersion>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(JsonSerializer.Deserialize<ResidueProfileVersion>(reader.GetString(0))!);
+        while (await reader.ReadAsync(ct)) result.Add(ReadRule(reader));
         return result;
+    }
+
+    internal static ResidueProfileVersion ReadRule(NpgsqlDataReader reader)
+    {
+        var rule = JsonSerializer.Deserialize<ResidueProfileVersion>(reader.GetString(0))!;
+        return reader.IsDBNull(1) ? rule : rule with
+        {
+            Retirement = new ResidueProfileRetirement(reader.GetGuid(1), rule.Code, rule.CompanyId,
+                reader.GetString(2), reader.GetGuid(3), reader.GetFieldValue<DateTimeOffset>(4))
+        };
     }
 
     private static IResult Conflict(string title) => Results.Problem(statusCode: 409, title: title,

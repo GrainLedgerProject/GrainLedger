@@ -14,6 +14,12 @@ A profile covers one substance and commodity across laboratory interpretation an
 
 Profile Code identifies the whole series. Revisions preserve step IDs for unchanged logical rows; new paths get new IDs. Effective windows are start-inclusive and end-exclusive. One complete company override replaces the same-Code system profile for its effective window; missing override components do not fall back to system policy.
 
+## Retire a profile series
+
+In profile maintenance, an authorized Administrator can retire a system series and its Customer Manager can retire an own-company series. On the latest profile, choose **Retire profile**, enter a reason (up to 1,000 characters), and confirm retirement of the entire series. Retirement takes effect immediately; the server records the authenticated actor and time. Open **Details** to inspect the reason, actor and time, or filter by **Retired**. Published versions and existing snapshots remain available as history.
+
+New evaluations cannot use a retired series, including older versions; retirement does not restore an earlier version. Review and publish a new profile series and any necessary company adoption rather than relying on fallback. Retirement does not delete or alter historical evaluations.
+
 ## Adopt and bind evidence
 
 As Customer Manager, open **Residue profiles**, inspect the full profile, then publish a reviewed `SYSTEM_DEFAULT` setting for its Code and effective period. For an approved same-Code company profile, publish `COMPANY_OVERRIDE`; publish a new `SYSTEM_DEFAULT` setting to return to inheritance. Profile publication alone is not adoption. Search, scope/status filters, sorting and expandable history help find profile series and reviewed decisions.

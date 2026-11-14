@@ -29,6 +29,11 @@ beforeEach(() => {
   fetchMock.mockImplementation(async (url, init) => {
     const path = String(url).split('?')[0];
     if (path === '/api/auth/csrf') return response({ token: 'csrf' });
+    if (path === `/api/residue-rules/${profile.id}/retire` && init?.method === 'POST') {
+      const retirement = { profileId: profile.id, code: profile.code, companyId: null, reason: JSON.parse(String(init.body)).reason, retiredBy: 'reviewer', retiredAt: '2026-02-01T00:00:00Z' };
+      rules = rules.map(rule => ({ ...rule, retirement }));
+      return response(retirement);
+    }
     if (path === '/api/residue-rules' && init?.method === 'POST') {
       if (failure) { const status = failure; failure = 0; return response({ message: 'Publication failed' }, status); }
       rules = [...rules, { ...JSON.parse(String(init.body)), publishedBy: 'publisher', publishedAt: '2026-01-01T00:00:00Z' }];
@@ -132,4 +137,24 @@ it('allocates a new component identity when the physical path changes', async ()
   await waitFor(() => expect(posts()).toHaveLength(1));
   expect(body().steps[0]).toMatchObject({ process: 'MILLING', inputStage: 'DRIED_PADDY', outputStage: 'HEAD_RICE' });
   expect(body().steps[0].id).not.toBe(stepId);
+});
+
+it('requires reason and confirmation, then exposes retirement without reuse or revision', async () => {
+  const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Retire profile' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Retire profile' }));
+  const dialog = screen.getByRole('dialog', { name: 'Retire profile series' });
+  const confirmRetirement = within(dialog).getByRole('button', { name: 'Confirm retirement' });
+  expect(confirmRetirement).toBeDisabled();
+  await user.type(within(dialog).getByLabelText('Reason for retirement'), '  Replaced by reviewed policy  ');
+  expect(confirmRetirement).toBeDisabled();
+  await user.click(within(dialog).getByLabelText('I confirm retirement of this entire profile series.'));
+  await user.click(confirmRetirement);
+  await screen.findByText('Retired series');
+  const request = fetchMock.mock.calls.find(([url]) => String(url) === `/api/residue-rules/${profile.id}/retire`);
+  expect(JSON.parse(String(request?.[1]?.body))).toEqual({ reason: 'Replaced by reviewed policy' });
+  expect(screen.queryByRole('button', { name: 'Revise profile' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: /RICE-RES/ })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Details' }));
+  expect(screen.getByText(/Series retired .* by reviewer. Reason: Replaced by reviewed policy/)).toBeInTheDocument();
 });
