@@ -133,8 +133,8 @@ export function CompanyResiduePolicies({ active, allowed, companyId }: { active:
             return <label key={code} className="residue-profile-choice">
               <input type="checkbox" checked={drafts.some(item => item.ruleCode === code)} disabled={!selectedSource} onChange={event => chooseCodes(event.target.checked ? [...drafts.map(item => item.ruleCode), code] : drafts.filter(item => item.ruleCode !== code).map(item => item.ruleCode))} />
               <span className="residue-profile-choice-text">
-                <strong className="residue-profile-choice-primary">{substance?.name || rule.substanceId} · {operations}</strong>{' '}
-                <small className="muted residue-profile-choice-secondary">{commodity?.name || rule.commodityId} · {rule.residueDefinition} · {methods} · {code} · {selectedSource ? `latest published tip v${rule.versionNo} · ${effectiveWindowLabel(rule)}` : 'Reviewed profile unavailable in this mode (retired, missing or conflicting); metadata is not a selected source'}</small>
+                <strong className="residue-profile-choice-primary">{substance?.name || rule.substanceId} · {commodity?.name || rule.commodityId} · {rule.residueDefinition}</strong>{' '}
+                <small className="muted residue-profile-choice-secondary">{operations} · {methods} · {code} · {selectedSource ? `latest published tip v${rule.versionNo} · ${effectiveWindowLabel(rule)}` : 'Reviewed profile unavailable in this mode (retired, missing or conflicting); metadata is not a selected source'}</small>
               </span>
             </label>;
           })}</div></fieldset>

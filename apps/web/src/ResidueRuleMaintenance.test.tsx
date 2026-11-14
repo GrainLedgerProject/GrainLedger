@@ -224,6 +224,29 @@ it('shows complete published details and resets review information in revision p
   expect(preview.getAllByText('Not specified').length).toBeGreaterThan(0);
 });
 
+it('keeps published methods, factors, conditions and review metadata visible in the compact readout', async () => {
+  rules = [{ ...profile, supersedesId: 'previous-profile', effectiveTo: '2027-01-01T00:00:00Z',
+    laboratory: [...profile.laboratory, { analyticalMethod: 'GC-MS', numericInterpretationKind: 'NUMERIC_RELATIVE_UNCERTAINTY', relativeUncertaintyPercent: '12.50', relativeUncertaintyAtZero: true, belowLimit: false, ndThresholdKind: 'LOQ' }],
+    steps: [{ ...profile.steps[0], factorLower: '0.500', factorUpper: '1.250', conditions: 'Temperature below 40°C', factorSemantics: 'CUMULATIVE_CONCENTRATION', anchorStage: 'RAW_PADDY', homogeneousMixing: true }] }];
+  const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Details' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Details' }));
+  const details = within(screen.getByRole('region', { name: 'Published profile details' }));
+  for (const value of ['SUB · Substance', 'RICE · Rice', 'parent compound', 'previous-profile', '3 decimal places',
+    'LC-MS/MS', 'Absolute uncertainty', 'Supported (reported below a limit)', 'Limit of detection (LOD)',
+    'GC-MS', 'Relative uncertainty', '12.50%', 'Not supported', 'Limit of quantification (LOQ)',
+    '0.500 to 1.250', 'Temperature below 40°C', 'cumulative concentration', 'Verified rice scope',
+    'study-1', 'Dr A', 'QA', 'publisher', '2027-01-01T00:00:00Z']) {
+    expect(details.getByText(value, { selector: 'dd, strong' })).toBeVisible();
+  }
+  expect(details.getByText('Cumulative ancestor stage')).toBeVisible();
+  expect(details.getByText('Homogeneous mixing applicability')).toBeVisible();
+  expect(details.getAllByText('Reviewed', { selector: 'dd' })).toHaveLength(2);
+  expect(details.getByText('Published at')).toBeVisible();
+  expect(details.getByText('Reviewed at')).toBeVisible();
+  expect(screen.queryByRole('region', { name: 'Live profile preview' })).not.toBeInTheDocument();
+});
+
 it('suggests exact visible methods while retaining arbitrary method text on publication', async () => {
   rules = [profile, { ...profile, id: 'other', code: 'OTHER', laboratory: [{ ...profile.laboratory[0], analyticalMethod: 'lc-ms/ms' }] }];
   const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
@@ -234,6 +257,23 @@ it('suggests exact visible methods while retaining arbitrary method text on publ
   change('Concentration factor', '1'); await confirm(user); submit();
   await waitFor(() => expect(posts()).toHaveLength(1));
   expect(body().laboratory[0].analyticalMethod).toBe('  Custom Method  ');
+});
+
+it('shows meaningful profile labels while keeping codes searchable and visible in details and history', async () => {
+  rules = [profile, { ...profile, id: 'revision', versionNo: 2, supersedesId: profile.id, residueDefinition: 'parent and metabolites' },
+    { ...profile, id: 'other', code: 'OTHER', residueDefinition: 'other definition' }];
+  const user = userEvent.setup(); render(<ResidueRuleMaintenance active allowed />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create profile' })).toBeEnabled());
+  const table = within(screen.getByRole('region', { name: 'Published residue profiles' }));
+  expect(table.getByText('Substance · Rice · parent and metabolites', { selector: 'strong' })).toBeVisible();
+  expect(table.getByText('Substance · Rice · other definition', { selector: 'strong' })).toBeVisible();
+  expect(screen.getByRole('option', { name: /Substance · Rice · parent and metabolites · RICE-RES v2/ })).toBeInTheDocument();
+  await user.type(screen.getByLabelText('Search profiles and history'), 'RICE-RES');
+  expect(table.queryByText('Substance · Rice · other definition', { selector: 'strong' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /Show earlier versions/ }));
+  expect(table.getByText('Substance · Rice · parent compound', { selector: 'strong' })).toBeVisible();
+  await user.click(table.getAllByRole('button', { name: 'Details' })[0]);
+  expect(within(screen.getByRole('region', { name: 'Published profile details' })).getByText('RICE-RES v2 · System')).toBeVisible();
 });
 
 it('filters profile history by exact analytical method', async () => {

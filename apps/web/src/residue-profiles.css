@@ -1,6 +1,7 @@
 /* Hallmark · shape: app screen · scope: residue profiles · critique: familiar workbench, restrained existing palette; render not verified */
 :root {
   --residue-border: #dce2d7;
+  --residue-field-border: #718477;
   --residue-surface: #fff;
   --residue-soft: #eaf0e6;
   --residue-text: #213d31;
@@ -22,6 +23,14 @@
 .residue-history-series li { margin-block: .75rem; }
 .residue-counts { font-variant-numeric: tabular-nums; }
 .residue-rule-history-heading td { background: var(--ledger-soft, var(--residue-soft)); }
+.residue-rule-maintenance th, .residue-rule-maintenance .table-subtitle,
+.residue-company-policies .page-heading :is(.eyebrow, .muted) { color: var(--residue-muted); }
+.residue-rule-maintenance table { font-size: 13px; }
+.residue-rule-maintenance th, .residue-rule-maintenance .table-subtitle { font-size: 12px; }
+.residue-rule-maintenance .residue-rule-table-scroll:focus-visible { outline: 3px solid var(--residue-accent); outline-offset: 3px; }
+.residue-rule-maintenance :is(input:not([type='checkbox']):not([type='radio']), select, textarea),
+.residue-company-policies :is(input:not([type='checkbox']):not([type='radio']), select, textarea),
+.residue-dialog :is(input:not([type='checkbox']):not([type='radio']), select, textarea) { border-color: var(--residue-field-border); }
 .residue-dialog :is(button, input, select, textarea, summary):focus-visible,
 .residue-rule-maintenance :is(button, input, select, textarea, summary):focus-visible { outline: 3px solid var(--ledger-accent, var(--residue-accent)); outline-offset: 2px; }
 .residue-profile-editor button:active:not(:disabled), .residue-rule-maintenance button:active:not(:disabled) { filter: brightness(.9); }
@@ -51,7 +60,36 @@
 .residue-readout ol { margin: 0; padding-left: 1.5rem; }
 .residue-readout li + li { margin-top: 1rem; }
 .residue-readout li > strong { display: block; margin-bottom: .5rem; text-transform: none; }
+.residue-readout-published { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem 1.25rem; padding: 1rem; }
+.residue-readout-published > h3, .residue-readout-published > .residue-readout-section:first-of-type, .residue-readout-published > .residue-readout-section:last-of-type { grid-column: 1 / -1; }
+.residue-readout-published > h3 { margin: 0; }
+.residue-readout-published .residue-readout-section { min-width: 0; margin: 0; padding-top: .75rem; }
+.residue-readout-published h4 { margin-bottom: .4rem; }
+.residue-readout-published p { margin: 0 0 .5rem; }
+.residue-readout-published dl { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: .4rem .75rem; }
+.residue-readout-published ol { padding-left: 1.25rem; }
+.residue-readout-published li + li { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--ledger-border, var(--residue-border)); }
+.residue-readout-published li > strong { margin-bottom: .35rem; }
+@media (max-width: 800px) {
+  .residue-readout-published { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 600px) {
   .residue-dialog { width: calc(100% - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; }
   .residue-toolbar label { flex-basis: 100%; }
+  .residue-rule-maintenance .residue-rule-table { min-width: 0; table-layout: auto; }
+  .residue-rule-maintenance .residue-rule-table, .residue-rule-maintenance .residue-rule-table tbody,
+  .residue-rule-maintenance .residue-rule-table tr, .residue-rule-maintenance .residue-rule-table td { display: block; width: 100%; }
+  .residue-rule-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .residue-rule-maintenance .residue-rule-table th:nth-child(n), .residue-rule-maintenance .residue-rule-table td:nth-child(n) { width: 100%; }
+  .residue-rule-table tr:not(.residue-rule-history-heading) > td:not([colspan]) { padding: .5rem .75rem; border-bottom: 0; }
+  .residue-rule-table tr:not(.residue-rule-history-heading) > td:not([colspan])::before { display: block; margin-bottom: .25rem; color: var(--residue-muted); font-size: 12px; font-weight: 700; }
+  .residue-rule-table tr > td:nth-child(1):not([colspan])::before { content: 'Profile'; }
+  .residue-rule-table tr > td:nth-child(2)::before { content: 'Applies to'; }
+  .residue-rule-table tr > td:nth-child(3)::before { content: 'Operations'; }
+  .residue-rule-table tr > td:nth-child(4)::before { content: 'Effective period'; }
+  .residue-rule-table tr > td:nth-child(5)::before { content: 'Status'; }
+  .residue-rule-table tr > td:nth-child(6)::before { content: 'Actions'; }
+  .residue-rule-maintenance .residue-rule-table tr > td.admin-row-actions { display: block; padding-bottom: 1rem; border-bottom: 1px solid var(--residue-border); }
+  .residue-rule-table td.admin-row-actions button { margin: .25rem .25rem .25rem 0; }
+  .residue-rule-maintenance .residue-rule-details-panel { position: static; width: 100%; }
 }

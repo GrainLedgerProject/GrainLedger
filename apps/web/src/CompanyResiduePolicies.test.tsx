@@ -44,6 +44,19 @@ beforeEach(() => {
     return response({ items: [], hasMore: false });
   });
 });
+it('shows substance, commodity and residue definition as primary adoption label', async () => {
+  rules = [systemRule, { ...otherRule, residueDefinition: 'metabolites' }];
+  const user = userEvent.setup(); render(<CompanyResiduePolicies active allowed companyId={companyId} />);
+  const first = await screen.findByRole('checkbox', { name: /RICE-RES/ });
+  const choice = first.closest('label')!;
+  expect(choice.querySelector('strong')).toHaveTextContent('Human substance · Human commodity · parent compound');
+  expect(choice.querySelector('small')).toHaveTextContent('RICE-RES');
+  expect(screen.getByRole('checkbox', { name: /Human substance · Human commodity · metabolites.*RICE-PROCESS/ })).toBeVisible();
+  await user.type(screen.getByLabelText('Find profiles to adopt'), 'RICE-RES');
+  expect(screen.queryByRole('checkbox', { name: /RICE-PROCESS/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: /RICE-RES/ })).toBeVisible();
+});
+
 it('reuses source evidence and applicability, but requires a distinct explicit company adoption review', async () => {
   const user = userEvent.setup(); render(<CompanyResiduePolicies active allowed companyId={companyId} />);
   await screen.findByRole('checkbox', { name: /Human substance.*Human commodity.*RICE-RES/ });
