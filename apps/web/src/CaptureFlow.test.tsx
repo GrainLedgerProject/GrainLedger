@@ -172,6 +172,9 @@ describe('Capture journey', () => {
     await browser.type(screen.getByLabelText('Measured mass'), '600');
     await browser.type(screen.getByLabelText('Moisture (%)'), '22.5');
     await browser.click(screen.getByRole('button', { name: 'Register procurement' }));
+    const intakePost = fetchMock.mock.calls.find(([url, init]) => url === '/api/procurements' && init?.method === 'POST')!;
+    const [intakeLine] = JSON.parse(String(intakePost[1]?.body)).payload.items;
+    expect(intakeLine).toMatchObject({ measuredValue: '600', measuredUnit: 'KG', moisturePercent: '22.5', plotSeasonId });
     expect(await screen.findByRole('heading', { name: 'PN-001' })).toBeInTheDocument();
     expect(screen.getByText(/No usable stock is available/)).toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: /LOT-1/ }));
@@ -186,10 +189,11 @@ describe('Capture journey', () => {
     expect(screen.queryByText(/The outcome is uncertain/)).not.toBeInTheDocument();
     const samplePost = fetchMock.mock.calls.find(([url]) => url === '/api/samples')!;
     expect(JSON.parse(String(samplePost[1]?.body)).payload).not.toHaveProperty('code');
-    expect(JSON.parse(String(samplePost[1]?.body)).payload.materialDescription).toBe('Paddy grain');
+    expect(JSON.parse(String(samplePost[1]?.body)).payload).toMatchObject({ materialDescription: 'Paddy grain', sealCode: 'SEAL-001', sourceLotId: intakeLine.sourceLotId });
     expect(JSON.parse(String(samplePost[1]?.body)).payloadSchemaVersion).toBe(2);
     finishSample?.(json(sample, 201));
     expect(await screen.findByRole('heading', { name: 'SMP-20261017-0008' })).toBeInTheDocument();
+    expect(screen.getByText('SEAL-001')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '+ Receive report' })).not.toBeInTheDocument();
     await browser.click(screen.getByRole('button', { name: 'Send to laboratory' }));
     expect(screen.getByLabelText('Handover type')).toHaveValue('LAB_DISPATCH');
