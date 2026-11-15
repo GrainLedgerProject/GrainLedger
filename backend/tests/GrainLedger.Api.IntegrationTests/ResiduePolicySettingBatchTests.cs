@@ -65,6 +65,23 @@ public sealed class ResiduePolicySettingBatchTests(ApiFactory factory) : IClassF
     }
 
     [Fact]
+    public async Task Batch_rejects_override_without_company_profile_without_publishing_other_setting()
+    {
+        using var s = await CreateAsync(factory);
+        var f = await ResidueScenario.CreateAsync(s);
+        var firstProfile = f.RuleBody();
+        var secondProfile = f.RuleBody();
+        await f.PublishRuleAsync(firstProfile, adopt: false);
+        await f.PublishRuleAsync(secondProfile, adopt: false);
+        var first = f.SettingBody(firstProfile["code"]!.GetValue<string>());
+        var missingOverride = f.SettingBody(secondProfile["code"]!.GetValue<string>(), "COMPANY_OVERRIDE");
+        var before = await GetAsync(s.Customer, "/api/residue-policy-settings");
+        await RejectedAsync(s.Customer, HttpMethod.Post, "/api/residue-policy-settings/batch",
+            new JsonObject { ["items"] = new JsonArray(first, missingOverride) }, HttpStatusCode.BadRequest);
+        Assert.Equal(before.GetRawText(), (await GetAsync(s.Customer, "/api/residue-policy-settings")).GetRawText());
+    }
+
+    [Fact]
     public async Task Batch_retains_permission_and_company_boundaries()
     {
         using var s = await CreateAsync(factory);

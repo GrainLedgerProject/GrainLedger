@@ -87,16 +87,6 @@ public sealed class BrowserWorkflowHost
         var second = await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("40"));
         var firstReport = await residue.ReportAsync(first);
         var lateReport = await residue.ReportAsync(second, [residue.Result("0.55", "±0.25")], confirm: false);
-        await residue.PublishRuleAsync();
-        await residue.SelectAsync(first, firstReport.Report);
-        foreach (var (kind, input, output, factor) in new[]
-        {
-            ("DRYING", "RAW_PADDY", "DRIED_PADDY", "1"),
-            ("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5"),
-            ("BLENDING", "HEAD_RICE", "BLENDED_RICE", "1"),
-            ("CUSTODY_INGRESS", "BLENDED_RICE", "BLENDED_RICE", "1"),
-            ("CUSTODY_WITHDRAW", "BLENDED_RICE", "BLENDED_RICE", "1")
-        }) await residue.ProcessRuleAsync(kind, input, output, factor, factor);
         await residue.BlendCompatibilityAsync("HEAD_RICE");
         var driedFirst = LedgerScenario.Output(await scenario.CommitAsync(await scenario.DraftAsync(
             "DRYING", [(first.LotId, "60")], [("DRIED_PADDY", "60")])));
@@ -118,10 +108,7 @@ public sealed class BrowserWorkflowHost
         var policySample = await LabReportTests.SampleAsync(scenario, await scenario.ReceiptAsync("10"));
         var policyReport = await companyPolicy.ReportAsync(policySample, [companyPolicy.Result(uncertainty: null)]);
         var relativeRule = companyPolicy.RuleBody("NUMERIC_RELATIVE_UNCERTAINTY");
-        relativeRule["relativeUncertaintyPercent"] = "10";
-        relativeRule["relativeUncertaintyAtZero"] = false;
         var relativeRuleId = await companyPolicy.PublishRuleAsync(relativeRule, adopt: false);
-        await companyPolicy.SelectAsync(policySample, policyReport.Report, uncertainty: null);
         var beforeAdoption = await companyPolicy.EvaluateAsync(policySample.LotId);
         var reviewSamples = new[]
         {
@@ -234,6 +221,14 @@ public sealed class BrowserWorkflowHost
                 {
                     if (!latePublished)
                     {
+                        var rules = await LedgerScenario.GetAsync(scenario.Customer, "/api/residue-rules");
+                        var settings = await LedgerScenario.GetAsync(scenario.Customer, "/api/residue-policy-settings");
+                        var adopted = settings.GetProperty("items").EnumerateArray()
+                            .Select(x => x.GetProperty("ruleCode").GetString()).ToHashSet(StringComparer.Ordinal);
+                        residue.ProfileCode = rules.GetProperty("items").EnumerateArray()
+                            .Where(x => x.GetProperty("substanceId").GetGuid() == residue.SubstanceId &&
+                                adopted.Contains(x.GetProperty("code").GetString()))
+                            .Select(x => x.GetProperty("code").GetString()).Distinct().Single();
                         await LedgerScenario.SendAsync(scenario.Customer, HttpMethod.Post,
                             $"/api/lab-reports/{lateReport.ReportId}/confirm", LabReportTests.ConfirmRequest(lateReport.Report, second));
                         await residue.SelectAsync(second, lateReport.Report, "0.25");
@@ -312,14 +307,14 @@ public sealed class BrowserWorkflowHost
                     sourceLotIds = new[] { first.LotId, second.LotId }, sourceIds = new[] { first.SourceLotId, second.SourceLotId },
                     driedLotIds = new[] { driedFirst, driedSecond }, headLotIds = new[] { headFirst, headSecond },
                     blendedLotId = blended, poolLotId = pool, aliquotLotId = aliquot, remainderLotId = remainder,
-                    mixedLocationId = mixedLocation, lateReportId = lateReport.ReportId,
+                    mixedLocationId = mixedLocation, firstReportId = firstReport.ReportId, lateReportId = lateReport.ReportId,
                     initialEvaluationId = initialEvaluation.GetProperty("id").GetGuid(),
                     aliquotUrl = $"{uiUrl}/ledger/lots/{aliquot}",
                     remainderUrl = $"{uiUrl}/ledger/lots/{remainder}",
                     exhaustedSourceUrl = $"{uiUrl}/ledger/lots/{first.LotId}",
                     actionsUrl = $"{apiUrl}/__browser/residue-bounds",
                     lateEvidenceAction = $"POST {apiUrl}/__browser/residue-bounds/late-evidence",
-                    expectedFreshLower = "0.09", expectedFreshUpper = "0.22", unit = "mg/kg", basis = ResidueScenario.Basis
+                    expectedFreshLower = "0.09", expectedFreshUpper = "0.22", unit = "mg/kg"
                 },
                 companyPolicy = new
                 {

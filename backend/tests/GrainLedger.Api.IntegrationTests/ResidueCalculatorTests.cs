@@ -10,7 +10,6 @@ public sealed class ResidueCalculatorTests
     private static readonly Guid Commodity = Guid.NewGuid();
     private static readonly Guid Substance = Guid.NewGuid();
     private static readonly DateTimeOffset At = DateTimeOffset.UtcNow;
-    private const string Basis = ResidueScenario.Basis;
 
     [Fact]
     public void Committed_mass_weighted_intervals_and_fraction_factors_match_worked_example()
@@ -28,7 +27,7 @@ public sealed class ResidueCalculatorTests
     }
 
     [Fact]
-    public void Mixed_fraction_blend_requires_each_parent_mapping_and_keeps_both_rule_versions()
+    public void Mixed_fraction_blend_requires_each_parent_mapping_and_keeps_both_components()
     {
         var source = Source();
         var head = Node("MILLING", "HEAD_RICE", [(source.LotId, "60")]);
@@ -45,8 +44,8 @@ public sealed class ResidueCalculatorTests
         };
         var result = Calculate(blended, nodes, sources, [.. millFactors, headBlend, brokenBlend]);
         Complete(result, "0.11", "0.22");
-        Assert.Contains(result.Rules, x => x.Id == headBlend.Rule.Id);
-        Assert.Contains(result.Rules, x => x.Id == brokenBlend.Rule.Id);
+        Assert.Contains(result.Rules, x => x.Id == headBlend.Rule.Id && x.ComponentKey == headBlend.StepId.ToString());
+        Assert.Contains(result.Rules, x => x.Id == brokenBlend.Rule.Id && x.ComponentKey == brokenBlend.StepId.ToString());
         Unresolved(Calculate(blended, nodes, sources, [.. millFactors, headBlend]));
     }
 
@@ -66,13 +65,30 @@ public sealed class ResidueCalculatorTests
     public void Cumulative_factor_bypasses_intermediate_factor_instead_of_multiplying_twice()
     {
         var source = Source();
+        var dried = Node("DRYING", "DRIED_PADDY", [(source.LotId, "80")]);
+        var milled = Node("MILLING", "HEAD_RICE", [(dried.LotId, "80")]);
+        var drying = Factor("DRYING", "RAW_PADDY", "DRIED_PADDY", "2", "2");
+        var milling = Factor("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5",
+            semantics: "CUMULATIVE", anchorStage: "RAW_PADDY");
+        var result = Calculate(milled, [source, dried, milled], [Bound(source, "0.1", "0.2")], [drying, milling]);
+        Complete(result, "0.05", "0.1");
+        Assert.Contains(result.Rules, x => x.Id == drying.Rule.Id && x.ComponentKey == drying.StepId.ToString());
+        Assert.Contains(result.Rules, x => x.Id == milling.Rule.Id && x.ComponentKey == milling.StepId.ToString());
+    }
+
+    [Fact]
+    public void Cumulative_rewind_across_changed_mass_remains_unresolved()
+    {
+        var source = Source();
         var dried = Node("DRYING", "DRIED_PADDY", [(source.LotId, "100")]);
         var milled = Node("MILLING", "HEAD_RICE", [(dried.LotId, "80")]);
-        Complete(Calculate(milled, [source, dried, milled], [Bound(source, "0.1", "0.2")],
+        var result = Calculate(milled, [source, dried, milled], [Bound(source, "0.1", "0.2")],
         [
             Factor("DRYING", "RAW_PADDY", "DRIED_PADDY", "2", "2"),
-            Factor("MILLING", "RAW_PADDY", "HEAD_RICE", "0.5", "0.5", semantics: "CUMULATIVE")
-        ]), "0.05", "0.1");
+            Factor("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5", semantics: "CUMULATIVE", anchorStage: "RAW_PADDY")
+        ]);
+        Unresolved(result);
+        Assert.Contains("Cumulative rule cannot rewind branching ancestry or changed mixture mass basis", result.Reasons);
     }
 
     [Fact]
@@ -84,7 +100,7 @@ public sealed class ResidueCalculatorTests
         Unresolved(Calculate(milled, [a, b, mixedDrying, milled], [Bound(a, "0.1", "0.2"), Bound(b, "0.3", "0.8")],
         [
             Factor("DRYING", "RAW_PADDY", "DRIED_PADDY", "2", "2"),
-            Factor("MILLING", "RAW_PADDY", "HEAD_RICE", "0.5", "0.5", semantics: "CUMULATIVE")
+            Factor("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5", semantics: "CUMULATIVE", anchorStage: "RAW_PADDY")
         ]));
     }
 
@@ -136,10 +152,10 @@ public sealed class ResidueCalculatorTests
     [InlineData("missing-parent")]
     [InlineData("unknown-upper")]
     [InlineData("missing-factor")]
-    [InlineData("wrong-basis")]
     [InlineData("conflicting-factor")]
     [InlineData("inconsistent-history")]
-    [InlineData("different-parent-basis")]
+    [InlineData("different-parent-profile")]
+    [InlineData("different-factor-profile")]
     public void Unsupported_dependency_or_rule_never_returns_finite_complete_bounds(string fault)
     {
         var a = Source(); var b = Source();
@@ -152,10 +168,10 @@ public sealed class ResidueCalculatorTests
             case "missing-parent": nodes.Remove(b); break;
             case "unknown-upper": sources[1] = sources[1] with { Upper = null, Reasons = ["UNKNOWN_UPPER"] }; break;
             case "missing-factor": factors.Clear(); break;
-            case "wrong-basis": factors[0] = factors[0] with { InputBasis = "UNAPPROVED_DRY_MATTER" }; break;
             case "conflicting-factor": factors.Add(Factor("DRYING", "RAW_PADDY", "DRIED_PADDY", "0.5", "0.5")); break;
             case "inconsistent-history": nodes[2] = output with { Inconsistent = true }; break;
-            case "different-parent-basis": sources[1] = sources[1] with { Basis = "OTHER_BASIS" }; break;
+            case "different-parent-profile": sources[1] = sources[1] with { ProfileCode = "OTHER_PROFILE" }; break;
+            case "different-factor-profile": factors[0] = factors[0] with { ProfileCode = "OTHER_PROFILE" }; break;
         }
         Unresolved(Calculate(output, nodes, sources, factors));
     }
@@ -180,8 +196,10 @@ public sealed class ResidueCalculatorTests
         var source = Source();
         var dried = Node("DRYING", "DRIED_PADDY", [(source.LotId, "100")]);
         var original = Factor("DRYING", "RAW_PADDY", "DRIED_PADDY", "1", "1");
-        var replacement = Factor("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5") with
+        var replacementStep = Factor("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
+        var replacement = replacementStep with
         {
+            Rule = replacementStep.Rule with { Id = Guid.NewGuid(), Version = 2 },
             SupersedesId = original.Rule.Id,
             EffectiveFrom = At.AddMinutes(-1)
         };
@@ -196,12 +214,19 @@ public sealed class ResidueCalculatorTests
     private static ResidueNode Node(string kind, string stage, (Guid LotId, string Mass)[] parents) =>
         new(Guid.NewGuid(), Company, Commodity, stage, stage, At, kind,
             kind == "SOURCE" ? null : Guid.NewGuid(), null, parents.Select(x => new ResidueParent(x.LotId, x.Mass)).ToArray());
+    private const string ProfileCode = "SYNTHETIC_PROFILE";
+    private static readonly Guid ProfileId = Guid.NewGuid();
     private static ResidueSourceBound Bound(ResidueNode node, string lower, string upper, int precision = 12) =>
-        new(node.LotId, Substance, lower, upper, "mg/kg", Basis, precision, [],
-            [new ResidueProvenance("DIRECT", node.LotId, RuleId: Guid.NewGuid())], []);
-    private static ResidueFactor Factor(string kind, string input, string output, string lower, string upper, string semantics = "STEP", int precision = 12) =>
-        new(Substance, Commodity, kind, input, output, Basis, Basis, "mg/kg", lower, upper, precision, semantics, null,
-            new ResidueRuleReference(Guid.NewGuid(), 1, kind, ResidueScenario.Review), HomogeneousMixing: true);
+        new(node.LotId, Substance, lower, upper, "mg/kg", precision, [],
+            [new ResidueProvenance("DIRECT", node.LotId, RuleId: Guid.NewGuid())], [], ProfileCode: ProfileCode);
+    private static ResidueFactor Factor(string kind, string input, string output, string lower, string upper,
+        string semantics = "STEP", int precision = 12, string? anchorStage = null)
+    {
+        var stepId = Guid.NewGuid();
+        return new(Substance, Commodity, kind, input, output, "mg/kg", lower, upper, precision, semantics, "UNCONDITIONAL",
+            new ResidueRuleReference(ProfileId, 1, "FLOW", ResidueScenario.Review, ComponentKey: stepId.ToString()),
+            HomogeneousMixing: true, ProfileCode: ProfileCode, StepId: stepId, AnchorStage: anchorStage);
+    }
     private static ResidueResult Calculate(ResidueNode target, IReadOnlyList<ResidueNode> nodes, IReadOnlyList<ResidueSourceBound> sources, IReadOnlyList<ResidueFactor> factors) =>
         Assert.Single(ResidueCalculator.Calculate(target.LotId, [Substance], nodes, sources, factors));
     private static void Complete(ResidueResult result, string lower, string upper)

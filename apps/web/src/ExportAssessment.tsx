@@ -50,7 +50,7 @@ function PolicyForm({ markets, commodities, substances, attributes }: { markets:
   const [evidenceReference, setEvidenceReference] = useState(''), [reviewedBy, setReviewedBy] = useState(''), [reviewAuthority, setReviewAuthority] = useState(''), [reviewedAt, setReviewedAt] = useState(''), [confirmed, setConfirmed] = useState(false);
   const action = useAction();
   useEffect(() => {
-    setCurrent(null); setLookupError(''); setVersionNo(1); setConfirmed(false);
+    setCurrent(null); setLookupError(''); setVersionNo(1); setConfirmed(false); setBasis('');
     if (!marketId || !commodityId) return;
     let active = true;
     void api<Policy>(`/api/blend-assessment-policies/applicable?${new URLSearchParams({ marketId, commodityId })}`)
@@ -65,7 +65,7 @@ function PolicyForm({ markets, commodities, substances, attributes }: { markets:
   }
   async function publish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!requiredSubstanceIds.length || !decimal.test(mrlMarginFraction) || Number(mrlMarginFraction) >= 1 || qualityRules.some(row => !row.unit)) { action.setError('Select required substances, a margin fraction below 1 and valid quality rules.'); return; }
+    if (!requiredSubstanceIds.length || !decimal.test(mrlMarginFraction) || Number(mrlMarginFraction) >= 1 || qualityRules.some(row => !row.unit) || residueBasis !== 'AS_RECEIVED') { action.setError('Select required substances, as-received convention, a margin fraction below 1 and valid quality rules.'); return; }
     if (effectiveTo && new Date(effectiveTo) <= new Date(effectiveFrom)) { action.setError('Effective to must follow effective from.'); return; }
     await action.run(async () => {
       const policyId = id();
@@ -81,13 +81,13 @@ function PolicyForm({ markets, commodities, substances, attributes }: { markets:
     <form onSubmit={event => void publish(event)}>
       <div className="form-columns"><label>Version number<input type="number" min="1" step="1" required value={versionNo} onChange={event => setVersionNo(Number(event.target.value))} /></label><label>MRL safety margin fraction<input required inputMode="decimal" placeholder="0.1 means 10%" value={mrlMarginFraction} onChange={event => setMargin(event.target.value)} /></label></div>
       <div className="form-columns"><label>Effective from<input required type="datetime-local" value={effectiveFrom} onChange={event => setEffectiveFrom(event.target.value)} /></label><label>Effective to (optional)<input type="datetime-local" value={effectiveTo} onChange={event => setEffectiveTo(event.target.value)} /></label></div>
-      <label>Comparable residue material basis<input required maxLength={100} value={residueBasis} onChange={event => setBasis(event.target.value)} /></label>
+      <label>Comparable residue convention<select required value={residueBasis} onChange={event => { setBasis(event.target.value); setConfirmed(false); }}><option value="">Select reviewed convention</option><option value="AS_RECEIVED">As received</option></select></label>
       <fieldset><legend>Required active substances</legend><label>Find substance<input type="search" value={substanceSearch} onChange={event => setSubstanceSearch(event.target.value)} /></label><div className="assessment-checklist">{substances.filter(row => requiredSubstanceIds.includes(row.id) || `${row.code} ${row.name}`.toLowerCase().includes(substanceSearch.toLowerCase())).map(row => <label key={row.id}><input type="checkbox" checked={requiredSubstanceIds.includes(row.id)} onChange={() => toggle(row.id)} /> {row.code} · {row.name}</label>)}</div><p>{requiredSubstanceIds.length} selected</p></fieldset>
       <fieldset><legend>Quality calculation rules</legend><p className="muted">Add each required buyer attribute. The supported calculation is mass weighted mean.</p><label>Add attribute<select value="" onChange={event => addRule(event.target.value)}><option value="">Select attribute</option>{attributes.filter(row => !qualityRules.some(rule => rule.attributeId === row.id)).map(row => <option key={row.id} value={row.id}>{row.code} · {row.name} ({row.unit})</option>)}</select></label>{qualityRules.map(row => <div className="assessment-rule" key={row.attributeId}>{attributes.find(item => item.id === row.attributeId)?.name} · {row.unit} · mass weighted mean <button type="button" className="secondary" onClick={() => setQualityRules(rows => rows.filter(item => item.attributeId !== row.attributeId))}>Remove</button></div>)}</fieldset>
       <label>Approved source or evidence reference<textarea required maxLength={1000} value={evidenceReference} onChange={event => setEvidenceReference(event.target.value)} /></label>
       <div className="form-columns"><label>Reviewed by<input required value={reviewedBy} onChange={event => setReviewedBy(event.target.value)} /></label><label>Review authority<input required value={reviewAuthority} onChange={event => setReviewAuthority(event.target.value)} /></label></div>
       <label>Reviewed at<input required type="datetime-local" max={localTime(new Date().toISOString())} value={reviewedAt} onChange={event => setReviewedAt(event.target.value)} /></label>
-      <label className="assessment-confirm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> I checked the approved source, substance scope and calculation rules.</label>
+      <label className="assessment-confirm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> I checked the approved source, substance scope, as-received convention and calculation rules.</label>
       <Feedback {...action} /><button disabled={action.busy || !confirmed || !marketId || !commodityId || !!lookupError || !requiredSubstanceIds.length}>{action.busy ? 'Publishing…' : 'Publish policy'}</button>
     </form>
   </section>;

@@ -6,9 +6,9 @@ import { CompanyResiduePolicies } from './CompanyResiduePolicies';
 
 const fetchMock = vi.fn<typeof fetch>();
 const companyId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const systemRule = { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', code: 'RICE-RES', versionNo: 1, companyId: null, kind: 'INTERPRETATION', substanceId: 'substance', commodityId: 'commodity', residueDefinition: 'parent compound', inputStage: 'RAW_PADDY', outputStage: 'RAW_PADDY', inputBasis: 'WHOLE', outputBasis: 'WHOLE', outputFraction: '', process: '', conditions: '', analyticalMethod: 'LC-MS/MS', unit: 'mg/kg', decimalPlaces: 3, interpretationKind: 'NUMERIC_RELATIVE_UNCERTAINTY', ndThresholdKind: null, factorLower: null, factorUpper: null, factorSemantics: null, homogeneousMixing: false, relativeUncertaintyPercent: '10', relativeUncertaintyAtZero: false, effectiveFrom: '2026-01-01T00:00:00Z', effectiveTo: null, supersedesId: null, evidenceRef: 'scientific-source', applicabilityStatement: 'Rice only', reviewedBy: 'Dr A', reviewAuthority: 'Scientific QA', reviewedAt: '2026-01-01T00:00:00Z', publishedBy: 'admin', publishedAt: '2026-01-01T00:00:00Z' };
-const otherRule = { ...systemRule, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', code: 'RICE-PROCESS', evidenceRef: 'processing-study', applicabilityStatement: 'Dry rice processing only' };
-const companyRule = { ...systemRule, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', companyId, relativeUncertaintyPercent: '20', evidenceRef: 'company-study' };
+const systemRule = { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', code: 'RICE-RES', versionNo: 1, companyId: null, kind: 'FLOW', schemaVersion: 2, substanceId: 'substance', commodityId: 'commodity', residueDefinition: 'parent compound', unit: 'mg/kg', decimalPlaces: 3, laboratory: [{ analyticalMethod: 'LC-MS/MS', numericInterpretationKind: 'NUMERIC_RELATIVE_UNCERTAINTY', relativeUncertaintyPercent: '10', relativeUncertaintyAtZero: false, belowLimit: true, ndThresholdKind: null }], steps: [], effectiveFrom: '2026-01-01T00:00:00Z', effectiveTo: null, supersedesId: null, evidenceRef: 'scientific-source', applicabilityStatement: 'Rice only', reviewedBy: 'Dr A', reviewAuthority: 'Scientific QA', reviewedAt: '2026-01-01T00:00:00Z', publishedBy: 'admin', publishedAt: '2026-01-01T00:00:00Z', asReceivedConfirmed: true };
+const otherRule = { ...systemRule, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', code: 'RICE-PROCESS', steps: [{ id: 'step', process: 'DRYING', inputStage: 'RAW_PADDY', outputStage: 'DRIED_PADDY', outputFraction: 'DRIED_PADDY', conditions: 'UNCONDITIONAL', factorLower: '1', factorUpper: '1', factorSemantics: 'STEP_CONCENTRATION', anchorStage: null, homogeneousMixing: false }], evidenceRef: 'processing-study', applicabilityStatement: 'Dry rice processing only' };
+const companyRule = { ...systemRule, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', companyId, evidenceRef: 'company-study' };
 let rules: Array<Record<string, unknown>>, settings: Array<Record<string, unknown>>, posted: Array<{ items: Array<Record<string, unknown>> }>, failure: number;
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 // Paste fixture text while retaining user interaction and publication checks.
@@ -44,6 +44,19 @@ beforeEach(() => {
     return response({ items: [], hasMore: false });
   });
 });
+it('shows substance, commodity and residue definition as primary adoption label', async () => {
+  rules = [systemRule, { ...otherRule, residueDefinition: 'metabolites' }];
+  const user = userEvent.setup(); render(<CompanyResiduePolicies active allowed companyId={companyId} />);
+  const first = await screen.findByRole('checkbox', { name: /RICE-RES/ });
+  const choice = first.closest('label')!;
+  expect(choice.querySelector('strong')).toHaveTextContent('Human substance · Human commodity · parent compound');
+  expect(choice.querySelector('small')).toHaveTextContent('RICE-RES');
+  expect(screen.getByRole('checkbox', { name: /Human substance · Human commodity · metabolites.*RICE-PROCESS/ })).toBeVisible();
+  await user.type(screen.getByLabelText('Find profiles to adopt'), 'RICE-RES');
+  expect(screen.queryByRole('checkbox', { name: /RICE-PROCESS/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: /RICE-RES/ })).toBeVisible();
+});
+
 it('reuses source evidence and applicability, but requires a distinct explicit company adoption review', async () => {
   const user = userEvent.setup(); render(<CompanyResiduePolicies active allowed companyId={companyId} />);
   await screen.findByRole('checkbox', { name: /Human substance.*Human commodity.*RICE-RES/ });
@@ -119,58 +132,11 @@ it('requires adoption confirmation again after changing the shared review', asyn
   expect(screen.getByRole('button', { name: 'Publish reviewed policy settings' })).toBeDisabled();
   expect(posted).toHaveLength(0);
 });
-it('blocks checked adoption after embedded scientific revision until refreshed sources receive fresh adoption review', async () => {
-  rules = [systemRule, companyRule];
-  const user = userEvent.setup(); render(<CompanyResiduePolicies active allowed companyId={companyId} />);
-  await screen.findByRole('checkbox', { name: /RICE-RES/ });
-  await user.selectOptions(screen.getByLabelText('Setting mode'), 'COMPANY_OVERRIDE');
-  await user.click(screen.getByRole('checkbox', { name: /RICE-RES/ }));
-  await user.click(screen.getByText('Customize adoption evidence or applicability'));
-  await user.clear(screen.getByLabelText('Evidence reference · RICE-RES'));
-  await pasteText(user, screen.getByLabelText('Evidence reference · RICE-RES'), 'Company-specific adoption evidence');
-  await fillReview(user);
-  expect(screen.getByRole('button', { name: 'Publish reviewed policy settings' })).toBeEnabled();
-
-  const editor = within(screen.getByRole('heading', { name: 'Company residue rules' }).closest('section')!);
-  await user.click(editor.getByRole('button', { name: /^Revise rule/ }));
-  await user.clear(editor.getByLabelText('Relative uncertainty (%)'));
-  await pasteText(user, editor.getByLabelText('Relative uncertainty (%)'), '25');
-  await user.clear(editor.getByLabelText('Evidence reference'));
-  await pasteText(user, editor.getByLabelText('Evidence reference'), 'new-scientific-study');
-  await user.clear(editor.getByLabelText('Applicability statement'));
-  await pasteText(user, editor.getByLabelText('Applicability statement'), 'New reviewed rice applicability');
-  await pasteText(user, editor.getByLabelText('Scientific reviewer'), 'Actual scientist');
-  await pasteText(user, editor.getByLabelText('Review authority'), 'Scientific QA');
-  fireEvent.change(editor.getByLabelText('Effective from'), { target: { value: '2026-10-23T00:00' } });
-  fireEvent.change(editor.getByLabelText('Reviewed at'), { target: { value: '2026-10-22T00:00' } });
-  await user.click(editor.getByLabelText('I reviewed the complete scientific profile, evidence and effective period.'));
-  await user.click(editor.getByRole('button', { name: 'Publish reviewed company rule' }));
-
-  await screen.findByRole('button', { name: 'Review updated profile sources' });
-  expect(screen.getByRole('checkbox', { name: /I reviewed every selected profile/ })).not.toBeChecked();
-  expect(screen.getByRole('checkbox', { name: /I reviewed every selected profile/ })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Publish reviewed policy settings' })).toBeDisabled();
-  expect(screen.getByLabelText('Evidence reference · RICE-RES')).toHaveValue('Company-specific adoption evidence');
-  expect(screen.getByLabelText('Applicability statement · RICE-RES')).toHaveValue('Rice only');
-  expect(posted).toHaveLength(0);
-
-  await user.click(screen.getByRole('button', { name: 'Review updated profile sources' }));
-  expect(screen.getByLabelText('Evidence reference · RICE-RES')).toHaveValue('Company-specific adoption evidence');
-  expect(screen.getByLabelText('Applicability statement · RICE-RES')).toHaveValue('New reviewed rice applicability');
-  expect(screen.getByLabelText('Adoption reviewer')).toHaveValue('');
-  expect(screen.getByLabelText('Reviewed at')).toHaveValue('');
-  await fillReview(user); await user.click(screen.getByRole('button', { name: 'Publish reviewed policy settings' }));
-  await waitFor(() => expect(posted).toHaveLength(1));
-  expect(posted[0].items[0]).toMatchObject({ evidenceRef: 'Company-specific adoption evidence', applicabilityStatement: 'New reviewed rice applicability', reviewedBy: 'Actual adoption reviewer' });
-  expect(posted[0].items[0]).not.toHaveProperty('sourceRuleId');
-});
 
 it('does not silently choose a same-code profile when published series has conflicting roots', async () => {
   rules = [systemRule, { ...systemRule, id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', versionNo: 2 }];
-  const user = userEvent.setup(); render(<CompanyResiduePolicies active allowed companyId={companyId} />);
+  render(<CompanyResiduePolicies active allowed companyId={companyId} />);
   expect(await screen.findByRole('checkbox', { name: /RICE-RES/ })).toBeDisabled();
-  await user.click(await screen.findByRole('button', { name: 'Edit selected profiles' }));
-  expect(await screen.findByRole('button', { name: 'Edit company policy · RICE-RES' })).toBeDisabled();
   expect(screen.getAllByText(/Conflicting applicability/).length).toBeGreaterThan(0);
   expect(posted).toHaveLength(0);
 });

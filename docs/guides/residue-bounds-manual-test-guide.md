@@ -6,11 +6,11 @@ Use an isolated test environment only. Numbers below are synthetic calculation i
 
 This guide covers the business flow from new source records. The existing browser-test scenario already creates the source, processing and sample records; when using that prebuilt scenario, inspect those records rather than creating them again.
 
-Environment prerequisites: matching application and module migrations installed in an isolated database, configured runtime role, and test accounts for each role below. See [Setup and deployment](../setup-and-deployment.md). Do not run migrations or seeds against shared data for this test.
+Environment prerequisites: matching application and whole-flow migration installed in an isolated database, configured runtime role, and test accounts for each role below. See [Setup and deployment](../setup-and-deployment.md). Do not run migrations or seeds against shared data for this test.
 
-## 1. Prepare test data and rules
+## 1. Prepare test data and profile
 
-For field-by-field instructions and synthetic rule examples, see [Residue rules entry guide](residue-rules-entry-guide.md). Use numeric interpretation and baseline drying/milling/blending rules for this flow; alternative ND and cumulative examples are separate exercises.
+For field-by-field instructions and synthetic examples, see [Residue profile field guide](residue-rules-entry-guide.md). Put the numeric interpretation and all drying/milling/blending steps in one whole-flow profile.
 
 Keep both source lots under the same customer company, with operators assigned to the processing facility.
 
@@ -19,9 +19,9 @@ Keep both source lots under the same customer company, with operators assigned t
 | A | 60 kg | 0.15 mg/kg | 0.05 mg/kg | `[0.10, 0.20]` |
 | B | 40 kg | 0.55 mg/kg | 0.25 mg/kg | `[0.30, 0.80]` |
 
-Use the same substance, residue definition and analytical basis throughout. The laboratory method must match the interpretation rule.
+Use the same substance and residue definition throughout. Concentrations are as received; laboratory method must exactly match the profile entry.
 
-As **Administrator**, open **Administration → Catalogs → Commodities** and configure synthetic reviewed rules before calculating:
+As **Administrator**, open residue profile maintenance and configure one synthetic reviewed profile before calculating:
 
 | Process | Input → output | Concentration factor |
 | --- | --- | --- |
@@ -31,15 +31,15 @@ As **Administrator**, open **Administration → Catalogs → Commodities** and c
 | Mixed-storage ingress, if tested | BLENDED_RICE → BLENDED_RICE | 1 |
 | Mixed-storage withdrawal, if tested | BLENDED_RICE → BLENDED_RICE | 1 |
 
-Then, as **Customer Manager**, open **Residue profiles**. Select the interpretation profile and every process profile used here, choose system-default adoption, and publish with one shared reviewed effective period covering test events. Check each inherited evidence/applicability summary and record the actual setting reviewer/authority/review time once for the batch. Separate setting IDs/versions remain available for audit. System rule publication is not adoption; no seed or automatic adoption exists.
+Then, as **Customer Manager**, open **Residue profiles**, inspect the whole profile and publish one system-default adoption covering source receipts and test events. System publication is not adoption; no automatic adoption exists.
 
-Profile management checks: **Create rule** opens an expert dialog with no scientific values supplied. **Edit selected profiles** opens the batch dialog; explicitly select exact profiles and complete shared review. Check rule search/task/scope/status filters and sorting; current scoped series and historical-version counts must remain distinct. Earlier versions stay collapsed for broad filters; a historical-only match reveals history while retaining the latest tip. Confirm adoption/override history search and mode/effective-status filters can find earlier decisions without changing them. Neither grouping nor batch review authorizes fewer scientific applicability requirements.
+Profile management checks: **Create profile** starts without scientific numeric defaults. Review the full laboratory and step sections, search/filter/sort scoped series, and inspect expandable version and adoption history. Revisions require fresh review; stale publication must retain the draft and publish nothing.
 
 Also required:
 
-- Reviewed numeric interpretation matching method, substance, commodity and material basis.
+- Reviewed numeric interpretation matching exact method, substance and commodity, with as-received attestation.
 - Explicit outward precision, for example **12 decimal places**.
-- Applicable process rules with explicit fraction/product identity, basis, conditions and factor semantics. Use per-step factors for this test. `UNCONDITIONAL` only for explicitly reviewed condition-independent synthetic rule.
+- Each applicable step with explicit fraction/product identity, conditions and factor semantics. Use per-step factors for this test. `UNCONDITIONAL` only for explicitly reviewed condition-independent synthetic paths.
 - Reviewed homogeneous mixing for multi-input operations.
 - Existing facility balance policies and blend compatibility.
 - Effective dates covering test events.
@@ -107,12 +107,12 @@ As **Customer Manager**:
 5. Save report evidence.
 6. Open **Review and confirm**.
 7. Verify sample identity and transcription against the synthetic original.
-8. Choose **Confirm identity and bind compatible results**.
+8. Check **Concentrations are as received (required for residue bounds)** for this explicitly synthetic scenario, then choose **Confirm identity and bind compatible results**.
 9. Inspect returned residue-binding outcomes. This baseline's nonblank uncertainty text requires exception review, so that row stays unbound:
    - Open **Resolve exceptions or bind after policy adoption**.
    - Server matches the adopted profile against confirmed source, substance, commodity, method, stage, canonical unit and effective applicability.
    - Enter reviewed absolute uncertainty **0.05** with supporting review; never infer it by parsing raw text.
-   - Preview interval/reasons and explicitly publish the reviewed exception selection.
+   - Confirm as received, preview interval/reasons and explicitly publish the reviewed exception selection.
    - In the separate relative-uncertainty rehearsal with no reported uncertainty, compatible adopted policy binds during step 8; no second routine confirmation is required.
 
 ### Report B
@@ -175,11 +175,11 @@ As **Customer Manager**:
 
 1. Open report B.
 2. Review sample identity and transcription.
-3. Choose **Confirm identity and bind compatible results**. This baseline needs normalized uncertainty, so inspect its explicit exception.
+3. Check **Concentrations are as received (required for residue bounds)**, then choose **Confirm identity and bind compatible results**. This baseline needs normalized uncertainty, so inspect its explicit exception.
 4. Open exception review and draft B's reviewed result selection:
    - Numeric result: **0.55 mg/kg**.
    - Reviewed absolute uncertainty: **0.25 mg/kg**, entered in this report's original unit.
-   - Same compatible basis and residue definition as A.
+   - Same profile Code and residue definition as A.
 5. Preview the server assessment; retain profile scientific review and record the actual normalization review note.
 6. Publish the reviewed exception selection, then return to blended lot.
 7. Click **Refresh live preview**. Refresh must not append evaluation history.
@@ -197,7 +197,7 @@ Unit:   mg/kg
 Inspect:
 
 - Provenance references A and B.
-- Applied interpretation and process rules.
+- Applied whole-profile Code, laboratory components, distinct process step IDs and setting references.
 - Physical dependencies.
 
 `COMPLETE` means a finite interval was established under the referenced reviewed inputs, not legal PASS.
@@ -233,7 +233,7 @@ Use separate test records for conflicting-evidence scenarios so they do not cont
 | Test | Expected |
 | --- | --- |
 | Select a substance absent from reports, without approved fallback | `UNRESOLVED`, never zero |
-| Evaluate a path without a compatible process rule | `UNRESOLVED`, never implicit factor 1 |
+| Evaluate a path absent from the adopted profile | `UNRESOLVED`, never implicit factor 1 or another profile's factor |
 | Create a conflicting confirmed retest without reviewed resolution | `UNRESOLVED`; latest or lowest must not win automatically |
 | Assigned operator opens derived bounds | Allowed |
 | Operator requests the original laboratory report | Denied |
@@ -241,13 +241,13 @@ Use separate test records for conflicting-evidence scenarios so they do not cont
 | Confirm a supported `150 µg/kg` result under adopted synthetic relative 10% profile, without reported uncertainty | Same `[0.135, 0.165] mg/kg` source interval as `0.15 mg/kg`; original unit/value and scale retained |
 | Confirm a report containing one compatible row and one missing-policy substance | Identity remains confirmed; compatible row binds, missing-policy row remains an explicit exception |
 | Open or refresh live preview repeatedly | No evaluation history rows appended |
-| Publish focused batch-editor change against stale predecessor | 409; no partial rule/settings publication, draft retained |
+| Publish a profile revision against a stale predecessor | 409; no partial version, draft retained |
 | Filter a scoped series or search its Code when both current and earlier versions match | Earlier versions remain collapsed until explicitly opened |
-| Search metadata found only in a historical version | Matching history opens, latest published tip remains visible, no automatic revision |
-| Open Create rule / close either editor by keyboard | Required scientific inputs remain blank; focus stays inside dialog and returns to its trigger on close |
+| Confirm identity without as-received attestation | Identity confirmed; residue binding remains unresolved |
+| Open Create profile / close editor by keyboard | Required scientific inputs remain blank; focus stays inside dialog and returns to its trigger on close |
 
 ## Pass condition
 
 Baseline pass criteria: late evidence updates only new calculations, history stays immutable, missing scientific inputs never become guessed bounds or PASS, and residue evaluation does not alter stock, original laboratory evidence or HOLD state. Extension acceptance additionally requires explicit profile adoption, fail-closed override behavior, correct uncertainty handling/provenance and real UI/API verification.
 
-Numeric examples above are expected synthetic test data, not operational scientific policy. Observed checks and isolated API/browser scenarios are recorded separately in the [focused-profile verification log](../plans/residue-bounds-plan.md#16-focused-profile-management-and-rule-volume-audit); that log, rather than this walkthrough, identifies which flows were exercised.
+Numeric examples above are expected synthetic test data, not operational scientific policy. This walkthrough does not assert that these checks were run.

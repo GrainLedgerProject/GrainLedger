@@ -32,7 +32,7 @@ public static class ResidueEvidenceResolver
                 && (direct.Length == 0 || x.Precedence == "GROUP_FIRST")).ToArray();
             if (applicableGroups.Length > 1)
             {
-                output.Add(new(node.LotId, substance, null, null, null, null, null, ["Conflicting approved source-group versions"],
+                output.Add(new(node.LotId, substance, null, null, null, null, ["Conflicting approved source-group versions"],
                     applicableGroups.Select(g => new ResidueProvenance("SOURCE_GROUP", node.LotId, GroupVersionId: g.Id, SourceId: source.SourceId)).ToArray(),
                     applicableGroups.Select(g => new ResidueRuleReference(g.Id, g.VersionNo, "SOURCE_GROUP", "Company-scoped reviewed evidence")).ToArray()));
                 continue;
@@ -45,7 +45,7 @@ public static class ResidueEvidenceResolver
             var selectionVersions = selections.GetValueOrDefault((source.SourceId, substance)) ?? [];
             var activeSelections = ActiveSelections(selectionVersions, snapshotAt);
             if (activeSelections.Length != 1)
-            { output.Add(Unknown(node.LotId, substance, activeSelections.Length == 0 ? "Missing reviewed material basis and report selection" : "Conflicting reviewed report selections", direct)); continue; }
+            { output.Add(Unknown(node.LotId, substance, activeSelections.Length == 0 ? "Missing reviewed report selection" : "Conflicting reviewed report selections", direct)); continue; }
             var selection = activeSelections[0];
             var remaining = direct.Where(x => !selection.SupersededResultIds.Contains(x.ResultId)).DistinctBy(x => x.ResultId).ToArray();
             if (remaining.Length != 1 || remaining[0].ResultId != selection.SelectedResultId)
@@ -59,14 +59,16 @@ public static class ResidueEvidenceResolver
             selection = normalization.Selection;
             var numeric = result.ResultKind == "NUMERIC";
             var kind = result.ResultKind switch { "BELOW_LIMIT" => "BELOW_LIMIT", "NOT_DETECTED" => "ND", _ => "UNSUPPORTED" };
-            var resolved = SelectPolicy(policy, source.CompanyId, source.ReceivedAt, x =>
-                x.Kind == "INTERPRETATION" && x.SubstanceId == substance
-                && (numeric ? x.InterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY" : x.InterpretationKind == kind)
-                && x.InputStage == source.ProductStage && x.OutputStage == source.ProductStage
-                && x.InputBasis == selection.MaterialBasis && x.OutputBasis == selection.MaterialBasis
-                && x.ResidueDefinition == selection.ResidueDefinition && x.Unit == result.Unit
-                && x.AnalyticalMethod == result.Method && x.CommodityId == node.CommodityId);
+            if (selection.SchemaVersion != 2 || !selection.AsReceivedConfirmed || string.IsNullOrWhiteSpace(selection.ProfileCode)
+                || selection.ProfileRuleId is null || selection.ProfileSettingId is null || selection.LaboratoryMethod != result.Method)
+            { output.Add(Unknown(node.LotId, substance, "Missing reviewed as-received profile binding", [raw])); continue; }
+            var resolved = SelectPolicy(policy, source.CompanyId, source.ReceivedAt, node.CommodityId, substance, selection.ProfileCode);
             var applicable = resolved.Rules;
+            var rule = applicable.Count == 1 ? applicable[0].Rule : null;
+            var laboratory = rule?.Laboratory.SingleOrDefault(x => x.AnalyticalMethod == result.Method);
+            var supported = laboratory is not null && (numeric ? laboratory.NumericInterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY"
+                : kind == "BELOW_LIMIT" ? laboratory.BelowLimit : kind == "ND" && laboratory.NdThresholdKind is not null);
+            var componentKey = $"laboratory:{result.Method}:{result.ResultKind}";
             var provenance = new[] { new ResidueProvenance("DIRECT", node.LotId, result.ReportId, result.ResultId, SelectionId: selection.Id,
                 RuleId: applicable.Count == 1 ? applicable[0].Rule.Id : null, SourceId: source.SourceId,
                 AssociationId: result.AssociationId, ResultSetId: result.ResultSetId,
@@ -74,16 +76,21 @@ public static class ResidueEvidenceResolver
                 OriginalNumericValue: raw.NumericValue, OriginalLod: raw.Lod, OriginalLoq: raw.Loq,
                 OriginalAbsoluteUncertainty: rawSelection.AbsoluteUncertainty, OriginalReportingThreshold: rawSelection.ReportingThreshold) };
             var references = new List<ResidueRuleReference> { new(selection.Id, 1, "REPORT_SELECTION", "Company-scoped reviewed evidence") };
-            references.AddRange(applicable.Select(x => Reference(x.Rule, x.Setting)));
-            if (resolved.Reason is not null || applicable.Count != 1)
-            { output.Add(new(node.LotId, substance, null, null, result.Unit, selection.MaterialBasis, null,
-                [resolved.Reason ?? (applicable.Count == 0 ? "Missing compatible reviewed interpretation, method, unit or material basis" : "Conflicting interpretation policies")],
-                provenance, references, selection.ResidueDefinition)); continue; }
-            var rule = applicable[0].Rule;
+            var reviewedRule = policy.Rules.SingleOrDefault(x => x.Id == selection.ProfileRuleId && x.Code == selection.ProfileCode);
+            var reviewedSetting = policy.Settings.SingleOrDefault(x => x.Id == selection.ProfileSettingId && x.RuleCode == selection.ProfileCode);
+            if (reviewedRule is not null && reviewedSetting is not null)
+                references.Add(Reference(reviewedRule, reviewedSetting, componentKey));
+            references.AddRange(applicable.Select(x => Reference(x.Rule, x.Setting, componentKey)));
+            if (resolved.Reason is not null || applicable.Count != 1 || rule is null || !supported
+                || reviewedRule is null || reviewedSetting is null
+                || rule.ResidueDefinition != selection.ResidueDefinition || rule.Unit != result.Unit)
+            { output.Add(new(node.LotId, substance, null, null, result.Unit, null,
+                [resolved.Reason ?? "Missing compatible reviewed profile, laboratory method or result form"],
+                provenance, references, selection.ResidueDefinition, selection.ProfileCode)); continue; }
             if (numeric && selection.AbsoluteUncertainty is null && !string.IsNullOrWhiteSpace(result.Uncertainty))
             {
-                output.Add(new(node.LotId, substance, null, null, rule.Unit, selection.MaterialBasis, rule.DecimalPlaces,
-                    ["Reported uncertainty requires explicit reviewed normalization"], provenance, references, selection.ResidueDefinition));
+                output.Add(new(node.LotId, substance, null, null, rule.Unit, rule.DecimalPlaces,
+                    ["Reported uncertainty requires explicit reviewed normalization"], provenance, references, selection.ResidueDefinition, selection.ProfileCode));
                 continue;
             }
             try
@@ -103,9 +110,9 @@ public static class ResidueEvidenceResolver
                     }
                     else
                     {
-                        if (rule.InterpretationKind != "NUMERIC_RELATIVE_UNCERTAINTY" || rule.RelativeUncertaintyPercent is null
-                            || value.CompareTo(zero) == 0 && !rule.RelativeUncertaintyAtZero) throw new FormatException();
-                        percent = rule.RelativeUncertaintyPercent;
+                        if (laboratory!.NumericInterpretationKind != "NUMERIC_RELATIVE_UNCERTAINTY" || laboratory.RelativeUncertaintyPercent is null
+                            || value.CompareTo(zero) == 0 && !laboratory.RelativeUncertaintyAtZero) throw new FormatException();
+                        percent = laboratory.RelativeUncertaintyPercent;
                         var relative = ResidueRational.Parse(percent);
                         if (relative.CompareTo(zero) < 0) throw new FormatException();
                         uncertainty = value * relative / ResidueRational.Parse("100");
@@ -119,7 +126,7 @@ public static class ResidueEvidenceResolver
                 }
                 else
                 {
-                    var threshold = kind == "BELOW_LIMIT" ? result.NumericValue : rule.NdThresholdKind switch
+                    var threshold = kind == "BELOW_LIMIT" ? result.NumericValue : laboratory!.NdThresholdKind switch
                     { "REPORTING_THRESHOLD" => selection.ReportingThreshold, "LOD" => result.Lod, "LOQ" => result.Loq, _ => null };
                     if (threshold is null) throw new FormatException();
                     lower = zero; upper = ResidueRational.Parse(threshold);
@@ -127,26 +134,43 @@ public static class ResidueEvidenceResolver
                 }
                 // Preserve every terminating digit before downstream weighting; only final lot output rounds outward.
                 output.Add(new(node.LotId, substance, lower.ExactDecimal(), upper.ExactDecimal(),
-                    rule.Unit, selection.MaterialBasis, rule.DecimalPlaces, [], provenance, references, selection.ResidueDefinition));
+                    rule.Unit, rule.DecimalPlaces, [], provenance, references, selection.ResidueDefinition, selection.ProfileCode));
             }
             catch (Exception ex) when (ex is FormatException or ArgumentOutOfRangeException)
-            { output.Add(new(node.LotId, substance, null, null, rule.Unit, selection.MaterialBasis, rule.DecimalPlaces,
-                ["Missing or unsupported reviewed uncertainty/reporting threshold"], provenance, references, selection.ResidueDefinition)); }
+            { output.Add(new(node.LotId, substance, null, null, rule.Unit, rule.DecimalPlaces,
+                ["Missing or unsupported reviewed uncertainty/reporting threshold"], provenance, references, selection.ResidueDefinition, selection.ProfileCode)); }
 
-            ResidueSourceBound GroupBound(ResidueSourceGroupVersion g) => new(node.LotId, substance, g.Lower, g.Upper,
-                g.Unit, g.MaterialBasis, g.DecimalPlaces, [],
-                [new("SOURCE_GROUP", node.LotId, GroupVersionId: g.Id, SourceId: source.SourceId)],
-                [new(g.Id, g.VersionNo, "SOURCE_GROUP", "Company-scoped reviewed evidence")], g.ResidueDefinition);
+            ResidueSourceBound GroupBound(ResidueSourceGroupVersion g)
+            {
+                var bindings = g.ProfileBindings?.Where(x => x.SourceId == source.SourceId).ToArray() ?? [];
+                var binding = bindings.Length == 1 ? bindings[0] : null;
+                var groupPolicy = SelectPolicy(policy, source.CompanyId, source.ReceivedAt, node.CommodityId, substance, g.ProfileCode);
+                var groupReferences = new List<ResidueRuleReference> { new(g.Id, g.VersionNo, "SOURCE_GROUP", "Company-scoped reviewed evidence") };
+                var groupReviewedRule = policy.Rules.SingleOrDefault(x => x.Id == binding?.ProfileRuleId && x.Code == g.ProfileCode);
+                var groupReviewedSetting = policy.Settings.SingleOrDefault(x => x.Id == binding?.ProfileSettingId && x.RuleCode == g.ProfileCode);
+                if (groupReviewedRule is not null && groupReviewedSetting is not null) groupReferences.Add(Reference(groupReviewedRule, groupReviewedSetting));
+                groupReferences.AddRange(groupPolicy.Rules.Select(x => Reference(x.Rule, x.Setting)));
+                if (g.SchemaVersion != 2 || !g.AsReceivedConfirmed || string.IsNullOrWhiteSpace(g.ProfileCode) || binding is null
+                    || groupReviewedRule is null || groupReviewedSetting is null
+                    || groupPolicy.Reason is not null || groupPolicy.Rules.Count != 1
+                    || groupPolicy.Rules[0].Rule.ResidueDefinition != g.ResidueDefinition || groupPolicy.Rules[0].Rule.Unit != g.Unit)
+                    return new(node.LotId, substance, null, null, g.Unit, g.DecimalPlaces,
+                        [groupPolicy.Reason ?? "Missing compatible reviewed source-group profile binding"],
+                        [new("SOURCE_GROUP", node.LotId, GroupVersionId: g.Id, SourceId: source.SourceId)], groupReferences, g.ResidueDefinition, g.ProfileCode);
+                return new(node.LotId, substance, g.Lower, g.Upper, g.Unit, g.DecimalPlaces, [],
+                    [new("SOURCE_GROUP", node.LotId, GroupVersionId: g.Id, SourceId: source.SourceId)],
+                    groupReferences, g.ResidueDefinition, g.ProfileCode);
+            }
         }
         return output;
     }
 
-    public static IReadOnlyList<ResidueFactor> Factors(IReadOnlyList<ResidueRuleVersion> policies) => policies
-        .Where(x => x.Kind == "PROCESS").Select(x => new ResidueFactor(x.SubstanceId, x.CommodityId, x.Process,
-            x.InputStage, x.OutputStage, x.InputBasis, x.OutputBasis, x.Unit, x.FactorLower!, x.FactorUpper!,
-            x.DecimalPlaces, x.FactorSemantics == "STEP_CONCENTRATION" ? "STEP" : x.FactorSemantics == "CUMULATIVE_CONCENTRATION" ? "CUMULATIVE" : "UNSUPPORTED",
-            x.Conditions, Reference(x), x.ResidueDefinition, x.OutputFraction, x.HomogeneousMixing,
-            x.EffectiveFrom, x.EffectiveTo, x.SupersedesId)).ToArray();
+    public static IReadOnlyList<ResidueFactor> Factors(IReadOnlyList<ResidueProfileVersion> profiles) => profiles
+        .SelectMany(x => x.Steps.Select(step => new ResidueFactor(x.SubstanceId, x.CommodityId, step.Process,
+            step.InputStage, step.OutputStage, x.Unit, step.FactorLower, step.FactorUpper,
+            x.DecimalPlaces, step.FactorSemantics == "STEP_CONCENTRATION" ? "STEP" : step.FactorSemantics == "CUMULATIVE_CONCENTRATION" ? "CUMULATIVE" : "UNSUPPORTED",
+            step.Conditions, Reference(x) with { ComponentKey = step.Id.ToString() }, x.ResidueDefinition, step.OutputFraction, step.HomogeneousMixing,
+            x.EffectiveFrom, x.EffectiveTo, x.SupersedesId, x.Code, step.Id, step.AnchorStage))).ToArray();
 
     private static bool Effective(DateTimeOffset from, DateTimeOffset? to, DateTimeOffset at) => at >= from && (to is null || at < to);
     internal static ResidueReportSelection[] ActiveSelections(IReadOnlyList<ResidueReportSelection> history, DateTimeOffset at)
@@ -155,15 +179,16 @@ public static class ResidueEvidenceResolver
         var removed = Superseded(active.Select(x => x.Id), history.ToDictionary(x => x.Id, x => x.SupersedesId));
         return active.Where(x => !removed.Contains(x.Id)).ToArray();
     }
-    private static ResidueRuleReference Reference(ResidueRuleVersion rule) => new(rule.Id, rule.VersionNo, rule.Kind, rule.EvidenceRef);
+    private static ResidueRuleReference Reference(ResidueProfileVersion rule) => new(rule.Id, rule.VersionNo, rule.Kind, rule.EvidenceRef, RuleCode: rule.Code);
 
-    internal static ResidueRuleReference Reference(ResidueRuleVersion rule, ResiduePolicySettingVersion setting) =>
-        new(rule.Id, rule.VersionNo, rule.Kind, rule.EvidenceRef, setting.Mode, setting.Id, setting.VersionNo, rule.Code);
+    internal static ResidueRuleReference Reference(ResidueProfileVersion rule, ResiduePolicySettingVersion setting, string? componentKey = null) =>
+        new(rule.Id, rule.VersionNo, rule.Kind, rule.EvidenceRef, setting.Mode, setting.Id, setting.VersionNo, rule.Code, componentKey);
 
-    internal static (IReadOnlyList<(ResidueRuleVersion Rule, ResiduePolicySettingVersion Setting)> Rules, string? Reason)
-        SelectPolicy(ResiduePolicySnapshot snapshot, Guid companyId, DateTimeOffset at, Func<ResidueRuleVersion, bool> matches)
+    internal static (IReadOnlyList<(ResidueProfileVersion Rule, ResiduePolicySettingVersion Setting)> Rules, string? Reason)
+        SelectPolicy(ResiduePolicySnapshot snapshot, Guid companyId, DateTimeOffset at, Guid commodityId, Guid substanceId, string? profileCode = null)
     {
-        var history = snapshot.Rules.Where(x => x.CompanyId is null || x.CompanyId == companyId).ToArray();
+        var history = snapshot.Rules.Where(x => (x.CompanyId is null || x.CompanyId == companyId)
+            && x.SubstanceId == substanceId && x.CommodityId == commodityId && (profileCode is null || x.Code == profileCode)).ToArray();
         var active = history.Where(x => Effective(x.EffectiveFrom, x.EffectiveTo, at)).ToArray();
         var removed = Superseded(active.Select(x => x.Id), history.ToDictionary(x => x.Id, x => x.SupersedesId));
         active = active.Where(x => !removed.Contains(x.Id)).ToArray();
@@ -171,14 +196,13 @@ public static class ResidueEvidenceResolver
         var effectiveSettings = settings.Where(x => Effective(x.EffectiveFrom, x.EffectiveTo, at)).ToArray();
         var removedSettings = Superseded(effectiveSettings.Select(x => x.Id), settings.ToDictionary(x => x.Id, x => x.SupersedesId));
         effectiveSettings = effectiveSettings.Where(x => !removedSettings.Contains(x.Id)).ToArray();
-        var selected = new List<(ResidueRuleVersion Rule, ResiduePolicySettingVersion Setting)>();
+        var selected = new List<(ResidueProfileVersion Rule, ResiduePolicySettingVersion Setting)>();
         string? reason = null;
         foreach (var adoption in effectiveSettings.GroupBy(x => x.RuleCode, StringComparer.Ordinal))
         {
             // Returned inheritance ignores company-only applicability; intended overrides still block matching defaults.
             var includesCompanyScope = adoption.Any(x => x.Mode != "SYSTEM_DEFAULT");
-            var applicable = active.Where(x => x.Code == adoption.Key && (x.CompanyId is null || includesCompanyScope)
-                && matches(x)).ToArray();
+            var applicable = active.Where(x => x.Code == adoption.Key && (x.CompanyId is null || includesCompanyScope)).ToArray();
             if (applicable.Length == 0) continue;
             var versions = adoption.ToArray();
             if (versions.Length != 1)
@@ -188,6 +212,8 @@ public static class ResidueEvidenceResolver
             { reason = "Unsupported company policy setting"; continue; }
             var scope = setting.Mode == "COMPANY_OVERRIDE" ? (Guid?)companyId : null;
             var candidates = applicable.Where(x => x.CompanyId == scope).ToArray();
+            if (history.Any(x => x.Code == adoption.Key && x.CompanyId == scope && x.Retirement is not null))
+            { reason = "Adopted residue profile series is retired"; continue; }
             if (candidates.Length == 0)
             { reason = setting.Mode == "COMPANY_OVERRIDE" ? "Intended company override is missing or inapplicable" : "Adopted system profile is missing or inapplicable"; continue; }
             selected.AddRange(candidates.Select(x => (x, setting)));
@@ -207,7 +233,7 @@ public static class ResidueEvidenceResolver
         return removed;
     }
     private static ResidueSourceBound Unknown(Guid lot, Guid substance, string reason, IReadOnlyList<ResidueLabEvidence>? results = null) =>
-        new(lot, substance, null, null, null, null, null, [reason],
+        new(lot, substance, null, null, null, null, [reason],
             results?.Select(x => new ResidueProvenance("DIRECT", lot, x.ReportId, x.ResultId,
                 SourceId: x.SourceId, AssociationId: x.AssociationId, ResultSetId: x.ResultSetId)).ToArray() ?? [], []);
 }

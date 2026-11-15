@@ -15,16 +15,33 @@ using NpgsqlTypes;
 
 namespace GrainLedger.Api.Features.Catalogs;
 
-public sealed record ResidueRuleVersion(Guid Id, string Code, int VersionNo, string Kind,
-    Guid SubstanceId, string ResidueDefinition, string InputStage, string OutputStage,
-    string InputBasis, string OutputBasis, string OutputFraction, string Process, string Conditions,
-    string Unit, [property: JsonRequired] int DecimalPlaces, string? InterpretationKind, string? NdThresholdKind,
-    string? FactorLower, string? FactorUpper, string? FactorSemantics, [property: JsonRequired] bool HomogeneousMixing,
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ResidueProfileVersion(Guid Id, string Code, int VersionNo, string Kind,
+    [property: JsonRequired] int SchemaVersion, Guid SubstanceId, Guid? CommodityId,
+    string ResidueDefinition, string Unit, [property: JsonRequired] int DecimalPlaces,
+    [property: JsonRequired] IReadOnlyList<ResidueLaboratorySettings> Laboratory,
+    [property: JsonRequired] IReadOnlyList<ResidueProcessStep> Steps,
+    [property: JsonRequired] bool AsReceivedConfirmed,
     DateTimeOffset EffectiveFrom, DateTimeOffset? EffectiveTo, Guid? SupersedesId,
     string EvidenceRef, string ApplicabilityStatement, string ReviewedBy, string ReviewAuthority,
     DateTimeOffset ReviewedAt, Guid? PublishedBy = null, DateTimeOffset? PublishedAt = null,
-    Guid? CommodityId = null, string AnalyticalMethod = "", Guid? CompanyId = null,
-    string? RelativeUncertaintyPercent = null, bool RelativeUncertaintyAtZero = false);
+    Guid? CompanyId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ResidueProfileRetirement? Retirement = null);
+
+public sealed record ResidueProfileRetirement(Guid ProfileId, string Code, Guid? CompanyId, string Reason,
+    Guid RetiredBy, DateTimeOffset RetiredAt);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record RetireResidueProfileRequest(string Reason);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ResidueLaboratorySettings(string AnalyticalMethod, string? NumericInterpretationKind,
+    string? RelativeUncertaintyPercent, [property: JsonRequired] bool RelativeUncertaintyAtZero,
+    [property: JsonRequired] bool BelowLimit, string? NdThresholdKind);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ResidueProcessStep(Guid Id, string Process, string InputStage, string OutputStage,
+    string OutputFraction, string Conditions, string FactorLower, string FactorUpper,
+    string FactorSemantics, string? AnchorStage, [property: JsonRequired] bool HomogeneousMixing);
 
 public sealed class ResiduePolicyReader
 {
@@ -34,24 +51,31 @@ public sealed class ResiduePolicyReader
     {
         // Keep historical effective windows: each physical graph node has its own process time.
         await using var command = new NpgsqlCommand("""
-            SELECT payload::text FROM grainledger.catalog_residue_rule_versions
-            WHERE substance_id=ANY($1) AND published_at <= $2 AND effective_from <= $2
-                AND (company_id IS NULL OR company_id=$3)
-            ORDER BY code,company_id NULLS FIRST,version_no
+            SELECT r.payload::text, t.profile_id, t.reason, t.retired_by, t.retired_at
+            FROM grainledger.catalog_residue_rule_versions r
+            LEFT JOIN grainledger.catalog_residue_rule_retirements t ON t.code=r.code AND t.company_id IS NOT DISTINCT FROM r.company_id
+            WHERE r.substance_id=ANY($1) AND r.published_at <= $2 AND r.effective_from <= $2
+                AND (r.company_id IS NULL OR r.company_id=$3)
+                AND r.payload->>'Kind' = 'FLOW' AND r.payload->>'SchemaVersion' = '2'
+            ORDER BY r.code,r.company_id NULLS FIRST,r.version_no
             """, connection, transaction);
         command.Parameters.AddWithValue(substanceIds.ToArray());
         command.Parameters.AddWithValue(snapshotAt);
         command.Parameters.AddWithValue(companyId);
-        var rules = new List<ResidueRuleVersion>();
+        var rules = new List<ResidueProfileVersion>();
         var settings = new List<ResiduePolicySettingVersion>();
         await using (var reader = await command.ExecuteReaderAsync(ct))
         {
-            while (await reader.ReadAsync(ct)) rules.Add(JsonSerializer.Deserialize<ResidueRuleVersion>(reader.GetString(0))!);
+            while (await reader.ReadAsync(ct)) rules.Add(ResidueRuleEndpoints.ReadRule(reader));
         }
         await using var settingsCommand = new NpgsqlCommand("""
-            SELECT payload::text FROM grainledger.catalog_residue_policy_setting_versions
-            WHERE company_id=$1 AND published_at <= $2 AND effective_from <= $2
-            ORDER BY rule_code,version_no
+            SELECT s.payload::text FROM grainledger.catalog_residue_policy_setting_versions s
+            WHERE s.company_id=$1 AND s.published_at <= $2 AND s.effective_from <= $2
+                AND EXISTS (SELECT 1 FROM grainledger.catalog_residue_rule_versions r
+                    WHERE r.code=s.rule_code AND (r.company_id IS NULL OR r.company_id=s.company_id)
+                    AND r.payload->>'Kind'='FLOW' AND r.payload->>'SchemaVersion'='2'
+                    AND r.published_at <= $2)
+            ORDER BY s.rule_code,s.version_no
             """, connection, transaction);
         settingsCommand.Parameters.AddWithValue(companyId);
         settingsCommand.Parameters.AddWithValue(snapshotAt);
@@ -71,20 +95,60 @@ public static class ResidueRuleEndpoints
             .AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>()
             .WithTags("Reviewed residue rules");
         group.MapPost("", PublishAsync);
+        group.MapPost("/{id:guid}/retire", RetireAsync);
         group.MapGet("", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
-        endpoints.MapPost("/api/residue-matrix/publish", ResidueMatrixEndpoints.PublishAsync)
-            .RequireAuthorization().AddEndpointFilter<NoStoreFilter>()
-            .AddEndpointFilter<MutationAntiforgeryFilter>().WithTags("Reviewed residue rules");
         return endpoints;
     }
 
-    private static async Task<IResult> PublishAsync(ResidueRuleVersion request, HttpContext http,
+    private static async Task<IResult> RetireAsync(Guid id, RetireResidueProfileRequest request, HttpContext http,
+        AppDbContext db, CancellationToken ct)
+    {
+        if (!Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var actor)) return Results.Forbid();
+        var reason = request.Reason?.Trim();
+        if (string.IsNullOrEmpty(reason) || reason.Length > 1000)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["Reason is required and must not exceed 1000 characters."] });
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
+        var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        var transaction = (NpgsqlTransaction)tx.GetDbTransaction();
+        var scope = await ResidueReview.ReadScopeAsync(http, connection, transaction, ct);
+        if (!scope.Allowed) return Results.Forbid();
+        var profile = (await ReadVersionsAsync(connection, transaction, scope.CompanyId, ct)).SingleOrDefault(x => x.Id == id);
+        if (profile is null) return Results.NotFound();
+        var permission = profile.CompanyId is null ? Permissions.ResiduePolicyManage : Permissions.ResidueCompanyPolicyManage;
+        if (!await ResidueReview.AuthorizeAsync(connection, transaction, actor, permission, profile.CompanyId, ct)) return Results.Forbid();
+        if (profile.Retirement is not null) return Conflict("Profile series is already retired.");
+        try
+        {
+            await using var command = new NpgsqlCommand("SELECT grainledger.catalog_retire_residue_rule($1,$2,$3)", connection, transaction);
+            command.Parameters.AddWithValue(actor);
+            command.Parameters.AddWithValue(id);
+            command.Parameters.AddWithValue(reason);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            await reader.ReadAsync(ct);
+            var retiredAt = reader.GetFieldValue<DateTimeOffset>(0);
+            await reader.CloseAsync();
+            await tx.CommitAsync(ct);
+            return Results.Ok(new ResidueProfileRetirement(id, profile.Code, profile.CompanyId, reason, actor, retiredAt));
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            return Conflict("Profile series is already retired.");
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+        {
+            return Results.Forbid();
+        }
+    }
+
+    private static async Task<IResult> PublishAsync(ResidueProfileVersion request, HttpContext http,
         AppDbContext db, TimeProvider clock, CancellationToken ct)
     {
         if (!Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var actor)) return Results.Forbid();
         var now = clock.GetUtcNow();
         var errors = ValidateRule(request, now);
+        if (request.Retirement is not null) errors["retirement"] = ["Retirement metadata is server-owned."];
         if (errors.Count != 0) return Results.ValidationProblem(errors);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
@@ -97,6 +161,7 @@ public static class ResidueRuleEndpoints
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["substanceId"] = ["Substance and commodity must exist."] });
         var versions = await ReadVersionsAsync(connection, transaction, request.CompanyId, ct);
         var prior = versions.Where(x => x.Code == request.Code && x.CompanyId == request.CompanyId).ToArray();
+        if (prior.Any(x => x.Retirement is not null)) return Conflict("Retired profile series cannot be republished.");
         if (versions.Any(x => x.Code == request.Code && x.CompanyId is null &&
             (x.SubstanceId != request.SubstanceId || x.Kind != request.Kind || x.CommodityId != request.CommodityId)))
             return Conflict("Company override must retain system profile substance, kind and commodity applicability.");
@@ -105,6 +170,14 @@ public static class ResidueRuleEndpoints
             request.SupersedesId is { } previous && !prior.Any(x => x.Id == previous && x.SubstanceId == request.SubstanceId && x.Kind == request.Kind) ||
             prior.Any(x => x.SupersedesId == request.SupersedesId && request.SupersedesId is not null))
             return Conflict("Rule ID/version or supersession conflicts with published history.");
+        var predecessor = request.SupersedesId is { } predecessorId
+            ? prior.SingleOrDefault(x => x.Id == predecessorId)
+            : prior.OrderByDescending(x => x.VersionNo).FirstOrDefault();
+        if (predecessor is not null && request.Steps.Any(step => predecessor.Steps.Any(old =>
+                SamePath(old, step) && old.Id != step.Id)) ||
+            request.Steps.Any(step => prior.Any(version => version.Steps.Any(old =>
+                old.Id == step.Id && !SamePath(old, step)))))
+            return Conflict("Unchanged processing paths must retain their step IDs; step IDs cannot be reused for different paths.");
         // The protected SQL publisher compares PublishedAt with its own clock.
         // Use that database clock so a small API/DB clock skew cannot reject a
         // newly reviewed rule as future-published.
@@ -134,48 +207,89 @@ public static class ResidueRuleEndpoints
         return Results.Created($"/api/residue-rules/{rule.Id}", rule);
     }
 
-    internal static Dictionary<string, string[]> ValidateRule(ResidueRuleVersion request, DateTimeOffset now)
+    internal static Dictionary<string, string[]> ValidateRule(ResidueProfileVersion request, DateTimeOffset now)
     {
         var errors = ResidueReview.Validate(request.Id, request.EffectiveFrom, request.EffectiveTo,
             request.EvidenceRef, request.ApplicabilityStatement, request.ReviewedBy, request.ReviewAuthority,
             request.ReviewedAt, now);
         if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 100 || request.VersionNo < 1)
             errors["code"] = ["Code (maximum 100 characters) and positive version are required."];
-        if (request.SubstanceId == Guid.Empty || request.DecimalPlaces is < 0 or > 18 || request.Unit != "mg/kg")
-            errors["unit"] = ["Explicit substance, mg/kg concentration unit and approved precision 0..18 required."];
-        if (request.CommodityId is null || request.CommodityId == Guid.Empty)
-            errors["commodityId"] = ["Explicit Catalog commodity applicability required; no universal default."];
+        if (request.Kind != "FLOW" || request.SchemaVersion != 2 || !request.AsReceivedConfirmed)
+            errors["kind"] = ["Schema 2 FLOW profile with as-received confirmation required."];
+        if (request.SubstanceId == Guid.Empty || request.CommodityId is null || request.CommodityId == Guid.Empty ||
+            request.DecimalPlaces is < 0 or > 18 || request.Unit != "mg/kg" || string.IsNullOrWhiteSpace(request.ResidueDefinition))
+            errors["applicability"] = ["Substance, commodity, residue definition, mg/kg and precision 0..18 required."];
         if (request.CompanyId == Guid.Empty)
             errors["companyId"] = ["Use null for system scope or an explicit owning company."];
-        if (new[] { request.ResidueDefinition, request.InputStage, request.OutputStage, request.InputBasis, request.OutputBasis }.Any(string.IsNullOrWhiteSpace))
-            errors["applicability"] = ["Explicit residue definition, stages and analytical bases required."];
-        if (request.Kind == "INTERPRETATION")
+        if (request.Laboratory is null || request.Steps is null)
         {
-            if (request.InterpretationKind is not ("NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY" or "BELOW_LIMIT" or "ND") ||
-                string.IsNullOrWhiteSpace(request.AnalyticalMethod) || request.InputBasis != request.OutputBasis ||
-                request.InputStage != request.OutputStage || request.FactorLower is not null || request.FactorUpper is not null ||
-                request.FactorSemantics is not null || request.HomogeneousMixing ||
-                (request.InterpretationKind == "ND" ? request.NdThresholdKind is not ("REPORTING_THRESHOLD" or "LOD" or "LOQ") : request.NdThresholdKind is not null))
-                errors["interpretationKind"] = ["Reviewed interpretation requires exact method, unchanged basis/stage and explicit ND threshold policy; no processing factors."];
+            errors["profile"] = ["Laboratory and steps arrays are required."];
+            return errors;
         }
-        else if (request.Kind == "PROCESS")
+        if (request.Laboratory.Count == 0 && request.Steps.Count == 0)
+            errors["profile"] = ["At least one laboratory entry or processing step required."];
+        var methods = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var lab in request.Laboratory)
         {
-            if (!ResidueReview.Interval(request.FactorLower, request.FactorUpper) ||
-                request.FactorSemantics is not ("STEP_CONCENTRATION" or "CUMULATIVE_CONCENTRATION") ||
-                string.IsNullOrWhiteSpace(request.Process) || string.IsNullOrWhiteSpace(request.OutputFraction) ||
-                string.IsNullOrWhiteSpace(request.Conditions) || request.InterpretationKind is not null || request.NdThresholdKind is not null)
-                errors["factor"] = ["Reviewed nonnegative concentration-factor interval, semantics, process, fraction and conditions required."];
+            if (lab is null || string.IsNullOrWhiteSpace(lab.AnalyticalMethod) || !methods.Add(lab.AnalyticalMethod) ||
+                lab.NumericInterpretationKind is not (null or "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY") ||
+                lab.NdThresholdKind is not (null or "REPORTING_THRESHOLD" or "LOD" or "LOQ") ||
+                (lab.NumericInterpretationKind is null && !lab.BelowLimit && lab.NdThresholdKind is null) ||
+                (lab.NumericInterpretationKind == "NUMERIC_RELATIVE_UNCERTAINTY"
+                    ? !ResidueReview.Number(lab.RelativeUncertaintyPercent)
+                    : lab.RelativeUncertaintyPercent is not null || lab.RelativeUncertaintyAtZero))
+                errors["laboratory"] = ["Each exact method must be unique and enable valid reviewed result forms and uncertainty settings."];
         }
-        else errors["kind"] = ["Use INTERPRETATION or PROCESS."];
-        if (request.InterpretationKind == "NUMERIC_RELATIVE_UNCERTAINTY" && request.Kind == "INTERPRETATION")
+        var ids = new HashSet<Guid>();
+        var paths = new Dictionary<(string, string, string, string), HashSet<string>>();
+        foreach (var step in request.Steps)
         {
-            if (!ResidueReview.Number(request.RelativeUncertaintyPercent))
-                errors["relativeUncertaintyPercent"] = ["Explicit nonnegative exact percentage required; 10 means 10%, not a fraction."];
+            if (step is null) { errors["steps"] = ["Processing steps cannot be null."]; continue; }
+            if (step.Id == Guid.Empty || !ids.Add(step.Id) || !SupportedPath(step) ||
+                string.IsNullOrWhiteSpace(step.Conditions) || !ResidueReview.Interval(step.FactorLower, step.FactorUpper) ||
+                step.FactorSemantics is not ("STEP_CONCENTRATION" or "CUMULATIVE_CONCENTRATION") ||
+                (step.FactorSemantics == "STEP_CONCENTRATION" ? step.AnchorStage is not null : !SupportedAnchor(step)))
+                errors["steps"] = ["Each step requires a unique ID, supported path and anchor, reviewed conditions and valid exact factor interval."];
+            var key = (step.Process, step.InputStage, step.OutputStage, step.OutputFraction);
+            if (!paths.TryGetValue(key, out var conditions)) paths[key] = conditions = new(StringComparer.Ordinal);
+            if (step.Conditions is null || !conditions.Add(step.Conditions) ||
+                conditions.Count > 1 && conditions.Contains("UNCONDITIONAL"))
+                errors["steps"] = ["Processing rows must not overlap for the same physical path."];
         }
-        else if (request.RelativeUncertaintyPercent is not null || request.RelativeUncertaintyAtZero)
-            errors["relativeUncertaintyPercent"] = ["Relative settings apply only to NUMERIC_RELATIVE_UNCERTAINTY interpretation."];
         return errors;
     }
+
+    private static bool SamePath(ResidueProcessStep a, ResidueProcessStep b) =>
+        a.Process == b.Process && a.InputStage == b.InputStage && a.OutputStage == b.OutputStage &&
+        a.OutputFraction == b.OutputFraction && a.Conditions == b.Conditions;
+
+    private static bool SupportedPath(ResidueProcessStep step)
+    {
+        var rice = step.InputStage is "HEAD_RICE" or "BROKEN_RICE" or "BLENDED_RICE";
+        var material = step.InputStage is "RAW_PADDY" or "DRIED_PADDY" or "HEAD_RICE" or "BROKEN_RICE" or "BRAN" or "HUSK" or "BLENDED_RICE";
+        return step.Process switch
+        {
+            "DRYING" => step.InputStage == "RAW_PADDY" && step.OutputStage == "DRIED_PADDY" && step.OutputFraction == "DRIED_PADDY",
+            "MILLING" => step.InputStage == "DRIED_PADDY" && step.OutputStage == step.OutputFraction && step.OutputStage is "HEAD_RICE" or "BROKEN_RICE" or "BRAN" or "HUSK",
+            "BLENDING" => rice && step.OutputStage == "BLENDED_RICE" && step.OutputFraction == "BLENDED_RICE",
+            "BAGGING" => rice && step.OutputStage == "BAGGED_RICE" && step.OutputFraction == step.InputStage,
+            "MERGE" or "CUSTODY_INGRESS" or "CUSTODY_WITHDRAW" => step.InputStage == step.OutputStage &&
+                (material && step.OutputFraction == step.InputStage || step.InputStage == "BAGGED_RICE" &&
+                    step.OutputFraction is "HEAD_RICE" or "BROKEN_RICE" or "BLENDED_RICE"),
+            _ => false
+        };
+    }
+
+    private static bool SupportedAnchor(ResidueProcessStep step) => step.AnchorStage switch
+    {
+        "RAW_PADDY" => true,
+        "DRIED_PADDY" => step.InputStage is not "RAW_PADDY",
+        "HEAD_RICE" or "BROKEN_RICE" => step.AnchorStage == step.InputStage || step.InputStage is "BLENDED_RICE" or "BAGGED_RICE",
+        "BRAN" or "HUSK" => step.AnchorStage == step.InputStage,
+        "BLENDED_RICE" => step.InputStage is "BLENDED_RICE" or "BAGGED_RICE",
+        "BAGGED_RICE" => step.InputStage == "BAGGED_RICE",
+        _ => false
+    };
 
     private static async Task<IResult> ListAsync(HttpContext http, AppDbContext db, CancellationToken ct)
     {
@@ -199,18 +313,32 @@ public static class ResidueRuleEndpoints
     }
 
 
-    internal static async Task<List<ResidueRuleVersion>> ReadVersionsAsync(NpgsqlConnection connection,
+    internal static async Task<List<ResidueProfileVersion>> ReadVersionsAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid? companyId, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand("""
-            SELECT payload::text FROM grainledger.catalog_residue_rule_versions
-            WHERE company_id IS NULL OR company_id=$1 ORDER BY code,company_id NULLS FIRST,version_no
+            SELECT r.payload::text, t.profile_id, t.reason, t.retired_by, t.retired_at
+            FROM grainledger.catalog_residue_rule_versions r
+            LEFT JOIN grainledger.catalog_residue_rule_retirements t ON t.code=r.code AND t.company_id IS NOT DISTINCT FROM r.company_id
+            WHERE (r.company_id IS NULL OR r.company_id=$1)
+                AND r.payload->>'Kind'='FLOW' AND r.payload->>'SchemaVersion'='2'
+            ORDER BY r.code,r.company_id NULLS FIRST,r.version_no
             """, connection, tx);
         command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)companyId ?? DBNull.Value });
-        var result = new List<ResidueRuleVersion>();
+        var result = new List<ResidueProfileVersion>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(JsonSerializer.Deserialize<ResidueRuleVersion>(reader.GetString(0))!);
+        while (await reader.ReadAsync(ct)) result.Add(ReadRule(reader));
         return result;
+    }
+
+    internal static ResidueProfileVersion ReadRule(NpgsqlDataReader reader)
+    {
+        var rule = JsonSerializer.Deserialize<ResidueProfileVersion>(reader.GetString(0))!;
+        return reader.IsDBNull(1) ? rule : rule with
+        {
+            Retirement = new ResidueProfileRetirement(reader.GetGuid(1), rule.Code, rule.CompanyId,
+                reader.GetString(2), reader.GetGuid(3), reader.GetFieldValue<DateTimeOffset>(4))
+        };
     }
 
     private static IResult Conflict(string title) => Results.Problem(statusCode: 409, title: title,
