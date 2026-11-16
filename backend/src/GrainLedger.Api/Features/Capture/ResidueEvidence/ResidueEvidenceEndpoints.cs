@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using GrainLedger.Api.Features.Catalogs;
 using GrainLedger.Api.Features.Identity;
+using GrainLedger.Api.Features.Ledger;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -49,8 +50,10 @@ public static class ResidueEvidenceEndpoints
             request.SupportingResultIds.Any(x => x == Guid.Empty) || request.SupportingResultIds.Distinct().Count() != request.SupportingResultIds.Length)
             errors["supportingResultIds"] = ["Supply distinct confirmed supporting result IDs, or an empty array for external reviewed evidence."];
         if (request.ProductStage != "RAW_PADDY" || request.ProductIdentity != "RAW_PADDY" ||
-            string.IsNullOrWhiteSpace(request.MaterialBasis) || string.IsNullOrWhiteSpace(request.ResidueDefinition))
-            errors["materialBasis"] = ["Explicit procurement RAW_PADDY material, analytical basis and residue definition required."];
+            string.IsNullOrWhiteSpace(request.ResidueDefinition))
+            errors["productStage"] = ["Explicit procurement RAW_PADDY material and residue definition required."];
+        if (request.SchemaVersion != 2 || !request.AsReceivedConfirmed || string.IsNullOrWhiteSpace(request.ProfileCode))
+            errors["profileCode"] = ["Schema 2, as-received confirmation and an adopted profile code are required."];
         if (!ResidueReview.Interval(request.Lower, request.Upper) || request.Unit != "mg/kg" || request.DecimalPlaces is < 0 or > 18)
             errors["interval"] = ["Reviewed nonnegative finite interval, mg/kg and approved precision 0..18 required. MRL or observed maximum alone does not establish a fallback bound."];
         if (request.Precedence is not ("DIRECT_FIRST" or "GROUP_FIRST" or "UNTESTED_ONLY"))
@@ -79,6 +82,10 @@ public static class ResidueEvidenceEndpoints
             .Where(x => members.Contains(x.SourceId)).Select(x => x.ResultId).ToHashSet();
         if (request.SupportingResultIds.Any(id => !support.Contains(id)))
             return Invalid("supportingResultIds", "Support must reference confirmed same-substance results from explicit group members.");
+        var sourceProfiles = await ResolveProfilesAsync(connection, transaction, request.CompanyId,
+            request.SubstanceId, request.ProfileCode!, request.ResidueDefinition, request.SourceIds, now, ct);
+        if (sourceProfiles is null)
+            return Invalid("profileCode", "Each source requires one effective adopted profile with matching commodity and residue definition at receipt.");
         var history = await ResidueEvidenceReader.ReadPayloadsAsync<ResidueSourceGroupVersion>(connection, transaction,
             "residue_source_group_versions", request.CompanyId, now, ct);
         var prior = history.Where(x => x.Code == request.Code).ToArray();
@@ -90,7 +97,8 @@ public static class ResidueEvidenceEndpoints
         var databaseNow = await db.Database.SqlQueryRaw<DateTimeOffset>(
             "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
         var itemToPublish = request with { PublishedBy = actor, PublishedAt = databaseNow,
-            SourceIds = request.SourceIds.Order().ToArray(), SupportingResultIds = request.SupportingResultIds.Order().ToArray() };
+            SourceIds = request.SourceIds.Order().ToArray(), SupportingResultIds = request.SupportingResultIds.Order().ToArray(),
+            ProfileBindings = sourceProfiles.OrderBy(x => x.SourceId).ToArray() };
         try
         {
             await PublishAsync(connection, transaction, "publish_residue_group", actor, itemToPublish, ct);
@@ -110,8 +118,10 @@ public static class ResidueEvidenceEndpoints
         var errors = Review(request.Id, request.EffectiveFrom, request.EffectiveTo, request.EvidenceRef,
             request.ApplicabilityStatement, request.ReviewedBy, request.ReviewAuthority, request.ReviewedAt, now);
         if (request.CompanyId == Guid.Empty || request.SourceId == Guid.Empty || request.SubstanceId == Guid.Empty || request.SelectedResultId == Guid.Empty ||
-            string.IsNullOrWhiteSpace(request.MaterialBasis) || string.IsNullOrWhiteSpace(request.ResidueDefinition))
-            errors["selection"] = ["Explicit company/source/substance/result, material basis and residue definition required."];
+            string.IsNullOrWhiteSpace(request.ResidueDefinition))
+            errors["selection"] = ["Explicit company/source/substance/result and residue definition required."];
+        if (request.SchemaVersion != 2 || !request.AsReceivedConfirmed || string.IsNullOrWhiteSpace(request.ProfileCode))
+            errors["profileCode"] = ["Schema 2, as-received confirmation and an adopted profile code are required."];
         if (request.SupersededResultIds is null || request.SupersededResultIds.Length > 1000 ||
             request.SupersededResultIds.Contains(request.SelectedResultId) || request.SupersededResultIds.Any(x => x == Guid.Empty) ||
             request.SupersededResultIds.Distinct().Count() != request.SupersededResultIds.Length)
@@ -136,6 +146,15 @@ public static class ResidueEvidenceEndpoints
             return Invalid("absoluteUncertainty", "Normalized uncertainty requires numeric result with retained raw uncertainty evidence.");
         if (request.ReportingThreshold is not null && selectedRaw.ResultKind != "NOT_DETECTED")
             return Invalid("reportingThreshold", "Explicit reporting threshold applies only to NOT_DETECTED result.");
+        var bindings = await ResolveProfilesAsync(connection, transaction, request.CompanyId, request.SubstanceId,
+            request.ProfileCode!, request.ResidueDefinition, [request.SourceId], now, ct,
+            profile => ResidueConcentration.CanonicalUnit(selectedRaw.Unit) == profile.Unit &&
+                profile.Laboratory.Any(lab => lab.AnalyticalMethod == selectedRaw.Method &&
+                    (selectedRaw.ResultKind == "NUMERIC" && lab.NumericInterpretationKind is "NUMERIC_ABSOLUTE_UNCERTAINTY" or "NUMERIC_RELATIVE_UNCERTAINTY" ||
+                     selectedRaw.ResultKind == "BELOW_LIMIT" && lab.BelowLimit ||
+                     selectedRaw.ResultKind == "NOT_DETECTED" && lab.NdThresholdKind is not null)));
+        if (bindings is null)
+            return Invalid("profileCode", "Source requires exactly one compatible adopted profile at receipt, matching the requested code and residue definition.");
         var history = await ResidueEvidenceReader.ReadPayloadsAsync<ResidueReportSelection>(connection, transaction,
             "residue_report_selections", request.CompanyId, now, ct);
         if (history.Any(x => x.Id == request.Id) || request.SupersedesId is { } old && !history.Any(x => x.Id == old &&
@@ -145,8 +164,8 @@ public static class ResidueEvidenceEndpoints
         var databaseNow = await db.Database.SqlQueryRaw<DateTimeOffset>(
             "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
         var item = request with { PublishedBy = actor, PublishedAt = databaseNow, SupersededResultIds = request.SupersededResultIds.Order().ToArray(),
-            BindingReportId = null, ProfileRuleId = null, ProfileSettingId = null,
-            BindingRequest = null, BindingFingerprint = null, BindingNote = null };
+            BindingReportId = null, ProfileRuleId = bindings[0].ProfileRuleId, ProfileSettingId = bindings[0].ProfileSettingId,
+            LaboratoryMethod = selectedRaw.Method, BindingRequest = null, BindingFingerprint = null, BindingNote = null };
         try
         {
             await PublishAsync(connection, transaction, "publish_residue_selection", actor, item, ct);
@@ -157,6 +176,46 @@ public static class ResidueEvidenceEndpoints
             return Conflict("Selection ID or reviewed supersession conflicts with history.");
         }
         return Results.Created($"/api/residue-report-selections/{request.Id}", item);
+    }
+
+    private static async Task<ResidueProfileBinding[]?> ResolveProfilesAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, Guid companyId, Guid substanceId,
+        string profileCode, string residueDefinition, Guid[] sourceIds, DateTimeOffset snapshotAt, CancellationToken ct,
+        Func<ResidueProfileVersion, bool>? laboratoryCompatible = null)
+    {
+        var sources = new List<(Guid Id, DateTimeOffset ReceivedAt, Guid CommodityId)>();
+        await using (var command = new NpgsqlCommand("""
+            SELECT sl.id, p.received_at, COALESCE(mapping.catalog_commodity_id, l.commodity_id)
+            FROM grainledger.capture_source_lots sl
+            JOIN grainledger.capture_procurement_items i ON i.id=sl.procurement_item_id AND i.company_id=sl.company_id
+            JOIN grainledger.capture_procurements p ON p.id=i.procurement_id AND p.company_id=i.company_id
+            JOIN grainledger.ledger_lots l ON l.id=sl.lot_id AND l.owner_id=sl.company_id
+            LEFT JOIN grainledger.ledger_catalog_commodities mapping ON mapping.ledger_commodity_id=l.commodity_id
+            WHERE sl.company_id=$1 AND sl.id=ANY($2)
+            """, connection, transaction))
+        {
+            command.Parameters.AddWithValue(companyId);
+            command.Parameters.AddWithValue(sourceIds);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                sources.Add((reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1), reader.GetGuid(2)));
+        }
+        if (sources.Count != sourceIds.Length) return null;
+        var policy = await new ResiduePolicyReader().ReadAsync(connection, transaction, companyId, [substanceId], snapshotAt, ct);
+        var bindings = new List<ResidueProfileBinding>(sources.Count);
+        foreach (var source in sources)
+        {
+            var resolution = ResidueEvidenceResolver.SelectPolicy(policy, companyId, source.ReceivedAt,
+                source.CommodityId, substanceId, laboratoryCompatible is null ? profileCode : null);
+            var compatible = laboratoryCompatible is null
+                ? resolution.Rules
+                : resolution.Rules.Where(x => laboratoryCompatible(x.Rule)).ToArray();
+            if (resolution.Reason is not null || compatible.Count != 1 ||
+                compatible[0].Rule.Code != profileCode || compatible[0].Rule.ResidueDefinition != residueDefinition)
+                return null;
+            bindings.Add(new(source.Id, compatible[0].Rule.Id, compatible[0].Setting.Id));
+        }
+        return bindings.ToArray();
     }
 
     private sealed record ConfirmedResult(Guid ResultId, Guid SourceId);

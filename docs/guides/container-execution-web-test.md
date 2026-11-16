@@ -2,9 +2,11 @@
 
 Dùng [plan hiện hành](../plans/container-execution-plan-2026-11-13.md) và [API contract](../api/container-execution-api.md). Đây là hướng dẫn thực hiện, không tự chứng minh đã chạy manual browser E2E hoặc nghiệm thu staging.
 
+**Bản chi tiết cập nhật 16/11/2026:** [báo cáo 30 nhóm ca test web container](../reports/container-web-test-report-2026-11-16.md), gồm chuẩn bị fixture, tạo order/proposal/approve, đối chiếu stock/reservation, loading/CLOSE, dossier/trace, blockers, retry và phân quyền. Tất cả ca manual trong báo cáo bắt đầu ở NOT RUN.
+
 ## Điều kiện
 
-- Backend/web cùng phiên bản feature; database đã được chủ môi trường phê duyệt và cài migration monolith qua `20261113000100_ContainerExecution` cùng finite runtime grants. Không tự chạy migration/seed trên Supabase để thử theo hướng dẫn.
+- Backend/web cùng phiên bản feature; database đã được chủ môi trường phê duyệt và cài migration monolith qua `20261113000100_ContainerExecution` cùng finite runtime grants, và đủ các migration/profile contracts của code dev đã tích hợp (whole-flow schema 2/retirement). Không tự chạy migration/seed trên Supabase để thử theo hướng dẫn.
 - Dùng database thử nghiệm cô lập hoặc môi trường test được phép ghi. Một ExportStaff và một CustomerManager cùng công ty; công ty B để kiểm quyền.
 - Có order/target **10 kg**, phương án **DIRECT_STOCK** và CM đã approve/reserve đúng 10 kg thành phẩm. Lab/rules/adoption/MRL/margin/quality phải đủ căn cứ để preview/approve PASS; không nhập PASS giả.
 - DIRECT_STOCK có thể là thành phẩm đã blend **trước** khi lập phương án. Plan chọn BLEND_INPUT_STOCK cần luồng thực thi của bên blend bàn giao, hiện sẽ thấy blocker rõ.
@@ -21,7 +23,7 @@ Dùng [plan hiện hành](../plans/container-execution-plan-2026-11-13.md) và [
 7. Loading tiếp **6** kg bằng version mới. Actual loaded = **10.000000**, Remaining = **0.000000**, reservation hết quota. Hai dòng/lần trong manifest không bị cộng cùng original output/draft.
 8. Refresh closure checks. Đủ target + number/seal + current assessment/restrictions thì PASS. Bấm **Close container** và xác nhận. Status thành CLOSED, manifest cố định; stock không bị trừ thêm.
 9. Mở **Read closure dossier**, tải JSON. ExportStaff nhận view đã bỏ source composition/evidence; CM nhận bản đầy đủ. Không coi JSON này là chứng thư pháp lý/PDF đã được duyệt.
-10. Mở **Read container history**, kiểm actor/time và các sự kiện; phân trang nếu có nhiều dòng. Container đã đóng không còn thao tác loading/metadata thông thường.
+10. Mở **Read container history**, kiểm loại sự kiện/thời điểm; phân trang nếu có nhiều dòng. Actor/request chi tiết đọc trong response history hoặc dossier; UI danh sách hiện tại chỉ hiện kind/time. Container đã đóng không còn thao tác loading/metadata thông thường.
 
 ## Luồng 2 — Truy xuất actual source ↔ container
 

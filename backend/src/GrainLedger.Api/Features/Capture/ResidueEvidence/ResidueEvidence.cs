@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Npgsql;
 
 namespace GrainLedger.Api.Features.Capture;
@@ -8,22 +9,28 @@ public sealed record ResidueSource(Guid SourceId, Guid LotId, Guid CompanyId, Da
 public sealed record ResidueLabEvidence(Guid SourceId, Guid LotId, Guid ReportId, Guid ResultSetId,
     Guid ResultId, Guid AssociationId, Guid SubstanceId, string ResultKind, string? NumericValue,
     string? Unit, string? Lod, string? Loq, string? Method, string? Uncertainty, DateTimeOffset ConfirmedAt,
-    Guid? SelectionId, string? MaterialBasis, string? ResidueDefinition, string? AbsoluteUncertainty,
+    Guid? SelectionId, string? ResidueDefinition, string? AbsoluteUncertainty,
     string? ReportingThreshold, bool Selected);
+public sealed record ResidueProfileBinding(Guid SourceId, Guid ProfileRuleId, Guid ProfileSettingId);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ResidueSourceGroupVersion(Guid Id, Guid CompanyId, string Code, int VersionNo,
-    Guid SubstanceId, Guid[] SourceIds, string ProductStage, string ProductIdentity, string MaterialBasis,
+    Guid SubstanceId, Guid[] SourceIds, string ProductStage, string ProductIdentity,
     string ResidueDefinition, string Lower, string Upper, string Unit, string Precedence,
     Guid[] SupportingResultIds, DateTimeOffset EffectiveFrom, DateTimeOffset? EffectiveTo, Guid? SupersedesId,
     string EvidenceRef, string ApplicabilityStatement, string ReviewedBy, string ReviewAuthority,
-    DateTimeOffset ReviewedAt, Guid? PublishedBy = null, DateTimeOffset? PublishedAt = null, int DecimalPlaces = -1);
+    DateTimeOffset ReviewedAt, Guid? PublishedBy = null, DateTimeOffset? PublishedAt = null, int DecimalPlaces = -1,
+    int SchemaVersion = 0, bool AsReceivedConfirmed = false, string? ProfileCode = null,
+    ResidueProfileBinding[]? ProfileBindings = null);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ResidueReportSelection(Guid Id, Guid CompanyId, Guid SourceId, Guid SubstanceId,
-    Guid SelectedResultId, Guid[] SupersededResultIds, string MaterialBasis, string ResidueDefinition,
+    Guid SelectedResultId, Guid[] SupersededResultIds, string ResidueDefinition,
     string? AbsoluteUncertainty, string? ReportingThreshold, DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveTo, Guid? SupersedesId, string EvidenceRef, string ApplicabilityStatement,
     string ReviewedBy, string ReviewAuthority, DateTimeOffset ReviewedAt,
     Guid? PublishedBy = null, DateTimeOffset? PublishedAt = null,
     Guid? BindingReportId = null, Guid? ProfileRuleId = null, Guid? ProfileSettingId = null,
-    string? BindingRequest = null, string? BindingFingerprint = null, string? BindingNote = null);
+    string? BindingRequest = null, string? BindingFingerprint = null, string? BindingNote = null,
+    int SchemaVersion = 0, bool AsReceivedConfirmed = false, string? ProfileCode = null, string? LaboratoryMethod = null);
 public sealed record ResidueEvidenceSnapshot(IReadOnlyList<ResidueSource> Sources,
     IReadOnlyList<ResidueLabEvidence> Results, IReadOnlyList<ResidueSourceGroupVersion> Groups,
     IReadOnlyList<ResidueReportSelection> Selections);
@@ -91,7 +98,7 @@ public sealed class ResidueEvidenceReader
                 results.Add(new(source, reader.GetGuid(1), reader.GetGuid(2), reader.GetGuid(3), resultId,
                     reader.GetGuid(5), substance, reader.GetString(7), Text(8), Text(9), Text(10), Text(11),
                     Text(12), Text(13), reader.GetFieldValue<DateTimeOffset>(14), selected?.Id,
-                    selected?.MaterialBasis, selected?.ResidueDefinition, selected?.AbsoluteUncertainty,
+                    selected?.ResidueDefinition, selected?.AbsoluteUncertainty,
                     selected?.ReportingThreshold, selected?.SelectedResultId == resultId));
                 string? Text(int index) => reader.IsDBNull(index) ? null : reader.GetString(index);
             }
@@ -110,10 +117,11 @@ public sealed class ResidueEvidenceReader
             : """
                AND substance_id=ANY($3) AND code IN (
                    SELECT code FROM grainledger.capture_residue_source_group_versions
-                   WHERE company_id=$1 AND published_at <= $2 AND substance_id=ANY($3) AND source_ids && $4)
+                   WHERE company_id=$1 AND published_at <= $2 AND payload->>'SchemaVersion' = '2'
+                       AND substance_id=ANY($3) AND source_ids && $4)
               """;
         // Return full group version chains: supersession can explicitly remove membership.
-        await using var command = new NpgsqlCommand($"SELECT payload::text FROM grainledger.capture_{table} WHERE company_id=$1 AND published_at <= $2{scope} ORDER BY published_at,id", connection, transaction);
+        await using var command = new NpgsqlCommand($"SELECT payload::text FROM grainledger.capture_{table} WHERE company_id=$1 AND published_at <= $2 AND payload->>'SchemaVersion' = '2'{scope} ORDER BY published_at,id", connection, transaction);
         command.Parameters.AddWithValue(companyId); command.Parameters.AddWithValue(snapshotAt);
         if (sourceIds is not null)
         {

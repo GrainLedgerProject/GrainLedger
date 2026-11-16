@@ -153,8 +153,11 @@ public static partial class ExportModule
                 CultureInfo.InvariantCulture), publishedYield.EvidenceId.ToString());
         // Confirmed per-lot quality observations remain unavailable. Even
         // published yield and coverage policies cannot authorize PASS alone.
+        var assessmentBounds = request.Mode == "DIRECT_STOCK" && assessmentRule is not null
+            ? DirectStockResidueAssessment.ConservativeBounds(previews, assessmentRule.RequiredSubstances)
+            : hypothetical?.Results;
         var assessment = BlendAssessment.Evaluate(request.Mode, plan.TargetMassKg, selected,
-            yieldRule, assessmentRule, mrl, hypothetical?.Results, specification, qualityRules, []);
+            yieldRule, assessmentRule, mrl, assessmentBounds, specification, qualityRules, []);
         return Results.Ok(new { status = group.Status, group.Findings,
             inputMassKg = ExportRules.Text(group.InputMassKg), scopeRevision = planRevision,
             residueSnapshotAt = residueSelection.SnapshotAt, residue = previews,

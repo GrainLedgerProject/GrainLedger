@@ -57,6 +57,8 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## Reports & Reviews (`docs/reports/`)
 
+- [Container end-to-end business flow (2026-11-16)](reports/container-end-to-end-business-flow-2026-11-16.md): luồng chính từ export order qua duyệt, blend, bàn giao thành phẩm, loading, CLOSE và trace; ai làm và điểm cần nối tiếp
+- [Container web test report (2026-11-16)](reports/container-web-test-report-2026-11-16.md): 30 nhóm ca manual với dữ liệu đầu vào, từng bước web, stock/reservation reconciliation, blockers, retry, scope và các nhánh chưa hỗ trợ; checklist, chưa phải kết quả nghiệm thu
 - [Admin Capture Enhancements Report](reports/admin-capture-enhancements-report.md): implementation review and verification report
 - [Authentication QA Report (2026-10-10)](reports/auth-qa-report-2026-10-10.md): auth flow audit, session management, and test evidence
 - [Traceability Feasibility Review (2026-10-17)](reports/traceability-feasibility-review-2026-10-17.md): graph engine options and performance evaluation

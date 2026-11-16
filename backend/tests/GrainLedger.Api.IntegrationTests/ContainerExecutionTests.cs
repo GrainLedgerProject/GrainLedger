@@ -92,12 +92,12 @@ public sealed class ContainerExecutionTests(ApiFactory factory) : IClassFixture<
             versionNo = 2,
             measuredValue = "15",
             unit = "%",
-            measuredAt = DateTimeOffset.UtcNow,
+            measuredAt = DateTimeOffset.UtcNow.AddSeconds(-10),
             evidenceId = f.Stock.EvidenceId,
             reportReference = "Synthetic later QC",
             reviewedBy = "Reviewer",
             reviewAuthority = "Authority",
-            reviewedAt = DateTimeOffset.UtcNow,
+            reviewedAt = DateTimeOffset.UtcNow.AddSeconds(-5),
             subjectConfirmed = true
         });
         var blocked = await f.Export.PostAsJsonAsync(f.Route + "/loads", f.Load(1, "4"));

@@ -17,9 +17,9 @@ const json = (value: unknown) => new Response(JSON.stringify(value), { headers: 
 const reviewRow = {
   input: { id: 'binding-1', resultId: 'result-one', sourceId: 'source-one', absoluteUncertainty: null, reportingThreshold: null, supersededResultIds: [], supersedesId: null, note: null, previewFingerprint: 'server-fingerprint' },
   label: 'R-001 · section 1 · Analyte A · 0.12', rawUncertainty: null,
-  profile: { code: 'Reviewed profile A', versionNo: 2, inputBasis: 'WHOLE', residueDefinition: 'Analyte A', evidenceRef: 'Scientific evidence A', applicabilityStatement: 'Reviewed method and material', reviewedBy: 'Original scientist', reviewAuthority: 'Scientific authority', reviewedAt: '2026-01-01T00:00:00Z' },
+  profile: { code: 'Reviewed profile A', versionNo: 2, residueDefinition: 'Analyte A', evidenceRef: 'Scientific evidence A', applicabilityStatement: 'Reviewed method and material', reviewedBy: 'Original scientist', reviewAuthority: 'Scientific authority', reviewedAt: '2026-01-01T00:00:00Z' },
   setting: { mode: 'SYSTEM_DEFAULT', versionNo: 1, reviewedBy: 'Company policy reviewer', reviewAuthority: 'Company authority', evidenceRef: 'Company adoption evidence' },
-  assessment: { lower: '0.10', upper: '0.14', unit: 'mg/kg', basis: 'WHOLE', reasons: [], provenance: [], rules: [], decimalPlaces: 3 },
+  assessment: { lower: '0.10', upper: '0.14', unit: 'mg/kg', reasons: [], provenance: [], rules: [], decimalPlaces: 3 },
   reasons: [] as string[], conflictingResults: [] as Array<{ resultId: string; label: string; selectionId: string | null }>, existingSelections: [] as Array<{ resultId: string; label: string; selectionId: string | null }>, published: false,
 };
 let reviewRows: unknown[];
@@ -34,7 +34,7 @@ beforeEach(() => {
     if (path === '/api/auth/csrf') return json({ token: 'csrf' });
     if (path === '/api/lab-reports/report-1/residue-review/preview') return json({ reportId: 'report-1', effectiveFrom: '2026-10-23T00:00:00Z', rows: confirmed ? [{ ...reviewRow, published: true }] : reviewRows });
     if (path === '/api/lab-reports/report-1/residue-review/confirm') { confirmed = true; return json({}); }
-    if (path === '/api/residue-report-selections/preview' && init?.method === 'POST') return json({ lower: '0.10', upper: '0.14', unit: 'mg/kg', basis: 'WHOLE', reasons: [], provenance: [], rules: [], decimalPlaces: 3 });
+    if (path === '/api/residue-report-selections/preview' && init?.method === 'POST') return json({ lower: '0.10', upper: '0.14', unit: 'mg/kg', reasons: [], provenance: [], rules: [], decimalPlaces: 3 });
     if ((path === '/api/residue-source-groups' || path === '/api/residue-report-selections') && init?.method !== 'POST') return json({ items: [] });
     if (path === '/api/residue-report-selections' && init?.method === 'POST') return json({});
     return json({ items: [], hasMore: false });
@@ -91,8 +91,11 @@ it('shows non-mutating server preview and clears it when proposed evidence chang
   expect(await screen.findByLabelText('Server residue preview')).toHaveTextContent('0.10–0.14 mg/kg');
   expect(await screen.findByLabelText('Server residue preview')).toHaveTextContent('Lab-reported result/uncertainty text: 0.12');
   expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/residue-report-selections/preview')).toHaveLength(1);
+  const previewRequest = fetchMock.mock.calls.find(([url]) => String(url) === '/api/residue-report-selections/preview');
+  expect(JSON.parse(String(previewRequest?.[1]?.body))).toMatchObject({ schemaVersion: 2, asReceivedConfirmed: false, profileCode: '' });
+  expect(JSON.parse(String(previewRequest?.[1]?.body))).not.toHaveProperty('materialBasis');
   expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === '/api/residue-report-selections' && init?.method === 'POST')).toHaveLength(0);
-  await user.type(within(screen.getByRole('group', { name: 'Record reviewed report-result evidence' })).getByLabelText('Material basis'), ' dry');
+  await user.type(within(screen.getByRole('group', { name: 'Record reviewed report-result evidence' })).getByLabelText('Adopted profile code'), 'PROFILE');
   expect(screen.queryByLabelText('Server residue preview')).not.toBeInTheDocument();
 });
 
@@ -101,17 +104,21 @@ it('prepares authoritative profile summary and confirms compatible rows once wit
   render(<ResidueEvidenceControls active allowed companyId="company-1" report={confirmedReport} />);
   expect(await screen.findByText('Reviewed profile A v2')).toBeVisible();
   expect(screen.getByText(/Ready for binding confirmation/)).toHaveTextContent('0.10–0.14 mg/kg');
-  screen.getAllByLabelText('Material basis').forEach(field => expect(field).not.toBeVisible());
+  expect(screen.queryByLabelText('Material basis')).not.toBeInTheDocument();
   await user.click(screen.getByText('Scientific review and applicability', { selector: 'summary' }));
   expect(screen.getByText(/Scientific reviewer: Original scientist/)).toBeVisible();
   expect(screen.getByRole('button', { name: 'Review and confirm compatible results', hidden: true })).not.toBeVisible();
   await user.click(screen.getByText('Resolve exceptions or bind after policy adoption', { selector: 'summary' }));
+  expect(screen.getByRole('button', { name: 'Review and confirm compatible results' })).toBeDisabled();
+  await user.click(within(screen.getByLabelText('Report residue review')).getByRole('checkbox', { name: /Concentrations are as received/ }));
+  await user.click(screen.getByRole('button', { name: 'Refresh result matches' }));
+  expect(await screen.findByText(/Ready for binding confirmation/)).toBeVisible();
   expect(screen.getByRole('button', { name: 'Review and confirm compatible results' })).toBeVisible();
   await user.click(screen.getByRole('button', { name: 'Review and confirm compatible results' }));
   const confirmation = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/residue-review/confirm'));
   expect(confirmation).toBeDefined();
   expect(JSON.parse(String(confirmation![1]?.body))).toEqual({
-    companyId: 'company-1', effectiveFrom: '2026-10-23T00:00:00Z', rows: [reviewRow.input],
+    companyId: 'company-1', asReceivedConfirmed: true, effectiveFrom: '2026-10-23T00:00:00Z', rows: [reviewRow.input],
   });
   expect(await screen.findByText(/Report bindings confirmed/)).toBeVisible();
   expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/residue-report-selections' && init?.method === 'POST')).toBe(false);
@@ -134,5 +141,22 @@ it('shows unresolved prerequisites and named conflicts; editing invalidates prev
   expect(screen.getByRole('button', { name: 'Refresh result matches' })).toBeEnabled();
   expect(screen.queryByLabelText('Unresolved prerequisites')).not.toBeInTheDocument();
   expect(confirm).toBeDisabled();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/residue-review/confirm'))).toBe(false);
+});
+
+it('shows scoped method mismatch guidance without enabling confirmation or suggesting it for other failures', async () => {
+  reviewRows = [
+    { ...reviewRow, profile: null, setting: null, assessment: null, reasons: ['Method mismatch. Reported method: LAB X. Eligible adopted profile methods: METHOD A, METHOD B'] },
+    { ...reviewRow, input: { ...reviewRow.input, resultId: 'result-two', sourceId: 'source-two' }, label: 'Other result', profile: null, setting: null, assessment: null, reasons: ["No compatible adopted profile for this result's unit, stage or result kind"] },
+  ];
+  const user = userEvent.setup();
+  render(<ResidueEvidenceControls active allowed companyId="company-1" report={confirmedReport} />);
+  const diagnostic = await screen.findByText('Method mismatch. Reported method: LAB X. Eligible adopted profile methods: METHOD A, METHOD B');
+  const firstRow = diagnostic.closest('article')!;
+  expect(within(firstRow).getByText('Compare the reported method with eligible adopted profile methods; no method is selected automatically.')).toBeVisible();
+  const otherRow = screen.getByText('Other result').closest('article')!;
+  expect(within(otherRow).queryByText(/no method is selected automatically/)).not.toBeInTheDocument();
+  await user.click(screen.getByText('Resolve exceptions or bind after policy adoption', { selector: 'summary' }));
+  expect(screen.getByRole('button', { name: 'Review and confirm compatible results' })).toBeDisabled();
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/residue-review/confirm'))).toBe(false);
 });

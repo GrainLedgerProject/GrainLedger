@@ -30,9 +30,12 @@ internal sealed class ContainerExecutionScenario : IDisposable
         var receipt = await stock.ReceiptAsync("20");
         var sample = await SampleAsync(stock, receipt);
         var (_, report) = await residue.ReportAsync(sample);
-        await residue.PublishRuleAsync(); await residue.SelectAsync(sample, report);
-        await residue.ProcessRuleAsync("DRYING", "RAW_PADDY", "DRIED_PADDY");
-        await residue.ProcessRuleAsync("MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
+        var profile = residue.RuleBody();
+        ResidueScenario.AddStep(profile, "DRYING", "RAW_PADDY", "DRIED_PADDY");
+        ResidueScenario.AddStep(profile, "MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
+        ResidueScenario.AddStep(profile, "MILLING", "DRIED_PADDY", "BROKEN_RICE", "0.5", "0.5");
+        ResidueScenario.AddStep(profile, "BLENDING", "HEAD_RICE", "BLENDED_RICE");
+        await residue.PublishRuleAsync(profile); await residue.SelectAsync(sample, report);
         var dried = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("DRYING", [(sample.LotId, "20")], [("DRIED_PADDY", "20")])));
         var lot = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("MILLING", [(dried, "20")], [("HEAD_RICE", "10"), ("BROKEN_RICE", "10")])));
         if (preBlended)
@@ -42,7 +45,6 @@ internal sealed class ContainerExecutionScenario : IDisposable
             await residue.SelectAsync(secondSample, secondReport);
             var secondDried = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("DRYING", [(secondSample.LotId, "20")], [("DRIED_PADDY", "20")])));
             var secondHead = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("MILLING", [(secondDried, "20")], [("HEAD_RICE", "10"), ("BROKEN_RICE", "10")])));
-            await residue.ProcessRuleAsync("BLENDING", "HEAD_RICE", "BLENDED_RICE");
             await residue.BlendCompatibilityAsync("HEAD_RICE");
             lot = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("BLENDING", [(lot, "10"), (secondHead, "10")], [("BLENDED_RICE", "20")])));
         }
@@ -87,7 +89,7 @@ internal sealed class ContainerExecutionScenario : IDisposable
             subjectConfirmed = true
         });
         await LedgerScenario.SendAsync(stock.Customer, HttpMethod.Post, "/api/blend-assessment-policies", new PublishBlendAssessmentPolicyRequest(
-            Guid.NewGuid(), market, stock.CatalogCommodityId, 1, DateTimeOffset.UtcNow.AddMinutes(-1), null, [residue.SubstanceId], "0.1", ResidueScenario.Basis,
+            Guid.NewGuid(), market, stock.CatalogCommodityId, 1, DateTimeOffset.UtcNow.AddMinutes(-1), null, [residue.SubstanceId], "0.1", "AS_RECEIVED",
             [new PublishedQualityPropagationRule(attribute, "%", "MASS_WEIGHTED_MEAN")], "Synthetic reviewed policy", "Synthetic reviewer", "Synthetic authority", DateTimeOffset.UtcNow.AddMinutes(-2)));
         var (user, session) = await factory.SeedUserAsync(Roles.ExportStaff, stock.OwnerId);
         var export = factory.CreateRealCookieClient(user, session); await LedgerScenario.CsrfAsync(export);

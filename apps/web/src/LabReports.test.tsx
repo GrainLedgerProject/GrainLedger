@@ -321,8 +321,8 @@ it('shows rejected confirmation inside dialog, allows correction and retry, and 
   };
   let confirmedReport = report;
   let confirmationAttempts = 0;
-  let firstConfirmation: { payload: { matches: Array<{ identityBasis: string }> } } | undefined;
-  let correctedConfirmation: { payload: { matches: Array<{ identityBasis: string }> } } | undefined;
+  let firstConfirmation: { payload: { asReceivedConfirmed: boolean; matches: Array<{ identityBasis: string }> } } | undefined;
+  let correctedConfirmation: { payload: { asReceivedConfirmed: boolean; matches: Array<{ identityBasis: string }> } } | undefined;
   fetchMock.mockImplementation(async (input, init) => {
     const path = String(input);
     if (path === '/api/auth/csrf') return new Response(JSON.stringify({ token: 'csrf' }), { headers: { 'Content-Type': 'application/json' } });
@@ -351,7 +351,25 @@ it('shows rejected confirmation inside dialog, allows correction and retry, and 
   const user = userEvent.setup();
   await user.click(await screen.findByRole('button', { name: 'R-001 ↗' }));
   expect(await screen.findByText('NOT_ASSESSED')).toBeVisible();
-  await user.click(await screen.findByRole('button', { name: 'Review and confirm' }));
+  const trigger = await screen.findByRole('button', { name: 'Review and confirm' });
+  await user.click(trigger);
+  const firstDialog = screen.getByRole('dialog', { name: 'Review report transcription' });
+  const close = within(firstDialog).getByRole('button', { name: 'Close confirmation' });
+  const cancel = within(firstDialog).getByRole('button', { name: 'Cancel' });
+  // jsdom has no layout; mark boundary controls visible for the focus trap.
+  vi.spyOn(close, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+  vi.spyOn(cancel, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+  expect(firstDialog).toHaveFocus();
+  await user.keyboard('{Shift>}{Tab}{/Shift}');
+  expect(cancel).toHaveFocus();
+  await user.tab();
+  expect(close).toHaveFocus();
+  await user.keyboard('{Shift>}{Tab}{/Shift}');
+  expect(cancel).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Review report transcription' })).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+  await user.keyboard('{Enter}');
   const dialog = screen.getByRole('dialog', { name: 'Review report transcription' });
   await screen.findByRole('option', { name: 'SMP-001 · seal SEAL-001' });
   await user.click(screen.getByRole('checkbox', { name: /I checked sample\/seal identity/ }));
@@ -361,10 +379,13 @@ it('shows rejected confirmation inside dialog, allows correction and retry, and 
   expect(await screen.findByRole('alert')).toHaveTextContent('Identity basis does not match printed sample.');
   expect(screen.getByRole('dialog', { name: 'Review report transcription' })).toBe(dialog);
   expect(firstConfirmation?.payload.matches[0].identityBasis).toBe('SAMPLE_CODE');
+  expect(firstConfirmation?.payload.asReceivedConfirmed).toBe(false);
+  await user.click(screen.getByRole('checkbox', { name: /Concentrations are as received/ }));
   await user.selectOptions(screen.getByLabelText('Identity basis'), 'SEAL_CODE');
   await user.click(screen.getByRole('button', { name: 'Confirm identity and bind compatible results' }));
 
   await waitFor(() => expect(correctedConfirmation?.payload.matches[0].identityBasis).toBe('SEAL_CODE'));
+  expect(correctedConfirmation?.payload.asReceivedConfirmed).toBe(true);
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Review report transcription' })).not.toBeInTheDocument());
   expect(screen.getByText('NOT_ASSESSED')).toBeVisible();
   expect(screen.getByLabelText('Confirmation residue bindings')).toHaveTextContent('1 compatible residue rows bound; 1 require exception review');

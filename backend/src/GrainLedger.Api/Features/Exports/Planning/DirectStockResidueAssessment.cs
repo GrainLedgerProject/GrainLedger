@@ -16,23 +16,31 @@ internal static class DirectStockResidueAssessment
         {
             var rows = inputs.Select(x => x.Results.SingleOrDefault(r =>
                 r.SubstanceId == substance)).ToArray();
+            var resolved = rows.OfType<ResidueResult>().ToArray();
+            if (resolved.Length == 0) continue;
             var complete = rows.Length == inputs.Count && inputs.Count > 0 &&
-                rows.All(x => x is { Status: "COMPLETE", Upper: not null,
-                    Unit: not null, Basis: not null }) &&
+                rows.All(x => x is { Status: "COMPLETE", Upper: not null, Unit: not null }) &&
                 rows.Select(x => x!.Unit).Distinct().Count() == 1 &&
-                rows.Select(x => x!.Basis).Distinct().Count() == 1 &&
+                rows.Select(x => x!.CommodityId).Distinct().Count() == 1 &&
+                rows.Select(x => x!.ProductStage).Distinct().Count() == 1 &&
+                rows.Select(x => x!.ProductIdentity).Distinct().Count() == 1 &&
                 rows.All(x => decimal.TryParse(x!.Upper, NumberStyles.AllowDecimalPoint,
                     CultureInfo.InvariantCulture, out _));
-            var resolved = rows.OfType<ResidueResult>().ToArray();
-            output.Add(new ResidueResult(substance, complete ? "COMPLETE" : "INCOMPLETE",
-                null, complete ? resolved.Max(x => decimal.Parse(x.Upper!,
+            output.Add(resolved[0] with
+            {
+                Status = complete ? "COMPLETE" : "INCOMPLETE",
+                Lower = null,
+                Upper = complete ? resolved.Max(x => decimal.Parse(x.Upper!,
                     CultureInfo.InvariantCulture)).ToString("0.############################",
                     CultureInfo.InvariantCulture) : null,
-                complete ? resolved[0].Unit : null, complete ? resolved[0].Basis : null,
-                complete ? [] : ["DIRECT_LOT_RESIDUE_INCOMPLETE"],
-                resolved.SelectMany(x => x.Provenance).ToArray(),
-                resolved.SelectMany(x => x.Rules).ToArray(),
-                resolved.SelectMany(x => x.Dependencies).ToArray()));
+                Unit = complete ? resolved[0].Unit : null,
+                ProfileCode = resolved.Select(x => x.ProfileCode).Distinct().Count() == 1
+                    ? resolved[0].ProfileCode : null,
+                Reasons = complete ? [] : ["DIRECT_LOT_RESIDUE_INCOMPLETE"],
+                Provenance = resolved.SelectMany(x => x.Provenance).ToArray(),
+                Rules = resolved.SelectMany(x => x.Rules).ToArray(),
+                Dependencies = resolved.SelectMany(x => x.Dependencies).ToArray()
+            });
         }
         return output;
     }

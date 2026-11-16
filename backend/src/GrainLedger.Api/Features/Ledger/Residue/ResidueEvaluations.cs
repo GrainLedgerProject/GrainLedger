@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 using GrainLedger.Api.Features.Capture;
 using GrainLedger.Api.Features.Catalogs;
 using GrainLedger.Api.Features.Identity;
@@ -57,11 +58,22 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
         var results = CalculateResults(lotId, substances, materialized.Nodes, materialized.Evidence, materialized.Policies, snapshotAt);
         var snapshot = new ResidueEvaluation(request.Id, lotId, materialized.Nodes.Single(x => x.LotId == lotId).CompanyId,
             snapshotAt, null, ResidueCalculator.EngineVersion, results);
+        var appendSnapshot = JsonSerializer.SerializeToNode(snapshot, Json)!.AsObject();
+        appendSnapshot["retiredProfileIds"] = JsonSerializer.SerializeToNode(materialized.Policies.Rules
+            .Where(x => x.Retirement is not null).Select(x => x.Retirement!.ProfileId).Distinct().ToArray(), Json);
         await using var persist = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        var appended = (string)(await ExecuteAsync(connection, persist,
-            "SELECT grainledger.ledger_residue_append($1,$2,$3,$4,$5)::text", ct, actor, lotId, request.Id,
-            JsonSerializer.SerializeToElement(new { substanceIds = substances }, Json),
-            JsonSerializer.SerializeToElement(snapshot, Json)))!;
+        string appended;
+        try
+        {
+            appended = (string)(await ExecuteAsync(connection, persist,
+                "SELECT grainledger.ledger_residue_append($1,$2,$3,$4,$5)::text", ct, actor, lotId, request.Id,
+                JsonSerializer.SerializeToElement(new { substanceIds = substances }, Json),
+                JsonSerializer.SerializeToElement(appendSnapshot, Json)))!;
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.SerializationFailure)
+        {
+            throw new LedgerException(409, "Residue policy changed during evaluation; submit a new evaluation.");
+        }
         await persist.CommitAsync(ct);
         return Parse(appended);
     }
@@ -193,7 +205,7 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
     {
         if (request.Id == Guid.Empty || request.CompanyId == Guid.Empty || request.SourceId == Guid.Empty
             || request.SubstanceId == Guid.Empty || request.SelectedResultId == Guid.Empty
-            || string.IsNullOrWhiteSpace(request.MaterialBasis) || string.IsNullOrWhiteSpace(request.ResidueDefinition)
+            || request.SchemaVersion != 2 || string.IsNullOrWhiteSpace(request.ProfileCode) || string.IsNullOrWhiteSpace(request.ResidueDefinition)
             || request.EffectiveTo is { } end && end <= request.EffectiveFrom
             || request.SupersededResultIds is null || request.SupersededResultIds.Length > 1000
             || request.SupersededResultIds.Contains(request.SelectedResultId)
@@ -230,7 +242,21 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
             && (!evidence.Selections.Any(x => x.Id == prior && x.SourceId == request.SourceId && x.SubstanceId == request.SubstanceId)
                 || evidence.Selections.Any(x => x.SupersedesId == prior)))
             throw new LedgerException(409, "Selection ID or reviewed supersession conflicts with history");
+        if (!request.AsReceivedConfirmed)
+        {
+            await tx.CommitAsync(ct);
+            return new ResidueSourceBound(lotId, request.SubstanceId, null, null, null, null,
+                ["As-received concentration confirmation required for residue bounds"], [], []);
+        }
         var policies = await policyReader.ReadAsync(connection, tx, sourceNode.CompanyId, substances, snapshotAt, ct);
+        var source = evidence.Sources.Single(x => x.SourceId == request.SourceId);
+        var selectedPolicy = ResidueEvidenceResolver.SelectPolicy(policies, request.CompanyId, source.ReceivedAt,
+            sourceNode.CommodityId, request.SubstanceId, request.ProfileCode);
+        if (selectedPolicy.Reason is null && selectedPolicy.Rules.Count == 1)
+        {
+            var binding = selectedPolicy.Rules[0];
+            request = request with { ProfileRuleId = binding.Rule.Id, ProfileSettingId = binding.Setting.Id, LaboratoryMethod = selected.Method };
+        }
         var proposed = evidence with { Selections = evidence.Selections.Append(request).ToArray() };
         var preview = ResidueEvidenceResolver.Resolve([sourceNode], substances, proposed, policies, snapshotAt).Single();
         await tx.CommitAsync(ct);
