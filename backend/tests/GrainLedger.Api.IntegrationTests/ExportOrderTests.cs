@@ -107,7 +107,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
     }
 
     [Fact]
-    public async Task Blend_preview_uses_policy_output_commodity_and_stays_incomplete_without_yield_and_evidence()
+    public async Task ST14_blend_preview_uses_policy_output_commodity_and_stays_incomplete_without_yield_and_evidence()
     {
         using var scenario = await LedgerScenario.CreateAsync(factory);
         var receipt = await scenario.ReceiptAsync("20");
@@ -205,6 +205,26 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
             .EnumerateArray().ToArray();
         Assert.Equal(20m, selectedBySearch.Sum(x => decimal.Parse(
             x.GetProperty("quantityKg").GetString()!, System.Globalization.CultureInfo.InvariantCulture)));
+
+        var proposalPath = $"/api/blend-plans/{draft.Id}/propose";
+        using var missingReference = await writer.PostAsJsonAsync(proposalPath,
+            new ProposeBlendPlanRequest(Guid.NewGuid(), Guid.Empty));
+        Assert.Equal(HttpStatusCode.BadRequest, missingReference.StatusCode);
+        using var unknownReference = await writer.PostAsJsonAsync(proposalPath,
+            new ProposeBlendPlanRequest(Guid.NewGuid(), Guid.NewGuid()));
+        Assert.Equal(HttpStatusCode.NotFound, unknownReference.StatusCode);
+        using var savedProposal = await writer.GetAsync($"/api/blend-plans/{draft.Id}/proposal");
+        Assert.Equal(HttpStatusCode.NotFound, savedProposal.StatusCode);
+
+        await using var dbScope = factory.Services.CreateAsyncScope();
+        var db = dbScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await db.BlendPlanProposals.AnyAsync(proposal => proposal.PlanId == draft.Id));
+        foreach (var allocation in selected)
+        {
+            var lot = await scenario.LotAsync(allocation.lotId);
+            Assert.Equal(10m, LedgerScenario.Quantity(lot));
+            Assert.Equal(10m, LedgerScenario.Quantity(lot, "availableKg"));
+        }
     }
 
     [Fact]
@@ -839,7 +859,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
     }
 
     [Fact]
-    public async Task Decision_read_requires_visible_proposal_and_reports_pending_then_rejected()
+    public async Task ST15_decision_read_requires_visible_proposal_and_reports_pending_then_rejected()
     {
         var (writer, order, _, _) = await EditableOrderAsync();
         using var client = writer;
@@ -999,7 +1019,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
     }
 
     [Fact]
-    public async Task Create_replay_scope_and_allocation_guard_use_real_postgres()
+    public async Task ST13_create_replay_scope_and_allocation_guard_use_real_postgres()
     {
         var company = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
         var otherCompany = await factory.SeedOrganizationAsync(OrganizationKind.Customer);
@@ -1041,9 +1061,21 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Matches(@"^EXP-\d{8}-\d{6,}$", order.Code);
         Assert.Equal("48000", order.RequiredMassKg);
         Assert.Equal("0", order.RemainingMassKg);
+        var initialOrder = await reader.GetFromJsonAsync<ExportOrderDto>($"/api/export-orders/{order.Id}");
+        Assert.NotNull(initialOrder);
+        Assert.Equal(order.Id, initialOrder.Id);
+        Assert.Equal(1, initialOrder.Version);
+        Assert.Equal(1, initialOrder.SpecificationVersion);
         var targets = await writer.GetFromJsonAsync<ExportPage<ExportContainerDto>>($"/api/export-orders/{order.Id}/containers");
         Assert.Equal(2, targets!.TotalCount);
-        Assert.All(targets.Items, x => Assert.Matches(@"^CTN-\d{8}-\d{6,}$", x.InternalCode));
+        Assert.All(targets.Items, target =>
+        {
+            Assert.Matches(@"^CTN-\d{8}-\d{6,}$", target.InternalCode);
+            Assert.Equal(order.Id, target.OrderId);
+            Assert.Equal("24000", target.TargetMassKg);
+            Assert.Equal("PLANNED", target.Status);
+            Assert.Equal(1, target.Version);
+        });
         var replay = await writer.PostAsJsonAsync("/api/export-orders", payload);
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
         var replayedOrder = (await replay.Content.ReadFromJsonAsync<ExportOrderDto>())!;
@@ -1108,8 +1140,9 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Equal(HttpStatusCode.PreconditionFailed, (await writer.SendAsync(stale)).StatusCode);
         using var scope = factory.Services.CreateScope();
         var exports = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        Assert.Equal(1, await exports.Orders.CountAsync(x => x.CompanyId == company.Id));
-        Assert.Equal(2, await exports.Containers.CountAsync(x => x.OrderId == order.Id));
+        var companyOrder = await exports.Orders.SingleAsync(x => x.CompanyId == company.Id);
+        Assert.Equal(order.Id, companyOrder.Id);
+        Assert.Equal(2, await exports.Containers.CountAsync(x => x.OrderId == order.Id && x.CompanyId == company.Id));
         Assert.Equal(2, await exports.Specifications.CountAsync(x => x.OrderId == order.Id));
         Assert.Equal(stockBefore, await StockAsync());
         await using var rewrite = new NpgsqlCommand("""

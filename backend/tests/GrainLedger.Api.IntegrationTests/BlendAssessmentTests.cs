@@ -34,7 +34,7 @@ public sealed class BlendAssessmentTests
         Guid.NewGuid(), 1);
 
     [Fact]
-    public void MissingPoliciesAndEvidenceFailClosed()
+    public void UT12_missing_policies_and_evidence_fail_closed()
     {
         var result = BlendAssessment.Evaluate("BLEND_INPUT_STOCK", 9m, Allocation,
             null, null, new ApplicableMrlResult("NOT_AVAILABLE", null, null, null,
@@ -46,7 +46,7 @@ public sealed class BlendAssessmentTests
     }
 
     [Fact]
-    public void ExplicitSyntheticRulesCanPassWithoutAssumingDefaultYieldOrMargin()
+    public void UT12_explicit_rules_can_pass_without_default_yield_or_margin()
     {
         var result = BlendAssessment.Evaluate("BLEND_INPUT_STOCK", 9m, Allocation,
             new BlendYieldRule(Guid.NewGuid(), 1, 0.9m, "approved synthetic yield"),
@@ -57,7 +57,34 @@ public sealed class BlendAssessmentTests
     }
 
     [Fact]
-    public void ProvenMrlFailureIsNotHiddenByMissingQualityEvidence()
+    public void UT12_blend_quality_uses_mass_weighted_mean_for_unequal_lots()
+    {
+        var secondLot = Guid.NewGuid();
+        var allocations = new[]
+        {
+            Allocation[0] with { QuantityKg = 6m },
+            new CandidateGroupItem(secondLot, Guid.NewGuid(), 4m, "revision")
+        };
+        var observations = new[]
+        {
+            Observation,
+            Observation with { LotId = secondLot, Value = 15m }
+        };
+        var limit = QualityLimit;
+        limit.MaxValue = 13.8m;
+
+        var result = BlendAssessment.Evaluate("BLEND_INPUT_STOCK", 9m, allocations,
+            new BlendYieldRule(Guid.NewGuid(), 1, 0.9m, "approved synthetic yield"),
+            Policy, Mrl, [Bound(0.008m)], [limit], [QualityRule], observations);
+
+        Assert.Equal("PASS", result.Status);
+        var quality = Assert.Single(result.Findings, finding => finding.Code == "QUALITY_LIMIT");
+        Assert.Equal("13.8", quality.Actual);
+        Assert.Equal("PASS", quality.Status);
+    }
+
+    [Fact]
+    public void UT12_proven_mrl_failure_is_not_hidden_by_missing_quality_evidence()
     {
         var result = BlendAssessment.Evaluate("DIRECT_STOCK", 10m, Allocation,
             null, Policy, Mrl, [Bound(0.0091m)], [QualityLimit], [QualityRule], []);
@@ -67,7 +94,7 @@ public sealed class BlendAssessmentTests
     }
 
     [Fact]
-    public void Residue_bound_must_match_assessment_commodity_and_reviewed_convention()
+    public void UT12_residue_bound_must_match_assessment_commodity_and_reviewed_convention()
     {
         foreach (var (policy, bound) in new[]
         {
@@ -83,7 +110,7 @@ public sealed class BlendAssessmentTests
     }
 
     [Fact]
-    public void ConflictingQualityEvidenceCannotBeChosenSilently()
+    public void UT12_conflicting_quality_evidence_cannot_be_chosen_silently()
     {
         var result = BlendAssessment.Evaluate("DIRECT_STOCK", 10m, Allocation,
             null, Policy, Mrl, [Bound(0.001m)], [QualityLimit], [QualityRule],
@@ -93,7 +120,7 @@ public sealed class BlendAssessmentTests
     }
 
     [Fact]
-    public void Direct_lots_do_not_average_away_a_failing_quality_result()
+    public void UT12_direct_lots_do_not_average_away_a_failing_quality_result()
     {
         var second = Guid.NewGuid();
         var allocations = new[] { Allocation[0],
@@ -108,7 +135,7 @@ public sealed class BlendAssessmentTests
     }
 
     [Fact]
-    public void Direct_lots_use_the_highest_residue_upper_bound()
+    public void UT12_direct_lots_use_the_highest_residue_upper_bound()
     {
         var first = new ResidueEvaluationPreview(Guid.NewGuid(), Guid.NewGuid(),
             DateTimeOffset.UtcNow, "synthetic", [Bound(0.001m)]);
@@ -119,7 +146,7 @@ public sealed class BlendAssessmentTests
     }
 
     [Fact]
-    public void Direct_lots_with_different_target_metadata_are_incomplete()
+    public void UT12_direct_lots_with_different_target_metadata_are_incomplete()
     {
         var first = new ResidueEvaluationPreview(Guid.NewGuid(), Guid.NewGuid(),
             DateTimeOffset.UtcNow, "synthetic", [Bound(0.001m)]);

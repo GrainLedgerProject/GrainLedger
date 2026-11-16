@@ -29,9 +29,6 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
     {
         using var scenario = await LedgerScenario.CreateAsync(factory);
         var f = await ResidueScenario.CreateAsync(scenario);
-        var receipt = await scenario.ReceiptAsync("20");
-        var sample = await SampleAsync(scenario, receipt);
-        var (_, report) = await f.ReportAsync(sample);
         var profile = f.RuleBody();
         ResidueScenario.AddStep(profile, "DRYING", "RAW_PADDY", "DRIED_PADDY");
         ResidueScenario.AddStep(profile, "MILLING", "DRIED_PADDY", "HEAD_RICE", "0.5", "0.5");
@@ -39,7 +36,17 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         ResidueScenario.AddStep(profile, "BLENDING", "HEAD_RICE", "BLENDED_RICE");
         ResidueScenario.AddStep(profile, "BLENDING", "BROKEN_RICE", "BLENDED_RICE");
         await f.PublishRuleAsync(profile);
-        await f.SelectAsync(sample, report);
+        var receipt = await scenario.ReceiptAsync("20");
+        var sample = await SampleAsync(scenario, receipt);
+        var (_, report) = await f.ReportAsync(sample);
+        // Publication uses the database clock. Selection reads the policy at the API clock.
+        var settings = await LedgerScenario.GetAsync(scenario.Customer, "/api/residue-policy-settings");
+        var adopted = Assert.Single(settings.GetProperty("items").EnumerateArray(),
+            setting => setting.GetProperty("ruleCode").GetString() == f.ProfileCode);
+        await WaitForFixtureTimestampAsync(adopted.GetProperty("publishedAt").GetDateTimeOffset());
+        var selectionId = await f.SelectAsync(sample, report);
+        await WaitForFixtureWriteAsync(
+            "SELECT published_at FROM grainledger.capture_residue_report_selections WHERE id=$1", selectionId);
         var drying = await scenario.DraftAsync("DRYING", [(sample.LotId, "20")],
             [("DRIED_PADDY", "20")]);
         await scenario.CommitAsync(drying);
@@ -69,26 +76,18 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                 SubstanceId = f.SubstanceId, LimitValue = 1m, Unit = "mg/kg" });
             await db.SaveChangesAsync();
         }
-        var quality = await scenario.Customer.PostAsJsonAsync(
-            "/api/ledger/planning-quality-observations", new
-            {
-                id = Guid.NewGuid(), ownerId = scenario.OwnerId,
-                facilityId = scenario.FacilityId, lotId = head, attributeId,
-                versionNo = 1, measuredValue = "13", unit = "%",
-                measuredAt = DateTimeOffset.UtcNow.AddMinutes(-2),
-                evidenceId = scenario.EvidenceId, reportReference = "SYNTHETIC-QC-1",
-                reviewedBy = "Synthetic reviewer", reviewAuthority = "Synthetic authority",
-                reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-1), subjectConfirmed = true
-            });
-        Assert.Equal(HttpStatusCode.OK, quality.StatusCode);
-        var policy = await scenario.Customer.PostAsJsonAsync("/api/blend-assessment-policies",
-            new PublishBlendAssessmentPolicyRequest(Guid.NewGuid(), marketId,
+        await PublishQualityAsync(head, 1, "13");
+        var policyId = Guid.NewGuid();
+        using var policy = await scenario.Customer.PostAsJsonAsync("/api/blend-assessment-policies",
+            new PublishBlendAssessmentPolicyRequest(policyId, marketId,
                 scenario.CatalogCommodityId, 1, DateTimeOffset.UtcNow.AddMinutes(-1),
                 null, [f.SubstanceId], "0.1", "AS_RECEIVED",
                 [new PublishedQualityPropagationRule(attributeId, "%", "MASS_WEIGHTED_MEAN")],
                 "Synthetic approved policy", "Synthetic reviewer",
                 "Synthetic authority", DateTimeOffset.UtcNow.AddMinutes(-2)));
         Assert.Equal(HttpStatusCode.Created, policy.StatusCode);
+        await WaitForFixtureWriteAsync(
+            "SELECT published_at FROM grainledger.catalog_blend_assessment_policies WHERE id=$1", policyId);
         var (staff, session) = await factory.SeedUserAsync(Roles.ExportStaff, scenario.OwnerId);
         using var writer = factory.CreateRealCookieClient(staff, session);
         writer.DefaultRequestHeaders.Add("X-CSRF-TOKEN",
@@ -119,7 +118,10 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                 before.GetProperty("scopeRevision").GetString()!, 8));
         Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
         var preview = await previewResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("PASS", preview.GetProperty("assessmentStatus").GetString());
+        Assert.True(preview.GetProperty("assessmentStatus").GetString() == "PASS",
+            $"Expected a PASS preview for flow {flow}. " +
+            $"Findings: {preview.GetProperty("assessmentFindings").GetRawText()}. " +
+            $"Search reasons: {preview.GetProperty("reasons").GetRawText()}.");
         var reference = preview.GetProperty("previewReference").GetGuid();
         async Task<(long Positions, decimal Mass, long Postings, long Holds)> StockAsync()
         {
@@ -315,7 +317,12 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                 // Verify revalidation uses its own 10 kg even though public availability is zero.
                 var provisional = await StartAsync(container.Id, body.ProposalId, 1, commit: false);
                 Assert.NotNull(provisional.Authorization);
-                Assert.Equal(10m, Assert.Single(provisional.Authorization.Reservations).RemainingKg);
+                Assert.Equal(body.ProposalId, provisional.Authorization.ProposalId);
+                Assert.Equal(container.Id, provisional.Authorization.ContainerId);
+                var executionReservation = Assert.Single(provisional.Authorization.Reservations);
+                Assert.Equal(head, executionReservation.LotId);
+                Assert.Equal(scenario.LocationId, executionReservation.LocationId);
+                Assert.Equal(10m, executionReservation.RemainingKg);
                 Assert.Equal(container.Version + 1, provisional.Authorization.ContainerVersion);
                 var rolledBack = await writer.GetFromJsonAsync<ExportContainerDto>($"/api/export-containers/{container.Id}");
                 Assert.Equal("PLANNED", rolledBack!.Status);
@@ -352,8 +359,9 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                 using var reject = await scenario.Customer.PostAsJsonAsync(competingPath + "/reject",
                     new RejectBlendPlanRequest(Guid.NewGuid(), rejectedId, 0, "Rejected fixture"));
                 Assert.Equal(HttpStatusCode.OK, reject.StatusCode);
-                Assert.Equal(409, ((await StartAsync(competingContainer.Id, rejectedId, 1))
-                    .Failure as IStatusCodeHttpResult)?.StatusCode);
+                var rejectedStart = await StartAsync(competingContainer.Id, rejectedId, 1);
+                Assert.Null(rejectedStart.Authorization);
+                Assert.Equal(409, (rejectedStart.Failure as IStatusCodeHttpResult)?.StatusCode);
 
                 await scenario.HoldAsync(head);
                 var heldStart = await StartAsync(container.Id, body.ProposalId, 1);
@@ -482,18 +490,7 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                 reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-3)
             });
         Assert.Equal(HttpStatusCode.OK, yieldResponse.StatusCode);
-        var brokenQuality = await scenario.Customer.PostAsJsonAsync(
-            "/api/ledger/planning-quality-observations", new
-            {
-                id = Guid.NewGuid(), ownerId = scenario.OwnerId,
-                facilityId = scenario.FacilityId, lotId = LedgerScenario.Output(milling, 1),
-                attributeId, versionNo = 1, measuredValue = "13", unit = "%",
-                measuredAt = DateTimeOffset.UtcNow.AddMinutes(-2),
-                evidenceId = scenario.EvidenceId, reportReference = "SYNTHETIC-QC-BROKEN",
-                reviewedBy = "Synthetic reviewer", reviewAuthority = "Synthetic authority",
-                reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-1), subjectConfirmed = true
-            });
-        Assert.Equal(HttpStatusCode.OK, brokenQuality.StatusCode);
+        await PublishQualityAsync(LedgerScenario.Output(milling, 1), 1, "13");
         var blendOrderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId,
@@ -552,7 +549,9 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                 new ProposeBlendPlanRequest(Guid.NewGuid(), blendReference)),
             writer.PostAsJsonAsync($"/api/blend-plans/{blendDraft.Id}/propose",
                 new ProposeBlendPlanRequest(Guid.NewGuid(), blendReference)));
-        Assert.Single(simultaneousProposals, x => x.StatusCode == HttpStatusCode.Created);
+        Assert.True(simultaneousProposals.Count(x => x.StatusCode == HttpStatusCode.Created) == 1,
+            string.Join(" | ", await Task.WhenAll(simultaneousProposals.Select(async response =>
+                $"{(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}"))));
         Assert.Single(simultaneousProposals, x => x.StatusCode == HttpStatusCode.Conflict);
         Assert.Equal(blendStockBefore, await StockAsync());
         if (flow == 4)
@@ -613,18 +612,7 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             Assert.Equal(blendStockBefore, await StockAsync());
             return;
         }
-        var revisedQuality = await scenario.Customer.PostAsJsonAsync(
-            "/api/ledger/planning-quality-observations", new
-            {
-                id = Guid.NewGuid(), ownerId = scenario.OwnerId,
-                facilityId = scenario.FacilityId, lotId = head, attributeId,
-                versionNo = 2, measuredValue = "15", unit = "%",
-                measuredAt = DateTimeOffset.UtcNow.AddMinutes(-2),
-                evidenceId = scenario.EvidenceId, reportReference = "SYNTHETIC-QC-2",
-                reviewedBy = "Synthetic reviewer", reviewAuthority = "Synthetic authority",
-                reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-1), subjectConfirmed = true
-            });
-        Assert.Equal(HttpStatusCode.OK, revisedQuality.StatusCode);
+        await PublishQualityAsync(head, 2, "15");
         using var staleApproval = await scenario.Customer.PostAsJsonAsync(
             $"/api/blend-plans/{draft.Id}/approve",
             new ApproveBlendPlanRequest(Guid.NewGuid(), proposal.GetProperty("id").GetGuid(), 0));
@@ -660,13 +648,14 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             failedPreview.ToString());
         Assert.False(failedPreview.GetProperty("canPropose").GetBoolean());
         Assert.Equal(JsonValueKind.Null, failedPreview.GetProperty("previewReference").ValueKind);
-        async Task PublishQualityAsync(int version, string value)
+        async Task PublishQualityAsync(Guid lotId, int version, string value)
         {
-            var response = await scenario.Customer.PostAsJsonAsync(
+            var observationId = Guid.NewGuid();
+            using var response = await scenario.Customer.PostAsJsonAsync(
                 "/api/ledger/planning-quality-observations", new
                 {
-                    id = Guid.NewGuid(), ownerId = scenario.OwnerId,
-                    facilityId = scenario.FacilityId, lotId = head, attributeId,
+                    id = observationId, ownerId = scenario.OwnerId,
+                    facilityId = scenario.FacilityId, lotId, attributeId,
                     versionNo = version, measuredValue = value, unit = "%",
                     measuredAt = DateTimeOffset.UtcNow.AddMinutes(-2),
                     evidenceId = scenario.EvidenceId,
@@ -677,8 +666,11 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                     subjectConfirmed = true
                 });
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            await WaitForFixtureWriteAsync(
+                "SELECT confirmed_at FROM grainledger.ledger_planning_quality_observations WHERE id=$1", observationId);
         }
-        await PublishQualityAsync(3, "13");
+
+        await PublishQualityAsync(head, 3, "13");
         var secondDraftResponse = await writer.PostAsJsonAsync(
             $"/api/export-containers/{container.Id}/blend-plans/drafts",
             new CreateBlendPlanDraftRequest(Guid.NewGuid(), order.Version,
@@ -693,14 +685,23 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                 secondCandidates.GetProperty("scopeRevision").GetString()!, 8));
         Assert.Equal(HttpStatusCode.OK, secondPreviewResponse.StatusCode);
         var secondPreview = await secondPreviewResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("PASS", secondPreview.GetProperty("assessmentStatus").GetString());
-        await PublishQualityAsync(4, "15");
-        var staleProposal = await writer.PostAsJsonAsync(
+        Assert.True(secondPreview.GetProperty("assessmentStatus").GetString() == "PASS",
+            $"Expected a PASS preview after confirming moisture version 3 (13%). " +
+            $"Findings: {secondPreview.GetProperty("assessmentFindings").GetRawText()}.");
+        await PublishQualityAsync(head, 4, "15");
+        var stockBeforeStaleProposal = await StockAsync();
+        using var staleProposal = await writer.PostAsJsonAsync(
             $"/api/blend-plans/{secondDraft.Id}/propose",
             new ProposeBlendPlanRequest(Guid.NewGuid(),
                 secondPreview.GetProperty("previewReference").GetGuid()));
         Assert.Equal(HttpStatusCode.Conflict, staleProposal.StatusCode);
-        await PublishQualityAsync(5, "13");
+        Assert.Equal("PLAN_PREVIEW_STALE",
+            (await staleProposal.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        using var staleSavedProposal = await writer.GetAsync($"/api/blend-plans/{secondDraft.Id}/proposal");
+        Assert.Equal(HttpStatusCode.NotFound, staleSavedProposal.StatusCode);
+        Assert.Equal(stockBeforeStaleProposal, await StockAsync());
+
+        await PublishQualityAsync(head, 5, "13");
         var thirdDraftResponse = await writer.PostAsJsonAsync(
             $"/api/export-containers/{container.Id}/blend-plans/drafts",
             new CreateBlendPlanDraftRequest(Guid.NewGuid(), order.Version,
@@ -724,5 +725,33 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         Assert.True(heldProposal.StatusCode == HttpStatusCode.Conflict,
             $"Expected a stale preview conflict, got {(int)heldProposal.StatusCode}: " +
             await heldProposal.Content.ReadAsStringAsync());
+    }
+
+    private async Task WaitForFixtureWriteAsync(string query, Guid id)
+    {
+        await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
+        await connection.OpenAsync();
+        await using var read = new NpgsqlCommand(query, connection);
+        read.Parameters.AddWithValue(id);
+        var timestamp = Assert.IsType<DateTime>(await read.ExecuteScalarAsync());
+        await WaitForFixtureTimestampAsync(new DateTimeOffset(timestamp));
+    }
+
+    private async Task WaitForFixtureTimestampAsync(DateTimeOffset timestamp)
+    {
+        // Point-in-time reads in this fixture use both the API and PostgreSQL clocks.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
+        await connection.OpenAsync(timeout.Token);
+        await using var readClock = new NpgsqlCommand("SELECT clock_timestamp()", connection);
+        while (true)
+        {
+            var databaseNow = new DateTimeOffset(Assert.IsType<DateTime>(
+                await readClock.ExecuteScalarAsync(timeout.Token)));
+            var apiNow = factory.Clock.GetUtcNow();
+            if (databaseNow >= timestamp && apiNow >= timestamp) return;
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20), timeout.Token);
+        }
     }
 }
