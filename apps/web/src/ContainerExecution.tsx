@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
+import { ContainerProduction } from './ContainerProduction';
 import { Mass, positive } from './ledger-ui';
 
 type Allocation = { lotId: string; lotCode: string; locationId: string; reservedKg: string; remainingKg: string; restricted: boolean; loadingPositionReady: boolean };
@@ -13,6 +14,9 @@ type Trace = { loadedKg: string; complete: boolean; sourceContributions: { sourc
 const newId = () => crypto.randomUUID();
 const findings: Record<string, string> = {
   ACTIVE_APPROVAL_REQUIRED: 'A Customer Manager must approve a current plan first.',
+  OUTPUT_REVIEW_REQUIRED: 'The finished output needs confirmed quality and Customer Manager review.',
+  OUTPUT_REVIEW_REJECTED: 'The output review was rejected. A new review is required before loading.',
+  APPROVED_PRODUCTION_PENDING: 'The mill has not committed the requested blend production yet.',
   BLEND_OUTPUT_HANDOFF_REQUIRED: 'This plan needs actual blend execution and reserved finished outputs from the blend workflow.',
   POSITION_OR_SOURCE_HANDOFF_REQUIRED: 'An approved position needs stock/source or pool-reservation reconciliation before loading.',
   CONTAINER_HOLD: 'This container has an active HOLD.', LOT_RESTRICTED: 'An approved lot has a current restriction.',
@@ -27,8 +31,8 @@ function saved(key: string): Pending | null {
   catch { return null; }
 }
 
-export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate }: {
-  id: string; userId: string; canWrite: boolean; canHold: boolean; onNavigate: (path: string) => void;
+export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate, onChanged }: {
+  id: string; userId: string; canWrite: boolean; canHold: boolean; onNavigate: (path: string) => void; onChanged?: () => void;
 }) {
   const route = `/api/export-containers/${id}/execution`, key = `grainledger.container.execution.${userId}.${id}`;
   const [detail, setDetail] = useState<Container | null>(null), [readiness, setReadiness] = useState<Readiness | null>(null);
@@ -53,7 +57,7 @@ export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate }
     try {
       const receipt = await api<Container>(request.path, { method: 'POST', body: request.body });
       if (!receipt || receipt.id !== id || !Number.isInteger(receipt.version) || typeof receipt.loadedKg !== 'string') throw new Error('The operation result is uncertain. Retry the same operation.');
-      sessionStorage.removeItem(key); setPending(null); setConfirmation(false); setKg(''); setSelection(''); setReason(''); setReload(n => n + 1);
+      sessionStorage.removeItem(key); setPending(null); setConfirmation(false); setKg(''); setSelection(''); setReason(''); setReload(n => n + 1); onChanged?.();
     } catch (cause) {
       if (cause instanceof ApiError && cause.status < 500 && cause.status !== 408) { sessionStorage.removeItem(key); setPending(null); }
       setError(errorMessage(cause));
@@ -82,7 +86,7 @@ export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate }
     void mutate('loads', { proposalId: detail.approval.proposalId, decisionVersion: detail.approval.decisionVersion,
       loadedAt: new Date().toISOString(), lines: [{ lotId: selected.lotId, locationId: selected.locationId, quantityKg: kg }] });
   }
-  return <section className="panel export-section"><h2>Loading and closure</h2>
+  return <>{detail?.approval?.mode === 'BLEND_INPUT_STOCK' && <ContainerProduction id={id} userId={userId} canRequest={canWrite} canReview={canHold} proposalId={detail.approval.proposalId} containerVersion={detail.version} closed={detail.status !== 'PLANNED'} onChanged={() => { setReload(n => n + 1); onChanged?.(); }} />}<section className="panel export-section"><h2>Loading and closure</h2>
     <p className="muted">Only committed loading counts toward this container. Planned allocations and preparation drafts do not.</p>
     {error && <div className="notice error" role="alert">{error}</div>}
     {pending && <div className="notice error" role="alert">A previous operation has an uncertain result. Retry the same operation before starting another. <button disabled={busy} onClick={() => void mutate('', {})}>Retry container operation</button></div>}
@@ -95,7 +99,7 @@ export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate }
         <fieldset disabled={busy || !!pending}><legend>Physical container and seal</legend><div className="form-columns"><label>Container number<input value={number} maxLength={80} onChange={event => setNumber(event.target.value)} /></label><label>Seal number<input value={seal} maxLength={80} onChange={event => setSeal(event.target.value)} /></label></div><button>Save container metadata</button></fieldset></form>}
       <h3>Approved reserved stock</h3>
       <p className="muted">{detail.approval ? `Selection: ${detail.approval.mode}. Reserved amounts below belong to this approval; they are separate from free stock.` : 'No active approved allocation.'}</p>
-      <div className="table-scroll"><table aria-label="Approved reserved stock"><thead><tr><th>Lot</th><th>Reserved (kg)</th><th>Reservation remaining (kg)</th><th>Restriction</th></tr></thead><tbody>{allocations.map(item => <tr key={`${item.lotId}:${item.locationId}`}><td>{item.lotCode}</td><td>{item.reservedKg}</td><td>{item.remainingKg}</td><td>{item.restricted ? 'Blocked' : item.loadingPositionReady ? 'Current position' : 'Handoff needed'}</td></tr>)}</tbody></table></div>
+      <div className="table-scroll"><table aria-label="Approved reserved stock"><thead><tr><th>Lot</th><th>Reserved (kg)</th><th>Reservation remaining (kg)</th><th>Restriction</th></tr></thead><tbody>{allocations.map(item => <tr key={`${item.lotId}:${item.locationId}`}><td>{item.lotCode}</td><td>{item.reservedKg}</td><td>{item.remainingKg}</td><td>{item.restricted ? 'Blocked' : item.loadingPositionReady ? 'Current position' : positive(item.remainingKg) ? 'Handoff needed' : 'Quota consumed'}</td></tr>)}</tbody></table></div>
       {canWrite && detail.status !== 'CLOSED' && positive(detail.remainingKg) && <form onSubmit={load}><fieldset disabled={busy || !!pending || !mayLoad}><legend>Record actual loading</legend>
         <label>Approved position<select value={selection} onChange={event => { setSelection(event.target.value); setConfirmation(false); }} required><option value="">Select reserved stock</option>{eligible.map(item => <option key={`${item.lotId}:${item.locationId}`} value={`${item.lotId}:${item.locationId}`}>{item.lotCode} · {item.remainingKg} kg reserved remaining</option>)}</select></label>
         <Mass value={kg} onChange={value => { setKg(value); setConfirmation(false); }} label="Actual loaded quantity (kg)" />
@@ -109,5 +113,5 @@ export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate }
       <section><h3>Container history</h3><button className="secondary" disabled={busy || !!pending} onClick={() => void readHistory(1)}>Read container history</button>{history && <><ul>{history.items.map(item => <li key={item.id}>{item.kind} · {new Date(item.recorded_at).toLocaleString()}</li>)}</ul><div className="form-footer"><span>Page {historyPage}</span><button className="secondary" disabled={busy || historyPage === 1} onClick={() => void readHistory(historyPage - 1)}>Previous history page</button><button className="secondary" disabled={busy || !history.hasMore} onClick={() => void readHistory(historyPage + 1)}>Next history page</button></div></>}</section>
       {dossier != null && <section><h3>Immutable closure dossier</h3><p className="muted">Historical decision and actual manifest; later HOLDs do not rewrite this snapshot.</p><pre className="table-scroll">{JSON.stringify(dossier, null, 2)}</pre><a className="text-button" download={`${detail.code}-dossier.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dossier, null, 2))}`}>Download dossier JSON</a></section>}
     </>}
-  </section>;
+  </section></>;
 }

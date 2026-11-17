@@ -159,7 +159,7 @@ public static partial class ExportModule
         var data = System.Text.Json.Nodes.JsonNode.Parse(raw.GetRawText())!.AsObject();
         if (data["approval"] is System.Text.Json.Nodes.JsonObject approval)
         {
-            approval.Remove("snapshot"); approval.Remove("previewRequest"); approval.Remove("demandSnapshot");
+            approval.Remove("outputSnapshot"); approval.Remove("snapshot"); approval.Remove("previewRequest"); approval.Remove("demandSnapshot");
         }
         return data;
     }
@@ -207,10 +207,15 @@ public static partial class ExportModule
         var approval = detail.GetProperty("approval");
         object? evidence = null; string? dependency = null;
         if (approval.ValueKind == JsonValueKind.Null) findings.Add("ACTIVE_APPROVAL_REQUIRED");
-        else if (approval.GetProperty("mode").GetString() != "DIRECT_STOCK") findings.Add("BLEND_OUTPUT_HANDOFF_REQUIRED");
+        else if (approval.GetProperty("mode").GetString() != "DIRECT_STOCK" && (!approval.TryGetProperty("outputSnapshot", out var actualOutput) || actualOutput.ValueKind == JsonValueKind.Null)) findings.Add(approval.TryGetProperty("productionState", out var productionState) ? productionState.GetString() switch
+        {
+            "PRODUCED" => "OUTPUT_REVIEW_REQUIRED", "REJECTED" => "OUTPUT_REVIEW_REJECTED",
+            "REQUESTED" or "DRAFT" => "APPROVED_PRODUCTION_PENDING", _ => "BLEND_OUTPUT_HANDOFF_REQUIRED"
+        } : "BLEND_OUTPUT_HANDOFF_REQUIRED");
         else
         {
-            var saved = ReadSavedBlendSelection(approval.GetProperty("snapshot").GetRawText());
+            var snapshot = approval.TryGetProperty("outputSnapshot", out var reviewedOutput) && reviewedOutput.ValueKind != JsonValueKind.Null ? reviewedOutput : approval.GetProperty("snapshot");
+            var saved = ReadSavedBlendSelection(snapshot.GetRawText());
             var demand = JsonDocument.Parse(approval.GetProperty("demandSnapshot").GetString()!);
             using (demand)
             {
@@ -268,6 +273,8 @@ public static partial class ExportModule
             findings = findings.Distinct().ToArray(),
             dependencyRevision = dependency,
             evidence,
+            outputAuthorization = approval.ValueKind == JsonValueKind.Object && approval.TryGetProperty("outputReviewId", out var outputReview) && outputReview.ValueKind != JsonValueKind.Null
+                ? new { proposalId = approval.GetProperty("proposalId").GetGuid(), reviewId = outputReview.GetGuid(), operationId = approval.GetProperty("productionOperationId").GetGuid() } : null,
             calculationVersion = "F16_DIRECT_STOCK_V1"
         }, ContainerJson);
     }

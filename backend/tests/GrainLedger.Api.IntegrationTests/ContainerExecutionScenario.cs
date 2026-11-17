@@ -23,7 +23,7 @@ internal sealed class ContainerExecutionScenario : IDisposable
     internal required Guid SourceId { get; init; }
     internal required Guid QualityAttributeId { get; init; }
     internal string Route => $"/api/export-containers/{ContainerId}/execution";
-    internal static async Task<ContainerExecutionScenario> CreateAsync(ApiFactory factory, bool preBlended = false)
+    internal static async Task<ContainerExecutionScenario> CreateAsync(ApiFactory factory, bool preBlended = false, bool production = false)
     {
         var stock = await LedgerScenario.CreateAsync(factory);
         var residue = await ResidueScenario.CreateAsync(stock);
@@ -38,15 +38,27 @@ internal sealed class ContainerExecutionScenario : IDisposable
         await residue.PublishRuleAsync(profile); await residue.SelectAsync(sample, report);
         var dried = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("DRYING", [(sample.LotId, "20")], [("DRIED_PADDY", "20")])));
         var lot = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("MILLING", [(dried, "20")], [("HEAD_RICE", "10"), ("BROKEN_RICE", "10")])));
-        if (preBlended)
+        Guid? secondInput = null;
+        if (preBlended || production)
         {
             var secondSample = await SampleAsync(stock, await stock.ReceiptAsync("20"));
             var (_, secondReport) = await residue.ReportAsync(secondSample);
             await residue.SelectAsync(secondSample, secondReport);
             var secondDried = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("DRYING", [(secondSample.LotId, "20")], [("DRIED_PADDY", "20")])));
             var secondHead = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("MILLING", [(secondDried, "20")], [("HEAD_RICE", "10"), ("BROKEN_RICE", "10")])));
-            await residue.BlendCompatibilityAsync("HEAD_RICE");
-            lot = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("BLENDING", [(lot, "10"), (secondHead, "10")], [("BLENDED_RICE", "20")])));
+            var compatibility = await residue.BlendCompatibilityAsync("HEAD_RICE");
+            if (production)
+            {
+                secondInput = secondHead;
+                await LedgerScenario.SendAsync(stock.Manager, HttpMethod.Post, "/api/ledger/planning-yield-rules", new
+                {
+                    id = Guid.NewGuid(), facilityId = stock.FacilityId, compatibilityPolicyId = compatibility.GetProperty("id").GetGuid(),
+                    versionNo = 1, outputFraction = "1", effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1), effectiveTo = (DateTimeOffset?)null,
+                    evidenceId = stock.EvidenceId, reviewedBy = "Synthetic manager", reviewAuthority = "Isolated container production test",
+                    reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+                });
+            }
+            if (!production) lot = LedgerScenario.Output(await stock.CommitAsync(await stock.DraftAsync("BLENDING", [(lot, "10"), (secondHead, "10")], [("BLENDED_RICE", "20")])));
         }
         var market = Guid.NewGuid(); var attribute = Guid.NewGuid(); var mrl = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
@@ -70,12 +82,13 @@ internal sealed class ContainerExecutionScenario : IDisposable
             db.MrlLimits.Add(new MrlLimit { Id = Guid.NewGuid(), MrlVersionId = mrl, SubstanceId = residue.SubstanceId, LimitValue = 1m, Unit = "mg/kg" });
             await db.SaveChangesAsync();
         }
+        foreach (var qualityLot in secondInput is Guid other ? new[] { lot, other } : new[] { lot })
         await LedgerScenario.SendAsync(stock.Customer, HttpMethod.Post, "/api/ledger/planning-quality-observations", new
         {
             id = Guid.NewGuid(),
             ownerId = stock.OwnerId,
             facilityId = stock.FacilityId,
-            lotId = lot,
+            lotId = qualityLot,
             attributeId = attribute,
             versionNo = 1,
             measuredValue = "13",
@@ -98,17 +111,17 @@ internal sealed class ContainerExecutionScenario : IDisposable
             operationId = Guid.NewGuid(),
             marketId = market,
             commodityId = stock.CatalogCommodityId,
-            requiredMass = "10",
+            requiredMass = production ? "20" : "10",
             unit = "KG",
             shippingFrom = "2026-11-10",
             shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
-            containers = new[] { new { targetMass = "10", unit = "KG" } }
+            containers = new[] { new { targetMass = production ? "20" : "10", unit = "KG" } }
         });
         var containers = await LedgerScenario.GetAsync(export, $"/api/export-orders/{order.GetProperty("id").GetGuid()}/containers");
         var container = Assert.Single(containers.GetProperty("items").EnumerateArray()); var cid = container.GetProperty("id").GetGuid();
         var draft = await LedgerScenario.SendAsync(export, HttpMethod.Post, $"/api/export-containers/{cid}/blend-plans/drafts", new CreateBlendPlanDraftRequest(
-            Guid.NewGuid(), order.GetProperty("version").GetInt32(), container.GetProperty("version").GetInt32(), preBlended ? "BLENDED_RICE" : "HEAD_RICE"));
+            Guid.NewGuid(), order.GetProperty("version").GetInt32(), container.GetProperty("version").GetInt32(), preBlended || production ? "BLENDED_RICE" : "HEAD_RICE"));
         var pid = draft.GetProperty("id").GetGuid();
         var candidates = await LedgerScenario.GetAsync(export, $"/api/export-containers/{cid}/candidates?facilityId={stock.FacilityId}&planId={pid}");
         var preview = await LedgerScenario.SendAsync(export, HttpMethod.Post, $"/api/blend-plans/{pid}/preview", new PreviewBlendPlanRequest(stock.FacilityId, candidates.GetProperty("scopeRevision").GetString()!));

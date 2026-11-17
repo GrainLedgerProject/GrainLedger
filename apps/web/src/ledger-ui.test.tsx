@@ -39,3 +39,17 @@ describe('shared list controls', () => {
     expect(ids).toEqual(['2', '0', '1']);
   });
 });
+
+it('renders multiple lot rows from one event without duplicate React keys', () => {
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    render(<Table controls={false} columns={['lotId', 'quantityKg']} rows={[
+      { id: 'one-milling-event', lotId: 'head-output', quantityKg: '6.000000' },
+      { id: 'one-milling-event', lotId: 'broken-output', quantityKg: '4.000000' },
+    ]} />);
+    expect(screen.getAllByRole('row')).toHaveLength(3);
+    expect(screen.getByText('head-output')).toBeInTheDocument();
+    expect(screen.getByText('broken-output')).toBeInTheDocument();
+    expect(errors.mock.calls.some(args => args.map(String).join(' ').includes('same key'))).toBe(false);
+  } finally { errors.mockRestore(); }
+});

@@ -131,6 +131,10 @@ This merge does not migrate/reset shared Supabase, transfer old-schema preparati
 
 Forward AppDbContext migration `20261113000100_ContainerExecution` adds private actual loading/source complement/HOLD/closure/request records and the protected planned-container command/read/target routines. Explicit runtime setup grants only these public entries, retaining no direct table/helper writes. It does not migrate legacy preparation into actuals, implement approved blend production or auto-repair startup grants. Apply only through the approved owner migration workflow after environment-specific approval; no shared deployment is asserted. [Execution API](api/container-execution-api.md) and [web guide](guides/container-execution-web-test.md) describe current supported stock and limits.
 
+### Approved container blend production
+
+Forward migration `20261117000000_ContainerProduction` implements one-batch approved production, actual-output review and output reservation for loading. It adds the finite runtime entry `grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)`; private tables/helpers stay denied. It was tested on disposable PostgreSQL, then applied with the single new grant to the configured shared Supabase on 18/11/2026 after explicit user approval; see the [deployment record](reports/container-production-deployment-2026-11-18.md). For other environments follow the [production deployment checklist](guides/container-production-deployment.md), including owner approval, backup and compatible API instances; old code does not understand the new RESERVE events/output authorization. Normal startup does not migrate or seed. See [verification](reports/container-production-implementation-2026-11-18.md).
+
 ### Historical module-era deployment notes
 
 The following migration-specific instructions preserve prior release history only. They describe old per-module schemas/migrations and must not be used as current cutover or deployment instructions. Confirm current database status independently; no reset or deployment is asserted here.

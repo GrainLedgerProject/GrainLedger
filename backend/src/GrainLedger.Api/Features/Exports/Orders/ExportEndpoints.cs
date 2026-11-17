@@ -72,6 +72,7 @@ public static partial class ExportModule
             .AddEndpointFilter<MutationAntiforgeryFilter>().AddEndpointFilter<ReadyFilter>();
         MapBlendPlanning(endpoints);
         MapContainerExecution(endpoints);
+        MapContainerProduction(endpoints);
         MapContainerTrace(endpoints);
         return endpoints;
     }

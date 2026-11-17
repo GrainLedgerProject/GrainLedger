@@ -192,6 +192,9 @@ public static class LedgerDatabase
                 IF to_regprocedure('grainledger.ledger_reserve_approved_blend(uuid,uuid)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_reserve_approved_blend(uuid,uuid) TO %I', runtime_role);
                 END IF;
+                IF to_regprocedure('grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb) TO %I', runtime_role);
+                END IF;
                 IF to_regprocedure('grainledger.ledger_release_revoked_blend(uuid,uuid)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_release_revoked_blend(uuid,uuid) TO %I', runtime_role);
                 END IF;
@@ -374,7 +377,8 @@ public static class LedgerDatabase
               ('grainledger.ledger_container_action(uuid,text,jsonb)'),
               ('grainledger.ledger_export_container_read(uuid,uuid,text,integer,integer)'),
               ('grainledger.ledger_container_targets(uuid,uuid,uuid[])'),
-              ('grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb)')
+              ('grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb)'),
+              ('grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)')
             ), expected_sequence(name,can_usage,can_select,can_update) AS (VALUES
               ('identity_audit_events_Id_seq',true,true,false),
               ('ledger_lot_code_serial',false,false,false)

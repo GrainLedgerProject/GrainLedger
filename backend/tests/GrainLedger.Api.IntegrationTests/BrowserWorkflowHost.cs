@@ -155,6 +155,15 @@ public sealed class BrowserWorkflowHost
             scenario.Accounts.Add("containerExport", (containerUser, containerSession, containerClient));
             scenario.Accounts.Add("containerCustomer", containerExecution.Stock.Accounts["customer"]);
         }
+        using var containerProduction = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_CONTAINER_PRODUCTION") == "true"
+            ? await ContainerExecutionScenario.CreateAsync(factory, production: true) : null;
+        if (containerProduction is not null)
+        {
+            var (productionUser, productionSession) = await factory.SeedUserAsync(Roles.ExportStaff, containerProduction.Stock.OwnerId);
+            scenario.Accounts.Add("productionExport", (productionUser, productionSession, factory.CreateRealCookieClient(productionUser, productionSession)));
+            scenario.Accounts.Add("productionOperator", containerProduction.Stock.Accounts["operator"]);
+            scenario.Accounts.Add("productionCustomer", containerProduction.Stock.Accounts["customer"]);
+        }
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -344,6 +353,12 @@ public sealed class BrowserWorkflowHost
                     uncoveredSubstanceId = companyPolicy.OtherSubstanceId
                 },
                 evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(),
+                containerProduction = containerProduction is null ? null : new {
+                    id = containerProduction.ContainerId, proposalId = containerProduction.ProposalId,
+                    facilityId = containerProduction.Stock.FacilityId, locationId = containerProduction.Stock.SecondLocationId,
+                    equipmentId = containerProduction.Stock.EquipmentId, qualityAttributeId = containerProduction.QualityAttributeId,
+                    uiUrl = $"{uiUrl}/export/containers/{containerProduction.ContainerId}"
+                },
                 containerExecution = containerExecution is null ? null : new {
                     id = containerExecution.ContainerId, route = containerExecution.Route, proposalId = containerExecution.ProposalId,
                     lotId = containerExecution.LotId, locationId = containerExecution.Stock.LocationId,

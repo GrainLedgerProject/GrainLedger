@@ -1,12 +1,12 @@
-# Planned container execution: direct stock, HOLD, closure and trace
+# Planned container execution: finished stock, HOLD, closure and trace
 
-Current implementation: `feat/container`, 13 November 2026. Follow [execution plan](../plans/container-execution-plan-2026-11-13.md) and [web walkthrough](../guides/container-execution-web-test.md). The [preparation API](container-api.md) remains a separate legacy draft workflow and never counts as actual loading.
+Current implementation: `feat/container`, updated 18 November 2026. Approved one-batch production/output review is described in the [production API](container-production-api.md). Follow [execution plan](../plans/container-execution-plan-2026-11-13.md) and [web walkthrough](../guides/container-execution-web-test.md). The [preparation API](container-api.md) remains a separate legacy draft workflow and never counts as actual loading.
 
 ## Supported boundary
 
 The authoritative ID/order/company/target/status/version is F13 `exports_containers`. Protected Ledger extensions retain physical container/seal, pinned proposal/facility, actual loads, exact source allocations/complement, container HOLDs, closure dossier and request receipts/history. Nothing automatically converts legacy preparation records.
 
-**DIRECT_STOCK** means the approved lots are already produced and physically present, including a pre-produced blended lot. First successful load starts execution; subsequent loads consume the same active approval. No standalone successful “start” request changes the status. An approval selecting **BLEND_INPUT_STOCK** remains blocked until the blend owner supplies actual production/output-reservation handoff. This feature does not grant ExportStaff mill-processing authority.
+**DIRECT_STOCK** means the approved lots are already produced and physically present, including a pre-produced blended lot. First successful load starts execution; subsequent loads consume the same active approval. No standalone successful “start” request changes the status. An approval selecting **BLEND_INPUT_STOCK** can load only the separately reviewed ordinary output supplied by the S1 production workflow; before that handoff it remains blocked. This feature does not grant ExportStaff mill-processing authority.
 
 Current actual loading supports ordinary, non-custody-derived positions with proven source attribution. Mixed pools, withdrawn custody generations and reservation transfers through top-up/bagging/transfer require the handoff recorded in the plan. These cases are rejected, never silently remapped to a successor lot.
 
@@ -18,7 +18,7 @@ All routes use `/api/export-containers/{id}/execution`, persisted authentication
 | --- | --- | --- |
 | GET base | `{container,readiness}`; full actual manifest, reserved remaining and current phase checks | own-company ExportStaff/CustomerManager with `export-orders.read`; evaluation also needs `residue.evaluate` |
 | POST `/metadata` | Set physical number/seal; optimistic version, history and stable operation ID | own-company ExportStaff, `containers.write`; not CLOSED |
-| POST `/loads` | Append actual load, source shares, consume reservation and debit stock atomically | own-company ExportStaff, `containers.write` + `residue.evaluate`; current approved DIRECT_STOCK |
+| POST `/loads` | Append actual load, source shares, consume reservation and debit stock atomically | own-company ExportStaff, `containers.write` + `residue.evaluate`; current approved DIRECT_STOCK or separately reviewed S1 production output |
 | POST `/holds` | Append container HOLD; may be placed after closure without rewriting dossier | own-company CustomerManager, `holds.manage` |
 | POST `/close` | Exact-target check, current assessment/restrictions, atomic CLOSED+dossier | own-company ExportStaff, `containers.write` + `residue.evaluate` |
 | GET `/history?page=1&pageSize=25` | Paged container execution events, actor IDs, server time and original request | own-company export readers; pageSize maximum 100 |
@@ -49,6 +49,10 @@ The same actor/operation ID, route/action and canonical JSON payload returns the
 
 UI persists the exact request in sessionStorage for uncertain network/408/5xx or malformed success responses. A retry preserves operation ID, payload, loading time and version. Known 4xx refusals allow a refresh/new request. No credentials or evidence bytes are stored there.
 
+## Approved blend outputs
+
+With migration `20261117000000_ContainerProduction`, the [production workflow](container-production-api.md) supplies a separately reviewed actual output reservation for BLEND_INPUT_STOCK. The original proposal mode/snapshot stays immutable; the execution view exposes the mapped output and output-review/production references. Only that output can load. Container versions change on production commit/output review, so refresh before sending a new load. Production without output review remains blocked; pool/custody and partial-execution revalidation remain unsupported. This code capability does not imply shared deployment.
+
 ## Accounting and source attribution
 
 Each actual load has immutable lines, actor/occurrence/recording times and the complete server assessment. `loadedKg` and `remainingKg` derive from all committed lines. Drafts, reservations and original output mass are not summed into loaded mass. Lines are restricted to approved lot/location quotas; duplicate positions must be combined before sending. At most 100 lines/request, 1,000 loads/container, 100 approved lots for the current assessment and 10,000 positive source shares/position are supported; unsupported sizes fail explicitly.
@@ -63,7 +67,7 @@ Actual loaded mass is retained as container custody records and source allocatio
 
 The caller owns a READ COMMITTED AppDbContext connection/transaction. It acquires stock advisory lock `714928352`, then the existing company lock, before row changes. Role/company is rechecked after waiting; the protected command holds a shared actor-row lock through the mutation so a role change cannot authorize a later write. Source/stock/reservation/load/closure routines do not commit the caller transaction.
 
-F12 intervals, F14 conservative direct-stock assessment, applicable MRL, confirmed quality and company assessment policy are reused. The full pinned approved selection is assessed; only its exact lot/location allocations may be loaded. Physically distinct lots are not chemically averaged. Current dependency fingerprint must equal the reviewed proposal's fingerprint; changed evidence, policy or quality requires review instead of a silent replacement approval. A partial execution that subsequently loses freshness stays blocked until the owner supplies an authorized revalidation path.
+F12 intervals, F14 conservative direct-stock assessment, applicable MRL, confirmed quality and company assessment policy are reused. The pinned loading scope is assessed: the original finished-stock selection for DIRECT_STOCK, or the separately reviewed actual output for S1 production. Only its exact lot/location allocations may be loaded. Physically distinct lots are not chemically averaged. Current dependency fingerprint must equal the reviewed proposal's fingerprint; changed evidence, policy or quality requires review instead of a silent replacement approval. A partial execution that subsequently loses freshness stays blocked until the owner supplies an authorized revalidation path.
 
 Policy/MRL/rule/lab/quality publishers use the same stock writer boundary. Current MRL/policy effectivity is also checked at commit because time can cross a scheduled publication boundary while calculations run. Assessment records include phase, calculation version, dependency revision, decision time, legal/policy versions, bounds/rules/provenance and quality observations. A finite residue interval alone is not PASS.
 

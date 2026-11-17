@@ -43,3 +43,18 @@ Dùng [plan hiện hành](../plans/container-execution-plan-2026-11-13.md) và [
 - **Nhánh chưa hỗ trợ:** BLEND_INPUT_STOCK hoặc pool/custody position hiển thị handoff blocker, không có fake successful load.
 
 Ghi lại build/commit, fixture, actor/role, request IDs, actual kg, before/after stock/quota và manifest/dossier. Không sửa Report5/BM04 local sang PASS chỉ vì đã có code hoặc test fixture. ST-18 manual workflow và ST-21 full-season benchmark cần bằng chứng riêng.
+
+
+## Luồng 4 — Approved blend production S1 (18/11/2026)
+
+Cần migration/grant mới đã được duyệt và fixture độc lập có input stock, lab/profile cho BLENDING, compatibility, yield, quality và market policy phù hợp. Dùng môi trường test cô lập; không tái dùng fixture HOLD/stale/CLOSED hoặc ghi thêm dữ liệu vào Supabase khi chưa được phép. Xem [API/state contract](../api/container-production-api.md) và [deployment checklist](container-production-deployment.md).
+
+1. Export mở planned container có approved BLEND_INPUT_STOCK, bấm **Request approved blend production**.
+2. Operator được giao đúng facility mở **Ledger → Approved production**, chọn task của container. Chọn equipment, ordinary output location, ghi actual finished output/loss/time, bấm **Save approved blend draft**. Nếu actual output khác target của lát cắt này, dừng và báo sai lệch; không sửa số đo cho khớp.
+3. Khi cần, Mill Manager xác nhận variance cho đúng saved operation/version tại **Ledger → Process & correct**. Operator tick xác nhận rồi **Commit approved blend production**. Output được tạo/reserve nhưng actual loaded phải vẫn 0, container PLANNED.
+4. CM vào **Export assessment → Finished-lot quality evidence**, tìm đúng output code, upload synthetic evidence/confirm quality trên fixture test. Quay lại container, nhập **Output review reason**, bấm **Approve actual output**. Thiếu evidence hoặc non-PASS phải bị chặn.
+5. Export refresh checks, chọn chính output đã review, nhập metadata và ghi từng actual load có xác nhận. Ví dụ target 20 kg: `4.000001` rồi `15.999999`. Không cộng reservation/input vào loaded kg.
+6. Đủ target/current checks thì CLOSE, đọc dossier, CM trace actual sources và source forward. Đối chiếu input consumed một lần, output consumed đúng actual load; CLOSE không debit thêm.
+7. Rejection/re-review trước loading dùng fixture riêng: REJECT release outstanding output và giữ history; review mới chỉ reserve lại nếu stock còn đủ/eligible. Sau partial loading, thay evidence vẫn chặn và không có revalidation S2.
+
+Luồng web này đã chạy trên fixture PostgreSQL cô lập, xem [verification record](../reports/container-production-implementation-2026-11-18.md). Các mô tả blocker ở những bản checklist trước ngày 18/11 là baseline trước khi có S1 production; pool/custody và các giới hạn S2 vẫn giữ chặn.

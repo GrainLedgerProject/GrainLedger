@@ -12,6 +12,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## API Specifications (`docs/api/`)
 
+- [Container production API](api/container-production-api.md): approved one-batch production, actual-output review and output reservation/loading
 - [Container execution API](api/container-execution-api.md): approved direct-stock loading, HOLD, closure dossier and actual container tracing
 - [Container preparation API](api/container-api.md): draft-only preparation; actual loading/CLOSE remain blocked
 - [Catalog API](api/catalog-api.md): active substances, commodities, units, and system master data
@@ -25,6 +26,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## Guides & Walkthroughs (`docs/guides/`)
 
+- [Container production deployment](guides/container-production-deployment.md): migration/grant review, shared-environment approval and compatible-instance checklist
 - [Container execution web tests](guides/container-execution-web-test.md): direct-stock loading/closure and trace/exception scenarios
 - [Authentication & Scalar API Guide](guides/auth-email-password-scalar.md): email/password auth, JWT/refresh tokens, OTP, and Scalar UI
 - [Companion Capture Codes](guides/companion-capture-codes.md): offline client synchronization codes and short token generation
@@ -42,7 +44,8 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 ## Plans & Backlogs (`docs/plans/`)
 
 - [Admin Capture Enhancements Plan](plans/admin-capture-enhancements-plan.md): administrative capture tooling, review queue, and bulk updates
-- [Container execution plan](plans/container-execution-plan-2026-11-13.md): current implementation checklist and deferred blend/output dependencies
+- [Container core completion plan (2026-11-17)](plans/container-core-completion-plan-2026-11-17.md): S1 production/output review/loading implementation checklist and deferred S2/S3 workflows
+- [Container execution plan](plans/container-execution-plan-2026-11-13.md): implemented DIRECT_STOCK baseline and deferred blend/output dependencies
 - [Container completion review](reports/container-completion-review-2026-11-13.md): current post-merge gaps, questions and ordered acceptance plan
 - [Container Loading Plan](plans/container-loading-plan.md): historical scope and requirements
 - [Container implementation history](plans/container-loading-implementation-plan.md) · [previous execution plan](plans/container-loading-next-plan.md) · [integration checklist](plans/container-integration-handover.md)
@@ -56,6 +59,9 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 - [Unified Lot Code Implementation Plan](plans/unified-lot-code-implementation-plan.md): unified token format migration and deployment safety
 
 ## Reports & Reviews (`docs/reports/`)
+
+- [Container production S1 verification (2026-11-18)](reports/container-production-implementation-2026-11-18.md): implemented approved blend → output review/reservation → loading/CLOSE/trace; isolated tests/browser PASS
+- [Container production deployment (2026-11-18)](reports/container-production-deployment-2026-11-18.md): approved shared migration and single runtime grant applied; backup, unchanged existing ACLs and read-only runtime verification
 
 - [Container end-to-end business flow (2026-11-16)](reports/container-end-to-end-business-flow-2026-11-16.md): luồng chính từ export order qua duyệt, blend, bàn giao thành phẩm, loading, CLOSE và trace; ai làm và điểm cần nối tiếp
 - [Container web test report (2026-11-16)](reports/container-web-test-report-2026-11-16.md): 30 nhóm ca manual với dữ liệu đầu vào, từng bước web, stock/reservation reconciliation, blockers, retry, scope và các nhánh chưa hỗ trợ; checklist, chưa phải kết quả nghiệm thu
