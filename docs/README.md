@@ -47,6 +47,8 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 ## Plans & Backlogs (`docs/plans/`)
 
 - [Admin Capture Enhancements Plan](plans/admin-capture-enhancements-plan.md): administrative capture tooling, review queue, and bulk updates
+- [Fresh demo preparation and rehearsal](reports/container-demo-v2-preparation-2026-11-18.md): new source/stock API preparation, complete web walkthrough, stock preservation and infrastructure limits
+- [Fresh container and tracing lecturer demo](guides/container-tracing-lecturer-demo-2026-11-18-v2.md): preselected fresh BLD079 stock, web rehearsal complete, 10kg retained for one new presentation run
 - [Container tracing deployment and web results](reports/container-tracing-deployment-2026-11-18.md): approved Supabase migration, scoped EXECUTE restoration and CM/Export tracing acceptance; ACL recurrence recorded
 - [Container tracing implementation](reports/container-tracing-flowchart-implementation-2026-11-18.md): code complete, focused tests passed; links shared deployment and browser acceptance
 - [Container tracing web acceptance](guides/container-tracing-flowchart-web-test.md): focused forward container nodes and backward graph walkthrough; core shared web acceptance recorded

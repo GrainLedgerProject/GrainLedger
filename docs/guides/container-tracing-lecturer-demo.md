@@ -1,5 +1,8 @@
 # Một luồng demo container và tracing cho giảng viên — dùng dữ liệu Supabase đã chọn
 
+> **Luồng này đã được thực hiện, stock BLD-20261117-000064 đã hết. Không dùng các khẳng định “còn10kg” bên dưới làm dữ liệu hiện tại.** Dùng [luồng demo mới BLD-20261118-000079](container-tracing-lecturer-demo-2026-11-18-v2.md). Container CLOSED cũ vẫn đọc tracing/dossier được; không reset để load lại.
+
+
 **Thực hiện đúng luồng dưới đây, không cần chọn giữa nhiều kịch bản.** Dùng thành phẩm đã blend sẵn, tạo order/container mới 10 kg, duyệt DIRECT_STOCK, load **4 + 6 kg**, CLOSE rồi tracing hai chiều. Không có bước production mới trong luồng này; lịch sử blend sẽ được trình bày qua tracing.
 
 **Bộ dữ liệu sử dụng: seed/demo hiện có trên Supabase**, không phải DB Testcontainers cục bộ. Dùng `DEMO-CONTAINER / PADDY` xuyên suốt order, stock, assessment policy và MRL để không đi qua điểm vướng PADDY/RICE. Các tên synthetic được giữ nguyên để giảng viên biết đây là dữ liệu phần mềm giả lập.
