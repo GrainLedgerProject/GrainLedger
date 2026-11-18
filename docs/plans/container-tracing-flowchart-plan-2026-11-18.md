@@ -6,10 +6,12 @@ Các checkbox tổng thể bên dưới vẫn để mở nếu matrix còn ca ch
 
 ## 1. Mục tiêu và căn cứ
 
+Các nguồn proposal/SRS/business rules được dẫn dưới đây nằm ngoài repository. Tham chiếu ghi tên file, mã yêu cầu và dòng/trang của bản đã đối chiếu khi lập plan; không phải liên kết tới tài liệu trong checkout. Số dòng có thể thay đổi khi bản nguồn được cập nhật.
+
 Cho người dùng theo dõi liên tục **nguồn → processing/custody → lot thành phẩm → container đã thực nhận hàng**, rồi từ trang container xem ngược các lot và nguồn đã đóng góp.
 
-- [SRS UC-24](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:144>) yêu cầu trace nguồn/results xuôi tới container và container ngược về source contributions/plot-level mass shares.
-- [SRS FR-TRC-001](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:445>) yêu cầu đủ kết quả được phép, giữ source kg, company scope và phân biệt tracing với HOLD.
+- SRS UC-24 (`Report3_Software Requirement Specification.docx.md:144`) yêu cầu trace nguồn/results xuôi tới container và container ngược về source contributions/plot-level mass shares.
+- SRS FR-TRC-001 (`Report3_Software Requirement Specification.docx.md:445`) yêu cầu đủ kết quả được phép, giữ source kg, company scope và phân biệt tracing với HOLD.
 - **Node container trên Flowchart, thao tác bấm mở hồ sơ và bố trí các màn hình là giải pháp UI đề xuất**, không phải giao diện bắt buộc nguyên văn của SRS.
 
 Đây là bổ sung trình bày và contract đọc cho tracing đã có, không mở nghiệp vụ shipment mới. Không kéo vấn đề mapping commodity PADDY/RICE hay các sửa UI container khác vào plan này.
