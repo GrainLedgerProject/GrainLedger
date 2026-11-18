@@ -45,3 +45,22 @@ it('gives the customer reviewer review controls and no production or loading aut
   expect(screen.queryByRole('button', { name: 'Commit approved blend production' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Request approved blend production' })).not.toBeInTheDocument();
 });
+
+it('scales a partial batch with exact micro-kg and retains only its remaining input quota', async () => {
+  const bodies: string[] = [];
+  mock.mockImplementation(async (url, init) => {
+      if (String(url) === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (String(url) === '/api/ledger/lookups') return json(look);
+      if (String(url) === route + '/draft') { bodies.push(String(init?.body)); return json({ ...task, version: 3 }); }
+      return json({ ...task, plannedKg: '20', remainingProductionKg: '10', targetKg: '10', operation: undefined,
+        inputs: [{ lotId: 'i1', lotCode: 'HEAD-1', locationId: 'store1', approvedKg: '20', quantityKg: '10' }], state: 'REQUESTED' });
+  });
+  const browser = userEvent.setup(); render(<ContainerProduction id="c1" userId="operator1" operator />);
+  await screen.findByText('REQUESTED');
+  await browser.selectOptions(screen.getByLabelText('Production equipment'), 'equipment1');
+  await browser.selectOptions(screen.getByLabelText('Finished output location'), 'outstore');
+  await browser.clear(screen.getByLabelText('Actual finished output (kg)')); await browser.type(screen.getByLabelText('Actual finished output (kg)'), '4.000001');
+  await browser.click(screen.getByRole('button', { name: 'Save approved blend draft' }));
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  expect(JSON.parse(bodies[0]).draft.inputs).toEqual([{ lotId: 'i1', locationId: 'store1', quantityKg: '4.000001' }]);
+});

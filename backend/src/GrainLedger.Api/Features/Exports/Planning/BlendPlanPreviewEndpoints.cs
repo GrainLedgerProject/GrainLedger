@@ -96,7 +96,7 @@ public static partial class ExportModule
                 x.LotId, x.LocationId, x.QuantityKg, x.CandidateRevision)).ToArray();
             var yield = selection.CompatibilityPolicyId is { } compatibilityId &&
                 yieldByCompatibility.TryGetValue(compatibilityId, out var found) ? found : null;
-            var group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = revision },
+            var group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = revision, TargetMassKg = plan.TargetMassKg },
                 selected, target, selection.Mode, revision,
                 selection.CompatibilityPolicyId, yield is not null);
             if (group.Status == "INVALID") return new BlendAssessmentResult("FAIL", null,

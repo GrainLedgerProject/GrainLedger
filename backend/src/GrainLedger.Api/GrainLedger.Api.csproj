@@ -30,6 +30,7 @@
     <EmbeddedResource Include="Data/Sql/ContainerPreparation.sql" LogicalName="GrainLedger.Data.Sql.ContainerPreparation.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerExecution.sql" LogicalName="GrainLedger.Data.Sql.ContainerExecution.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerProduction.sql" LogicalName="GrainLedger.Data.Sql.ContainerProduction.sql" />
+    <EmbeddedResource Include="Data/Sql/ContainerWorkflow.sql" LogicalName="GrainLedger.Data.Sql.ContainerWorkflow.sql" />
     <InternalsVisibleTo Include="GrainLedger.Api.IntegrationTests" />
   </ItemGroup>
 </Project>

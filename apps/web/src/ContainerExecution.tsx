@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
 import { ContainerProduction } from './ContainerProduction';
+import { ContainerWorkflow } from './ContainerWorkflow';
 import { Mass, positive } from './ledger-ui';
 
 type Allocation = { lotId: string; lotCode: string; locationId: string; reservedKg: string; remainingKg: string; restricted: boolean; loadingPositionReady: boolean };
-type Container = { id: string; code: string; orderId: string; targetKg: string; status: string; version: number; loadedKg: string; remainingKg: string;
+type Container = { id: string; code: string; orderId: string; targetKg: string; status: string; version: number; loadedKg: string; remainingKg: string; workflowAvailable?: boolean;
   containerNumber: string | null; sealNumber: string | null; holds: { id: string; reason: string; recordedAt: string }[];
   approval: null | { proposalId: string; decisionVersion: number; mode: string; allocations: Allocation[] };
   loads: { id: string; loadedAt: string; lines: { lotId: string; lotCode: string; locationId: string; quantityKg: string }[] }[]; dossierAvailable: boolean };
@@ -31,8 +32,8 @@ function saved(key: string): Pending | null {
   catch { return null; }
 }
 
-export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate, onChanged }: {
-  id: string; userId: string; canWrite: boolean; canHold: boolean; onNavigate: (path: string) => void; onChanged?: () => void;
+export function ContainerExecution({ id, userId, canWrite, canHold, canReview = canHold, onNavigate, onChanged }: {
+  id: string; userId: string; canWrite: boolean; canHold: boolean; canReview?: boolean; onNavigate: (path: string) => void; onChanged?: () => void;
 }) {
   const route = `/api/export-containers/${id}/execution`, key = `grainledger.container.execution.${userId}.${id}`;
   const [detail, setDetail] = useState<Container | null>(null), [readiness, setReadiness] = useState<Readiness | null>(null);
@@ -86,7 +87,7 @@ export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate, 
     void mutate('loads', { proposalId: detail.approval.proposalId, decisionVersion: detail.approval.decisionVersion,
       loadedAt: new Date().toISOString(), lines: [{ lotId: selected.lotId, locationId: selected.locationId, quantityKg: kg }] });
   }
-  return <>{detail?.approval?.mode === 'BLEND_INPUT_STOCK' && <ContainerProduction id={id} userId={userId} canRequest={canWrite} canReview={canHold} proposalId={detail.approval.proposalId} containerVersion={detail.version} closed={detail.status !== 'PLANNED'} onChanged={() => { setReload(n => n + 1); onChanged?.(); }} />}<section className="panel export-section"><h2>Loading and closure</h2>
+  return <>{detail?.approval?.mode === 'BLEND_INPUT_STOCK' && <ContainerProduction id={id} userId={userId} canRequest={canWrite} canReview={canReview && !detail.workflowAvailable} proposalId={detail.approval.proposalId} containerVersion={detail.version} closed={detail.status === 'CLOSED'} onChanged={() => { setReload(n => n + 1); onChanged?.(); }} />}<section className="panel export-section"><h2>Loading and closure</h2>
     <p className="muted">Only committed loading counts toward this container. Planned allocations and preparation drafts do not.</p>
     {error && <div className="notice error" role="alert">{error}</div>}
     {pending && <div className="notice error" role="alert">A previous operation has an uncertain result. Retry the same operation before starting another. <button disabled={busy} onClick={() => void mutate('', {})}>Retry container operation</button></div>}
@@ -113,5 +114,5 @@ export function ContainerExecution({ id, userId, canWrite, canHold, onNavigate, 
       <section><h3>Container history</h3><button className="secondary" disabled={busy || !!pending} onClick={() => void readHistory(1)}>Read container history</button>{history && <><ul>{history.items.map(item => <li key={item.id}>{item.kind} · {new Date(item.recorded_at).toLocaleString()}</li>)}</ul><div className="form-footer"><span>Page {historyPage}</span><button className="secondary" disabled={busy || historyPage === 1} onClick={() => void readHistory(historyPage - 1)}>Previous history page</button><button className="secondary" disabled={busy || !history.hasMore} onClick={() => void readHistory(historyPage + 1)}>Next history page</button></div></>}</section>
       {dossier != null && <section><h3>Immutable closure dossier</h3><p className="muted">Historical decision and actual manifest; later HOLDs do not rewrite this snapshot.</p><pre className="table-scroll">{JSON.stringify(dossier, null, 2)}</pre><a className="text-button" download={`${detail.code}-dossier.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dossier, null, 2))}`}>Download dossier JSON</a></section>}
     </>}
-  </section></>;
+  </section>{detail?.workflowAvailable && <ContainerWorkflow key={`${userId}:${id}:workflow`} id={id} userId={userId} canReview={canReview} canWrite={canWrite} onChanged={() => { setReload(n => n + 1); onChanged?.(); }} />}</>;
 }

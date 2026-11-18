@@ -104,7 +104,7 @@ public sealed class ContainerExecutionTests(ApiFactory factory) : IClassFixture<
         Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
         var body = await blocked.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Contains(body.GetProperty("readiness").GetProperty("findings").EnumerateArray(), x => x.GetString() == "QUALITY_LIMIT");
-        var held = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/holds", new ContainerHoldRequest(Guid.NewGuid(), 1, "Synthetic blocked container"));
+        var held = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/holds", new ContainerHoldRequest(Guid.NewGuid(), (await f.Detail()).GetProperty("container").GetProperty("version").GetInt32(), "Synthetic blocked container"));
         var version = held.GetProperty("version").GetInt32();
         Assert.Equal(HttpStatusCode.Conflict, (await f.Export.PostAsJsonAsync(f.Route + "/loads", f.Load(version, "4"))).StatusCode);
         Assert.Equal(10m, Quantity(await f.Stock.LotAsync(f.LotId)));

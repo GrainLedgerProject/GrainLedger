@@ -4,7 +4,7 @@
 
 Implemented the S1 slice from the [core completion plan](../plans/container-core-completion-plan-2026-11-17.md): an approved BLEND_INPUT_STOCK request is executed as one real Ledger BLENDING operation, its ordinary exact-target output is reserved and reviewed, and that output can be partially loaded and closed with immutable dossier and actual source trace. Existing DIRECT_STOCK remains supported.
 
-**Implemented and verified in isolated PostgreSQL/browser. Subsequently deployed to the configured shared Supabase on 18/11/2026 after separate approval:** see the [deployment record](container-production-deployment-2026-11-18.md). S2/S3 are still deferred. This is not whole-SRS acceptance, a legal shipment certificate, a remote CI result or a witnessed deadline sign-off.
+**Implemented and verified in isolated PostgreSQL/browser. Subsequently deployed to the configured shared Supabase on 18/11/2026 after separate approval:** see the [deployment record](container-production-deployment-2026-11-18.md). The updated [core plan](../plans/container-core-completion-plan-2026-11-17.md#9-đợt-2--s2-hoàn-thiện-các-yêu-cầu-còn-lại) limits remaining implementation to requirement-backed S2 work and excludes extensions. This is not whole-SRS acceptance, a legal shipment certificate, a remote CI result or a witnessed deadline sign-off.
 
 ## What changed
 
@@ -70,6 +70,8 @@ After this implementation run, the user separately approved the new migration an
 No commit, push, PR or remote CI was performed. Existing untracked test reports from the earlier container run were preserved.
 
 ## Remaining scope
+
+The list below records S1 capability limits, not an instruction to implement every unsupported variant. The user's subsequent scope decision is reflected in sections 9–10 of the core plan: required S2 workflows remain; unsupported extensions and unconfirmed quantity/legacy policies are excluded.
 
 S1 supports one plan, one complete batch, one exact-target ordinary BLENDED_RICE output, pre-load review/re-review and partial loading. Current limitations remain explicit blockers:
 

@@ -34,4 +34,4 @@ Protected artifacts are outside Git at `/home/phucpinku/.local/share/grainledger
 
 Applied script SHA-256: `65993925afd342290d6c82f822059c7d9a919c8659c25e4540b3e6151f132749`.
 
-No restore, down migration, commit, push or remote deployment was performed. Keep the backup and coordinate a reviewed forward fix or recovery if needed; reverting code alone is unsafe after new reservation events or production records exist. S2/S3 scope remains deferred in the [core plan](../plans/container-core-completion-plan-2026-11-17.md).
+No restore, down migration, commit, push or remote deployment was performed in this deployment run. Keep the backup and coordinate a reviewed forward fix or recovery if needed; reverting code alone is unsafe after new reservation events or production records exist. The subsequently updated [core plan](../plans/container-core-completion-plan-2026-11-17.md) defines the remaining requirement-backed S2 scope and excludes extensions; it does not authorize new database changes.

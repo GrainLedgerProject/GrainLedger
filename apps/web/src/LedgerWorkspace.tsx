@@ -12,7 +12,7 @@ import { OwnReceivingThreshold } from './ReceivingThresholds';
 export const ledgerSections = [
   { id: 'receiving', label: 'Receive stock', description: 'Procurement & mill arrivals', permissions: ['farms.read', 'farms.write', 'purchases.write', 'platform.configure', 'lots.receive', 'receiving.reconcile'] },
   { id: 'inventory', label: 'Stock & HOLDs', description: 'Available stock, alerts & history', permissions: ['lots.read.all', 'lots.read.facility', 'lots.read.tenant', 'purchases.write'] },
-  { id: 'production', label: 'Approved production', description: 'Produce reserved blend inputs', permissions: ['containers.operate'] },
+  { id: 'production', label: 'Approved production', description: 'Approved production & stock handoffs', permissions: ['containers.operate', 'holds.process'] },
   { id: 'containers', label: 'Containers', description: 'Loading preparation & closure checks', permissions: ['containers.write', 'containers.operate', 'holds.process', 'blend.approve'] },
   { id: 'traceability', label: 'Traceability', description: 'Lot origins & affected lots', permissions: ['trace.read.tenant', 'trace.read.all'] },
   { id: 'operations', label: 'Process & correct', description: 'Processing, transfers & corrections', permissions: ['conversions.read', 'conversions.write', 'conversions.confirm', 'corrections.reconcile'] },

@@ -12,6 +12,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## API Specifications (`docs/api/`)
 
+- [Container S2 workflow API](api/container-workflow-api.md): partial reviews/batches, multi-plan CLOSE, reviewed handoffs, HOLD notices and shipment records
 - [Container production API](api/container-production-api.md): approved one-batch production, actual-output review and output reservation/loading
 - [Container execution API](api/container-execution-api.md): approved direct-stock loading, HOLD, closure dossier and actual container tracing
 - [Container preparation API](api/container-api.md): draft-only preparation; actual loading/CLOSE remain blocked
@@ -26,6 +27,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## Guides & Walkthroughs (`docs/guides/`)
 
+- [Container S2 deployment](guides/container-s2-deployment.md) · [S2 web walkthrough](guides/container-s2-web-test.md)
 - [Container production deployment](guides/container-production-deployment.md): migration/grant review, shared-environment approval and compatible-instance checklist
 - [Container execution web tests](guides/container-execution-web-test.md): direct-stock loading/closure and trace/exception scenarios
 - [Authentication & Scalar API Guide](guides/auth-email-password-scalar.md): email/password auth, JWT/refresh tokens, OTP, and Scalar UI
@@ -44,7 +46,8 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 ## Plans & Backlogs (`docs/plans/`)
 
 - [Admin Capture Enhancements Plan](plans/admin-capture-enhancements-plan.md): administrative capture tooling, review queue, and bulk updates
-- [Container core completion plan (2026-11-17)](plans/container-core-completion-plan-2026-11-17.md): S1 production/output review/loading implementation checklist and deferred S2/S3 workflows
+- [Container S2 implementation plan](plans/container-s2-implementation-plan-2026-11-18.md): seven authorized requirement groups and focused verification
+- [Container core completion plan (2026-11-17, scope updated 2026-11-18)](plans/container-core-completion-plan-2026-11-17.md): completed S1, requirement-mapped S2 tasks and excluded extensions; two implementation stages
 - [Container execution plan](plans/container-execution-plan-2026-11-13.md): implemented DIRECT_STOCK baseline and deferred blend/output dependencies
 - [Container completion review](reports/container-completion-review-2026-11-13.md): current post-merge gaps, questions and ordered acceptance plan
 - [Container Loading Plan](plans/container-loading-plan.md): historical scope and requirements
@@ -60,6 +63,9 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## Reports & Reviews (`docs/reports/`)
 
+- [Container S2 shared deployment](reports/container-s2-deployment-2026-11-18.md): approved migration/single grant applied, preserved existing data/ACLs, runtime read checks and local-versus-Supabase fixture explanation
+- [Container S2 additional browser walkthroughs](reports/container-s2-web-walkthroughs-2026-11-18.md): P1/P2 and pool/transfer/bagging through CLOSE, both PASS on fresh isolated fixtures
+- [Container S2 implementation and verification](reports/container-s2-implementation-2026-11-18.md): actual test/browser results, 1,000-container benchmark, deployment status and retained limits
 - [Container production S1 verification (2026-11-18)](reports/container-production-implementation-2026-11-18.md): implemented approved blend → output review/reservation → loading/CLOSE/trace; isolated tests/browser PASS
 - [Container production deployment (2026-11-18)](reports/container-production-deployment-2026-11-18.md): approved shared migration and single runtime grant applied; backup, unchanged existing ACLs and read-only runtime verification
 

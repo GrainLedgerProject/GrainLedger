@@ -80,6 +80,11 @@ public static partial class ExportModule
             var detail = await ReadExecutionAsync(actor, id, "detail", db, ct);
             var basis = !await access.HasPermissionAsync(Permissions.ResidueEvaluate, ct) ? JsonSerializer.SerializeToElement(new { phase = "LOADING", checkedAt = DateTimeOffset.UtcNow, assessmentStatus = "INCOMPLETE", findings = new[] { "RESIDUE_EVALUATE_PERMISSION_REQUIRED" } }) : await AssessContainerAsync(detail, detail.GetProperty("status").GetString() == "LOADING" &&
                 detail.GetProperty("remainingKg").GetString() == "0.000000" ? "CLOSE" : "LOADING", db, ledger, residue, mrl, policies, ct);
+            if (detail.GetProperty("status").GetString() != "CLOSED" && detail.GetProperty("approval").ValueKind == JsonValueKind.Object && InvalidatesActiveAuthority(detail, basis))
+            {
+                await InvalidateUnfinishedAuthorityAsync(actor, id, detail.GetProperty("version").GetInt32(), basis, db, ct);
+                detail = await ReadExecutionAsync(actor, id, "detail", db, ct);
+            }
             await tx.CommitAsync(ct);
             return Results.Ok(new { container = PublicContainer(detail), readiness = basis });
         }
@@ -143,9 +148,24 @@ public static partial class ExportModule
                 var detail = await ReadExecutionAsync(scope.Value.Actor, id, "detail", db, ct);
                 basis = await AssessContainerAsync(detail, action == "load" ? "LOADING" : "CLOSE", db, ledger, residue, mrl, policies, ct);
                 if (basis.GetProperty("assessmentStatus").GetString() != "PASS")
+                {
+                    if (detail.GetProperty("approval").ValueKind == JsonValueKind.Object && InvalidatesActiveAuthority(detail, basis))
+                    {
+                        await InvalidateUnfinishedAuthorityAsync(scope.Value.Actor, id, detail.GetProperty("version").GetInt32(), basis, db, ct);
+                        await tx.CommitAsync(ct);
+                    }
                     return Results.Json(new { code = "CONTAINER_BLOCKED", title = "Current container checks block this operation. Refresh checks to review the reasons.", readiness = basis }, statusCode: 409);
+                }
             }
             var result = await ExecutionCommandAsync(scope.Value.Actor, id, action, payload, basis, db, ct);
+            if (action is "load" or "close")
+            {
+                var finalDetail = await ReadExecutionAsync(scope.Value.Actor, id, "detail", db, ct);
+                var final = await AssessContainerAsync(finalDetail, action == "load" ? "LOADING" : "CLOSE", db, ledger, residue, mrl, policies, ct, finalCheck: true);
+                if (final.GetProperty("assessmentStatus").GetString() != "PASS" || final.GetProperty("dependencyRevision").GetString() != basis.GetProperty("dependencyRevision").GetString())
+                    return Problem(409, "CONTAINER_EVIDENCE_CHANGED", "Current evidence changed before commit; the operation was rolled back.");
+                await WorkflowSqlAsync(scope.Value.Actor, id, "assert-basis", EmptyContainerPayload, final, db, ct);
+            }
             await tx.CommitAsync(ct);
             return Results.Ok(PublicContainer(result));
         }
@@ -157,6 +177,7 @@ public static partial class ExportModule
     {
         // Internal assessment inputs contain the original proposal snapshot. Do not duplicate them in UI reads/receipts.
         var data = System.Text.Json.Nodes.JsonNode.Parse(raw.GetRawText())!.AsObject();
+        data.Remove("closingScopes");
         if (data["approval"] is System.Text.Json.Nodes.JsonObject approval)
         {
             approval.Remove("outputSnapshot"); approval.Remove("snapshot"); approval.Remove("previewRequest"); approval.Remove("demandSnapshot");
@@ -193,20 +214,23 @@ public static partial class ExportModule
 
     private static async Task<JsonElement> AssessContainerAsync(JsonElement detail, string phase, AppDbContext db,
         LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead mrlReader,
-        BlendAssessmentPolicyRead policyReader, CancellationToken ct)
+        BlendAssessmentPolicyRead policyReader, CancellationToken ct, bool finalCheck = false)
     {
         var findings = new List<string>();
-        if (detail.GetProperty("status").GetString() == "CLOSED") findings.Add("CONTAINER_CLOSED");
+        if (!finalCheck && detail.GetProperty("status").GetString() == "CLOSED") findings.Add("CONTAINER_CLOSED");
         if (detail.GetProperty("holds").GetArrayLength() != 0) findings.Add("CONTAINER_HOLD");
         if (phase == "CLOSE")
         {
             if (detail.GetProperty("remainingKg").GetString() != "0.000000") findings.Add("EXACT_TARGET_NOT_LOADED");
             if (detail.GetProperty("containerNumber").ValueKind == JsonValueKind.Null || detail.GetProperty("sealNumber").ValueKind == JsonValueKind.Null)
                 findings.Add("SEAL_METADATA_MISSING");
+            if (detail.TryGetProperty("closingScopes", out _))
+                return await AssessWholeContainerAsync(detail, findings, db, ledger, residue, mrlReader, policyReader, ct);
         }
         var approval = detail.GetProperty("approval");
         object? evidence = null; string? dependency = null;
         if (approval.ValueKind == JsonValueKind.Null) findings.Add("ACTIVE_APPROVAL_REQUIRED");
+        else if (approval.TryGetProperty("scopeReviewDecision", out var scopeDecision) && scopeDecision.GetString() != "APPROVED") findings.Add("OUTPUT_REVIEW_REJECTED");
         else if (approval.GetProperty("mode").GetString() != "DIRECT_STOCK" && (!approval.TryGetProperty("outputSnapshot", out var actualOutput) || actualOutput.ValueKind == JsonValueKind.Null)) findings.Add(approval.TryGetProperty("productionState", out var productionState) ? productionState.GetString() switch
         {
             "PRODUCED" => "OUTPUT_REVIEW_REQUIRED", "REJECTED" => "OUTPUT_REVIEW_REJECTED",
@@ -220,9 +244,9 @@ public static partial class ExportModule
             using (demand)
             {
                 var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == detail.GetProperty("orderId").GetGuid(), ct);
-                if (saved is null || demand.RootElement.GetProperty("orderVersion").GetInt32() != order.Version ||
-                    demand.RootElement.GetProperty("specificationVersion").GetInt32() != order.CurrentSpecificationVersion ||
-                    demand.RootElement.GetProperty("targetMassKg").GetString() != ExportRules.Text(decimal.Parse(detail.GetProperty("targetKg").GetString()!, CultureInfo.InvariantCulture)))
+                if (saved is null || (!approval.TryGetProperty("scopeReviewId", out _) && (demand.RootElement.GetProperty("orderVersion").GetInt32() != order.Version ||
+                    demand.RootElement.GetProperty("specificationVersion").GetInt32() != order.CurrentSpecificationVersion)) ||
+                    ParseKg((demand.RootElement.TryGetProperty("containerTargetMassKg", out var containerTarget) ? containerTarget.GetString() : demand.RootElement.GetProperty("targetMassKg").GetString())!) != ParseKg(detail.GetProperty("targetKg").GetString()!))
                     findings.Add("APPROVED_DEMAND_CHANGED");
                 else
                 {
@@ -233,26 +257,12 @@ public static partial class ExportModule
                     else
                     {
                         var selected = selection.Allocations.Select(x => new CandidateGroupItem(x.LotId, x.LocationId, x.QuantityKg, x.CandidateRevision)).ToArray();
-                        var boundsRead = await residue.PreviewSelectionAsync(selected.GroupBy(x => x.LotId).Select(x => new HypotheticalBlendInput(x.Key,
-                            ExportRules.Text(x.Sum(y => y.QuantityKg)))).ToArray(), null, policy.RequiredSubstanceIds, ct);
-                        var policyAtSnapshot = await policyReader.ResolveAsync(order.CompanyId, order.MarketId, order.CommodityId, boundsRead.SnapshotAt, ct);
-                        if (policyAtSnapshot?.Id != policy.Id) findings.Add("ASSESSMENT_POLICY_CHANGED_DURING_READ");
-                        var bounds = DirectStockResidueAssessment.ConservativeBounds(boundsRead.Inputs, policy.RequiredSubstanceIds);
-                        var mrl = await mrlReader.ResolveAsync(order.MarketId, order.CommodityId, boundsRead.SnapshotAt, ct);
-                        var quality = await ledger.ReadPlanningQualityObservationsAsync(order.CompanyId, request.FacilityId,
-                            selected.Select(x => x.LotId).Distinct().ToArray(), boundsRead.SnapshotAt, ct);
-                        var observations = quality.Select(x => new BlendQualityObservation(x.LotId, x.AttributeId,
-                            decimal.Parse(x.MeasuredValue, CultureInfo.InvariantCulture), x.Unit, x.Id, x.VersionNo)).ToArray();
-                        var limits = await db.Limits.AsNoTracking().Where(x => x.SpecificationId == approval.GetProperty("specificationId").GetGuid()).ToArrayAsync(ct);
-                        var rule = new BlendAssessmentRule(policy.Id, policy.VersionNo, policy.MarketId, policy.CommodityId,
-                            policy.RequiredSubstanceIds, decimal.Parse(policy.MrlMarginFraction, CultureInfo.InvariantCulture), policy.ResidueBasis, policy.EvidenceReference);
-                        var rules = policy.QualityRules.Select(x => new BlendQualityRule(policy.Id, policy.VersionNo, x.AttributeId, x.Unit, x.Calculation, policy.EvidenceReference)).ToArray();
-                        var assessment = BlendAssessment.Evaluate("DIRECT_STOCK", decimal.Parse(detail.GetProperty("targetKg").GetString()!, CultureInfo.InvariantCulture),
-                            selected, null, rule, mrl, bounds, limits, rules, observations);
-                        findings.AddRange(assessment.Findings.Where(x => x.Status != "PASS").Select(x => x.Code));
-                        dependency = ExportRules.Hash("blend-assessment-dependencies", new { mrl, policy, yield = (PlanningYieldRule?)null, bounds, observations });
+                        var assessment = await AssessWorkflowSelectionAsync(order, request.FacilityId, selected, "DIRECT_STOCK", selected.Sum(x => x.QuantityKg), null,
+                            db, ledger, residue, mrlReader, policyReader, ct);
+                        findings.AddRange(assessment.GetProperty("findings").EnumerateArray().Select(x => x.GetString()!));
+                        dependency = assessment.GetProperty("dependencyRevision").GetString();
                         if (dependency != saved.Value.DependencyRevision) findings.Add("APPROVAL_EVIDENCE_CHANGED");
-                        evidence = new { applicableMrl = mrl, assessmentPolicy = policy, residueBounds = bounds, qualityObservations = observations };
+                        evidence = assessment.GetProperty("evidence");
                     }
                     // Only immutable approved allocations are loadable, including their reserved rather than free stock.
                     foreach (var item in approval.GetProperty("allocations").EnumerateArray())
@@ -260,8 +270,10 @@ public static partial class ExportModule
                         if (item.GetProperty("restricted").GetBoolean()) findings.Add("LOT_RESTRICTED");
                         if (phase == "LOADING" && decimal.Parse(item.GetProperty("remainingKg").GetString()!, CultureInfo.InvariantCulture) > 0 &&
                             !item.GetProperty("loadingPositionReady").GetBoolean()) findings.Add("POSITION_OR_SOURCE_HANDOFF_REQUIRED");
+                        if (phase == "LOADING" && ParseKg(item.GetProperty("remainingKg").GetString()!) > 0 && !selection.Allocations.Any(x => x.LotId == item.GetProperty("lotId").GetGuid() && x.LocationId == item.GetProperty("locationId").GetGuid()))
+                            findings.Add("OUTPUT_REVIEW_REQUIRED");
                     }
-                    if (phase == "LOADING" && detail.GetProperty("remainingKg").GetString() == "0.000000") findings.Add("TARGET_ALREADY_LOADED");
+                    if (!finalCheck && phase == "LOADING" && detail.GetProperty("remainingKg").GetString() == "0.000000") findings.Add("TARGET_ALREADY_LOADED");
                 }
             }
         }
@@ -273,8 +285,11 @@ public static partial class ExportModule
             findings = findings.Distinct().ToArray(),
             dependencyRevision = dependency,
             evidence,
+            planAuthorization = approval.ValueKind == JsonValueKind.Object ? new { proposalId = approval.GetProperty("proposalId").GetGuid(), decisionVersion = approval.GetProperty("decisionVersion").GetInt32(),
+                reviewId = approval.TryGetProperty("scopeReviewId", out var scopeReview) ? scopeReview : JsonSerializer.SerializeToElement((Guid?)null),
+                productionOperations = approval.TryGetProperty("productionOperations", out var operations) ? operations : JsonSerializer.SerializeToElement(Array.Empty<Guid>()) } : null,
             outputAuthorization = approval.ValueKind == JsonValueKind.Object && approval.TryGetProperty("outputReviewId", out var outputReview) && outputReview.ValueKind != JsonValueKind.Null
-                ? new { proposalId = approval.GetProperty("proposalId").GetGuid(), reviewId = outputReview.GetGuid(), operationId = approval.GetProperty("productionOperationId").GetGuid() } : null,
+                ? new { proposalId = approval.GetProperty("proposalId").GetGuid(), reviewId = outputReview.GetGuid(), operationId = approval.TryGetProperty("productionOperationId", out var productionOperation) && productionOperation.ValueKind == JsonValueKind.String && productionOperation.TryGetGuid(out var operation) ? (Guid?)operation : null } : null,
             calculationVersion = "F16_DIRECT_STOCK_V1"
         }, ContainerJson);
     }

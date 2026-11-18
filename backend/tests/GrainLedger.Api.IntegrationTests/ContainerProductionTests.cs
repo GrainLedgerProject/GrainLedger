@@ -100,7 +100,7 @@ public sealed class ContainerProductionTests(ApiFactory factory) : IClassFixture
         var sources = trace.GetProperty("sourceContributions").EnumerateArray().ToArray(); Assert.Equal(2, sources.Length);
         Assert.All(sources, s => Assert.Equal("10.000000", s.GetProperty("quantityKg").GetString()));
         var dossier = await GetAsync(f.Stock.Customer, f.Route + "/dossier");
-        Assert.Equal(produced.GetProperty("operationId").GetGuid(), dossier.GetProperty("assessment").GetProperty("outputAuthorization").GetProperty("operationId").GetGuid());
+        Assert.Equal(produced.GetProperty("operationId").GetGuid(), Assert.Single(dossier.GetProperty("assessment").GetProperty("reviewedScopes").EnumerateArray()).GetProperty("productionOperations")[0].GetGuid());
 
     }
 

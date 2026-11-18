@@ -139,6 +139,10 @@ Forward migration `20261117000000_ContainerProduction` implements one-batch appr
 
 The following migration-specific instructions preserve prior release history only. They describe old per-module schemas/migrations and must not be used as current cutover or deployment instructions. Confirm current database status independently; no reset or deployment is asserted here.
 
+## Container S2 workflow deployment — 18 November 2026
+
+Forward migration `20261118000000_ContainerWorkflow` and the matching API/web build add partial reviews/batches, plan activation/whole-manifest CLOSE, reviewed pool/transfer/bagging handoff, HOLD notices and versioned shipment records. It was verified on disposable PostgreSQL and subsequently applied to the configured shared Supabase after the user's separate explicit S2 approval; see the [deployment record](reports/container-s2-deployment-2026-11-18.md). Existing S1 approval was not reused; no broad ACL rebuild, shared seed or fixture copy was run. Approval for this deployment does not authorize future changes or other environments. Review the [S2 package](guides/container-s2-deployment.md) and obtain explicit approval before this shared migration and the single new EXECUTE grant on `grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)`. Do not run seeds, broad runtime-role reconfiguration or owner-credential application startup to enable it. Older writers are incompatible with S2 scope/reservation semantics.
+
 ## Historical mixed-bulk migration and activation
 
 

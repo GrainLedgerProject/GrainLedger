@@ -61,4 +61,7 @@ Forward migration `20261117000000_ContainerProduction`, SQL resource `ContainerP
 
 See [deployment checklist](../guides/container-production-deployment.md). No shared migration/grant/seed is implied by code changes or normal startup.
 
-Deferred: mixed pools/custody successors, moving reserved output, multi-batch/partial production, output quantity exceptions, multiple plans/containers, revalidation after partial loading, dossier supplements/documents and notification inbox. HOLD release/unload/reopen are not implicitly introduced.
+S1 does not support mixed pools/custody successors, moving reserved output, multi-batch/partial production, output quantity exceptions, multiple plans/containers, revalidation after partial loading, dossier supplements/documents or notification inbox. These are capability limits, not a requirement to implement every variant: sections 9–10 of the [current core plan](../plans/container-core-completion-plan-2026-11-17.md) distinguish required S2 work from excluded extensions. HOLD release/unload/reopen are not implicitly introduced.
+
+
+S2 extends the historical one-batch scope in this document. See [workflow API](container-workflow-api.md) for partial batches, `production/next`, review scopes, multiple plan identities and handoff contracts, and [S2 verification](../reports/container-s2-implementation-2026-11-18.md) for actual test/deployment status. The S1 single-output review route remains compatible for a single actual batch; multiple outputs use scope review.

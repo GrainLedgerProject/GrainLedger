@@ -41,6 +41,9 @@ public static partial class ExportModule
         routes.MapPost("/commit", (Guid id, ProductionCommitRequest request, HttpContext http, ICurrentAccess access, AppDbContext db,
             LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead mrl, BlendAssessmentPolicyRead policies, CancellationToken ct) =>
             ProductionMutationAsync(id, "commit", request, http, access, db, ledger, residue, mrl, policies, ct)).RequireAuthorization(Permissions.ConversionsWrite);
+        routes.MapPost("/next", (Guid id, ProductionCommitRequest request, HttpContext http, ICurrentAccess access, AppDbContext db,
+            LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead mrl, BlendAssessmentPolicyRead policies, CancellationToken ct) =>
+            ProductionMutationAsync(id, "next", request, http, access, db, ledger, residue, mrl, policies, ct)).RequireAuthorization(Permissions.ConversionsWrite);
         foreach (var decision in new[] { "approve", "reject" })
         {
             var action = decision;
@@ -64,8 +67,8 @@ public static partial class ExportModule
     private static async Task<IResult> ProductionMutationAsync<T>(Guid id, string action, T request, HttpContext http, ICurrentAccess access,
         AppDbContext db, LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead mrl, BlendAssessmentPolicyRead policies, CancellationToken ct)
     {
-        var permission = action == "request" ? Permissions.ContainersWrite : action is "draft" or "commit" ? Permissions.ConversionsWrite : Permissions.BlendApprove;
-        var role = action == "request" ? Roles.ExportStaff : action is "draft" or "commit" ? Roles.MillOperator : Roles.CustomerManager;
+        var permission = action == "request" ? Permissions.ContainersWrite : action is "draft" or "commit" or "next" ? Permissions.ConversionsWrite : Permissions.BlendApprove;
+        var role = action == "request" ? Roles.ExportStaff : action is "draft" or "commit" or "next" ? Roles.MillOperator : Roles.CustomerManager;
         var payload = JsonSerializer.SerializeToElement(request, ContainerJson);
         if (payload.GetProperty("operationId").GetGuid() == Guid.Empty || payload.GetProperty("version").GetInt32() < 0)
             return Problem(400, "PRODUCTION_REQUEST_INVALID", "Stable operation ID and current version required.");
@@ -92,7 +95,15 @@ public static partial class ExportModule
             {
                 basis = await AssessProductionAsync(actor, id, action == "approve", db, ledger, residue, mrl, policies, ct);
                 if (basis.Value.GetProperty("assessmentStatus").GetString() != "PASS")
+                {
+                    if ((action is "request" or "commit") && InvalidatesUnfinishedAuthority(basis.Value))
+                    {
+                        var version = await db.Containers.AsNoTracking().Where(x => x.Id == id).Select(x => x.Version).SingleAsync(ct);
+                        await InvalidateUnfinishedAuthorityAsync(actor, id, version, basis.Value, db, ct);
+                        await tx.CommitAsync(ct);
+                    }
                     return Results.Json(new { code = "PRODUCTION_BLOCKED", title = "Current production checks do not pass.", readiness = new { assessmentStatus = basis.Value.GetProperty("assessmentStatus"), findings = basis.Value.GetProperty("findings") } }, statusCode: 409);
+                }
             }
             var result = await ProductionSqlAsync(actor, id, action, payload, basis, db, ct);
             if (basis is not null)
@@ -120,20 +131,25 @@ public static partial class ExportModule
         var plan = await db.BlendPlanDrafts.AsNoTracking().SingleAsync(x => x.Id == proposal.PlanId, ct);
         var container = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == id, ct);
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == plan.OrderId, ct);
-        using var demand = JsonDocument.Parse(plan.DemandSnapshot);
-        if (demand.RootElement.GetProperty("orderVersion").GetInt32() != order.Version || plan.TargetMassKg != container.TargetMassKg ||
-           demand.RootElement.GetProperty("specificationVersion").GetInt32() != order.CurrentSpecificationVersion)
+        if (!DemandContentIsCurrent(plan, order, container))
             throw new LedgerException(409, "Approved demand changed.");
         var saved = ReadSavedBlendSelection(proposal.SnapshotJson) ?? throw new LedgerException(409, "Invalid saved approval.");
+        var assessmentTarget = plan.TargetMassKg;
+        if (!output && context.TryGetProperty("inputSnapshot", out var reviewedInputs) && reviewedInputs.ValueKind == JsonValueKind.Object)
+        {
+            saved = ReadSavedBlendSelection(reviewedInputs.GetRawText()) ?? throw new LedgerException(409, "Invalid input review scope.");
+            assessmentTarget = ParseKg(reviewedInputs.GetProperty("targetKg").GetString()!);
+        }
         var facility = context.GetProperty("facilityId").GetGuid();
         var selected = saved.Selection.Allocations.Select(a => new CandidateGroupItem(a.LotId, a.LocationId, a.QuantityKg, a.CandidateRevision)).ToArray();
         if (output)
         {
             if (context.GetProperty("outputId").ValueKind != JsonValueKind.String) throw new LedgerException(409, "Production output is required before review.");
-            selected = [new(context.GetProperty("outputId").GetGuid(), context.GetProperty("outputLocationId").GetGuid(), container.TargetMassKg, "ACTUAL_OUTPUT")];
+            assessmentTarget = ParseKg(context.GetProperty("outputKg").GetString()!);
+            selected = [new(context.GetProperty("outputId").GetGuid(), context.GetProperty("outputLocationId").GetGuid(), assessmentTarget, "ACTUAL_OUTPUT")];
         }
         var policy = await policyReader.ResolveAsync(order.CompanyId, order.MarketId, order.CommodityId, null, ct);
-        if (policy is null) throw new LedgerException(409, "Applicable assessment policy is missing.");
+        if (policy is null) return IncompleteWorkflowAssessment("ASSESSMENT_POLICY_MISSING");
         var boundsRead = await residue.PreviewSelectionAsync(selected.GroupBy(x => x.LotId).Select(g => new HypotheticalBlendInput(g.Key, ExportRules.Text(g.Sum(x => x.QuantityKg)))).ToArray(),
             output ? null : context.GetProperty("outputCommodityId").GetGuid(), policy.RequiredSubstanceIds, ct);
         var currentPolicy = await policyReader.ResolveAsync(order.CompanyId, order.MarketId, order.CommodityId, boundsRead.SnapshotAt, ct);
@@ -155,7 +171,7 @@ public static partial class ExportModule
         var rule = new BlendAssessmentRule(policy.Id, policy.VersionNo, policy.MarketId, policy.CommodityId, policy.RequiredSubstanceIds,
             decimal.Parse(policy.MrlMarginFraction, CultureInfo.InvariantCulture), policy.ResidueBasis, policy.EvidenceReference);
         var qualityRules = policy.QualityRules.Select(q => new BlendQualityRule(policy.Id, policy.VersionNo, q.AttributeId, q.Unit, q.Calculation, policy.EvidenceReference)).ToArray();
-        var assessment = BlendAssessment.Evaluate(output ? "DIRECT_STOCK" : "BLEND_INPUT_STOCK", container.TargetMassKg, selected,
+        var assessment = BlendAssessment.Evaluate(output ? "DIRECT_STOCK" : "BLEND_INPUT_STOCK", assessmentTarget, selected,
             yield is null ? null : new BlendYieldRule(yield.Id, yield.VersionNo, decimal.Parse(yield.OutputFraction, CultureInfo.InvariantCulture), yield.EvidenceId.ToString()), rule, mrl, bounds, limits, qualityRules, observations);
         var dependency = ExportRules.Hash("blend-assessment-dependencies", new { mrl, policy, yield, bounds, observations });
         var findings = assessment.Findings.Where(f => f.Status != "PASS").Select(f => f.Code).ToList();

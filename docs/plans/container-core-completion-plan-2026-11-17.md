@@ -2,13 +2,15 @@
 
 ## 1. Mục tiêu và trạng thái
 
-**Cập nhật 18/11/2026: S1 đã có code, kiểm thử cô lập/web và đã áp dụng migration cùng quyền runtime mới lên Supabase cấu hình hiện tại theo phê duyệt riêng của người dùng.** Xem [verification record](../reports/container-production-implementation-2026-11-18.md), [biên bản triển khai DB](../reports/container-production-deployment-2026-11-18.md) và [API/state contract](../api/container-production-api.md). S2/S3 vẫn là backlog. Plan gốc được lập ngày 17/11 trước khi triển khai. Phê duyệt vừa thực hiện chỉ áp dụng migration/quyền trong biên bản, không tự cho phép các thay đổi DB hay dữ liệu tiếp theo. Người dùng yêu cầu tập trung luồng chính trước deadline và chuyển phần nhiều ràng buộc sang sprint sau.
+**Cập nhật phạm vi 18/11/2026 theo yêu cầu người dùng: chỉ thực hiện yêu cầu có căn cứ trong proposal/SRS/business rules; bỏ các phần mở rộng hoặc đề xuất chưa có yêu cầu. Plan gồm hai đợt: S1 đã triển khai, S2 hoàn thiện phần yêu cầu còn lại. Không có đợt S3 trong phạm vi hiện hành.**
+
+S1 đã có code, kiểm thử cô lập/web và đã áp dụng migration cùng quyền runtime mới lên Supabase cấu hình hiện tại theo phê duyệt riêng. Commit bàn giao: `8fd96ac` trên `feat/container`. Xem [verification record](../reports/container-production-implementation-2026-11-18.md), [biên bản triển khai DB](../reports/container-production-deployment-2026-11-18.md) và [API/state contract](../api/container-production-api.md). Chưa chạy lại toàn bộ checklist web trên DB dùng chung sau migration. Phê duyệt DB vừa thực hiện chỉ áp dụng migration/quyền trong biên bản, không tự cho phép các thay đổi DB tiếp theo.
 
 Mục tiêu sprint gần nhất: chạy được trên web **order → proposal BLEND_INPUT_STOCK → CM approve/reserve inputs → nhà máy blend thật → giữ và review actual output → actual loading từng phần → CLOSE → dossier/trace**. Duy trì đường DIRECT_STOCK đã chạy được.
 
 Chưa có ngày deadline, độ dài sprint hoặc capacity cụ thể; các sprint dưới đây là đề xuất phân phạm vi và thứ tự, không phải cam kết thời gian. Không mở rộng sprint hiện tại chỉ để đánh dấu đủ mọi chức năng SRS.
 
-Đầu ra của lượt lập plan ban đầu (17/11): duy nhất tài liệu này và liên kết trong documentation index. Không sửa code, không khởi động ứng dụng, không thay đổi DB, không commit/push. Các checkbox chưa đánh dấu là công việc tương lai.
+Người dùng đã yêu cầu bắt đầu S2 theo bảy nhóm việc xác nhận lại, xem [plan triển khai S2](container-s2-implementation-plan-2026-11-18.md). Các checkbox chưa đánh dấu là công việc chưa hoàn tất. Việc hoàn tất kiểm thử thuộc hai đợt trên, không phải một đợt phát triển thứ ba. Gom xong implementation rồi mới chạy đợt kiểm thử container liên quan; không chạy toàn bộ backend giữa các đoạn sửa.
 
 ## 2. Căn cứ và baseline
 
@@ -18,11 +20,13 @@ Chưa có ngày deadline, độ dài sprint hoặc capacity cụ thể; các spr
 - [Plan ngày 13/11](container-execution-plan-2026-11-13.md): baseline đã triển khai và giới hạn; tài liệu này bổ sung thứ tự công việc tiếp theo, không sửa kết quả lịch sử.
 - [SRS FR-EXP-003–005](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:419>), [Business Rules R03/RV02/RV03](</home/phucpinku/Desktop/Week1_report/review/erd_v2_1/BUSINESS_RULES.md:64>): input/output reservations, execution, OUTPUT_ONLY/ALL_REMAINING, review mới, CLOSE và dossier. Đây là yêu cầu đã có, không ghi chung là “chờ nghĩ nghiệp vụ”.
 - [Proposal v1.1](</home/phucpinku/Desktop/Week1_report/review/FA26SE272_GrainLedger_Proposal_v1.1.docx.pdf>): trang 4 và 11 xác định planning/approval/loading là core. Tài liệu local là căn cứ đọc, không copy vào Git hoặc sửa trạng thái nghiệm thu của team.
+- [GrainLedger V2](</home/phucpinku/Desktop/Week1_report/GrainLedger_V2.pdf>): trang 6 mô tả gom lúa nhiều nông hộ cùng khách hàng vào silo. Nghiệp vụ này là căn cứ kho trộn; pool generation/aliquot/successor là lựa chọn triển khai, không phải một bộ chức năng độc lập được proposal yêu cầu nguyên văn.
+- [SRS FR-LED-001/002](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:359>), [FR-TRC-002](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:453>), [NFR-REL-01–06 và NFR-PER-01](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:513>): processing/transfer/bagging, exact mass, HOLD và retained notices, kiểm chứng và benchmark tracing theo dataset xác định.
 - [Architecture](../architecture.md), [Ledger plan](ledger-implementation-plan.md), [setup/deployment](../setup-and-deployment.md): transaction, exact mass, quyền, code issuance và triển khai.
 
-Baseline code được đọc: `feat/container`, `1fc8efd`. Khi bắt đầu triển khai phải kiểm lại diff/schema/contracts của nhánh đích; không dựa vào baseline này để ghi đè thay đổi mới của người khác.
+Baseline lúc lập plan gốc: `feat/container`, `1fc8efd`; S1 đã được commit tại `8fd96ac`. Khi triển khai S2 phải kiểm lại diff/schema/contracts của nhánh đích; không dùng mô tả trước S1 để ghi đè implementation đã hoàn tất. Tài liệu plan/report kỹ thuật tự viết không tự tạo thêm yêu cầu nghiệp vụ; mọi đầu việc S2 phải có căn cứ gốc ở mục 9.
 
-## 3. Phạm vi sprint gần nhất — S1
+## 3. Đợt 1 — S1 đã hoàn thành trong phạm vi sau
 
 ### 3.1 Đường chính phải hoàn tất
 
@@ -49,7 +53,9 @@ Baseline code được đọc: `feat/container`, `1fc8efd`. Khi bắt đầu tri
 
 Thành phẩm đã ghi đúng nhưng thiếu quality hoặc assessment không PASS được giữ ở bước chờ review, không load. CM reject/invalidate trước loading phải có chuyển trạng thái và release phần output chưa consume trong cùng transaction, giữ production history; release reservation không gỡ HOLD. Review lại trước loading chỉ reserve lại output còn thực sự tồn tại/đủ điều kiện. Nếu contract xử lý này chưa triển khai được thì dừng ở gate thiết kế, không đưa nhánh production ra sử dụng.
 
-## 4. Những nút thắt đã xác định trong code
+## 4. Baseline trước S1 — các nút thắt đã xử lý trong đợt 1
+
+Bảng này ghi nhận code khi lập plan ngày 17/11, không phải danh sách lỗi còn tồn tại sau commit S1. Cách giải quyết thực tế và kiểm thử nằm trong verification record; không yêu cầu làm lại hoặc refactor theo dự kiến cũ.
 
 | Điểm | Hiện trạng | Việc phải làm |
 | --- | --- | --- |
@@ -124,51 +130,79 @@ Fixture synthetic có source/lab/profile/current MRL/quality/compatibility/proce
 
 Khi triển khai: chạy build/test backend liên quan bằng Docker/Testcontainers; frontend tests/build theo thay đổi; actual browser/API path trên môi trường cô lập. Trước merge chạy required checks của repo/CI theo scope. Không lấy 8 integration tests đã PASS ở lượt trước làm bằng chứng cho chức năng mới chưa viết. Bổ sung tenant B test account bằng harness cô lập, không gửi email hoặc tạo account trên DB chung ngoài scope.
 
-## 8. Cản trở và quyết định cắt phạm vi
+## 8. Các gate của S1 lúc lập plan — lưu để đối chiếu
+
+S1 đã vượt các gate để bàn giao phạm vi một mẻ, output đúng target. Bảng sau giữ lại lý do và ranh giới ban đầu; phạm vi S2 hiện hành chỉ lấy theo mục 9, không tự chuyển mọi ngoại lệ cũ thành đầu việc bắt buộc.
 
 | Gate | Cản trở | Cách xử lý / điều kiện dừng |
 | --- | --- | --- |
 | G1 trước C02 | Chưa thống nhất actor/state/purpose/output review với mô hình hiện tại | Chốt C01 trong một bước review contract; ghi rõ quyết định. Nếu không có contract khả thi thì đưa cả nhánh blend sang S2, không chỉ gỡ blocker để kịp demo. |
 | G2 trước C04 | Ledger command mở connection riêng hoặc reservation guard không phân biệt authorized input withdrawal | Cần đường nội bộ dùng chung transaction và protected consume. Nếu phải rewrite diện rộng mà không bảo đảm regression trong sprint, dừng mở production. |
 | G3 trước C06 | Actual output assessment/review không thể tách khỏi fingerprint input proposal | Implement output review reference và actual scope đúng nghĩa. Không sửa saved snapshot, tạo PASS provider, giả CM hoặc coi planning bound là approval output. |
-| G4 trước release | Thiếu evidence/policy hợp lệ hoặc actual target không phù hợp phạm vi một mẻ | Thiếu dữ liệu khoa học không tự điền default. Dùng fixture synthetic có khai báo cho test; hàng thật tiếp tục blocked. Ngoại lệ quantity/yield sang S2. |
+| G4 trước release | Thiếu evidence/policy hợp lệ hoặc actual target không phù hợp phạm vi một mẻ | Thiếu dữ liệu khoa học không tự điền default. Dùng fixture synthetic có khai báo cho test; hàng thật tiếp tục blocked. Ngoại lệ quantity/yield không có quy tắc nguồn rõ được loại khỏi phạm vi hiện hành. |
 | G5 trước shared deployment | Migration/grants chưa được duyệt hoặc chưa có build tương thích DB | Hoàn tất code, tests cô lập, SQL diff/preflight/rollback-backup plan để review. Chưa được triển khai không báo đã live. Approval cũ cho 4 container grants không tự áp dụng cho schema/grants mới. |
 
 G5 đã được xử lý cho migration `20261117000000_ContainerProduction` và một quyền EXECUTE mới trên DB cấu hình hiện tại ngày 18/11: người dùng duyệt riêng, backup và triển khai nguyên tử thành công, runtime local được kiểm tra. Không suy ra đã triển khai mọi API instance từ xa; xem biên bản triển khai ở trên.
 
-Nếu S1 không vượt được G1–G3 trong thời gian sprint thực tế: đóng gói DIRECT_STOCK + C08 + kiểm thử/tài liệu làm mốc bàn giao thu hẹp; báo rõ **chưa hoàn tất order → blend → container**, chuyển toàn bộ lát cắt blend còn thiếu sang sprint sau. Không hạ điều kiện transaction/quyền/accounting để giữ nhãn “done”.
+S1 đã thực hiện được đường blend sau duyệt; không còn áp dụng phương án bàn giao thu hẹp chỉ có DIRECT_STOCK từng dự kiến ở plan gốc. Các gate dữ liệu/quyền/accounting vẫn phải được bảo toàn khi mở rộng S2.
 
-## 9. Sprint sau — S2: các luồng chính phức tạp
+## 9. Đợt 2 — S2: hoàn thiện các yêu cầu còn lại
 
-Đây vẫn là backlog nghiệp vụ, không mặc định loại khỏi yêu cầu dự án. Mỗi dòng chỉ bắt đầu khi prerequisites tương ứng đủ và nghiệm thu độc lập.
+Các mục dưới đây là phạm vi thực hiện tiếp theo, không phải kết quả đã hoàn tất. Mỗi mục ghi nguồn yêu cầu và giới hạn để không mở rộng theo suy đoán. Rà implementation hiện có trước khi sửa; phần Ledger/HOLD đã có và đạt yêu cầu chỉ cần tích hợp, không làm lại toàn bộ module.
 
-| ID | Phần việc | Điều kiện mở / tiêu chí hoàn tất |
-| --- | --- | --- |
-| N01 | Full revalidation sau partial production/loading | Mở rộng RV03: ALL_REMAINING/OUTPUT_ONLY, current assessment + review mới, scope chính xác và release/re-reserve chưa consume. Giữ actual history; không chạy lại input; một plan có quyền mới tại mỗi thời điểm. |
-| N02 | Chuyển plan P1→P2 và CLOSE nhiều plan | Version/review/output identity giữ nguyên, không gán output P1 thành P2. Whole-container CLOSE đánh giá mọi committed loads/current requirements, giữ old authorization và new CLOSE basis. |
-| N03 | Pool/custody/aliquot reservation handoff | Contract source-wise complement + pool revisions + reservation purpose/transfer, lock/replay và HOLD ancestry. Test top-up/withdrawal/race; không tự rebind theo current stock. |
-| N04 | Transfer/bagging sau sản xuất, successor positions | Build trên N03 khi có custody; chuyển quota đúng output identity/product, không nhân stock hoặc mất source shares. Chỉ mở từng operation đã chứng minh. |
-| N05 | Nhiều mẻ, partial production, dư/thiếu output và chia container | Quy tắc actual yield/variance/output allocation được chốt, scope review/reserve theo actuals; conservation qua mọi mẻ. Không dùng predicted yield làm actual, không tự tăng target. |
-| N06 | Mở rộng regression/acceptance | Actual missing plot provenance bằng fixture cô lập hợp lệ, web tenant B, policy time boundaries, hành vi N01–N05; source-attribution/performance datasets và oracle đủ scope. |
+### 9.1 Đầu việc và căn cứ
 
-N01/N02 có thiết kế nghiệp vụ trong SRS/RV03/RV04; cản trở là độ rộng thay đổi approval, reservation, assessment và manifest hiện tại. N03–N05 cần thêm contract thực thi chi tiết cho generation/quantity exceptions; không ghi chung là tất cả đều chưa có yêu cầu.
+| ID | Đầu việc cần làm | Nguồn yêu cầu | Tiêu chí đạt / ranh giới |
+| --- | --- | --- | --- |
+| N01 | Duyệt lại sau khi đã có production/loading | [FR-EXP-003](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:419>), [R03/RV03](</home/phucpinku/Desktop/Week1_report/review/erd_v2_1/BUSINESS_RULES.md:110>) | Assessment/review mới theo ALL_REMAINING hoặc OUTPUT_ONLY, scope output IDs/masses và phần chưa thực hiện chính xác; STALE giữ lịch sử, release/re-reserve phần chưa consume theo quyền mới. Không chạy lại input đã dùng; HOLD còn hiệu lực vẫn chặn dù review mới PASS. |
+| N02 | Đổi plan P1→P2 và CLOSE qua nhiều plan | [FR-EXP-003/004](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:425>), [RV03/RV04](</home/phucpinku/Desktop/Week1_report/review/erd_v2_1/BUSINESS_RULES.md:118>) | Chỉ một plan có quyền execution/loading mới tại mỗi thời điểm. P2 chỉ lập cho phần chưa sản xuất; output/loading P1 giữ đúng identity và review. CLOSE đánh giá mọi committed loads theo yêu cầu hiện hành, exact target và order limit. |
+| N03 | Dùng stock kho trộn trong luồng container theo phạm vi đã được duyệt | [V2 trang 6](</home/phucpinku/Desktop/Week1_report/GrainLedger_V2.pdf>), [FR-LED-001](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:365>), [R03](</home/phucpinku/Desktop/Week1_report/review/erd_v2_1/BUSINESS_RULES.md:64>) | Nối mô hình mixed storage đã có với stock selection, reservation và actual loading khi chứng minh được đúng source mass/identity/quota/company. Reuse custody hiện có; pool revision/aliquot là chi tiết triển khai. Không tạo thêm một hệ thống pool hoặc tự cho reservation đi theo mọi top-up. Quy tắc chưa có căn cứ tiếp tục bị chặn, ghi rõ trường hợp chưa hỗ trợ. |
+| N04 | Nối transfer/bagging hợp lệ với reservation của plan | [FR-LED-001](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:365>), [RV02](</home/phucpinku/Desktop/Week1_report/review/erd_v2_1/BUSINESS_RULES.md:70>) | Dùng Ledger transfer/bagging hiện có; ordinary transfer giữ lot identity và stock postings bằng nhau, conversion giữ lineage. Khi công đoạn tiêu thụ OUTPUT reservation phải release rồi xác lập INPUT reservation được review đúng scope. Output mới muốn load cần đúng output mapping/reservation/review; không coi successor tự có quyền của output cũ. Phạm vi mixed storage phụ thuộc N03. |
+| N05 | Thực hiện phần còn lại theo scope được duyệt | [FR-EXP-003](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:425>), [RV03](</home/phucpinku/Desktop/Week1_report/review/erd_v2_1/BUSINESS_RULES.md:114>), [FR-LED-001/002](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:365>) | Hỗ trợ execution từng phần trong quota inputs/outputs được review, lưu actuals và phân biệt IN_EXECUTION/EXECUTED; phần đã thực hiện không chạy lại. Kiểm declared loss/variance theo policy hiện có. Không tự thêm batch-size policy, sản lượng dư/thiếu target, tăng target hoặc chia dư sang container khác. Partial execution có căn cứ; mọi biến thể nhiều mẻ không mặc định được yêu cầu. |
+| N06 | Hoàn tất kiểm thử container và bằng chứng web | [NFR-REL-01–06](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:513>), [FR-TRC-001](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:449>) | Chốt CT-16 picker HOLD, CT-18 time boundaries, CT-25 provenance thiếu và CT-26 tenant B bằng fixture phù hợp. CT-27 thêm expected cho production thành công; CT-28 kiểm riêng nhánh hỗ trợ và nhánh phải chặn. Thêm regression cho N01–N05/N07/N08, exact mass, wrong-plan loading, replay/race/rollback, quyền và immutable history. Không nâng PASS chỉ vì đã sửa code. |
+| N07 | Thông báo HOLD và xử lý theo đúng vai trò | [FR-TRC-002](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:453>), [R09/R10](</home/phucpinku/Desktop/Week1_report/review/erd_v2_1/BUSINESS_RULES.md:164>) | In-app notices đúng recipients, unique hold/recipient, ghi cùng HOLD, giữ khi offline và read state. Mill Manager xử lý ACKNOWLEDGE/ISOLATE/RECORD_RESPONSE trong scope; tái dùng phần đã có. Read/handling không release HOLD. Thiếu recipients hợp lệ là lỗi cấu hình; không thêm email/SMS hoặc broadcast. |
+| N08 | Chứng từ có phiên bản và dossier supplements | [FR-EXP-005; UC-33/35](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:435>) | Export xuất shipment document có container/type/version/file reference; supplement append evidence cùng reason/user/time, giữ snapshot CLOSE bất biến và phân quyền. Không tự bắt buộc PDF/Excel cụ thể, mẫu thương mại/hải quan hoặc chứng nhận pháp lý. Nếu nội dung/mẫu chứng từ chưa được cung cấp, ghi chính xác phần thiếu; không tự chế mẫu rồi báo hoàn tất. |
+| N09 | Kiểm chứng tracing trên dataset toàn mùa vụ | [NFR-PER-01, NFR-CAP-01](</home/phucpinku/Desktop/Week1_report/review/Report3_Software Requirement Specification.docx.md:527>), [proposal v1.1 trang 9](</home/phucpinku/Desktop/Week1_report/review/FA26SE272_GrainLedger_Proposal_v1.1.docx.pdf>) | Dataset synthetic có khai báo workload, nguồn/operations/container counts, source-mass oracle và tài nguyên máy. Đo forward/backward theo quyền, đối chiếu đầy đủ targets/shares và mục tiêu tracing 30 giây của SRS. Báo cold/warm/API/page đúng phạm vi; không benchmark mọi module BE hoặc tối ưu suy đoán. |
 
-## 10. Sau core — S3 / backlog phụ
+### 9.2 Thứ tự thực hiện và phụ thuộc
 
-| Phần việc | Trạng thái ưu tiên và điều kiện |
-| --- | --- |
-| Container HOLD notification inbox/read/handling | Sau S1; nối đúng recipients và retained read state theo R09/R10, không tự release. Alert detail hiện có không đủ để báo inbox hoàn chỉnh. |
-| Versioned shipment documents và dossier evidence supplements | Sau S1; FR-EXP-005 vẫn còn. Giữ immutable closing snapshot, supplement có reason/user/time, không reopen. Chốt mẫu/định dạng trước khi làm PDF/Excel cụ thể. |
-| Performance full-season, production measurements, staging/witness sign-off | Chốt dataset/counts/oracle/môi trường; đo cold/warm/API/page riêng. Cần nghiệm thu riêng trước khi tuyên bố đạt NFR toàn mùa vụ. |
-| Legacy preparation mapping | Chỉ khi có nhu cầu chuyển đổi đã xác nhận; explicit mapping/migration riêng, không match code hoặc tự chuyển draft thành actual. |
-| Mobile polish, định dạng xuất thêm và tối ưu đọc | Theo nhu cầu sau core; không cache bỏ freshness hoặc tối ưu trước khi có đo lường. |
+1. Rà lại implementation và chốt contract chỉ trong yêu cầu nguồn; bổ sung từng phần N06 còn thiếu bằng fixture độc lập.
+2. N01 review mới → N05 execution phần còn lại → N02 chuyển plan/CLOSE toàn container. Không gộp lại quyền của hai plan để tránh phải xử lý scope.
+3. N03 tích hợp stock kho trộn → N04 nhánh transfer/bagging liên quan. Ordinary transfer/bagging không có custody chỉ phụ thuộc contract review/reservation cần thiết.
+4. N07 thông báo/xử lý HOLD và N08 chứng từ/supplements có thể thực hiện độc lập với nhánh pool; đều nằm trong S2, không bị đẩy thành yêu cầu tùy chọn của S3.
+5. Hoàn tất N06 cho toàn bộ thay đổi, rồi N09 và hồ sơ bàn giao. Các bước kiểm thử/benchmark là phần nghiệm thu S2, không tạo thêm đợt phát triển.
 
-Không tự đưa HOLD release, unload/reopen/reseal, đóng thiếu, auto-HOLD, customs/dispatch hoặc ownership transfer vào backlog bắt buộc của S1/S2. Những ngoại lệ này cần yêu cầu/policy riêng; HOLD release không thuộc MVP đã đọc. Đưa sang sprint sau không đồng nghĩa cho phép triển khai khi chưa có nghiệp vụ.
+N03–N05 cần chi tiết triển khai phù hợp mô hình hiện có. Đó không phải quyền tự đặt quy tắc nghiệp vụ: thiếu quy tắc compatibility, quantity exception hoặc authority thì giữ chặn riêng tình huống đó, không tự bổ sung default và không báo toàn bộ phạm vi đã đạt. Không cần xin duyệt lại những lựa chọn kỹ thuật thường lệ đã nằm trong yêu cầu; thay đổi chính sách nghiệp vụ/DB dùng chung vẫn theo ranh giới hiện có.
 
-## 11. Quy tắc bàn giao và báo cáo deadline
+### 9.3 Điều kiện chốt đợt 2
 
-- Báo theo ba mốc riêng: **implemented → verified cô lập/web → deployed môi trường đích**. Checklist của plan không phải kết quả test.
-- Khi S1 đạt có thể báo: “Hoàn tất đường chính một approval–một mẻ blend–ordinary output review–partial loading–CLOSE–trace; giữ tương thích DIRECT_STOCK.” Phải kèm giới hạn S2/S3; không báo toàn bộ SRS container hoàn tất.
-- Nếu chỉ bàn giao mốc thu hẹp vì gate chưa đạt, báo đúng DIRECT_STOCK và các fix/test thực tế, cùng ID công việc chuyển sprint. Không tạo báo cáo PASS cho luồng chưa có.
-- Mọi migration/grants/shared test data được trình duyệt riêng sau khi có SQL diff, code và kiểm thử review được. Không dùng owner để chạy app; bảo toàn `.env`, dữ liệu/historical records và quyền private helper.
-- Người dùng đã yêu cầu triển khai S1; chưa cung cấp deadline/capacity cụ thể để gắn ngày cho sprint sau. Không tự mở rộng N01–N06/S3. Shared deployment cần approval riêng theo checklist, dù implementation đã được cho phép.
+- [x] N01/N02/N05: review và execution phần còn lại, chuyển plan, CLOSE nhiều plan chạy đúng bằng API/web; không tiêu lại inputs, vượt quota hoặc mất lịch sử.
+- [x] N03/N04: các nhánh kho trộn/transfer/bagging có căn cứ đã tích hợp và chứng minh conservation/reservation; phần quy tắc còn thiếu được chỉ rõ, không mặc nhiên đánh dấu xong.
+- [x] N07/N08: retained HOLD notices/handling và versioned documents/supplements đạt contract nguồn và phân quyền.
+- [x] N06: ghi kết quả test thực tế; giữ phân biệt PASS chức năng thành công, PASS chặn đúng và PARTIAL/NOT RUN.
+- [x] N09: có dataset/oracle và kết quả đo; không dùng kết quả fixture nhỏ thay nghiệm thu full-season.
+- [x] Tài liệu, migration/grant package và bản bàn giao cùng phiên bản; chỉ triển khai DB theo phê duyệt cho đúng thay đổi.
+
+Kết quả triển khai S2 ngày 18/11/2026 được ghi tại [báo cáo](../reports/container-s2-implementation-2026-11-18.md), [plan chi tiết](container-s2-implementation-plan-2026-11-18.md) và [gói triển khai](../guides/container-s2-deployment.md). Các dấu hoàn tất trên áp dụng cho luồng hỗ trợ và kiểm thử đã ghi rõ; không có nghĩa mọi biến thể pool/top-up có policy hoặc mọi CT cũ đều được đổi thành PASS. P1→P2 và pool/transfer/bagging đã có cả API coverage và walkthrough web đầy đủ đến CLOSE; xem [lượt nghiệm thu bổ sung](../reports/container-s2-web-walkthroughs-2026-11-18.md). Benchmark đạt trên dataset xác định, chưa thay nghiệm thu production concurrent load. Migration/quyền S2 đã áp dụng trên Supabase cấu hình hiện tại theo phê duyệt riêng; xem [biên bản triển khai](../reports/container-s2-deployment-2026-11-18.md). Dữ liệu test cô lập không được copy/sync lên Supabase.
+
+## 10. Loại khỏi phạm vi triển khai hiện hành
+
+Danh sách này chỉ ghi quyết định loại phạm vi để tránh tái đưa vào backlog; không phải các đầu việc sẽ tự làm sau S2. Các plan/report cũ mô tả giới hạn hoặc câu hỏi mở không thay đổi quyết định này.
+
+- Legacy preparation → order/container mapping hoặc migration chuyển dữ liệu cũ: chưa có yêu cầu chuyển đổi đã xác nhận. Giữ lịch sử cũ theo hành vi hiện có.
+- Tự xử lý output dư/thiếu target, tăng/giảm target sau loading, chia output dư sang container khác, đặt số mẻ/batch size tùy ý: chưa có policy cụ thể. Giữ kiểm actual mass/loss/variance đã được yêu cầu; không suy ngoại lệ shipment từ processing tolerance.
+- Multi-container optimization, buyer/auditor portal, EPCIS export, automated regulatory-data ingestion: các phần mở rộng được proposal/SRS tách khỏi core; không thực hiện trong plan này.
+- Mobile riêng cho container; thêm định dạng/mẫu PDF/Excel do developer tự chọn; dashboard/polish/read optimization ngoài yêu cầu hoặc thiếu đo lường. Mobile field capture và yêu cầu xuất shipment documents vốn có không bị loại khỏi phạm vi dự án; ở đây chỉ loại phần bổ sung cho container không có yêu cầu.
+- HOLD release/cancellation, auto-HOLD, unload/reopen/reseal, đóng thiếu, customs/dispatch, ownership transfer: không có authority/policy cho phép trong phạm vi đã đọc hoặc được tài liệu loại rõ; không triển khai như ngoại lệ tự suy diễn.
+- Tạo module custody mới, tự mở mọi successor/top-up/rebinding hoặc refactor diện rộng: không phải yêu cầu nghiệp vụ. Chỉ sửa tích hợp cần thiết cho N03/N04 và giữ protected contracts.
+
+Không xóa khả năng đã được triển khai chỉ vì phần mở rộng bị loại khỏi kế hoạch tiếp theo. Không sửa proposal/SRS gốc để hợp thức hóa phạm vi.
+
+## 11. Quy tắc thực hiện và báo cáo deadline
+
+- Chỉ có hai đợt: **S1 đã bàn giao; S2 là các yêu cầu còn lại ở mục 9**. Mục 10 không nằm trong backlog thực hiện.
+- Báo theo ba mốc riêng: **implemented → verified cô lập/web → deployed môi trường đích**. Checklist của plan không phải kết quả test. S1 đạt trong phạm vi một approval/mẻ/output; chưa phải toàn bộ SRS container hoàn tất.
+- Nêu rõ requirement ID, hành vi, API/web và bằng chứng cho từng mục S2. Nếu thiếu dữ liệu hoặc quy tắc nguồn, ghi đúng phần bị chặn và phần vẫn làm được; không thêm một nghiệp vụ mới để giải quyết bằng suy đoán.
+- Chỉ chạy backend tests liên quan container và các boundary trực tiếp bị thay đổi; frontend checks/build khi sửa web. Actual API/browser path dùng DB test cô lập, không dùng full backend suite để thay chứng cứ luồng web. Documentation-only chỉ kiểm file/link/whitespace.
+- Mọi migration/grants/shared test data mới tuân theo scope phê duyệt hiện có và AGENTS.md; không dùng migration owner để chạy app, không reset/seed tổng quát hoặc sửa dữ liệu luồng khác.
+- Người dùng đã cho phép triển khai S2 và xác nhận lại bảy nhóm việc; ACKNOWLEDGE/ISOLATE/RECORD_RESPONSE vẫn giữ, phần gỡ HOLD để tiếp tục vận hành ngoài phạm vi. Chưa có deadline/capacity để cam kết ngày hoàn thành. Không tự commit/push nếu chưa được yêu cầu.
