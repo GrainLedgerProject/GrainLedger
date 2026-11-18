@@ -33,6 +33,29 @@ public sealed class BlendAssessmentTests
     private static BlendQualityObservation Observation => new(Lot, Attribute, 13m, "%",
         Guid.NewGuid(), 1);
 
+    [Theory]
+    [InlineData("0.0099", "0.0095", null)]
+    [InlineData("0.0100", "0.0095", null)]
+    [InlineData("0.0105", "0.0095", "RESIDUE_INPUT_MRL_UNVERIFIED")]
+    [InlineData("0.0105", "0.0101", "RESIDUE_INPUT_MRL_EXCEEDED")]
+    public void Input_screen_uses_the_legal_mrl_before_applying_the_output_margin(string upper, string lower, string? code)
+    {
+        var candidate = new PlanningCandidate(Lot, "HDR-A", Guid.NewGuid(), "Store", Guid.NewGuid(), Commodity,
+            "HEAD_RICE", "HEAD_RICE", 10, 10, "ORDINARY", false, false, null, "revision", 1, true, true, [], []);
+        var snapshot = new PlanningCandidateSnapshot(Guid.NewGuid(), Guid.NewGuid(), 1, 1, "PLANNED", Commodity,
+            9m, DateTimeOffset.UtcNow, "revision", default, null, [candidate]);
+        var physical = Bound(0) with { Lower = lower, Upper = upper, ProductStage = "HEAD_RICE", ProductIdentity = "HEAD_RICE" };
+        var exclusion = BlendInputResidue.Screen(snapshot, [Lot],
+            [new ResidueEvaluationPreview(Lot, Guid.NewGuid(), snapshot.ObservedAt, "test", [physical])], Policy, Mrl);
+        if (code is null) Assert.Empty(exclusion);
+        else
+        {
+            Assert.Equal(code, Assert.Single(exclusion).Code);
+            var assessment = BlendInputResidue.Apply(new BlendAssessmentResult("PASS", 9m, []), exclusion);
+            Assert.NotEqual("PASS", assessment.Status);
+        }
+    }
+
     [Fact]
     public void UT12_missing_policies_and_evidence_fail_closed()
     {

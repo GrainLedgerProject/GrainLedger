@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BlendPlanWorkspace, ContainerPlans } from './BlendPlanning';
@@ -64,6 +64,94 @@ describe('F14 planning workflow', () => {
     render(<ContainerPlans containerId="container-1" userId="staff" canPropose onNavigate={vi.fn()} />);
     expect(await screen.findByText(/no supported F14 product category/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '+ Create draft' })).not.toBeInTheDocument();
+  });
+
+  it('requires a new passing preview before saving an adjusted ratio', async () => {
+    const initial = { ...preview, ratioRange: { minimumKg: '399.7', maximumKg: '600.3' },
+      optimization: { method: 'MILP', objective: 'MIN_LOCATIONS', positionsUsed: 2, optimal: true },
+      ratioQuality: [{ attributeId: 'moisture', first: '13.2', second: '13.8', unit: '%' }],
+      residueHeadroom: { substanceId: 'substance-1', ratio: .2222 },
+      calculationSteps: { method: 'MILP', attempts: [{ mode: 'BLEND_INPUT_STOCK', candidateCount: 2,
+        inputKg: 1000, status: 'OPTIMAL', variables: 4, constraints: 4, elapsedMs: 10,
+        objective: 2, bestBound: 2, nodes: 0, assessmentStatus: 'PASS' }] },
+      selection: { mode: 'BLEND_INPUT_STOCK', selectedMassKg: '1000', allocations: [
+        { lotId: 'lot-1', lotCode: 'Lot A', locationId: 'store-1', quantityKg: '600' },
+        { lotId: 'lot-2', lotCode: 'Lot B', locationId: 'store-2', quantityKg: '400' }
+      ] },
+      assessmentFindings: [{ code: 'RESIDUE_LIMIT', status: 'PASS', actual: '0.02', limit: '0.09',
+        unit: 'mg/kg', reference: 'substance-1' }], substanceNames: { 'substance-1': 'Fixture substance' }
+    };
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/blend-plans/plan-1') return json(plan);
+      if (path.endsWith('/proposal')) return json({}, 404);
+      if (path.includes('/history?')) return json(emptyPage);
+      if (path === '/api/ledger/lookups') return json({ facilities: [{ id: 'mill-1', name: 'Demo Mill' }], locations: [] });
+      if (path.includes('/candidates?')) return json(candidates);
+      if (path === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (path.endsWith('/preview')) {
+        const request = JSON.parse(String(init?.body));
+        if (!request.adjustment) return json(initial);
+        return json({ ...initial, previewReference: 'preview-2', selection: {
+          ...initial.selection, allocations: initial.selection.allocations.map(x => ({ ...x, quantityKg: '500' }))
+        } });
+      }
+      if (path.endsWith('/propose')) return json({ id: 'proposal-1' }, 201);
+      return json({}, 404);
+    });
+    const user = userEvent.setup();
+    render(<BlendPlanWorkspace planId="plan-1" userId="staff" canPropose canReadLedger onNavigate={vi.fn()} />);
+    await user.selectOptions(await screen.findByLabelText('Facility'), 'mill-1');
+    await user.selectOptions(await screen.findByLabelText('Planning priority'), 'MIN_LOCATIONS');
+    await user.click(screen.getByRole('button', { name: 'Calculate plan' }));
+    expect(await screen.findByText('Fixture substance · 22.22% of limit')).toBeInTheDocument();
+    await user.click(screen.getByText('Calculation steps (development)'));
+    expect(screen.getByText(/Objective 2 · Bound 2 · F14 PASS/)).toBeInTheDocument();
+    expect(screen.getByText(/Selected quantities · MILP/)).toBeInTheDocument();
+    const slider = screen.getByRole('slider');
+    expect(slider).toHaveAttribute('min', '400');
+    expect(slider).toHaveAttribute('max', '600');
+    expect(slider).toHaveAttribute('step', '1');
+    fireEvent.change(slider, { target: { value: '500' } });
+    expect(within(screen.getByLabelText('Lot quantities')).getAllByText('500 kg')).toHaveLength(2);
+    expect(screen.getByText('13.500 %')).toBeInTheDocument();
+    expect(screen.queryByText('Fixture substance · 22.22% of limit')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save proposal' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Check ratio' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save proposal' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Save proposal' }));
+    const requests = fetchMock.mock.calls.filter(([url]) => /\/(preview|propose)$/.test(String(url)))
+      .map(([, init]) => JSON.parse(String(init?.body)));
+    expect(requests[0]).toMatchObject({ objective: 'MIN_LOCATIONS' });
+    expect(requests[1]).toMatchObject({ adjustment: { previewReference: 'preview-1', firstQuantityKg: '500' } });
+    expect(requests[2]).toMatchObject({ previewReference: 'preview-2' });
+  });
+
+  it('passes the selected moisture attribute from the specification to the preview', async () => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/blend-plans/plan-1') return json({ ...plan, demandSnapshot: JSON.stringify({
+        ...JSON.parse(plan.demandSnapshot), limits: [{ attributeId: 'moisture', attributeName: 'Moisture content', unit: '%' }]
+      }) });
+      if (path.endsWith('/proposal')) return json({}, 404);
+      if (path.includes('/history?')) return json(emptyPage);
+      if (path === '/api/ledger/lookups') return json({ facilities: [{ id: 'mill-1', name: 'Demo Mill' }], locations: [] });
+      if (path.includes('/candidates?')) return json(candidates);
+      if (path === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (path.endsWith('/preview')) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ objective: 'MIN_MOISTURE', moistureAttributeId: 'moisture' });
+        return json({ ...preview, optimization: { weightedMoisture: '13.1' } });
+      }
+      return json({}, 404);
+    });
+    const user = userEvent.setup();
+    render(<BlendPlanWorkspace planId="plan-1" userId="staff" canPropose canReadLedger onNavigate={vi.fn()} />);
+    await user.selectOptions(await screen.findByLabelText('Facility'), 'mill-1');
+    await user.selectOptions(await screen.findByLabelText('Planning priority'), 'MIN_MOISTURE');
+    expect(screen.getByRole('button', { name: 'Calculate plan' })).toBeDisabled();
+    await user.selectOptions(screen.getByLabelText('Moisture attribute'), 'moisture');
+    await user.click(screen.getByRole('button', { name: 'Calculate plan' }));
+    expect(await screen.findByText('13.1 %')).toBeInTheDocument();
   });
 
   it('shows incomplete evidence and does not allow a proposal', async () => {

@@ -13,9 +13,9 @@ public static class ExportTargetProducts
     // distinguishes the actual output. Unmapped Catalog codes fail closed.
     public static IReadOnlyList<string> ForCommodity(string? code) => code?.Trim().ToUpperInvariant() switch
     {
-        "RICE" or "RICE_POLISHED" => Rice,
+        "RICE" or "RICE_POLISHED" or "POLISHED-RICE" => Rice,
         "PADDY" => Paddy,
-        "RICE_BRAN" => Bran,
+        "RICE_BRAN" or "RICE-BRAN" => Bran,
         "HUSK" or "RICE_HUSK" => Husk,
         _ => []
     };

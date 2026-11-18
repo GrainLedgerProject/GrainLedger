@@ -9,7 +9,127 @@ type Candidates = Page<Candidate> & { scopeRevision: string; summary: { inventor
 type Selection = { mode: string; selectedMassKg: string; allocations: { lotId: string; locationId: string; lotCode: string; quantityKg: string }[] };
 type Finding = { code: string; status: string; actual: string | null; limit: string | null; unit: string | null; reference: string | null };
 type Assessment = { outcome: string; iterations: number; reasons: string[]; selection: Selection | null; assessmentStatus: string; assessmentFindings: Finding[]; predictedOutputKg: string | null; evidence?: unknown };
-type Preview = Assessment & { previewReference: string | null; canPropose: boolean };
+type Optimization = { method: string; objective: string | null; positionsUsed: number | null; headRiceUsedKg?: string | null; lotsUsed?: number | null; weightedMoisture?: string | null; optimal: boolean };
+type CalculationAttempt = {
+  mode: string; candidateCount: number; inputKg: number; status: string;
+  variables: number; constraints: number; elapsedMs: number; objective: number | null;
+  bestBound: number | null; nodes: number | null; assessmentStatus: string | null;
+};
+type Preview = Assessment & { previewReference: string | null; canPropose: boolean;
+  ratioRange?: { minimumKg: string; maximumKg: string } | null;
+  optimization?: Optimization;
+  calculationSteps?: { method: string; attempts: CalculationAttempt[] } | null;
+  substanceNames?: Record<string, string>;
+  ratioQuality?: { attributeId: string; first: string; second: string; unit: string }[] | null;
+  residueHeadroom?: { substanceId: string; ratio: number } | null;
+  inputResidueExclusions?: { lotId: string; lotCode: string; substanceId: string; code: string;
+    upper: string | null; mrl: string | null; unit: string | null }[];
+};
+
+function CalculationSteps({ preview }: { preview: Preview }) {
+  const calculation = preview.calculationSteps;
+  if (!calculation) return null;
+  const source = calculation.method === 'MILP' ? 'MILP'
+    : calculation.method === 'GREEDY_FALLBACK' ? 'Greedy fallback'
+    : 'Recheck of the selected ratio';
+  return <details className="export-details"><summary>Calculation steps (development)</summary>
+    <ol>
+      <li><strong>Build and solve the model</strong>
+        {calculation.attempts.length === 0 && <p>No solver attempt was recorded for this preview.</p>}
+        {calculation.attempts.map((attempt, index) => <div key={index}>
+          <p>{label(attempt.mode)} · {attempt.inputKg} kg input · {attempt.candidateCount} candidates</p>
+          <p>{attempt.variables} variables · {attempt.constraints} constraints · {attempt.status} · {attempt.elapsedMs} ms
+            {attempt.nodes !== null && ` · ${attempt.nodes} nodes`}
+            {attempt.objective !== null && ` · Objective ${attempt.objective}`}
+            {attempt.bestBound !== null && ` · Bound ${attempt.bestBound}`}
+            {attempt.assessmentStatus && ` · F14 ${attempt.assessmentStatus}`}
+          </p>
+        </div>)}
+      </li>
+      <li><strong>Selected quantities · {source}</strong>
+        <p>{preview.selection?.allocations.map(row => `${row.lotCode}: ${row.quantityKg} kg`).join(' · ') || 'No allocation'}</p>
+        <p>Input: {preview.selection?.selectedMassKg ?? '—'} kg · Predicted output: {preview.predictedOutputKg ?? '—'} kg</p>
+      </li>
+      <li><strong>F14 verification · {preview.assessmentStatus}</strong>
+        <p>See Checks and evidence for quality limits and the result for each residue.</p>
+        {preview.reasons.length > 0 && <p>{preview.reasons.map(label).join(', ')}</p>}
+      </li>
+    </ol>
+  </details>;
+}
+
+function remainingKg(total: string, first: string) {
+  const toUnits = (kg: string) => {
+    const [whole, fraction = ''] = kg.split('.');
+    return BigInt(whole) * 1000000n + BigInt(fraction.padEnd(6, '0'));
+  };
+  const units = toUnits(total) - toUnits(first);
+  const fraction = (units % 1000000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return fraction ? `${units / 1000000n}.${fraction}` : (units / 1000000n).toString();
+}
+
+function BlendRatioCard({ preview, value, busy, attributeName, onChange, onCheck }: {
+  preview: Preview; value: string | null; busy: boolean; attributeName: (id: string) => string;
+  onChange: (kg: string | null) => void; onCheck: (kg: string) => void;
+}) {
+  const selection = preview.selection;
+  if (!preview.ratioRange || !selection || selection.allocations.length !== 2) return null;
+  const [first, second] = selection.allocations;
+  const [minWhole, minFraction] = preview.ratioRange.minimumKg.split('.');
+  const minimum = Number(minWhole) + (Number(minFraction ?? '0') > 0 ? 1 : 0);
+  const maximum = Number(preview.ratioRange.maximumKg.split('.')[0]);
+  const total = Number(selection.selectedMassKg);
+  const [wholeTotal] = selection.selectedMassKg.split('.');
+  if (remainingKg(selection.selectedMassKg, wholeTotal) !== '0' || minimum > maximum)
+    return <p className="muted small">Whole-kg adjustments are unavailable for this plan.</p>;
+
+  const initial = Math.max(minimum, Math.min(maximum, Math.round(Number(first.quantityKg))));
+  const firstKg = value ?? String(initial);
+  const secondKg = remainingKg(selection.selectedMassKg, firstKg);
+  const share = Number(firstKg) / total;
+  const edited = remainingKg(first.quantityKg, firstKg) !== '0';
+  const residues = preview.assessmentFindings.filter(finding => finding.code === 'RESIDUE_LIMIT');
+  const kg = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+  return <section className="f14-ratio-card">
+    <h3>Try a different ratio</h3>
+    <label className="f14-ratio-label">
+      <span>Quantity from {first.lotCode}</span><strong>{kg.format(Number(firstKg))} kg</strong>
+      <input type="range" min={minimum} max={maximum} step={1}
+        value={firstKg} disabled={busy || minimum === maximum}
+        aria-label={`Quantity from ${first.lotCode}`}
+        onChange={event => {
+          const next = event.target.valueAsNumber;
+          if (Number.isInteger(next) && next >= minimum && next <= maximum)
+            onChange(remainingKg(first.quantityKg, String(next)) === '0' ? null : String(next));
+        }} />
+    </label>
+    <div className="f14-ratio-row muted small"><span>{kg.format(minimum)} kg</span><span>{kg.format(maximum)} kg</span></div>
+    <div className="f14-ratio-bar" aria-hidden="true"><span style={{ width: `${(1 - share) * 100}%` }} /></div>
+    <div className="f14-ratio-row f14-ratio-lots" aria-label="Lot quantities">
+      <span>{second.lotCode}: <strong>{kg.format(Number(secondKg))} kg</strong></span>
+      <span>{first.lotCode}: <strong>{kg.format(Number(firstKg))} kg</strong></span>
+    </div>
+    <dl className="f14-ratio-metrics">
+      {preview.ratioQuality?.map(row => {
+        const estimate = share * Number(row.first) + (1 - share) * Number(row.second);
+        return <div key={row.attributeId}><dt>{attributeName(row.attributeId)}{edited && ' (estimated)'}</dt>
+          <dd>{estimate.toFixed(3)} {row.unit}</dd></div>;
+      })}
+      {edited ? <div><dt>Residue</dt><dd>Pending check</dd></div> : residues.map((finding, index) =>
+        <div key={finding.reference ?? index}>
+          <dt>{(finding.reference && preview.substanceNames?.[finding.reference]) || 'Residue'} (upper bound)</dt>
+          <dd>{finding.actual} {finding.unit}</dd>
+        </div>)}
+    </dl>
+    <div className="f14-ratio-row f14-ratio-footer">
+      <p className="muted small">{edited
+        ? 'Whole kg only. Check this ratio before using it in the proposal.'
+        : 'Whole kg only. The other lot adjusts automatically.'}</p>
+      <button disabled={busy || !edited} onClick={() => { onChange(firstKg); onCheck(firstKg); }}>Check ratio</button>
+    </div>
+  </section>;
+}
+
 type Proposal = { id: string; proposedAt: string; assessment: Assessment; freshness: string; freshnessReasons?: string[]; stockReserved: boolean };
 type History = { action: string; recordedAt: string; actorName: string };
 type Lookup = { facilities: { id: string; name: string }[]; locations: { id: string; name: string; kind: string }[] };
@@ -121,7 +241,7 @@ export function ContainerPlans({ containerId, userId, canPropose, onNavigate }: 
   </section>;
 }
 
-function AssessmentView({ assessment, locations }: { assessment: Assessment; locations: Lookup['locations'] }) {
+function AssessmentView({ assessment, locations, substanceNames = {} }: { assessment: Assessment; locations: Lookup['locations']; substanceNames?: Record<string, string> }) {
   const hitLimit = assessment.reasons?.includes('ITERATION_LIMIT_REACHED');
   const evidencePending = assessment.outcome === 'SEARCH_EXHAUSTED' && assessment.assessmentStatus === 'INCOMPLETE' && !!assessment.selection;
   const otherReasons = assessment.reasons?.filter(reason => reason !== 'SEARCH_SPACE_EXHAUSTED' && reason !== 'ITERATION_LIMIT_REACHED') ?? [];
@@ -131,7 +251,7 @@ function AssessmentView({ assessment, locations }: { assessment: Assessment; loc
     {assessment.outcome === 'SEARCH_EXHAUSTED' && !hitLimit && !evidencePending && <p className="notice">No checked selection passed every requirement. Review the findings below.</p>}
     {otherReasons.length > 0 && <p className="muted">Search reasons: {otherReasons.map(label).join(', ')}</p>}
     {assessment.selection && <><h3>Selected stock</h3><p className="muted">{label(assessment.selection.mode)}</p><div className="table-scroll"><table><thead><tr><th>Lot</th><th>Location</th><th>Input</th></tr></thead><tbody>{assessment.selection.allocations.map((item, index) => <tr key={`${item.lotId}-${item.locationId}-${index}`}><td>{item.lotCode}</td><td>{locations.find(location => location.id === item.locationId)?.name ?? 'Location unavailable'}</td><td>{item.quantityKg} kg</td></tr>)}</tbody></table></div></>}
-    <h3>Checks and evidence</h3>{assessment.assessmentFindings?.length ? <div className="table-scroll"><table><thead><tr><th>Area</th><th>Check</th><th>Result</th><th>Actual</th><th>Limit</th><th>Next step</th></tr></thead><tbody>{assessment.assessmentFindings.map((finding, index) => <tr key={`${finding.code}-${index}`}><td>{findingArea(finding.code)}</td><td>{label(finding.code)}</td><td>{finding.status}</td><td>{finding.actual ?? '—'} {finding.unit ?? ''}</td><td>{displayFindingLimit(finding)} {finding.unit ?? ''}</td><td>{findingAction(finding.code, finding.status)}</td></tr>)}</tbody></table></div> : <p>No findings returned.</p>}
+    <h3>Checks and evidence</h3>{assessment.assessmentFindings?.length ? <div className="table-scroll"><table><thead><tr><th>Area</th><th>Check</th><th>Result</th><th>Actual</th><th>Limit</th><th>Next step</th></tr></thead><tbody>{assessment.assessmentFindings.map((finding, index) => <tr key={`${finding.code}-${index}`}><td>{findingArea(finding.code)}</td><td>{label(finding.code)}{finding.code.startsWith('RESIDUE_') && finding.reference && substanceNames[finding.reference] && ` · ${substanceNames[finding.reference]}`}</td><td>{finding.status}</td><td>{finding.actual ?? '—'} {finding.unit ?? ''}</td><td>{displayFindingLimit(finding)} {finding.unit ?? ''}</td><td>{findingAction(finding.code, finding.status)}</td></tr>)}</tbody></table></div> : <p>No findings returned.</p>}
     {assessment.evidence != null && <details><summary>Evidence versions and calculation details</summary><pre className="f14-json">{JSON.stringify(assessment.evidence, null, 2)}</pre></details>}
   </div>;
 }
@@ -305,6 +425,9 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
   const [lineageError, setLineageError] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewExpired, setPreviewExpired] = useState(false);
+  const [objective, setObjective] = useState('');
+  const [moistureAttributeId, setMoistureAttributeId] = useState('');
+  const [testRatio, setTestRatio] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [stockError, setStockError] = useState('');
   const [previewError, setPreviewError] = useState('');
@@ -383,15 +506,30 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
     catch (cause) { setLineageError(errorMessage(cause)); if (cause instanceof ApiError && cause.status === 409) refreshCandidates(); }
   }
   function refreshCandidates() { setCandidatePage(1); setCandidates(null); setPreview(null); setLineage(null); setStockError(''); setReload(n => n + 1); }
-  async function runPreview() {
+  async function runPreview(firstQuantityKg?: string) {
     if (!candidates || !facilityId || busy) return;
-    setBusy(true); setPreviewError(''); setPreview(null);
-    try { setPreview(await api<Preview>(`/api/blend-plans/${planId}/preview`, { method: 'POST', body: JSON.stringify({ facilityId, scopeRevision: candidates.scopeRevision }) })); setPreviewExpired(false); }
+    const adjust = firstQuantityKg !== undefined;
+    const adjustment = adjust && preview?.previewReference
+      ? { previewReference: preview.previewReference, firstQuantityKg } : undefined;
+    if (adjust && (!adjustment || previewExpired)) return;
+    setBusy(true); setPreviewError('');
+    if (!adjust) { setPreview(null); setTestRatio(null); }
+    try {
+      const result = await api<Preview>(`/api/blend-plans/${planId}/preview`, { method: 'POST',
+        body: JSON.stringify({ facilityId, scopeRevision: candidates.scopeRevision,
+          objective: objective || undefined, adjustment,
+          moistureAttributeId: objective === 'MIN_MOISTURE' ? moistureAttributeId : undefined }) });
+      if (adjust && !result.canPropose) {
+        setPreviewError(`The adjusted ratio did not pass: ${result.assessmentFindings.filter(f => f.status !== 'PASS').map(f => label(f.code)).join(', ')}.`);
+      } else {
+        setPreview(result); setTestRatio(null); setPreviewExpired(false);
+      }
+    }
     catch (cause) { setPreviewError(errorMessage(cause)); if (cause instanceof ApiError && cause.status === 409) refreshCandidates(); }
     finally { setBusy(false); }
   }
   async function propose() {
-    if (busy || !pendingPropose && (!preview?.canPropose || previewExpired)) return;
+    if (busy || !pendingPropose && (!preview?.canPropose || previewExpired || testRatio !== null)) return;
     const request = pendingPropose ?? { route: `/api/blend-plans/${planId}/propose`, body: JSON.stringify({ operationId: crypto.randomUUID(), previewReference: preview!.previewReference }) };
     setBusy(true); setPreviewError(''); sessionStorage.setItem(proposeKey, JSON.stringify(request));
     try {
@@ -418,6 +556,13 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
     } finally { setBusy(false); }
   }
   const snapshot = plan ? demand(plan.demandSnapshot) : {};
+  const percentageAttributes = (Array.isArray(snapshot.limits) ? snapshot.limits : [])
+    .filter((row): row is { attributeId: string; attributeName?: string; attributeCode?: string; unit: string } =>
+      !!row && typeof row === 'object' && typeof row.attributeId === 'string' && row.unit === '%');
+  const attributeName = (id: string) => {
+    const row = percentageAttributes.find(attribute => attribute.attributeId === id);
+    return row?.attributeName ?? row?.attributeCode ?? 'Quality';
+  };
   const active = plan?.status === 'DRAFT' && plan.demandCurrent && !plan.hasProposal && !proposal && !proposalError && !proposalLoading;
   return <>
     <button className="text-button" onClick={() => onNavigate(plan ? `/export/containers/${plan.containerId}` : '/export/orders')}>← Back to container</button>
@@ -449,10 +594,47 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
       <Notice error={lineageError} />
       {lineage && <div className="f14-lineage"><div className="section-toolbar"><h3>Source composition</h3><button className="secondary" onClick={() => setLineage(null)}>Close</button></div><p>Lineage {lineage.lineage.complete ? 'complete' : 'incomplete'} · Position attribution {label(lineage.positionAttributionStatus)}</p><div className="table-scroll"><table><thead><tr><th>Source</th><th>Attributed mass</th></tr></thead><tbody>{lineage.composition.map((source, index) => <tr key={`${source.ledgerSourceLotId}-${index}`}><td>{source.captureSourceLotId ? <button className="text-button" onClick={() => onNavigate(`/capture/source-lots/${source.captureSourceLotId}`)}>Open source lot</button> : 'Ledger source'}</td><td>{source.lotAttributedKg} kg</td></tr>)}</tbody></table></div><details><summary>Processing and custody graph</summary><pre className="f14-json">{JSON.stringify(lineage.lineage, null, 2)}</pre></details></div>}
     </section>}
-    {active && facilityId && candidates && !candidateLoading && <section className="panel export-section"><div className="section-toolbar"><div><h2>Assessed preview</h2><p className="muted">The server selects candidate quantities and checks the complete plan.</p></div>{canPropose && <button disabled={busy || !!pendingCancel || !!pendingPropose} onClick={() => void runPreview()}>{busy ? 'Working…' : 'Calculate plan'}</button>}</div>
+    {active && facilityId && candidates && !candidateLoading && <section className="panel export-section"><div className="section-toolbar"><div><h2>Assessed preview</h2><p className="muted">The server selects candidate quantities and checks the complete plan.</p></div>{canPropose && <><label>Planning priority<select value={objective}
+      disabled={busy || !!pendingCancel || !!pendingPropose} onChange={event => {
+        setObjective(event.target.value); setPreview(null); setTestRatio(null);
+      }}><option value="">No additional priority</option><option value="MIN_LOCATIONS">Fewest stock locations</option>
+        <option value="MIN_LOTS">Fewest lots</option><option value="RETAIN_HEAD_RICE">Retain head rice</option>
+        <option value="MIN_MOISTURE" disabled={percentageAttributes.length === 0}>Lowest moisture</option>
+        <option value="MAX_RESIDUE_HEADROOM">Farthest from residue limits</option></select></label>
+      {objective === 'MIN_MOISTURE' && <label>Moisture attribute<select value={moistureAttributeId} disabled={busy}
+        onChange={event => { setMoistureAttributeId(event.target.value); setPreview(null); setTestRatio(null); }}>
+        <option value="">Select the moisture attribute</option>
+        {percentageAttributes.map(row => <option key={row.attributeId} value={row.attributeId}>{attributeName(row.attributeId)}</option>)}
+      </select></label>}
+      <button disabled={busy || !!pendingCancel || !!pendingPropose || (objective === 'MIN_MOISTURE' && !moistureAttributeId)} onClick={() => void runPreview()}>{busy ? 'Working…' : 'Calculate plan'}</button></>}</div>
       {!pendingPropose && <Notice error={previewError} />}
       {!canPropose && <p className="notice">Your role can inspect drafts but cannot calculate or propose a plan.</p>}
-      {preview && <><AssessmentView assessment={preview} locations={locations} />{canPropose && preview.canPropose && preview.previewReference && <div className="f14-actions"><p className="muted">{previewExpired ? 'The preview has expired. Calculate the plan again.' : 'This preview reference expires after ten minutes. The server checks all inputs again when you propose.'}</p><button disabled={busy || previewExpired} onClick={() => void propose()}>Save proposal</button></div>}</>}
+      {preview && <>{!!preview.inputResidueExclusions?.length && <div className="notice pending" role="status">
+        <strong>Lots excluded by the input MRL check</strong>
+        <ul>{preview.inputResidueExclusions.map(row => <li key={`${row.lotId}:${row.substanceId}`}>
+          {row.lotCode} · {preview.substanceNames?.[row.substanceId] ?? 'Required substance'} · {label(row.code)}
+          {row.upper !== null && ` · ${row.upper} ${row.unit} upper bound / ${row.mrl} ${row.unit} MRL`}
+        </li>)}</ul>
+      </div>}
+      {preview.optimization?.positionsUsed != null && <p>Stock locations: <strong>{preview.optimization.positionsUsed}</strong>
+        {preview.optimization.objective === 'MIN_LOCATIONS' && (preview.optimization.optimal ? ' · Optimal' : ' · Optimality not proven')}</p>}
+        {preview.optimization?.objective === 'MIN_LOTS' && preview.optimization.lotsUsed != null &&
+          <p>Lots used: <strong>{preview.optimization.lotsUsed}</strong> · {preview.optimization.optimal ? 'Optimal' : 'Optimality not proven'}</p>}
+        {preview.optimization?.weightedMoisture != null && testRatio === null &&
+          <p>Weighted moisture: <strong>{preview.optimization.weightedMoisture} %</strong> · {preview.optimization.optimal ? 'Optimal' : 'Optimality not proven'}</p>}
+        {preview.residueHeadroom && testRatio === null && <p>Closest residue to its limit: <strong>
+          {preview.substanceNames?.[preview.residueHeadroom.substanceId] ?? 'Required substance'} · {(preview.residueHeadroom.ratio * 100).toFixed(2)}% of limit</strong>
+          {preview.optimization?.objective === 'MAX_RESIDUE_HEADROOM' && (preview.optimization.optimal ? ' · Optimal' : ' · Optimality not proven')}</p>}
+        {preview.optimization?.headRiceUsedKg != null && testRatio === null && <p>Head rice used: <strong>{preview.optimization.headRiceUsedKg} kg</strong>
+          {preview.optimization.optimal ? ' · Optimal' : ' · Optimality not proven'}</p>}
+        {preview.previewReference && !previewExpired &&
+          <BlendRatioCard preview={preview} value={testRatio} busy={busy} attributeName={attributeName}
+            onChange={setTestRatio} onCheck={kg => void runPreview(kg)} />}
+        {testRatio === null && <>
+          <AssessmentView assessment={preview} locations={locations} substanceNames={preview.substanceNames} />
+          <CalculationSteps preview={preview} />
+        </>}
+        {canPropose && preview.canPropose && preview.previewReference && <div className="f14-actions"><p className="muted">{previewExpired ? 'The preview has expired. Calculate the plan again.' : 'This preview reference expires after ten minutes. The server checks all inputs again when you propose.'}</p><button disabled={busy || previewExpired || testRatio !== null} onClick={() => void propose()}>Save proposal</button></div>}</>}
     </section>}
     <section className="panel export-section"><h2>History</h2>{history ? <>{history.items.length ? <ul className="f14-history">{history.items.map((event, index) => <li key={`${event.recordedAt}-${index}`}><strong>{label(event.action)}</strong> · {event.actorName} · {new Date(event.recordedAt).toLocaleString()}</li>)}</ul> : <p>No history yet.</p>}<Pager page={historyPage} count={history.totalCount} more={history.hasMore} onPage={setHistoryPage} /></> : <p role="status">Loading history…</p>}</section></>}
   </>;

@@ -98,7 +98,7 @@ public static class ResidueCalculator
 
     public static IReadOnlyList<ResidueResult> Calculate(Guid targetLotId, IReadOnlyList<Guid> substanceIds,
         IReadOnlyList<ResidueNode> nodes, IReadOnlyList<ResidueSourceBound> sources, IReadOnlyList<ResidueFactor> factors,
-        ResiduePolicySnapshot? policy = null)
+        ResiduePolicySnapshot? policy = null, bool requireHomogeneousTargetStep = false)
     {
         var graph = nodes.ToDictionary(x => x.LotId);
         var sourceMap = sources.GroupBy(x => (x.LotId, x.SubstanceId)).ToDictionary(x => x.Key, x => x.ToArray());
@@ -233,6 +233,9 @@ public static class ResidueCalculator
                     if (candidates.Length != 1)
                         return Unknown(candidates.Length == 0 ? $"Missing applicable profile process step for {physicalNode.Stage} to {node.Stage}" : "Conflicting approved process steps", inputs);
                     var factor = candidates[0];
+                    if (requireHomogeneousTargetStep && node.LotId == targetLotId &&
+                        (factor.Semantics != "STEP" || !factor.HomogeneousMixing))
+                        return Unknown("Linear planning requires an approved homogeneous step", inputs);
                     if (policyReference is not null) factor = factor with { Rule = policyReference with { ComponentKey = factor.StepId.ToString() } };
                     Guid? anchor = physical.LotId;
                     if (factor.Semantics == "CUMULATIVE")

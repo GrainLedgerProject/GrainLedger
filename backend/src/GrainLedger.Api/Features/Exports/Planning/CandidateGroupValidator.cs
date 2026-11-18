@@ -76,9 +76,8 @@ internal static class CandidateGroupValidator
             {
                 var policy = snapshot.Compatibilities.Value.EnumerateArray().SingleOrDefault(x =>
                     x.GetProperty("id").GetGuid() == compatibilityPolicyId.Value);
-                if (policy.ValueKind == JsonValueKind.Undefined ||
-                    policy.GetProperty("outputCatalogCommodityId").ValueKind != JsonValueKind.String ||
-                    policy.GetProperty("outputCatalogCommodityId").GetGuid() != snapshot.CatalogCommodityId ||
+                if (!ExportProductMatch.TryMatchBlendOutput(policy, snapshot.CatalogCommodityId, snapshot.OrderCommodityCode,
+                        snapshot.CommodityCodes, out _) ||
                     !policy.GetProperty("inputProducts").EnumerateArray()
                         .Select(x => x.GetString()!).ToHashSet(StringComparer.Ordinal).SetEquals(products))
                     findings.Add("COMPATIBILITY_SET_MISMATCH");

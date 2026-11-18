@@ -26,7 +26,12 @@ public sealed record HypotheticalBlendInput(Guid LotId, string QuantityKg);
 public sealed record HypotheticalBlendPreview(DateTimeOffset SnapshotAt, string EngineVersion,
     IReadOnlyList<ResidueResult> Results);
 public sealed record ResidueSelectionPreview(DateTimeOffset SnapshotAt,
-    IReadOnlyList<ResidueEvaluationPreview> Inputs, HypotheticalBlendPreview? HypotheticalBlend);
+    IReadOnlyList<ResidueEvaluationPreview> Inputs, HypotheticalBlendPreview? HypotheticalBlend)
+{
+    [JsonIgnore]
+    internal IReadOnlyDictionary<Guid, IReadOnlyList<ResidueResult>> PlanningBlendBounds { get; init; } =
+        new Dictionary<Guid, IReadOnlyList<ResidueResult>>();
+}
 
 public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource, LedgerService ledger,
     ResiduePolicyReader policyReader, ResidueEvidenceReader evidenceReader)
@@ -102,9 +107,19 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
 
     // All input bounds and the optional in-memory BLENDING output share one
     // repeatable-read snapshot and one evidence/policy selection.
-    public async Task<ResidueSelectionPreview> PreviewSelectionAsync(
+    public Task<ResidueSelectionPreview> PreviewSelectionAsync(
         IReadOnlyList<HypotheticalBlendInput> inputs, Guid? outputLedgerCommodityId,
-        IReadOnlyList<Guid> substanceIds, CancellationToken ct)
+        IReadOnlyList<Guid> substanceIds, CancellationToken ct) =>
+        ReadSelectionAsync(inputs, outputLedgerCommodityId, substanceIds, false, ct);
+
+    internal Task<ResidueSelectionPreview> PreviewPlanningBlendBoundsAsync(IReadOnlyList<Guid> lotIds,
+        Guid outputLedgerCommodityId, IReadOnlyList<Guid> substanceIds, CancellationToken ct) =>
+        ReadSelectionAsync(lotIds.Select(id => new HypotheticalBlendInput(id, "1")).ToArray(),
+            outputLedgerCommodityId, substanceIds, true, ct);
+
+    private async Task<ResidueSelectionPreview> ReadSelectionAsync(
+        IReadOnlyList<HypotheticalBlendInput> inputs, Guid? outputLedgerCommodityId,
+        IReadOnlyList<Guid> substanceIds, bool planningBounds, CancellationToken ct)
     {
         if (inputs.Count is < 1 or > 100 || outputLedgerCommodityId == Guid.Empty ||
             inputs.Any(x => x.LotId == Guid.Empty) || inputs.Select(x => x.LotId).Distinct().Count() != inputs.Count ||
@@ -140,6 +155,7 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
             foreach (var node in graphNodes) nodes.TryAdd(node.LotId, node);
         }
         Guid? syntheticId = null;
+        var planningTargets = new Dictionary<Guid, ResidueNode>();
         if (outputLedgerCommodityId is { } output)
         {
             // residue_graph exposes Catalog commodity IDs for physical nodes.
@@ -152,16 +168,32 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
                 throw new LedgerException(422, "Hypothetical blend output has no Catalog commodity mapping");
             // A transient random ID would change the F12 dependency graph on
             // every read and make an otherwise identical F14 preview stale.
-            var syntheticKey = output.ToString("N") + ":" + string.Join(";",
-                inputs.OrderBy(x => x.LotId).Select(x =>
-                    $"{x.LotId:N}:{x.QuantityKg}"));
-            syntheticId = new Guid(SHA256.HashData(
-                Encoding.UTF8.GetBytes(syntheticKey)).AsSpan(0, 16));
-            if (nodes.ContainsKey(syntheticId.Value))
-                throw new LedgerException(409, "Hypothetical blend identity collides with a physical lot");
-            nodes.Add(syntheticId.Value, new ResidueNode(syntheticId.Value, company!.Value,
-                catalogCommodityId, "BLENDED_RICE", "BLENDED_RICE", at,
-                "BLENDING", null, null, inputs.Select(x => new ResidueParent(x.LotId, x.QuantityKg)).ToArray()));
+            if (planningBounds)
+            {
+                foreach (var input in inputs)
+                {
+                    var boundTargetId = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes(
+                        $"planning:{output:N}:{input.LotId:N}")).AsSpan(0, 16));
+                    if (nodes.ContainsKey(boundTargetId))
+                        throw new LedgerException(409, "Planning blend identity collides with a physical lot");
+                    planningTargets.Add(input.LotId, new ResidueNode(boundTargetId, company!.Value,
+                        catalogCommodityId, "BLENDED_RICE", "BLENDED_RICE", at,
+                        "BLENDING", null, null, [new ResidueParent(input.LotId, "1")]));
+                }
+            }
+            else
+            {
+                var syntheticKey = output.ToString("N") + ":" + string.Join(";",
+                    inputs.OrderBy(x => x.LotId).Select(x =>
+                        $"{x.LotId:N}:{x.QuantityKg}"));
+                syntheticId = new Guid(SHA256.HashData(
+                    Encoding.UTF8.GetBytes(syntheticKey)).AsSpan(0, 16));
+                if (nodes.ContainsKey(syntheticId.Value))
+                    throw new LedgerException(409, "Hypothetical blend identity collides with a physical lot");
+                nodes.Add(syntheticId.Value, new ResidueNode(syntheticId.Value, company!.Value,
+                    catalogCommodityId, "BLENDED_RICE", "BLENDED_RICE", at,
+                    "BLENDING", null, null, inputs.Select(x => new ResidueParent(x.LotId, x.QuantityKg)).ToArray()));
+            }
         }
         var substances = substanceIds.ToArray();
         var owner = company ?? throw new LedgerException(400, "Preview needs at least one owned lot");
@@ -177,7 +209,12 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
         var hypothetical = syntheticId is { } id
             ? new HypotheticalBlendPreview(at, ResidueCalculator.EngineVersion,
                 CalculateResults(id, substances, snapshotNodes, evidence, policies, at)) : null;
-        return new ResidueSelectionPreview(at, previews, hypothetical);
+        return new ResidueSelectionPreview(at, previews, hypothetical)
+        {
+            PlanningBlendBounds = planningTargets.ToDictionary(x => x.Key, x =>
+                CalculateResults(x.Value.LotId, substances, [.. snapshotNodes, x.Value],
+                    evidence, policies, at, requireHomogeneousTargetStep: true))
+        };
     }
 
     private async Task<(ResidueNode[] Nodes, ResiduePolicySnapshot Policies, ResidueEvidenceSnapshot Evidence)> ReadSnapshotAsync(
@@ -194,11 +231,12 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
     }
 
     private static IReadOnlyList<ResidueResult> CalculateResults(Guid lotId, Guid[] substances,
-        IReadOnlyList<ResidueNode> nodes, ResidueEvidenceSnapshot evidence, ResiduePolicySnapshot policies, DateTimeOffset snapshotAt)
+        IReadOnlyList<ResidueNode> nodes, ResidueEvidenceSnapshot evidence, ResiduePolicySnapshot policies,
+        DateTimeOffset snapshotAt, bool requireHomogeneousTargetStep = false)
     {
         var sources = ResidueEvidenceResolver.Resolve(nodes, substances, evidence, policies, snapshotAt);
         return ResidueCalculator.Calculate(lotId, substances, nodes, sources,
-            ResidueEvidenceResolver.Factors(policies.Rules), policies);
+            ResidueEvidenceResolver.Factors(policies.Rules), policies, requireHomogeneousTargetStep);
     }
 
     public async Task<ResidueSourceBound> PreviewAsync(ResidueReportSelection request, CancellationToken ct)

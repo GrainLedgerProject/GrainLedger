@@ -20,6 +20,62 @@ internal sealed record BlendAssessmentFinding(string Code, string Status, string
 internal sealed record BlendAssessmentResult(string Status, decimal? PredictedOutputKg,
     IReadOnlyList<BlendAssessmentFinding> Findings);
 
+internal static class BlendInputResidue
+{
+    internal sealed record Exclusion(Guid LotId, string LotCode, Guid SubstanceId, string Code,
+        string Status, string? Upper, string? Mrl, string? Unit);
+
+    internal static Exclusion[] Screen(PlanningCandidateSnapshot snapshot, IReadOnlyCollection<Guid> lotIds,
+        IReadOnlyList<ResidueEvaluationPreview> inputs, BlendAssessmentRule? policy, ApplicableMrlResult mrl)
+    {
+        if (policy is not { ResidueBasis: "AS_RECEIVED" } || mrl.Status != "FOUND" ||
+            mrl.MarketId != policy.MarketId || mrl.CommodityId != policy.CommodityId)
+            return [];
+        var limits = mrl.Limits.ToLookup(limit => limit.SubstanceId);
+        var inputByLot = inputs.ToDictionary(input => input.LotId);
+        var exclusions = new List<Exclusion>();
+        foreach (var candidate in snapshot.Candidates.Where(c => lotIds.Contains(c.LotId)).DistinctBy(c => c.LotId))
+        {
+            var results = inputByLot.GetValueOrDefault(candidate.LotId)?.Results ?? [];
+            foreach (var substance in policy.RequiredSubstances)
+            {
+                var legal = limits[substance].ToArray();
+                var bounds = results.Where(result => result.SubstanceId == substance).ToArray();
+                var bound = bounds.Length == 1 ? bounds[0] : null;
+                if (legal.Length != 1 || bound is not { Status: "COMPLETE" } ||
+                    bound.Unit != legal[0].Unit || bound.ProductStage != candidate.Stage ||
+                    bound.ProductIdentity != candidate.ProductIdentity ||
+                    !ExportProductMatch.IsResidueForProduct(bound, candidate.CatalogCommodityId,
+                        snapshot, candidate.ProductIdentity) ||
+                    !decimal.TryParse(bound.Upper, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var upper))
+                {
+                    exclusions.Add(new(candidate.LotId, candidate.LotCode, substance, "RESIDUE_INPUT_EVIDENCE_MISSING",
+                        "INCOMPLETE", null, null, null));
+                    continue;
+                }
+                if (upper <= legal[0].LimitValue) continue;
+                var exceeds = decimal.TryParse(bound.Lower, NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture, out var lower) && lower > legal[0].LimitValue;
+                exclusions.Add(new(candidate.LotId, candidate.LotCode, substance,
+                    exceeds ? "RESIDUE_INPUT_MRL_EXCEEDED" : "RESIDUE_INPUT_MRL_UNVERIFIED",
+                    exceeds ? "FAIL" : "INCOMPLETE", bound.Upper, ExportRules.BoundText(legal[0].LimitValue), bound.Unit));
+            }
+        }
+        return exclusions.ToArray();
+    }
+
+    internal static BlendAssessmentResult Apply(BlendAssessmentResult assessment, IReadOnlyList<Exclusion> exclusions)
+    {
+        if (exclusions.Count == 0) return assessment;
+        return assessment with
+        {
+            Status = assessment.Status == "FAIL" || exclusions.Any(x => x.Status == "FAIL") ? "FAIL" : "INCOMPLETE",
+            Findings = [.. assessment.Findings, .. exclusions.Select(x => new BlendAssessmentFinding(
+                x.Code, x.Status, x.Upper, x.Mrl, x.Unit, x.SubstanceId.ToString()))]
+        };
+    }
+}
+
 internal static class BlendAssessment
 {
     internal static BlendAssessmentResult Evaluate(string mode, decimal targetKg,
@@ -28,7 +84,8 @@ internal static class BlendAssessment
         IReadOnlyList<ResidueResult>? residue,
         IReadOnlyList<SpecificationLimit> specification,
         IReadOnlyList<BlendQualityRule> qualityRules,
-        IReadOnlyList<BlendQualityObservation> qualityObservations)
+        IReadOnlyList<BlendQualityObservation> qualityObservations,
+        Func<ResidueResult, bool>? matchesResidue = null)
     {
         var findings = new List<BlendAssessmentFinding>();
         void Add(string code, string status, string? actual = null, string? limit = null,
@@ -84,7 +141,7 @@ internal static class BlendAssessment
                     !decimal.TryParse(bound.Upper, NumberStyles.AllowDecimalPoint,
                         CultureInfo.InvariantCulture, out var upper) ||
                     bound.Unit != legal.Unit || policy.ResidueBasis != "AS_RECEIVED" ||
-                    bound.CommodityId != policy.CommodityId)
+                    !(matchesResidue?.Invoke(bound) ?? bound.CommodityId == policy.CommodityId))
                 {
                     Add("RESIDUE_COVERAGE_INCOMPLETE", "INCOMPLETE", reference: substance.ToString());
                     continue;

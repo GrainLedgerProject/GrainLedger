@@ -31,7 +31,7 @@ A mapped input commodity can remain visible when it differs from the order's
 output commodity. With a draft, direct match checks the product identity and
 commodity. Ledger retains PADDY as the Catalog commodity after milling; a
 lineage-complete HEAD_RICE, BROKEN_RICE or BLENDED_RICE lot from PADDY can
-therefore directly match a RICE order. RAW_PADDY and DRIED_PADDY cannot.
+therefore directly match a RICE or polished rice order. RAW_PADDY and DRIED_PADDY cannot. For an approved blend compatibility whose output retains PADDY in Ledger, F12 evaluates the approved physical process and retains its Catalog identity. F14 can apply the order's rice assessment policy and MRL to that result when F12 confirms the finished BLENDED_RICE stage and product. Source identity, processing approval, assessment policy and MRL remain separate evidence.
 This product mapping does not establish available mass or compliance. Candidate
 revisions include the Catalog codes used by the mapping.
 The GET route no longer returns a greedy mass selection. `candidateReadReady`
@@ -55,6 +55,16 @@ physical stock candidates with mixed-bulk ancestry. A draft pins the order,
 specification and target. Candidate reads alone do not supply a compliance
 verdict or execution authority.
 
+## MILP preview
+
+F14 screens each compatible finished input lot against the applicable published MRL for every substance required by the assessment policy. The check uses the lot's F12 interval before hypothetical blending, without applying the internal margin. A lot is eligible only when its verified upper bound is at or below the MRL. An interval that crosses the MRL is unresolved. In both that case and a confirmed exceedance, the solver excludes the lot. F14 rechecks selected inputs when evaluating the plan, including when saving or approving it. The finished blend still has to meet the internal margin-adjusted limits.
+
+Preview generates an OR-Tools/SCIP model from the current company/facility inventory, container demand, quality limits, compatibility, yield and the applicable residue panel. The feasibility mode can use continuous quantities alone. The optional fewest-locations objective adds a binary variable for each distinct stock location and minimizes the number used. The quantity and location decisions remain subject to the same F14 checks.
+
+Physical blends use conservative F12 planning coefficients for eligible homogeneous STEP rules. Direct stock checks each lot independently. Every solver result is normalized to the kg grid and reassessed with F12 and F14. A solver model optimum is reported as proven only when the verified selection reaches the applicable capacity lower bound. If the model cannot produce a verified selection, the existing assessed search provides a fallback and diagnostics. A failed search or an unsupported residue model does not prove that the F14 order is infeasible.
+
+A ratio adjustment keeps the two original stock positions and total input mass. A current owned preview authorizes the requested interval, and F14 reassesses exact adjusted quantities before issuing a replacement preview. Save and approval revalidate the recorded allocation and evidence instead of recomputing a different solution. This change has no schema migration.
+
 ## Current HTTP contract
 
 All routes use persisted active-role and customer-company scope. Reads use `export-orders.read` (ExportStaff and CustomerManager); draft creation and cancellation use the existing `blend.propose` permission (ExportStaff). Administrator is not a business-role wildcard. Cookie writes require CSRF. Cross-company resources return 404.
@@ -72,7 +82,7 @@ All routes use persisted active-role and customer-company scope. Reads use `expo
 | GET /api/export-containers/{id}/blend-plans | Paged drafts, newest version first. |
 | GET /api/blend-plans/{id} | Draft demand, status, ETag and canCancel. |
 | GET /api/blend-plans/{id}/history | Paged actor-labelled history. |
-| POST /api/blend-plans/{id}/preview | Runs bounded greedy search and fail-closed assessment. A PASS returns an expiring `previewReference`; no stock changes. |
+| POST /api/blend-plans/{id}/preview | Runs the solver and fail-closed assessment. Accepts one optional objective. `MIN_LOCATIONS` counts distinct locations. `MIN_LOTS` counts distinct lot IDs. `RETAIN_HEAD_RICE` minimizes kg allocated from `HEAD_RICE`. `MIN_MOISTURE` minimizes the weighted percentage of the selected order specification attribute (`moistureAttributeId`). `MAX_RESIDUE_HEADROOM` minimizes the highest proportion of each positive internal residue limit, while zero-limit substances remain mandatory checks. All priorities require a PASS from F14. A verified two-input blend may return `ratioRange`; send `adjustment: { previewReference, firstQuantityKg }` to recheck a ratio with whole kg in both allocations. A PASS returns an expiring `previewReference`. Stock stays unchanged. |
 | POST /api/blend-plans/{id}/propose | Body: `operationId`, `previewReference`. Rechecks the preview under the writer lock and atomically stores an immutable proposal and history. Stale inputs return 409. |
 | GET /api/blend-plans/{id}/proposal | Saved assessment, allocations and CURRENT/STALE freshness result. Does not authorize execution. |
 | POST /api/blend-plans/{id}/cancel | Body: operationId. Requires current plan ETag in If-Match. DRAFT becomes CANCELLED. |
@@ -124,7 +134,7 @@ Example draft body:
 
 The server derives company, actor, target mass, specification and next version. `targetProductIdentity` states the intended product for this container's plan. It is required when creating a new draft and is pinned in the immutable `demandSnapshot` and exposed on draft reads. Supported Ledger identities are `RAW_PADDY`, `DRIED_PADDY`, `HEAD_RICE`, `BROKEN_RICE`, `BRAN`, `HUSK` and `BLENDED_RICE`. Bagging retains the underlying identity, so `BAGGED_RICE` is a stage, not a target product identity. Existing drafts without this field read as null and cannot establish a product target. Commodity remains on the F13 order; one order can have containers with different draft targets. The candidate read now reports product-match hints for a current draft, but does not approve any cross-product substitution.
 
-The planning context returns `allowedTargetProducts` for the order's Catalog commodity, and draft creation checks the same set on the server. `RICE` and `RICE_POLISHED` allow `HEAD_RICE`, `BROKEN_RICE` and `BLENDED_RICE`; `RICE_BRAN` allows `BRAN`; `HUSK` and `RICE_HUSK` allow `HUSK`. Ledger currently retains `PADDY` as the Catalog commodity through processing, so `PADDY` permits its raw, dried and derived fractions. Unmapped commodity codes, including `RICE_HUSKED` until Ledger has a matching product identity, offer no F14 draft target. The FE does not invent a fallback list. This check prevents a mismatched draft target; actual stock and blend compatibility are still assessed later in the plan.
+The planning context returns `allowedTargetProducts` for the order's Catalog commodity, and draft creation checks the same set on the server. `RICE`, `RICE_POLISHED` and `POLISHED-RICE` allow `HEAD_RICE`, `BROKEN_RICE` and `BLENDED_RICE`. `RICE_BRAN` and `RICE-BRAN` allow `BRAN`. `HUSK` and `RICE_HUSK` allow `HUSK`. Ledger currently retains `PADDY` as the Catalog commodity through processing, so `PADDY` permits its raw, dried and derived fractions. Unmapped commodity codes, including `RICE_HUSKED` until Ledger has a matching product identity, offer no F14 draft target. The FE does not invent a fallback list. This check prevents a mismatched draft target; actual stock and blend compatibility are still assessed later in the plan.
 
 `versionNo` is the draft sequence within a container; `version` is the concurrency token for that draft. A new request makes a new version, including after cancellation. There is no edit/delete endpoint for historical demand. Draft list and detail return `hasProposal`; a proposal is stored separately while demand status remains `DRAFT`. `demandSnapshot` is a JSON string containing market/commodity, shipping dates, order/container versions, target product identity, target mass and quality specification. Mass is a decimal string with up to six fractional digits; quality values retain up to twelve.
 
