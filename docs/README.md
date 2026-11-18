@@ -27,6 +27,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## Guides & Walkthroughs (`docs/guides/`)
 
+- [Demo container và tracing cho giảng viên](guides/container-tracing-lecturer-demo.md): one fixed seed/demo walkthrough using DEMO-CONTAINER/PADDY on Supabase, preselected stock and bidirectional tracing
 - [Container S2 deployment](guides/container-s2-deployment.md) · [S2 web walkthrough](guides/container-s2-web-test.md)
 - [Container production deployment](guides/container-production-deployment.md): migration/grant review, shared-environment approval and compatible-instance checklist
 - [Container execution web tests](guides/container-execution-web-test.md): direct-stock loading/closure and trace/exception scenarios
@@ -46,6 +47,7 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 ## Plans & Backlogs (`docs/plans/`)
 
 - [Admin Capture Enhancements Plan](plans/admin-capture-enhancements-plan.md): administrative capture tooling, review queue, and bulk updates
+- [Container tracing Flowchart plan](plans/container-tracing-flowchart-plan-2026-11-18.md): planned forward container nodes, backward graph from container detail and navigation; not implemented
 - [Container S2 implementation plan](plans/container-s2-implementation-plan-2026-11-18.md): seven authorized requirement groups and focused verification
 - [Container core completion plan (2026-11-17, scope updated 2026-11-18)](plans/container-core-completion-plan-2026-11-17.md): completed S1, requirement-mapped S2 tasks and excluded extensions; two implementation stages
 - [Container execution plan](plans/container-execution-plan-2026-11-13.md): implemented DIRECT_STOCK baseline and deferred blend/output dependencies
