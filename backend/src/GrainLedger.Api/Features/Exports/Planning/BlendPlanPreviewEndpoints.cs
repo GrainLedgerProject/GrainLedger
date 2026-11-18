@@ -5,11 +5,15 @@ using GrainLedger.Api.Features.Identity;
 using GrainLedger.Api.Features.Ledger;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace GrainLedger.Api.Features.Exports;
 
+public sealed record BlendRatioAdjustment(Guid PreviewReference, string FirstQuantityKg);
 public sealed record PreviewBlendPlanRequest(Guid FacilityId, string ScopeRevision,
-    int MaxIterations = 32);
+    int MaxIterations = 32, string? Objective = null, BlendRatioAdjustment? Adjustment = null, Guid? MoistureAttributeId = null);
 
 public static partial class ExportModule
 {
@@ -33,8 +37,9 @@ public static partial class ExportModule
         if (scope is null) return Results.Forbid();
         if (!await access.HasPermissionAsync(Permissions.ResidueEvaluate, ct)) return Results.Forbid();
         if (request.FacilityId == Guid.Empty || string.IsNullOrWhiteSpace(request.ScopeRevision) ||
-            request.MaxIterations is < 1 or > 256)
-            return Invalid(new() { ["request"] = ["Choose a facility, current scope revision and 1–256 iterations."] });
+            request.MaxIterations is < 1 or > 256 || request.Objective is not
+                (null or "MIN_LOCATIONS" or "RETAIN_HEAD_RICE" or "MIN_LOTS" or "MIN_MOISTURE" or "MAX_RESIDUE_HEADROOM"))
+            return Invalid(new() { ["request"] = ["Choose a facility, current scope revision, 1–256 iterations and a supported objective."] });
         var plan = await db.BlendPlanDrafts.AsNoTracking().SingleOrDefaultAsync(x =>
             x.Id == id && x.CompanyId == scope.Value.Company, ct);
         if (plan is null) return Results.NotFound();
@@ -69,6 +74,9 @@ public static partial class ExportModule
                 CultureInfo.InvariantCulture), policy.ResidueBasis, policy.EvidenceReference);
         var limits = await db.Limits.AsNoTracking().Where(x =>
             x.SpecificationId == plan.SpecificationId).ToArrayAsync(ct);
+        if (request.Objective == "MIN_MOISTURE" && !limits.Any(limit =>
+            limit.AttributeId == request.MoistureAttributeId && limit.Unit == "%"))
+            return Invalid(new() { ["moistureAttributeId"] = ["Select the moisture percentage attribute from the order specification."] });
         var yieldByCompatibility = new Dictionary<Guid, PlanningYieldRule?>();
         foreach (var compatibility in snapshot.Compatibilities.Value.EnumerateArray())
         {
@@ -85,11 +93,11 @@ public static partial class ExportModule
                 !decimal.TryParse(rule.OutputFraction, NumberStyles.AllowDecimalPoint,
                     CultureInfo.InvariantCulture, out var fraction) || fraction is <= 0 or > 1)
                 return null;
-            try { return decimal.Ceiling(plan.TargetMassKg / fraction * 1000000m) / 1000000m; }
-            catch (OverflowException) { return null; }
+            return AssessedMilpSearch.MinimumBlendInput(plan.TargetMassKg, fraction);
         }
         string? passingDependencyRevision = null;
         object? passingEvidenceSnapshot = null;
+        IReadOnlyList<BlendQualityObservation> passingQuality = [];
         async Task<BlendAssessmentResult> AssessAsync(GreedyStockSelection.Result selection, CancellationToken token)
         {
             var selected = selection.Allocations.Select(x => new CandidateGroupItem(
@@ -103,6 +111,7 @@ public static partial class ExportModule
                 group.Findings.Select(x => new BlendAssessmentFinding(x, "FAIL", null,
                     null, null, null)).ToArray());
             IReadOnlyList<ResidueResult>? bounds = null;
+            IReadOnlyList<ResidueEvaluationPreview> inputEvidence = [];
             DateTimeOffset evidenceAt = snapshot.ObservedAt;
             if (policy is { RequiredSubstanceIds.Length: > 0 })
             {
@@ -120,6 +129,7 @@ public static partial class ExportModule
                         ExportRules.Text(x.Sum(y => y.QuantityKg)))).ToArray(),
                     outputCommodity, policy.RequiredSubstanceIds, token);
                 evidenceAt = evidence.SnapshotAt;
+                inputEvidence = evidence.Inputs;
                 bounds = selection.Mode == "DIRECT_STOCK"
                     ? DirectStockResidueAssessment.ConservativeBounds(evidence.Inputs,
                         policy.RequiredSubstanceIds)
@@ -146,11 +156,16 @@ public static partial class ExportModule
             }
             var assessment = BlendAssessment.Evaluate(selection.Mode, plan.TargetMassKg,
                 selected, yieldRule, assessmentRule, mrl, bounds, limits,
-                qualityRules, observations);
+                qualityRules, observations,
+                ExportProductMatch.AssessmentResidueScope(snapshot, target, selected, selection.CompatibilityPolicyId));
+            if (selection.Mode == "BLEND_INPUT_STOCK")
+                assessment = BlendInputResidue.Apply(assessment, BlendInputResidue.Screen(snapshot,
+                    selected.Select(x => x.LotId).Distinct().ToArray(), inputEvidence, assessmentRule, mrl));
             if (assessment.Status == "PASS")
             {
                 passingDependencyRevision = ExportRules.Hash("blend-assessment-dependencies",
                     new { mrl, policy, yield, bounds, observations });
+                passingQuality = observations;
                 passingEvidenceSnapshot = new
                 {
                     applicableMrl = mrl,
@@ -164,10 +179,141 @@ public static partial class ExportModule
         }
 
         AssessedGreedySearch.Result result;
-        if (savedSelection is null)
-            result = await AssessedGreedySearch.SearchAsync(snapshot.Candidates, plan.TargetMassKg,
-                target, snapshot.CatalogCommodityId, snapshot.Compatibilities.Value, AssessAsync,
-                request.MaxIterations, ct, InputTarget, snapshot.OrderCommodityCode);
+        AssessedMilpSearch.Result? solve = null;
+        BlendInputResidue.Exclusion[] inputResidueExclusions = [];
+        var method = "RECHECK";
+        var optimal = false;
+        var priority = request.Objective switch
+        {
+            "MIN_LOCATIONS" => BlendPlanningObjective.FewestLocations,
+            "RETAIN_HEAD_RICE" => BlendPlanningObjective.RetainHeadRice,
+            "MIN_LOTS" => BlendPlanningObjective.FewestLots,
+            "MIN_MOISTURE" => BlendPlanningObjective.LowestMoisture,
+            "MAX_RESIDUE_HEADROOM" => BlendPlanningObjective.ResidueHeadroom,
+            _ => BlendPlanningObjective.None
+        };
+        AssessedMilpSearch.RatioRange? ratioRange = null;
+        if (savedSelection is null && request.Adjustment is { } adjustment)
+        {
+            var basis = await db.BlendPlanPreviews.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.Id == adjustment.PreviewReference && x.CompanyId == scope.Value.Company &&
+                x.ActorId == scope.Value.Actor && x.PlanId == id && x.ExpiresAt > clock.GetUtcNow(), ct);
+            if (basis is null)
+                return Problem(409, "PLAN_PREVIEW_EXPIRED", "Calculate a new plan before adjusting the ratio.");
+            var basisRequest = JsonSerializer.Deserialize<PreviewBlendPlanRequest>(basis.RequestJson);
+            var stored = ReadSavedBlendSelection(basis.SnapshotJson);
+            using var basisDocument = JsonDocument.Parse(basis.SnapshotJson);
+            if (basisRequest?.ScopeRevision != revision || basisRequest.FacilityId != request.FacilityId ||
+                basisRequest.Objective != request.Objective || basisRequest.MoistureAttributeId != request.MoistureAttributeId ||
+                stored is not { Selection.Allocations.Count: 2 } ||
+                !basisDocument.RootElement.TryGetProperty("ratioRange", out var rangeElement) ||
+                rangeElement.ValueKind != JsonValueKind.Object)
+                return Problem(409, "PLAN_RATIO_STALE", "Calculate a new adjustable plan.");
+
+            ratioRange = JsonSerializer.Deserialize<AssessedMilpSearch.RatioRange>(rangeElement,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (ratioRange is null ||
+                !ExportRules.TryMass(adjustment.FirstQuantityKg, "KG", out var firstKg) ||
+                !ExportRules.TryMass(ratioRange.MinimumKg, "KG", out var minimum) ||
+                !ExportRules.TryMass(ratioRange.MaximumKg, "KG", out var maximum) ||
+                firstKg < minimum || firstKg > maximum)
+                return Invalid(new() { ["adjustment"] = ["Choose a quantity within the verified ratio range."] });
+
+            var initial = stored.Value.Selection;
+            if (firstKg % 1 != 0 || initial.SelectedMassKg % 1 != 0)
+                return Invalid(new() { ["adjustment"] = ["Use whole kilograms for both lots when adjusting the ratio."] });
+            var adjusted = initial with
+            {
+                Allocations = [initial.Allocations[0] with { QuantityKg = firstKg },
+                    initial.Allocations[1] with { QuantityKg = initial.SelectedMassKg - firstKg }]
+            };
+            var assessment = await AssessAsync(adjusted, ct);
+            method = "RATIO_RECHECK";
+            optimal = assessment.Status == "PASS" &&
+                (priority is BlendPlanningObjective.FewestLocations or BlendPlanningObjective.FewestLots) &&
+                AssessedMilpSearch.ProvesFewestPositions(snapshot, target, InputTarget, adjusted,
+                    priority == BlendPlanningObjective.FewestLots);
+            result = new(assessment.Status, 1, adjusted, assessment, []);
+        }
+        else if (savedSelection is null)
+        {
+            var searchSnapshot = snapshot;
+            if (assessmentRule is { RequiredSubstances.Count: > 0 })
+            {
+                var ids = snapshot.Candidates.Where(c => c.InventoryEligible && c.AvailableKg > 0)
+                    .Select(c => c.LotId).Distinct().ToArray();
+                if (ids.Length is > 0 and <= 100)
+                {
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    deadline.CancelAfter(TimeSpan.FromSeconds(8));
+                    try
+                    {
+                        if (target == "BLENDED_RICE")
+                        {
+                            var compatible = snapshot.Compatibilities.Value.EnumerateArray()
+                                .Where(item => ExportProductMatch.TryMatchBlendOutput(item, order.CommodityId,
+                                    snapshot.OrderCommodityCode, snapshot.CommodityCodes, out _))
+                                .SelectMany(item => item.GetProperty("inputProducts").EnumerateArray().Select(key => key.GetString()))
+                                .ToHashSet(StringComparer.Ordinal);
+                            var blendIds = snapshot.Candidates.Where(c => c.InventoryEligible && c.AvailableKg > 0 &&
+                                (c.Stage is "HEAD_RICE" or "BROKEN_RICE" or "BLENDED_RICE") &&
+                                compatible.Contains($"{c.LedgerCommodityId}:{c.ProductIdentity}"))
+                                .Select(c => c.LotId).Distinct().ToArray();
+                            if (blendIds.Length > 0)
+                            {
+                                var inputs = await residue.PreviewLotsAsync(blendIds, assessmentRule.RequiredSubstances, deadline.Token);
+                                var inputMrl = await applicableMrl.ResolveAsync(order.MarketId, order.CommodityId,
+                                    inputs[0].SnapshotAt, deadline.Token);
+                                inputResidueExclusions = BlendInputResidue.Screen(snapshot, blendIds, inputs, assessmentRule, inputMrl);
+                                var blocked = inputResidueExclusions.Select(x => x.LotId).ToHashSet();
+                                searchSnapshot = snapshot with { Candidates = snapshot.Candidates.Where(c => !blocked.Contains(c.LotId)).ToArray() };
+                            }
+                        }
+                        var quality = await ledger.ReadPlanningQualityObservationsAsync(
+                            scope.Value.Company, request.FacilityId, ids, snapshot.ObservedAt, deadline.Token);
+                        var observations = quality.Select(q => new BlendQualityObservation(q.LotId, q.AttributeId,
+                            decimal.Parse(q.MeasuredValue, CultureInfo.InvariantCulture), q.Unit, q.Id, q.VersionNo))
+                            .ToArray();
+                        var mrl = await applicableMrl.ResolveAsync(order.MarketId, order.CommodityId,
+                            snapshot.ObservedAt, deadline.Token);
+                        async Task<IReadOnlyDictionary<Guid, IReadOnlyList<ResidueResult>>> ReadBounds(
+                            Guid[] lotIds, Guid? output, CancellationToken token)
+                        {
+                            if (output is { } commodityId)
+                                return (await residue.PreviewPlanningBlendBoundsAsync(lotIds, commodityId,
+                                    assessmentRule.RequiredSubstances, token)).PlanningBlendBounds;
+                            return (await residue.PreviewLotsAsync(lotIds, assessmentRule.RequiredSubstances, token))
+                                .ToDictionary(x => x.LotId, x => x.Results);
+                        }
+
+                        solve = await AssessedMilpSearch.SearchAsync(searchSnapshot, target, limits, qualityRules,
+                            observations, assessmentRule, mrl, InputTarget, priority, request.MaxIterations,
+                            TimeSpan.FromSeconds(3), ReadBounds, AssessAsync, deadline.Token, request.MoistureAttributeId);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+                    catch (LedgerException ex) when (ex.StatusCode is 409 or 422 or 503) { }
+                }
+            }
+
+            GreedyStockSelection.Result? selection = solve?.Selection;
+            BlendAssessmentResult? verified = null;
+            if (selection is not null)
+                verified = await AssessAsync(selection, ct);
+            if (selection is not null && verified?.Status == "PASS")
+            {
+                method = "MILP";
+                optimal = solve!.Optimal;
+                ratioRange = solve.Range;
+                result = new("PASS", solve.Attempts.Count, selection, verified, []);
+            }
+            else
+            {
+                method = "GREEDY_FALLBACK";
+                result = await AssessedGreedySearch.SearchAsync(searchSnapshot.Candidates, plan.TargetMassKg,
+                    target, snapshot.CatalogCommodityId, snapshot.Compatibilities.Value, AssessAsync,
+                    request.MaxIterations, ct, InputTarget, snapshot.OrderCommodityCode, snapshot.CommodityCodes);
+            }
+        }
         else
         {
             var assessment = await AssessAsync(savedSelection, ct);
@@ -194,6 +340,7 @@ public static partial class ExportModule
             predictedOutputKg = result.Assessment?.PredictedOutputKg is { } kg ?
                 ExportRules.Text(kg) : null,
             calculationVersion = "F14_ASSESSMENT_V1",
+            ratioRange,
             dependencyRevision = passingDependencyRevision,
             evidence = passingEvidenceSnapshot };
         Guid? reference = null;
@@ -220,6 +367,49 @@ public static partial class ExportModule
             await db.SaveChangesAsync(ct);
             reference = preview.Id;
         }
+        var verifiedSelection = result.Outcome == "PASS" ? result.Selection : null;
+        var positionsUsed = verifiedSelection?.Allocations.Select(x => x.LocationId).Distinct().Count();
+        string? headRiceUsedKg = null;
+        if (priority == BlendPlanningObjective.RetainHeadRice && verifiedSelection is { } selected)
+        {
+            var headRiceLots = snapshot.Candidates.Where(c => c.ProductIdentity == "HEAD_RICE")
+                .Select(c => c.LotId).ToHashSet();
+            headRiceUsedKg = ExportRules.Text(selected.Allocations.Where(a => headRiceLots.Contains(a.LotId))
+                .Sum(a => a.QuantityKg));
+        }
+        var lotsUsed = verifiedSelection?.Allocations.Select(a => a.LotId).Distinct().Count();
+        string? weightedMoisture = null;
+        if (verifiedSelection is not null && request.MoistureAttributeId is { } attributeId)
+        {
+            var moistureByLot = passingQuality.Where(q => q.AttributeId == attributeId && q.Unit == "%")
+                .ToDictionary(q => q.LotId, q => q.Value);
+            if (verifiedSelection.Allocations.All(a => moistureByLot.ContainsKey(a.LotId)))
+                weightedMoisture = ExportRules.Text(verifiedSelection.Allocations.Sum(a => a.QuantityKg * moistureByLot[a.LotId]) /
+                    verifiedSelection.SelectedMassKg);
+        }
+        var worstResidue = AssessedMilpSearch.ResidueHeadroom(snapshotResponse.assessmentFindings);
+        var residueHeadroom = worstResidue is { } worst ? new { substanceId = worst.Substance, ratio = worst.Ratio } : null;
+        object? ratioQuality = null;
+        if (ratioRange is not null && verifiedSelection is { Mode: "BLEND_INPUT_STOCK", Allocations.Count: 2 })
+        {
+            var first = verifiedSelection.Allocations[0].LotId;
+            var second = verifiedSelection.Allocations[1].LotId;
+            var values = passingQuality.ToDictionary(q => (q.LotId, q.AttributeId));
+            ratioQuality = limits.Where(limit => limit.Unit == "%" && values.ContainsKey((first, limit.AttributeId)) &&
+                    values.ContainsKey((second, limit.AttributeId)))
+                .Select(limit => new { limit.AttributeId, first = ExportRules.Text(values[(first, limit.AttributeId)].Value),
+                    second = ExportRules.Text(values[(second, limit.AttributeId)].Value), limit.Unit }).ToArray();
+        }
+        var substanceIds = assessmentRule?.RequiredSubstances ?? [];
+        var substanceNames = issueReference && substanceIds.Count > 0
+            ? await db.ActiveSubstances.AsNoTracking().Where(x => substanceIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.Code + " · " + x.Name, ct)
+            : null;
+        // Development-only diagnostics stay outside the proposal snapshot and fingerprint.
+        var showSteps = issueReference &&
+            http.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment() &&
+            http.RequestServices.GetRequiredService<IConfiguration>()
+                .GetValue("BlendPlanning:ShowCalculationSteps", true);
         return Results.Ok(new { snapshotResponse.planId, snapshotResponse.scopeRevision,
             snapshotResponse.outcome, snapshotResponse.Iterations,
             snapshotResponse.Reasons, snapshotResponse.selection,
@@ -227,6 +417,11 @@ public static partial class ExportModule
             snapshotResponse.predictedOutputKg, snapshotResponse.dependencyRevision,
             snapshotResponse.calculationVersion, snapshotResponse.evidence,
             snapshotFingerprint = ExportRules.Hash("blend-plan-preview", snapshotResponse),
-            previewReference = reference, canPropose = reference is not null });
+            previewReference = reference, canPropose = reference is not null,
+            ratioRange = snapshotResponse.ratioRange,
+            substanceNames, ratioQuality, residueHeadroom, inputResidueExclusions,
+            optimization = issueReference ? new { method, objective = request.Objective, positionsUsed, lotsUsed,
+                headRiceUsedKg, weightedMoisture, optimal } : null,
+            calculationSteps = showSteps ? new { method, attempts = solve?.Attempts ?? [] } : null });
     }
 }

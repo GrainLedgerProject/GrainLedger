@@ -59,11 +59,12 @@ public static partial class ExportModule
             x.CompanyId == scope.Value.Company, ct))
             return Problem(409, "PLAN_ALREADY_PROPOSED", "This draft already has a proposal.");
         var previewRequest = JsonSerializer.Deserialize<PreviewBlendPlanRequest>(preview.RequestJson);
-        if (previewRequest is null)
+        var saved = ReadSavedBlendSelection(preview.SnapshotJson);
+        if (previewRequest is null || saved is null)
             return Problem(409, "PLAN_PREVIEW_INVALID", "Run a new preview before proposing.");
         var recomputed = await ComputeBlendPlanPreviewAsync(id, previewRequest,
             http, access, db, ledger, residue, applicableMrl,
-            assessmentPolicies, clock, false, Permissions.BlendPropose, ct);
+            assessmentPolicies, clock, false, Permissions.BlendPropose, ct, saved.Value.Selection);
         if (recomputed is not IStatusCodeHttpResult { StatusCode: StatusCodes.Status200OK } ||
             recomputed is not IValueHttpResult { Value: { } value }) return recomputed;
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(value,
@@ -71,7 +72,7 @@ public static partial class ExportModule
         var data = document.RootElement;
         if (data.GetProperty("outcome").GetString() != "PASS" ||
             data.GetProperty("assessmentStatus").GetString() != "PASS" ||
-            data.GetProperty("snapshotFingerprint").GetString() != preview.Fingerprint)
+            data.GetProperty("dependencyRevision").GetString() != saved.Value.DependencyRevision)
             return Problem(409, "PLAN_PREVIEW_STALE", "Stock, demand, evidence or policy changed. Run a new preview.");
         var plan = await db.BlendPlanDrafts.AsNoTracking().SingleAsync(x => x.Id == id, ct);
         var now = clock.GetUtcNow();
@@ -137,12 +138,13 @@ public static partial class ExportModule
         var storedRequest = JsonSerializer.Deserialize<PreviewBlendPlanRequest>(storedPreview.RequestJson);
         var reasons = new List<string>();
         if (!DemandIsCurrent(plan, order, container)) reasons.Add("DEMAND_CHANGED");
-        if (storedRequest is null) reasons.Add("PREVIEW_INVALID");
-        if (reasons.Count == 0)
+        var storedSelection = ReadSavedBlendSelection(proposal.SnapshotJson);
+        if (storedRequest is null || storedSelection is null) reasons.Add("PREVIEW_INVALID");
+        if (storedRequest is not null && storedSelection is { } selected && reasons.Count == 0)
         {
-            var current = await ComputeBlendPlanPreviewAsync(id, storedRequest!,
+            var current = await ComputeBlendPlanPreviewAsync(id, storedRequest,
                 http, access, db, ledger, residue, applicableMrl,
-                assessmentPolicies, clock, false, Permissions.ExportOrdersRead, ct);
+                assessmentPolicies, clock, false, Permissions.ExportOrdersRead, ct, selected.Selection);
             if (current is not IStatusCodeHttpResult { StatusCode: StatusCodes.Status200OK } ||
                 current is not IValueHttpResult { Value: { } value })
                 reasons.Add("PLANNING_INPUTS_CHANGED_OR_UNAVAILABLE");
@@ -153,7 +155,7 @@ public static partial class ExportModule
                 var data = document.RootElement;
                 if (data.GetProperty("outcome").GetString() != "PASS" ||
                     data.GetProperty("assessmentStatus").GetString() != "PASS" ||
-                    data.GetProperty("snapshotFingerprint").GetString() != storedPreview.Fingerprint)
+                    data.GetProperty("dependencyRevision").GetString() != selected.DependencyRevision)
                     reasons.Add("PREVIEW_DEPENDENCIES_CHANGED");
             }
         }

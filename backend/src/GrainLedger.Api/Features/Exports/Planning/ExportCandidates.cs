@@ -31,7 +31,8 @@ internal sealed record PlanningCandidate(Guid LotId, string LotCode, Guid Locati
 internal sealed record PlanningCandidateSnapshot(Guid ContainerId, Guid FacilityId, int OrderVersion,
     int ContainerVersion, string ContainerStatus, Guid CatalogCommodityId, decimal TargetMassKg, DateTimeOffset ObservedAt,
     string ScopeRevision, JsonElement Ledger, JsonElement? Compatibilities,
-    IReadOnlyList<PlanningCandidate> Candidates, string? OrderCommodityCode = null);
+    IReadOnlyList<PlanningCandidate> Candidates, string? OrderCommodityCode = null,
+    IReadOnlyDictionary<Guid, string>? CommodityCodes = null);
 
 internal sealed class CandidateDemandChangedException : Exception;
 
@@ -157,8 +158,13 @@ public static partial class ExportModule
             ? DirectStockResidueAssessment.ConservativeBounds(previews, assessmentRule.RequiredSubstances)
             : hypothetical?.Results;
         var assessment = BlendAssessment.Evaluate(request.Mode, plan.TargetMassKg, selected,
-            yieldRule, assessmentRule, mrl, assessmentBounds, specification, qualityRules, []);
-        return Results.Ok(new { status = group.Status, group.Findings,
+            yieldRule, assessmentRule, mrl, assessmentBounds, specification, qualityRules, [],
+            ExportProductMatch.AssessmentResidueScope(snapshot, target, selected, request.CompatibilityPolicyId));
+        var inputResidueExclusions = request.Mode == "BLEND_INPUT_STOCK"
+            ? BlendInputResidue.Screen(snapshot, selected.Select(x => x.LotId).Distinct().ToArray(), previews, assessmentRule, mrl)
+            : [];
+        assessment = BlendInputResidue.Apply(assessment, inputResidueExclusions);
+        return Results.Ok(new { status = group.Status, group.Findings, inputResidueExclusions,
             inputMassKg = ExportRules.Text(group.InputMassKg), scopeRevision = planRevision,
             residueSnapshotAt = residueSelection.SnapshotAt, residue = previews,
             evidenceStatus = unresolved.Length == 0 ? "INPUT_BOUNDS_AVAILABLE" : "INCOMPLETE",
@@ -195,16 +201,16 @@ public static partial class ExportModule
     // Ledger compatibility is an exact set rule for a physical BLENDING operation.
     // One candidate can only be a possible input; approval requires the full set.
     private static string ProductCompatibility(PlanningCandidate candidate, string target,
-        Guid outputCatalogCommodityId, string? outputCommodityCode, JsonElement policies)
+        PlanningCandidateSnapshot snapshot)
     {
-        if (ExportProductMatch.IsDirect(candidate, target, outputCatalogCommodityId, outputCommodityCode))
+        if (ExportProductMatch.IsDirect(candidate, target, snapshot.CatalogCommodityId, snapshot.OrderCommodityCode))
             return "DIRECT_MATCH";
         if (target != "BLENDED_RICE" || candidate.Stage is not ("HEAD_RICE" or "BROKEN_RICE" or "BLENDED_RICE"))
             return "PRODUCT_MISMATCH";
         var key = candidate.LedgerCommodityId.ToString() + ":" + candidate.ProductIdentity;
-        return policies.EnumerateArray().Any(policy =>
-            policy.GetProperty("outputCatalogCommodityId").ValueKind == JsonValueKind.String &&
-            policy.GetProperty("outputCatalogCommodityId").GetGuid() == outputCatalogCommodityId &&
+        return snapshot.Compatibilities!.Value.EnumerateArray().Any(policy =>
+            ExportProductMatch.TryMatchBlendOutput(policy, snapshot.CatalogCommodityId, snapshot.OrderCommodityCode,
+                snapshot.CommodityCodes, out _) &&
             policy.GetProperty("inputProducts").EnumerateArray().Any(input => input.GetString() == key))
             ? "POSSIBLE_BLEND_INPUT" : "BLEND_POLICY_MISSING";
     }
@@ -259,9 +265,12 @@ public static partial class ExportModule
             currentOrder.CommodityId != order.CommodityId)
             throw new CandidateDemandChangedException();
         var positions = data.GetProperty("positions").EnumerateArray().ToArray();
-        var commodityIds = positions.Select(x => x.GetProperty("catalogCommodityId"))
-            .Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetGuid())
-            .Distinct().ToArray();
+        var compatibilityOutputs = compatibilities?.EnumerateArray()
+            .Select(x => x.GetProperty("outputCatalogCommodityId")) ?? [];
+        var positionCommodityIds = positions.Select(x => x.GetProperty("catalogCommodityId"))
+            .Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetGuid()).ToHashSet();
+        var commodityIds = positionCommodityIds.Concat(compatibilityOutputs
+            .Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetGuid())).Distinct().ToArray();
         var commodityCodes = await db.Commodities.AsNoTracking()
             .Where(x => commodityIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, x => x.Code, ct);
@@ -304,7 +313,8 @@ public static partial class ExportModule
             cleared = p.GetProperty("locationCleared"), owner = p.GetProperty("locationOwnerId")
         }).OrderBy(x => x.lotId).ThenBy(x => x.locationId).ToArray();
         var state = JsonSerializer.Serialize(new { orderVersion = order.Version, containerVersion = container.Version, order.CommodityId,
-            orderCommodityCode, commodityCodes = commodityCodes.OrderBy(x => x.Key).ToArray(),
+            orderCommodityCode, commodityCodes = commodityCodes.Where(x => positionCommodityIds.Contains(x.Key))
+                .OrderBy(x => x.Key).ToArray(),
             container.TargetMassKg, facilityId, positions = canonicalPositions,
             nodes = data.GetProperty("nodes"), edges = data.GetProperty("edges"),
             composition = data.GetProperty("composition"), operations = data.GetProperty("operations") });
@@ -376,7 +386,7 @@ public static partial class ExportModule
             "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
         return new PlanningCandidateSnapshot(id, facilityId, order.Version, container.Version, container.Status,
             order.CommodityId, container.TargetMassKg, observedAt, revision, data,
-            compatibilities, candidates, orderCommodityCode);
+            compatibilities, candidates, orderCommodityCode, commodityCodes);
     }
 
     private static IResult CandidateFailure(Exception ex) => ex switch
@@ -444,17 +454,12 @@ public static partial class ExportModule
         var filtered = bool.TryParse(http.Request.Query["includeExcluded"], out var include) && include
             ? snapshot.Candidates : eligible;
         if (plan is not null && bool.TryParse(http.Request.Query["productMatchOnly"], out var matchOnly) && matchOnly)
-            filtered = filtered.Where(x => ProductCompatibility(x, targetProductIdentity!,
-                snapshot.CatalogCommodityId, snapshot.OrderCommodityCode,
-                snapshot.Compatibilities!.Value) != "PRODUCT_MISMATCH").ToArray();
+            filtered = filtered.Where(x => ProductCompatibility(x, targetProductIdentity!, snapshot) != "PRODUCT_MISMATCH").ToArray();
         var items = filtered.Skip((page - 1) * size).Take(size).Select(x => x.ToResponse(
-            plan is null ? "NOT_EVALUATED" : ProductCompatibility(x, targetProductIdentity!,
-                snapshot.CatalogCommodityId, snapshot.OrderCommodityCode, snapshot.Compatibilities!.Value))).ToArray();
+            plan is null ? "NOT_EVALUATED" : ProductCompatibility(x, targetProductIdentity!, snapshot))).ToArray();
         var eligibleMass = eligible.Sum(x => x.AvailableKg);
         var matchingMass = plan is null ? (decimal?)null : eligible
-            .Where(x => ProductCompatibility(x, targetProductIdentity!, snapshot.CatalogCommodityId,
-                snapshot.OrderCommodityCode,
-                snapshot.Compatibilities!.Value) == "DIRECT_MATCH")
+            .Where(x => ProductCompatibility(x, targetProductIdentity!, snapshot) == "DIRECT_MATCH")
             .Sum(x => x.AvailableKg);
         return Results.Ok(new
         {

@@ -25,6 +25,7 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
+    [InlineData(5)]
     public async Task Confirmed_evidence_can_propose_and_approve_with_exact_reservation(int flow)
     {
         using var scenario = await LedgerScenario.CreateAsync(factory);
@@ -58,15 +59,26 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         var marketId = Guid.NewGuid();
         var attributeId = Guid.NewGuid();
         var mrlId = Guid.NewGuid();
+        var assessmentCommodity = scenario.CatalogCommodityId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            if (flow == 5)
+            {
+                var rice = await db.Commodities.SingleOrDefaultAsync(x => x.Code == "RICE");
+                if (rice is null)
+                {
+                    rice = new Commodity { Id = Guid.NewGuid(), Code = "RICE", Name = "Rice" };
+                    db.Commodities.Add(rice);
+                }
+                assessmentCommodity = rice.Id;
+            }
             db.Markets.Add(new Market { Id = marketId,
                 Code = "M" + marketId.ToString("N"), Name = "Synthetic market" });
             db.QualityAttributes.Add(new QualityAttribute { Id = attributeId,
                 Code = "Q" + attributeId.ToString("N"), Name = "Synthetic moisture", Unit = "%" });
             db.MrlVersions.Add(new MrlVersion { Id = mrlId, MarketId = marketId,
-                CommodityId = scenario.CatalogCommodityId, VersionNo = 1,
+                CommodityId = assessmentCommodity, VersionNo = 1,
                 Status = "PUBLISHED", SourceRef = "Synthetic legal source",
                 PublishedBy = scenario.Accounts["customer"].User.Id,
                 PublishedAt = DateTimeOffset.UtcNow.AddMinutes(-3),
@@ -80,7 +92,7 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         var policyId = Guid.NewGuid();
         using var policy = await scenario.Customer.PostAsJsonAsync("/api/blend-assessment-policies",
             new PublishBlendAssessmentPolicyRequest(policyId, marketId,
-                scenario.CatalogCommodityId, 1, DateTimeOffset.UtcNow.AddMinutes(-1),
+                assessmentCommodity, 1, DateTimeOffset.UtcNow.AddMinutes(-1),
                 null, [f.SubstanceId], "0.1", "AS_RECEIVED",
                 [new PublishedQualityPropagationRule(attributeId, "%", "MASS_WEIGHTED_MEAN")],
                 "Synthetic approved policy", "Synthetic reviewer",
@@ -96,7 +108,7 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         var orderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId,
-            commodityId = scenario.CatalogCommodityId, requiredMass = "10", unit = "KG",
+            commodityId = assessmentCommodity, requiredMass = "10", unit = "KG",
             shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "10", unit = "KG" } }
@@ -494,10 +506,10 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         var blendOrderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId,
-            commodityId = scenario.CatalogCommodityId, requiredMass = "20", unit = "KG",
+            commodityId = assessmentCommodity, requiredMass = flow == 4 ? "19" : "20", unit = "KG",
             shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId, minValue = (string?)null, maxValue = "14" } },
-            containers = new[] { new { targetMass = "20", unit = "KG" } }
+            containers = new[] { new { targetMass = flow == 4 ? "19" : "20", unit = "KG" } }
         });
         Assert.Equal(HttpStatusCode.Created, blendOrderResponse.StatusCode);
         var blendOrder = (await blendOrderResponse.Content.ReadFromJsonAsync<ExportOrderDto>())!;
@@ -536,6 +548,14 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         Assert.Equal(HttpStatusCode.OK, diagnosticResponse.StatusCode);
         var diagnostic = await diagnosticResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("BOUNDS_AVAILABLE", diagnostic.GetProperty("hypotheticalBlendStatus").GetString());
+        if (flow == 5)
+        {
+            Assert.Equal(assessmentCommodity, blendPreview.GetProperty("evidence").GetProperty("applicableMrl")
+                .GetProperty("commodityId").GetGuid());
+            Assert.Equal(scenario.CatalogCommodityId, Assert.Single(diagnostic.GetProperty("hypotheticalBlend")
+                .GetProperty("results").EnumerateArray()).GetProperty("commodityId").GetGuid());
+            Assert.Equal("MILP", blendPreview.GetProperty("optimization").GetProperty("method").GetString());
+        }
         Assert.True(blendPreview.GetProperty("assessmentStatus").GetString() == "PASS",
             blendPreview.ToString());
         Assert.Equal("BLEND_INPUT_STOCK", blendPreview.GetProperty("selection")
@@ -544,6 +564,34 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             .GetProperty("allocations").GetArrayLength());
         var blendStockBefore = await StockAsync();
         var blendReference = blendPreview.GetProperty("previewReference").GetGuid();
+        if (flow == 4)
+        {
+            Assert.Equal("MILP", blendPreview.GetProperty("optimization").GetProperty("method").GetString());
+            var range = blendPreview.GetProperty("ratioRange");
+            var initial = blendPreview.GetProperty("selection").GetProperty("allocations")[0].GetProperty("quantityKg").GetString();
+            var min = range.GetProperty("minimumKg").GetString()!;
+            var max = range.GetProperty("maximumKg").GetString()!;
+            var changed = initial == min ? max : min;
+            var revision = blendCandidates.GetProperty("scopeRevision").GetString()!;
+            using var fractional = await writer.PostAsJsonAsync($"/api/blend-plans/{blendDraft.Id}/preview",
+                new PreviewBlendPlanRequest(scenario.FacilityId, revision, 8,
+                    Adjustment: new BlendRatioAdjustment(blendReference, "9.5")));
+            Assert.Equal(HttpStatusCode.BadRequest, fractional.StatusCode);
+            using var outside = await writer.PostAsJsonAsync($"/api/blend-plans/{blendDraft.Id}/preview",
+                new PreviewBlendPlanRequest(scenario.FacilityId, revision, 8,
+                    Adjustment: new BlendRatioAdjustment(blendReference, "21")));
+            Assert.Equal(HttpStatusCode.BadRequest, outside.StatusCode);
+            using var adjusted = await writer.PostAsJsonAsync($"/api/blend-plans/{blendDraft.Id}/preview",
+                new PreviewBlendPlanRequest(scenario.FacilityId, revision, 8,
+                    Adjustment: new BlendRatioAdjustment(blendReference, changed)));
+            Assert.Equal(HttpStatusCode.OK, adjusted.StatusCode);
+            var verified = await adjusted.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("PASS", verified.GetProperty("assessmentStatus").GetString());
+            Assert.Equal(changed, verified.GetProperty("selection").GetProperty("allocations")[0]
+                .GetProperty("quantityKg").GetString());
+            Assert.NotEqual(blendReference, verified.GetProperty("previewReference").GetGuid());
+            blendReference = verified.GetProperty("previewReference").GetGuid();
+        }
         var simultaneousProposals = await Task.WhenAll(
             writer.PostAsJsonAsync($"/api/blend-plans/{blendDraft.Id}/propose",
                 new ProposeBlendPlanRequest(Guid.NewGuid(), blendReference)),

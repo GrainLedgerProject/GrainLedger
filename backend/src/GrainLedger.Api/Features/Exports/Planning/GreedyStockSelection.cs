@@ -62,7 +62,8 @@ internal static class GreedyStockSelection
 
     internal static Result Select(IReadOnlyList<PlanningCandidate> candidates, decimal targetKg,
         string targetProductIdentity, Guid catalogCommodityId, JsonElement policies,
-        Func<Guid, decimal?>? blendInputTarget = null, string? orderCommodityCode = null)
+        Func<Guid, decimal?>? blendInputTarget = null, string? orderCommodityCode = null,
+        IReadOnlyDictionary<Guid, string>? commodityCodes = null)
     {
         if (targetKg <= 0) throw new ArgumentOutOfRangeException(nameof(targetKg));
         var eligible = candidates.Where(x => x.InventoryEligible && x.AvailableKg > 0).ToArray();
@@ -79,8 +80,7 @@ internal static class GreedyStockSelection
         Result? closest = null;
         foreach (var policy in policies.EnumerateArray().OrderBy(x => x.GetProperty("id").GetGuid()))
         {
-            var output = policy.GetProperty("outputCatalogCommodityId");
-            if (output.ValueKind != JsonValueKind.String || output.GetGuid() != catalogCommodityId)
+            if (!ExportProductMatch.TryMatchBlendOutput(policy, catalogCommodityId, orderCommodityCode, commodityCodes, out _))
                 continue;
             matchingPolicy = true;
             var keys = policy.GetProperty("inputProducts").EnumerateArray()
