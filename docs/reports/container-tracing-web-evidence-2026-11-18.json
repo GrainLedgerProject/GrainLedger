@@ -1,0 +1,329 @@
+{
+  "forward": {
+    "targets": "Container\tLinked loaded kg\tStatus\tHOLD\nCTN-20261117-000014\t10.000000\tCLOSED\tNone\nCTN-20261118-000024\t10.000000\tCLOSED\tNone",
+    "traceChecks": [
+      {
+        "complete": true,
+        "containers": [
+          {
+            "basis": "ACTUAL_LOADING",
+            "code": "CTN-20261117-000014",
+            "containerId": "3d834d1c-7e6a-48d3-a3f2-051506b2860c",
+            "held": false,
+            "linkedLoadedKg": "10.000000",
+            "restricted": false,
+            "status": "CLOSED"
+          },
+          {
+            "basis": "ACTUAL_LOADING",
+            "code": "CTN-20261118-000024",
+            "containerId": "983e96fa-c233-4792-8d8e-f74c0f44cadf",
+            "held": false,
+            "linkedLoadedKg": "10.000000",
+            "restricted": false,
+            "status": "CLOSED"
+          }
+        ],
+        "loadingEdges": [
+          {
+            "basis": "ACTUAL_LOADING",
+            "containerId": "3d834d1c-7e6a-48d3-a3f2-051506b2860c",
+            "lines": [
+              {
+                "lineId": "80d74b07-e3fa-477a-a838-7a2a46a0deb6",
+                "loadId": "512f727c-228c-4a24-9a52-1b7f4c54ca40",
+                "loadedAt": "2026-11-17T12:46:44.631+00:00",
+                "locationId": "05fee1f0-67a0-5cf4-94a7-72d27204beb2",
+                "proposalId": "fae3a2c6-a40c-4a79-8d41-5ce1c334e437",
+                "quantityKg": "4.000001"
+              },
+              {
+                "lineId": "cb985e6e-9d1c-4032-827d-a632e6cff443",
+                "loadId": "f8c00c02-c795-45b1-bd62-aec2e3ba459d",
+                "loadedAt": "2026-11-17T12:46:47.13+00:00",
+                "locationId": "05fee1f0-67a0-5cf4-94a7-72d27204beb2",
+                "proposalId": "fae3a2c6-a40c-4a79-8d41-5ce1c334e437",
+                "quantityKg": "5.999999"
+              }
+            ],
+            "lotId": "b3cf913a-f6bd-5916-956c-6bce85392aed",
+            "quantityKg": "10.000000"
+          },
+          {
+            "basis": "ACTUAL_LOADING",
+            "containerId": "983e96fa-c233-4792-8d8e-f74c0f44cadf",
+            "lines": [
+              {
+                "lineId": "1de0d2a6-3ab1-4dec-8230-ec8ddde102fd",
+                "loadId": "7f846db6-0fec-43df-938b-104d6c09f399",
+                "loadedAt": "2026-11-18T06:49:46.346+00:00",
+                "locationId": "05fee1f0-67a0-5cf4-94a7-72d27204beb2",
+                "proposalId": "29f30e3e-103f-4990-a76f-600d0c40c48f",
+                "quantityKg": "4.000000"
+              },
+              {
+                "lineId": "3c095223-81e5-42e7-851d-2f0414411aeb",
+                "loadId": "25ff0fcd-02d8-46ce-826b-6ca08550e7ac",
+                "loadedAt": "2026-11-18T06:52:37.227+00:00",
+                "locationId": "05fee1f0-67a0-5cf4-94a7-72d27204beb2",
+                "proposalId": "29f30e3e-103f-4990-a76f-600d0c40c48f",
+                "quantityKg": "6.000000"
+              }
+            ],
+            "lotId": "b3cf913a-f6bd-5916-956c-6bce85392aed",
+            "quantityKg": "10.000000"
+          }
+        ],
+        "lotCount": 5,
+        "status": 200
+      }
+    ]
+  },
+  "forwardGraph": {
+    "alerts": [],
+    "containers": [
+      {
+        "href": "/export/containers/3d834d1c-7e6a-48d3-a3f2-051506b2860c",
+        "label": "Open container CTN-20261117-000014",
+        "left": "2352px",
+        "text": "CONTAINER\nCTN-20261117-000014\nCLOSED · 10.000000 kg linked actual loading\nNo recorded restrictions\nOpen container details"
+      },
+      {
+        "href": "/export/containers/983e96fa-c233-4792-8d8e-f74c0f44cadf",
+        "label": "Open container CTN-20261118-000024",
+        "left": "2352px",
+        "text": "CONTAINER\nCTN-20261118-000024\nCLOSED · 10.000000 kg linked actual loading\nNo recorded restrictions\nOpen container details"
+      }
+    ],
+    "loads": [
+      "10.000000 kg loaded",
+      "10.000000 kg loaded"
+    ],
+    "lotNodes": [
+      "STARTING LOT · Procurement sourceRAW-20261117-000018RAW_PADDY · 20.000000 kg createdNo recorded restrictionsDemo Container Receiving Store",
+      "Processing outputDRY-20261117-000039DRIED_PADDY · 20.000000 kg createdNo recorded restrictionsDemo Container Dry Store",
+      "Processing outputBRK-20261117-000041BROKEN_RICE · 10.000000 kg createdNo recorded restrictionsDemo Container Broken Rice Store",
+      "Processing outputHDR-20261117-000040HEAD_RICE · 10.000000 kg createdNo recorded restrictionsDemo Container Head Rice Store",
+      "Processing outputBLD-20261117-000064BLENDED_RICE · 20.000000 kg createdNo recorded restrictionsDemo Container Blend Store"
+    ],
+    "traceCount": 1
+  },
+  "backward": {
+    "sourceTable": "Source\tActual kg\tShare (%)\tPlot / provenance\nRAW-20261117-000024\t5.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317\nRAW-20261117-000018\t5.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317",
+    "traceChecks": [
+      {
+        "complete": true,
+        "containers": [
+          {
+            "basis": "ACTUAL_LOADING",
+            "code": "CTN-20261118-000024",
+            "containerId": "983e96fa-c233-4792-8d8e-f74c0f44cadf",
+            "held": false,
+            "linkedLoadedKg": "10.000000",
+            "restricted": false,
+            "status": "CLOSED"
+          }
+        ],
+        "findings": [],
+        "loadedKg": "10.000000",
+        "loadingEdges": [
+          {
+            "basis": "ACTUAL_LOADING",
+            "containerId": "983e96fa-c233-4792-8d8e-f74c0f44cadf",
+            "lines": [
+              {
+                "lineId": "1de0d2a6-3ab1-4dec-8230-ec8ddde102fd",
+                "loadId": "7f846db6-0fec-43df-938b-104d6c09f399",
+                "loadedAt": "2026-11-18T06:49:46.346+00:00",
+                "locationId": "05fee1f0-67a0-5cf4-94a7-72d27204beb2",
+                "proposalId": "29f30e3e-103f-4990-a76f-600d0c40c48f",
+                "quantityKg": "4.000000",
+                "sourceContributions": [
+                  {
+                    "quantityKg": "2.000000",
+                    "sourceLotId": "0abdcfe4-5d5a-5224-8a95-e10012ef6a3f"
+                  },
+                  {
+                    "quantityKg": "2.000000",
+                    "sourceLotId": "10770c77-aac8-5592-838d-5280bbfd0bfb"
+                  }
+                ]
+              },
+              {
+                "lineId": "3c095223-81e5-42e7-851d-2f0414411aeb",
+                "loadId": "25ff0fcd-02d8-46ce-826b-6ca08550e7ac",
+                "loadedAt": "2026-11-18T06:52:37.227+00:00",
+                "locationId": "05fee1f0-67a0-5cf4-94a7-72d27204beb2",
+                "proposalId": "29f30e3e-103f-4990-a76f-600d0c40c48f",
+                "quantityKg": "6.000000",
+                "sourceContributions": [
+                  {
+                    "quantityKg": "3.000000",
+                    "sourceLotId": "0abdcfe4-5d5a-5224-8a95-e10012ef6a3f"
+                  },
+                  {
+                    "quantityKg": "3.000000",
+                    "sourceLotId": "10770c77-aac8-5592-838d-5280bbfd0bfb"
+                  }
+                ]
+              }
+            ],
+            "lotId": "b3cf913a-f6bd-5916-956c-6bce85392aed",
+            "quantityKg": "10.000000"
+          }
+        ],
+        "lots": [
+          {
+            "code": "RAW-20261117-000024",
+            "id": "0abdcfe4-5d5a-5224-8a95-e10012ef6a3f",
+            "producedKg": "20.000000"
+          },
+          {
+            "code": "RAW-20261117-000018",
+            "id": "10770c77-aac8-5592-838d-5280bbfd0bfb",
+            "producedKg": "20.000000"
+          },
+          {
+            "code": "BLD-20261117-000064",
+            "id": "b3cf913a-f6bd-5916-956c-6bce85392aed",
+            "producedKg": "20.000000"
+          },
+          {
+            "code": "DRY-20261117-000039",
+            "id": "d35d4f0a-c28e-50f5-9ab9-be79e628f922",
+            "producedKg": "20.000000"
+          },
+          {
+            "code": "DRY-20261117-000057",
+            "id": "e04f4e70-c0f3-508b-98a7-e0f7ac858464",
+            "producedKg": "20.000000"
+          },
+          {
+            "code": "HDR-20261117-000040",
+            "id": "f8d88a9e-115e-5483-a808-89e919333fe0",
+            "producedKg": "10.000000"
+          },
+          {
+            "code": "HDR-20261117-000058",
+            "id": "fc0b3a1a-ac3b-5a0f-b625-0617227cd58a",
+            "producedKg": "10.000000"
+          }
+        ],
+        "root": {
+          "id": "983e96fa-c233-4792-8d8e-f74c0f44cadf",
+          "type": "container"
+        },
+        "sources": [
+          {
+            "kg": "5.000000",
+            "percentage": "50",
+            "sourceLotId": "0abdcfe4-5d5a-5224-8a95-e10012ef6a3f",
+            "status": "RECORDED"
+          },
+          {
+            "kg": "5.000000",
+            "percentage": "50",
+            "sourceLotId": "10770c77-aac8-5592-838d-5280bbfd0bfb",
+            "status": "RECORDED"
+          }
+        ],
+        "status": 200
+      }
+    ]
+  },
+  "backwardGraph": {
+    "containers": [
+      {
+        "label": "Open container CTN-20261118-000024 — starting container",
+        "left": "2352px",
+        "text": "STARTING CONTAINER\nCTN-20261118-000024\nCLOSED · 10.000000 kg linked actual loading\nNo recorded restrictions\nOpen container details"
+      }
+    ],
+    "loadingLabels": [
+      "10.000000 kg loaded"
+    ],
+    "lotCount": 7,
+    "sourceTable": "Source\tActual kg\tShare (%)\tPlot / provenance\nRAW-20261117-000024\t5.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317\nRAW-20261117-000018\t5.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317",
+    "traceCount": 1
+  },
+  "lotBackward": {
+    "containersInGraph": 0,
+    "lastTrace": {
+      "direction": "backward",
+      "hasTargets": false,
+      "lotCount": 7,
+      "status": 200
+    },
+    "lotsInGraph": 7
+  },
+  "microKg": {
+    "code": "CTN-20261117-000014",
+    "complete": true,
+    "graphContainerCount": 1,
+    "lines": [
+      {
+        "kg": "4.000001",
+        "sources": [
+          {
+            "quantityKg": "2.000001",
+            "sourceLotId": "0abdcfe4-5d5a-5224-8a95-e10012ef6a3f"
+          },
+          {
+            "quantityKg": "2.000000",
+            "sourceLotId": "10770c77-aac8-5592-838d-5280bbfd0bfb"
+          }
+        ]
+      },
+      {
+        "kg": "5.999999",
+        "sources": [
+          {
+            "quantityKg": "2.999999",
+            "sourceLotId": "0abdcfe4-5d5a-5224-8a95-e10012ef6a3f"
+          },
+          {
+            "quantityKg": "3.000000",
+            "sourceLotId": "10770c77-aac8-5592-838d-5280bbfd0bfb"
+          }
+        ]
+      }
+    ],
+    "loadedKg": "10.000000",
+    "sources": [
+      {
+        "id": "0abdcfe4-5d5a-5224-8a95-e10012ef6a3f",
+        "kg": "5.000000"
+      },
+      {
+        "id": "10770c77-aac8-5592-838d-5280bbfd0bfb",
+        "kg": "5.000000"
+      }
+    ]
+  },
+  "mobile": {
+    "bodyWidth": 360,
+    "graphScroll": 1046,
+    "graphViewport": 284,
+    "traceCount": 1,
+    "viewport": 375,
+    "zoom": "40%"
+  },
+  "exportRole": {
+    "backwardOption": false,
+    "backwardStatus": 403,
+    "forwardStatus": 200,
+    "graphContainers": [
+      "Open container CTN-20261117-000014",
+      "Open container CTN-20261118-000024"
+    ],
+    "loadingContainsSourceAllocations": false,
+    "sourceFacts": 0,
+    "sourceVisible": false
+  },
+  "keyboardNavigation": {
+    "closed": true,
+    "manifest": false,
+    "traceSourcesButton": false,
+    "url": "/export/containers/983e96fa-c233-4792-8d8e-f74c0f44cadf"
+  }
+}

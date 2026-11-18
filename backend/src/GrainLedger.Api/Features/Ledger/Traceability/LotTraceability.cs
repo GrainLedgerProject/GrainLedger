@@ -89,6 +89,7 @@ public static class LotTraceability
             command.Parameters.AddWithValue(actor); command.Parameters.AddWithValue(request.LotId);
             command.Parameters.AddWithValue(request.Direction); command.Parameters.AddWithValue(request.View);
             var result = JsonNode.Parse((string)(await command.ExecuteScalarAsync(ct))!)!.AsObject();
+            result["root"] = new JsonObject { ["type"] = "lot", ["id"] = request.LotId };
             if (result["schemaVersion"]?.GetValue<int>() != 2)
                 return Results.Problem(statusCode: 503, title: "Custody trace upgrade is not installed. Run approved owner migrations and runtime-role configuration.");
             if (result["sourceContributionsVisible"]!.GetValue<bool>())
@@ -114,7 +115,9 @@ public static class LotTraceability
                     await using var targets = new NpgsqlCommand("SELECT grainledger.ledger_container_targets($1,$2,$3)::text",connection,transaction);
                     targets.Parameters.AddWithValue(actor);targets.Parameters.AddWithValue(request.LotId);
                     targets.Parameters.AddWithValue(result["lots"]!.AsArray().Select(x=>x!["id"]!.GetValue<Guid>()).ToArray());
-                    result["actualContainers"]=JsonNode.Parse((string)(await targets.ExecuteScalarAsync(ct))!)!["items"]!.DeepClone();
+                    var targetResult = JsonNode.Parse((string)(await targets.ExecuteScalarAsync(ct))!)!;
+                    result["actualContainers"] = targetResult["items"]!.DeepClone();
+                    result["loadingEdges"] = targetResult["loadingEdges"]?.DeepClone();
                     result["containerCoverage"]="ACTUAL_LOADING";
                 }
                 else result["containerCoverage"]="NOT_INSTALLED";

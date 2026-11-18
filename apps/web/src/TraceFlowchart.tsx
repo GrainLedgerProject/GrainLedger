@@ -1,28 +1,31 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { traceKindLabel } from './trace-kind';
-import type { LotTrace } from './LedgerTraceability';
+import type { TraceGraph } from './LedgerTraceability';
 import { buildTraceFlow, flowCard, traceRelationKey, traceRelationLabel } from './trace-flow';
 
 export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
-  trace: LotTrace; selectedId: string; onSelect: (id: string) => void; onShowTable: () => void;
+  trace: TraceGraph; selectedId: string; onSelect: (id: string) => void; onShowTable: () => void;
 }) {
   const flow = useMemo(() => buildTraceFlow(trace), [trace]);
   const lots = useMemo(() => new Map(trace.lots.map(lot => [lot.id, lot])), [trace]);
   const operations = useMemo(() => new Map(trace.operations.map(operation => [operation.id, operation])), [trace]);
+  const containers = useMemo(() => new Map(trace.actualContainers?.map(container => [container.containerId, container])), [trace]);
+  const containerRoot = trace.root?.type === 'container';
+  const rootId = containerRoot ? `container:${trace.root!.id}` : `lot:${trace.targetLotId}`;
   const positions = useMemo(() => new Map(flow.nodes.map(node => [node.id, node])), [flow]);
   const [zoom, setZoom] = useState(1);
-  const viewport = useRef<HTMLDivElement>(null), startingLot = useRef<HTMLButtonElement>(null);
+  const viewport = useRef<HTMLDivElement>(null), startingLot = useRef<HTMLButtonElement | HTMLAnchorElement>(null);
   const marker = useId().replaceAll(':', ''), helpId = `${marker}-help`;
   useEffect(() => {
-    const node = positions.get(`lot:${trace.targetLotId}`), area = viewport.current;
+    const node = positions.get(rootId), area = viewport.current;
     if (node && area) {
       area.scrollLeft = Math.max(0, node.x + flowCard.width / 2 - area.clientWidth / 2);
       area.scrollTop = Math.max(0, node.y + flowCard.height / 2 - area.clientHeight / 2);
     }
-  }, [positions, trace.targetLotId]);
+  }, [positions, rootId]);
   if (flow.error) return <div className="notice" role="status"><p>{flow.error}</p><button type="button" onClick={onShowTable}>Show table</button></div>;
   function focusStart() {
-    const node = positions.get(`lot:${trace.targetLotId}`), area = viewport.current;
+    const node = positions.get(rootId), area = viewport.current;
     if (!node || !area) return;
     startingLot.current?.focus({ preventScroll: true });
     area.scrollLeft = Math.max(0, (node.x + flowCard.width / 2) * zoom - area.clientWidth / 2);
@@ -30,7 +33,8 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
   }
   const selected = lots.get(selectedId);
   return <div className="trace-flow">
-    <p id={helpId}>Material flows left to right: lot → storage event or processing operation → lot. {trace.direction === 'backward' ? 'Backward tracing shows earlier inputs to the left of your starting lot.' : 'Forward tracing shows later outputs to the right of your starting lot.'} Only lots in this trace are shown; an operation may also have other inputs or outputs. Select a lot to inspect it below.</p>
+    <p id={helpId}>Material flows left to right: lot → storage event or processing operation → lot → actual loading → container. {containerRoot ? 'Backward tracing starts at this container and shows the ancestry of its actual loaded lots to the left.' : trace.direction === 'backward' ? 'Backward tracing shows earlier inputs to the left of your starting lot.' : 'Forward tracing shows later outputs and actual container targets to the right of your starting lot.'} Only lots in this trace are shown; an operation may also have other inputs or outputs. Select a lot to inspect it below; open a container to view its dossier and source trace.</p>
+    {containerRoot && <p className="notice">Lot and processing quantities describe historical production. Loading edges describe actual container kg. Source contributions to this container are shown separately in Actual container sources; do not add the historical lot quantities as loaded mass.</p>}
     <div className="trace-flow-toolbar" role="group" aria-label="Flowchart controls">
       <button type="button" aria-label="Zoom out" disabled={zoom <= 0.4} onClick={() => setZoom(value => Math.max(0.4, value - 0.2))}>−</button>
       <output aria-label="Graph zoom">{Math.round(zoom * 100)}%</output>
@@ -41,9 +45,9 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
         setZoom(Math.min(1, Math.max(0.4, Math.min((area?.clientWidth || flow.width) / flow.width, height / flow.height))));
       }}>Fit graph</button>
       <button type="button" onClick={() => { setZoom(1); }}>Reset zoom</button>
-      <button type="button" onClick={focusStart}>Focus starting lot</button>
+      <button type="button" onClick={focusStart}>Focus starting {containerRoot ? 'container' : 'lot'}</button>
     </div>
-    <div className="trace-flow-legend"><span className="trace-flow-lot-key">Lot</span><span className="trace-flow-operation-key">Processing / custody</span><span className="trace-flow-start-key">Starting lot</span><span>Badges show recorded restrictions, not a quality verdict.</span></div>
+    <div className="trace-flow-legend"><span className="trace-flow-lot-key">Lot</span><span className="trace-flow-operation-key">Processing / custody</span><span className="trace-flow-container-key">Container · actual loading</span><span className="trace-flow-start-key">Starting {containerRoot ? 'container' : 'lot'}</span><span>Badges show recorded restrictions, not a quality verdict.</span></div>
     <div className="trace-flow-viewport" ref={viewport} role="region" aria-label="Trace flowchart" aria-describedby={helpId} tabIndex={0}>
       <div style={{ width: flow.width * zoom, height: flow.height * zoom }}>
         <div className="trace-flow-canvas" style={{ width: flow.width, height: flow.height, transform: `scale(${zoom})` }}>
@@ -59,11 +63,21 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
               const path = to.x - from.x > flowCard.width + flowCard.columnGap + 1
                 ? `M${x1},${y1} C${x1 + 24},${y1} ${x1 + 24},${lane} ${x1 + 48},${lane} H${x2 - 48} C${x2 - 24},${lane} ${x2 - 24},${y2} ${x2},${y2}`
                 : `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`;
-              return <g key={edge.id}><path className="trace-flow-edge" d={path} markerEnd={`url(#${marker})`}><title>{edge.quantityKg} kg — event quantity, not source attribution</title></path></g>;
+              return <g key={edge.id}><path className={`trace-flow-edge${edge.kind === 'loading' ? ' trace-flow-loading-edge' : ''}`} d={path} markerEnd={`url(#${marker})`}><title>{edge.quantityKg} kg — {edge.kind === 'loading' ? 'actual loading, not source attribution' : 'event quantity, not source attribution'}</title></path>{edge.kind === 'loading' && <text x={(x1 + x2) / 2} y={to.x - from.x > flowCard.width + flowCard.columnGap + 1 ? lane - 2 : y2 - 12} textAnchor="middle" className="trace-flow-edge-label">{edge.quantityKg} kg loaded</text>}</g>;
             })}
           </svg>
           {flow.nodes.map(node => {
             const style = { left: node.x, top: node.y, width: flowCard.width, height: flowCard.height };
+            if (node.kind === 'container') {
+              const container = containers.get(node.recordId)!, start = containerRoot && trace.root!.id === node.recordId;
+              return <a key={node.id} ref={element => { if (start) startingLot.current = element; }} href={`/export/containers/${container.containerId}`} style={style}
+                className={`trace-flow-node trace-flow-container${start ? ' trace-flow-start' : ''}`} aria-label={`Open container ${container.code}${start ? ' — starting container' : ''}`}>
+                <span className="trace-flow-kicker">{start ? 'STARTING CONTAINER' : 'CONTAINER'}</span><strong>{container.code}</strong>
+                <span>{container.status} · {container.linkedLoadedKg} kg linked actual loading</span>
+                <span className={container.held || container.restricted ? 'trace-flow-restriction' : 'trace-flow-clear'}>{container.held ? 'Container HOLD' : container.restricted ? 'Loaded lot restriction' : 'No recorded restrictions'}</span>
+                <small>Open container details</small>
+              </a>;
+            }
             if (node.kind === 'custody') {
               const event = trace.custodyEvents?.find(event => event.id === node.recordId);
               return <div key={node.id} className="trace-flow-node trace-flow-operation trace-flow-custody" style={style} role="group" aria-label={`${event?.action || 'Custody'} storage event ${node.recordId}`}>
@@ -80,7 +94,7 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
               </div>;
             }
             const lot = lots.get(node.recordId)!, start = lot.id === trace.targetLotId;
-            return <button type="button" key={node.id} ref={start ? startingLot : undefined} style={style}
+            return <button type="button" key={node.id} ref={element => { if (start) startingLot.current = element; }} style={style}
               className={`trace-flow-node trace-flow-lot${start ? ' trace-flow-start' : ''}`}
               aria-label={`Select lot ${lot.code}${start ? ' — starting lot' : ''}`} aria-pressed={lot.id === selectedId} onClick={() => onSelect(lot.id)} title={`${lot.code} · ${lot.id}`}>
               <span className="trace-flow-kicker">{start ? 'STARTING LOT · ' : ''}{traceKindLabel(lot)}</span><strong>{lot.code}</strong><span>{lot.stage} · {lot.producedKg} kg created{lot.poolRevision != null ? ` · ${lot.isCurrentPool ? 'Current pool' : 'Generation'} r${lot.poolRevision}` : ''}</span>
@@ -91,7 +105,7 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
         </div>
       </div>
     </div>
-    {!trace.edges.length && <p>No material relationships in this direction and view. The starting lot is shown on its own.</p>}
+    {!trace.edges.length && !trace.loadingEdges?.length && <p>{containerRoot ? 'No actual loading recorded. The starting container is shown on its own.' : 'No material relationships in this direction and view. The starting lot is shown on its own.'}</p>}
     {selected && <section className="trace-flow-selection" aria-label="Selected graph lot" aria-live="polite">
       <strong>{selected.code}</strong>{selected.id === trace.targetLotId && <span className="trace-start-badge">Starting lot</span>}
       <p>{selected.stage} · Quantity when created: {selected.producedKg} kg · {selected.restrictions.join(', ') || 'No recorded restrictions'}</p>
@@ -102,6 +116,10 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
       <ul>{trace.edges.map(edge => <li key={`${traceRelationKey(edge)}/${edge.inputLotId}/${edge.outputLotId}`}>
         {lots.get(edge.inputLotId)?.code} → {traceRelationLabel(trace, edge)} → {lots.get(edge.outputLotId)?.code}: input {edge.inputConsumedKg} kg; output {edge.outputProducedKg} kg. <small>{edge.relationId || edge.operationId}</small>
       </li>)}</ul>
+      {!!trace.loadingEdges?.length && <><p>Actual loading is separate from historical lot quantities and individual source contributions. Linked loading may cover only part of a container manifest.</p><ul>{trace.loadingEdges.map(edge => <li key={`${edge.lotId}/${edge.containerId}`}>
+        {lots.get(edge.lotId)?.code} → {containers.get(edge.containerId)?.code}: {edge.quantityKg} kg actual loading.
+        <ul>{edge.lines.map(line => <li key={line.lineId}>{line.quantityKg} kg · load {line.loadId} · location {line.locationId} · proposal {line.proposalId}{line.sourceContributions?.map(source => <span key={source.sourceLotId}> · source {source.sourceLotId}: {source.quantityKg} kg</span>)}</li>)}</ul>
+      </li>)}</ul></>}
     </details>
   </div>;
 }

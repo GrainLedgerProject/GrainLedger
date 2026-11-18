@@ -61,3 +61,38 @@ it('draws custody ingress and withdrawal/remainder as separate storage events wi
   const nearLimit = { ...custody, lots: [...custody.lots, ...Array.from({ length: flowLimit.nodes - 5 }, (_, i) => lot(`extra-${i}`))] };
   expect(buildTraceFlow(nearLimit).error).toMatch(/complete result remains available in Table/);
 });
+
+const targets = [{ containerId: 'c1', code: 'CTN-1', status: 'CLOSED', linkedLoadedKg: '10.000000', basis: 'ACTUAL_LOADING', held: false }];
+const loadingEdges = [{ containerId: 'c1', lotId: 'd', quantityKg: '10.000000', basis: 'ACTUAL_LOADING' as const,
+  lines: [ { lineId: 'l1', loadId: 'load1', locationId: 'store1', proposalId: 'p1', loadedAt: trace.asOf, quantityKg: '4.000001' },
+    { lineId: 'l2', loadId: 'load2', locationId: 'store2', proposalId: 'p2', loadedAt: trace.asOf, quantityKg: '5.999999' } ] }];
+
+it('adds one actual container node and exact loading edge across partial loads, locations and plan versions', () => {
+  const flow = buildTraceFlow({ ...trace, actualContainers: targets, loadingEdges });
+  expect(flow.error).toBeUndefined();
+  expect(flow.nodes.filter(n => n.kind === 'container')).toEqual([expect.objectContaining({ id: 'container:c1' })]);
+  expect(flow.edges.filter(e => e.kind === 'loading')).toEqual([{ id: 'lot:d/container:c1', from: 'lot:d', to: 'container:c1', quantityKg: '10.000000', kind: 'loading' }]);
+  expect(flow.nodes.find(n => n.id === 'container:c1')!.x).toBeGreaterThan(flow.nodes.find(n => n.id === 'lot:d')!.x);
+  expect(flow.edges.some(e => e.from === 'lot:a' && e.to === 'container:c1')).toBe(false);
+  expect(loadingEdges[0].lines.map(l => l.quantityKg)).toEqual(['4.000001', '5.999999']);
+});
+
+it('keeps lot backward upstream, supports a container root and an unloaded standalone container', () => {
+  const backward = { ...trace, direction: 'backward' as const, targetLotId: 'd', actualContainers: targets, loadingEdges };
+  expect(buildTraceFlow(backward).nodes.some(n => n.kind === 'container')).toBe(false);
+  const fromContainer = { ...backward, targetLotId: undefined, root: { type: 'container' as const, id: 'c1' } };
+  expect(traceLotOrder(fromContainer)).toEqual(['d', 'b', 'c', 'a']);
+  expect(buildTraceFlow(fromContainer).nodes.some(n => n.kind === 'container')).toBe(true);
+  const empty = buildTraceFlow({ ...fromContainer, lots: [], edges: [], loadingEdges: [] });
+  expect(empty.error).toBeUndefined(); expect(empty.nodes).toHaveLength(1); expect(empty.edges).toEqual([]);
+});
+
+it('keeps multiple container targets distinct and counts container/loading connections in graph limits', () => {
+  const two = { ...trace, actualContainers: [...targets, { ...targets[0], containerId: 'c2' }], loadingEdges: [...loadingEdges, { ...loadingEdges[0], containerId: 'c2' }] };
+  expect(buildTraceFlow(two).nodes.filter(n => n.kind === 'container')).toHaveLength(2);
+  expect(buildTraceFlow(two).edges.filter(e => e.kind === 'loading')).toHaveLength(2);
+  expect(buildTraceFlow({ ...two, lots: [...trace.lots, ...Array.from({ length: flowLimit.nodes - 7 }, (_, i) => lot(`extra${i}`))] }).error).toMatch(/complete result remains available/);
+  expect(buildTraceFlow({ ...two, loadingEdges: undefined }).error).toMatch(/loading relationships are unavailable/);
+  expect(buildTraceFlow({ ...two, loadingEdges: [{ ...loadingEdges[0], lotId: 'missing' }] }).error).toMatch(/loading endpoints are missing/);
+  expect(buildTraceFlow({ ...two, loadingEdges: [loadingEdges[0], loadingEdges[0]] }).error).toMatch(/Duplicate loading/);
+});

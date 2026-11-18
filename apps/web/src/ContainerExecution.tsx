@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, errorMessage } from './api';
 import { ContainerProduction } from './ContainerProduction';
 import { ContainerWorkflow } from './ContainerWorkflow';
 import { Mass, positive } from './ledger-ui';
+import { ContainerSourceTrace, type ContainerTrace } from './ContainerSourceTrace';
 
 type Allocation = { lotId: string; lotCode: string; locationId: string; reservedKg: string; remainingKg: string; restricted: boolean; loadingPositionReady: boolean };
 type Container = { id: string; code: string; orderId: string; targetKg: string; status: string; version: number; loadedKg: string; remainingKg: string; workflowAvailable?: boolean;
@@ -11,7 +12,6 @@ type Container = { id: string; code: string; orderId: string; targetKg: string; 
   loads: { id: string; loadedAt: string; lines: { lotId: string; lotCode: string; locationId: string; quantityKg: string }[] }[]; dossierAvailable: boolean };
 type Readiness = { phase: string; checkedAt: string; assessmentStatus: string; findings: string[] };
 type Pending = { path: string; body: string };
-type Trace = { loadedKg: string; complete: boolean; sourceContributions: { sourceLotId: string; quantityKg: string; percentage?: string; status?: string; provenance?: { plotId: string; procurementCode: string } | null }[] };
 const newId = () => crypto.randomUUID();
 const findings: Record<string, string> = {
   ACTIVE_APPROVAL_REQUIRED: 'A Customer Manager must approve a current plan first.',
@@ -43,13 +43,15 @@ export function ContainerExecution({ id, userId, canWrite, canHold, canReview = 
   const [pending, setPending] = useState<Pending | null>(() => saved(key));
   const [history, setHistory] = useState<{ items: { id: string; kind: string; recorded_at: string }[]; page: number; hasMore: boolean } | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
-  const [trace, setTrace] = useState<Trace | null>(null), [dossier, setDossier] = useState<unknown>(null);
+  const [trace, setTrace] = useState<ContainerTrace | null>(null), [dossier, setDossier] = useState<unknown>(null);
+  const inspection = useRef<AbortController | null>(null);
   useEffect(() => {
+    inspection.current?.abort(); setBusy(false);
     const controller = new AbortController(); setError(''); setDetail(null); setReadiness(null); setTrace(null); setDossier(null); setHistory(null); setHistoryPage(1);
     void api<{ container: Container; readiness: Readiness }>(route, { signal: controller.signal }).then(result => {
       setDetail(result.container); setReadiness(result.readiness); setNumber(result.container.containerNumber ?? ''); setSeal(result.container.sealNumber ?? '');
     }).catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause)); });
-    return () => controller.abort();
+    return () => { controller.abort(); inspection.current?.abort(); };
   }, [id, userId, canWrite, canHold, reload]);
   async function mutate(action: string, fields: object) {
     if (!detail || busy) return; setBusy(true); setError('');
@@ -65,12 +67,17 @@ export function ContainerExecution({ id, userId, canWrite, canHold, canReview = 
     } finally { setBusy(false); }
   }
   async function inspect(action: 'trace' | 'dossier') {
+    inspection.current?.abort();
+    const controller = new AbortController(); inspection.current = controller;
     setBusy(true); setError(''); setTrace(null); setDossier(null);
     try {
-      if (action === 'trace') setTrace(await api<Trace>(`${route}/trace`, { method: 'POST', body: '{}' }));
-      else setDossier(await api<unknown>(`${route}/dossier`));
-    } catch (cause) { setError(errorMessage(cause)); }
-    finally { setBusy(false); }
+      const result = await api<ContainerTrace | unknown>(`${route}/${action}`, { method: action === 'trace' ? 'POST' : 'GET', ...(action === 'trace' ? { body: '{}' } : {}), signal: controller.signal });
+      if (!controller.signal.aborted) {
+        if (action === 'trace') setTrace(result as ContainerTrace);
+        else setDossier(result);
+      }
+    } catch (cause) { if (!controller.signal.aborted) setError(errorMessage(cause)); }
+    finally { if (!controller.signal.aborted) setBusy(false); }
   }
   async function readHistory(page: number) {
     setBusy(true); setError('');
@@ -110,7 +117,7 @@ export function ContainerExecution({ id, userId, canWrite, canHold, canReview = 
       {canWrite && detail.status === 'LOADING' && <button disabled={busy || !!pending || readiness?.phase !== 'CLOSE' || readiness.assessmentStatus !== 'PASS'} onClick={() => { if (window.confirm('Close this container and freeze its manifest?')) void mutate('close', {}); }}>Close container</button>}
       {canHold && <form onSubmit={event => { event.preventDefault(); if (!pending) void mutate('holds', { reason }); }}><fieldset disabled={busy || !!pending}><legend>Place container HOLD</legend><label>HOLD reason<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label><button>Place container HOLD</button></fieldset></form>}
       {(canHold || canWrite) && <div className="admin-form-actions">{canHold && <button className="secondary" disabled={busy || !!pending} onClick={() => void inspect('trace')}>Trace container sources</button>}{detail.dossierAvailable && <button className="secondary" disabled={busy || !!pending} onClick={() => void inspect('dossier')}>Read closure dossier</button>}</div>}
-      {trace && <section><h3>Actual container sources</h3>{!trace.complete && <p className="notice error">Source provenance is incomplete; review the findings.</p>}<div className="table-scroll"><table aria-label="Actual container sources"><thead><tr><th>Source</th><th>Actual kg</th><th>Share (%)</th><th>Plot / provenance</th></tr></thead><tbody>{trace.sourceContributions.map(source => <tr key={source.sourceLotId}><td>{source.sourceLotId}</td><td>{source.quantityKg}</td><td>{source.percentage ?? '—'}</td><td>{source.provenance?.plotId ?? source.status ?? 'Unavailable'}</td></tr>)}</tbody></table></div></section>}
+      {trace && <ContainerSourceTrace key={trace.graph?.traceId || 'sources'} trace={trace} />}
       <section><h3>Container history</h3><button className="secondary" disabled={busy || !!pending} onClick={() => void readHistory(1)}>Read container history</button>{history && <><ul>{history.items.map(item => <li key={item.id}>{item.kind} · {new Date(item.recorded_at).toLocaleString()}</li>)}</ul><div className="form-footer"><span>Page {historyPage}</span><button className="secondary" disabled={busy || historyPage === 1} onClick={() => void readHistory(historyPage - 1)}>Previous history page</button><button className="secondary" disabled={busy || !history.hasMore} onClick={() => void readHistory(historyPage + 1)}>Next history page</button></div></>}</section>
       {dossier != null && <section><h3>Immutable closure dossier</h3><p className="muted">Historical decision and actual manifest; later HOLDs do not rewrite this snapshot.</p><pre className="table-scroll">{JSON.stringify(dossier, null, 2)}</pre><a className="text-button" download={`${detail.code}-dossier.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dossier, null, 2))}`}>Download dossier JSON</a></section>}
     </>}

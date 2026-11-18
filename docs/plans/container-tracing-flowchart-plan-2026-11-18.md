@@ -1,6 +1,8 @@
 # Plan: bổ sung container vào Flowchart tracing
 
-**Trạng thái: chỉ lập kế hoạch, CHƯA triển khai.** Người dùng yêu cầu dừng ở plan. Không sửa code, chạy migration/grant/seed, tạo fixture hoặc thực hiện trace có audit trên DB dùng chung trong lượt lập plan này. Không commit/push khi chưa được yêu cầu.
+**Trạng thái: đã triển khai T01/T02/T03, áp dụng migration/grant sau phê duyệt và nghiệm thu luồng web chính trên Supabase ngày2026-11-18.** Xem [deployment/web report](../reports/container-tracing-deployment-2026-11-18.md). Không chạy toàn BE hoặc tạo DB local; các ca acceptance nâng cao NOT RUN được liệt kê riêng. Có sự cố container ACL bị thu hồi lại trong lượt test: đã phục hồi đúng quyền được duyệt và final validation PASS, nhưng nguồn thu hồi chưa xác định.
+
+Các checkbox tổng thể bên dưới vẫn để mở nếu matrix còn ca chưa chạy; luồng chính đã có bằng chứng thực tế. Xem [kịch bản web](../guides/container-tracing-flowchart-web-test.md) và [báo cáo implementation](../reports/container-tracing-flowchart-implementation-2026-11-18.md).
 
 ## 1. Mục tiêu và căn cứ
 
@@ -74,11 +76,13 @@ Không dùng full-lot composition 10+10 kg để trình bày rằng C1 nhận 20
 
 ## 5. Thiết kế kỹ thuật cần chốt trước khi code
 
-- [ ] Kiểm kê response forward hiện tại và các bảng actual load/line/source; xác định field tối thiểu còn thiếu cho typed container/loading nodes, references và root target.
-- [ ] Chốt contract mở rộng tương thích: phân biệt root lot/container, node type và quantity basis; giữ route/payload lot trace hiện có và table callers. Không tái sử dụng targetLotId để chứa container ID.
-- [ ] Chốt cách lấy ancestry cho nhiều actual-loaded lots bằng bulk query/read contract; không gọi một HTTP request/trace audit cho từng load line. Dùng in-process/module contracts, không chuyển EF entities qua module boundary.
-- [ ] Chốt semantics current/history với corrected/superseded lots và retained loads; không mất committed manifest hoặc lẫn hai thế hệ stock vì gom UUID không đúng.
-- [ ] Nếu cần đổi protected SQL routine/grant: chuẩn bị forward migration đúng module và chỉ quyền cần thiết. Không mặc định task này không cần migration; cũng không thay toàn bộ grant set. Shared deployment cần phê duyệt riêng.
+- [x] Kiểm kê response forward hiện tại và các bảng actual load/line/source; xác định field tối thiểu còn thiếu cho typed container/loading nodes, references và root target.
+- [x] Chốt contract mở rộng tương thích: phân biệt root lot/container, node type và quantity basis; giữ route/payload lot trace hiện có và table callers. Không tái sử dụng targetLotId để chứa container ID.
+- [x] Chốt cách lấy ancestry cho nhiều actual-loaded lots bằng bulk query/read contract; không gọi một HTTP request/trace audit cho từng load line. Dùng in-process/module contracts, không chuyển EF entities qua module boundary.
+- [x] Chốt semantics current/history với corrected/superseded lots và retained loads; không mất committed manifest hoặc lẫn hai thế hệ stock vì gom UUID không đúng.
+- [x] Nếu cần đổi protected SQL routine/grant: chuẩn bị forward migration đúng module và chỉ quyền cần thiết. Không mặc định task này không cần migration; cũng không thay toàn bộ grant set. Shared deployment cần phê duyệt riêng.
+
+Thiết kế đã chốt: private `ledger_trace_graph(a, roots[], direction, view)` dùng chung cho lot wrapper và bulk container ancestry; public `ledger_container_trace_graph` chỉ cho CM/Admin. API dùng cùng REPEATABLE READ, provenance bulk một lần, fresh authority recheck, audit container giữ một lần. Container graph có typed root riêng; actual loading edges gom lot/container nhưng giữ mọi load/location/proposal/source refs.
 
 Không cần đổi storage model hay backfill business history chỉ để vẽ graph. Nếu dữ liệu cũ thiếu quan hệ cần thiết, trình bày thiếu dữ liệu đúng sự thật; không tạo load/lineage mới để lấp graph.
 
@@ -90,7 +94,7 @@ Không cần đổi storage model hay backfill business history chỉ để vẽ
 4. Cập nhật callers, label giải thích kg và table fallback; cập nhật API/test guide.
 5. Gom xong lượt triển khai rồi chạy **một pha kiểm thử tập trung**; lỗi phát hiện mới nhận targeted rerun. Không chạy toàn bộ backend giữa các đoạn code.
 
-Không gán thêm sprint hoặc deadline khi chưa có capacity/ngày bàn giao. Các checkbox plan hiện đều chưa hoàn thành, không phải kết quả nghiệm thu.
+Không gán thêm sprint hoặc deadline khi chưa có capacity/ngày bàn giao. Checkbox thiết kế ghi nhận phần đã chốt; checkbox bàn giao chỉ đánh dấu theo bằng chứng nghiệm thu.
 
 ## 7. Các ca kiểm chứng và nghiệm thu
 
@@ -113,14 +117,14 @@ Không gán thêm sprint hoặc deadline khi chưa có capacity/ngày bàn giao.
 | API/query workload | Bulk đọc, không N+1 theo lot/container; kiểm đầy đủ targets so với oracle và tách warm handler/page timings nếu có đo. |
 | Desktop/mobile/keyboard | Các node không chồng nhãn nghiêm trọng, zoom/fit/focus cả container root, click/keyboard navigation đúng. |
 
-Khi triển khai, bổ sung focused regression cho authorization/accounting/graph semantics; không viết test chỉ lặp lại implementation. Chạy frontend graph/trace/container tests, build, các backend trace/container tests trực tiếp liên quan và actual API/browser path trên fixture cô lập. Không tạo lại dataset full-season hoặc chạy toàn backend mặc định khi thay đổi chưa ảnh hưởng truy vấn; chỉ mở rộng benchmark nếu query/performance concern thực tế đòi hỏi.
+Khi triển khai, bổ sung focused regression cho authorization/accounting/graph semantics; không viết test chỉ lặp lại implementation. Chạy frontend graph/trace/container tests, build, các backend trace/container tests trực tiếp liên quan và actual API/browser path dùng fixture đã có trên DB cấu hình sau khi được duyệt migration; không tạo fixture local theo yêu cầu mới của người dùng. Không tạo lại dataset full-season hoặc chạy toàn backend mặc định khi thay đổi chưa ảnh hưởng truy vấn; chỉ mở rộng benchmark nếu query/performance concern thực tế đòi hỏi.
 
 ## 8. Tiêu chí bàn giao
 
 - [ ] T01/T02/T03 đạt các ca có liên quan; code/API/UI/docs cùng contract, số liệu không nhầm lot mass với container/source mass.
-- [ ] Có bằng chứng web: source → container node → hồ sơ → backward graph nguồn; giữ Table đối chiếu.
-- [ ] Kết quả ghi rõ PASS, chặn đúng, PARTIAL/NOT RUN và giới hạn; không suy mọi CT cũ đều đã chạy lại.
-- [ ] Không sửa business stock/history/dossier, không mở thêm quyền và không kéo các nghiệp vụ đã loại sau HOLD vào scope.
-- [ ] Nếu có migration/grant, package và kế hoạch deployment được review riêng; implementation/isolated verification/shared deployment báo thành các mốc riêng.
+- [x] Có bằng chứng web: source → container node → hồ sơ → backward graph nguồn; giữ Table đối chiếu.
+- [x] Kết quả ghi rõ PASS, chặn đúng, PARTIAL/NOT RUN và giới hạn; không suy mọi CT cũ đều đã chạy lại.
+- [ ] Không sửa business stock/history/dossier, không mở thêm quyền ngoài phê duyệt và không kéo các nghiệp vụ đã loại sau HOLD vào scope.
+- [x] Nếu có migration/grant, package và kế hoạch deployment được review riêng; implementation/focused verification/shared deployment báo thành các mốc riêng.
 
-Kịch bản demo hiện tại vẫn dùng [hướng dẫn container/tracing](../guides/container-tracing-lecturer-demo.md) và bảng Actual container targets. Cho tới khi plan này được triển khai và nghiệm thu, không hướng dẫn giảng viên rằng container đã là node trên Flowchart.
+Kịch bản demo hiện tại tham chiếu [hướng dẫn container/tracing](../guides/container-tracing-lecturer-demo.md) và bảng Actual container targets. Sau deployment, có thể demo các node container theo web guide; không suy các ca advanced NOT RUN đã pass.

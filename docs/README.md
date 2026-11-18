@@ -47,7 +47,10 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 ## Plans & Backlogs (`docs/plans/`)
 
 - [Admin Capture Enhancements Plan](plans/admin-capture-enhancements-plan.md): administrative capture tooling, review queue, and bulk updates
-- [Container tracing Flowchart plan](plans/container-tracing-flowchart-plan-2026-11-18.md): planned forward container nodes, backward graph from container detail and navigation; not implemented
+- [Container tracing deployment and web results](reports/container-tracing-deployment-2026-11-18.md): approved Supabase migration, scoped EXECUTE restoration and CM/Export tracing acceptance; ACL recurrence recorded
+- [Container tracing implementation](reports/container-tracing-flowchart-implementation-2026-11-18.md): code complete, focused tests passed; links shared deployment and browser acceptance
+- [Container tracing web acceptance](guides/container-tracing-flowchart-web-test.md): focused forward container nodes and backward graph walkthrough; core shared web acceptance recorded
+- [Container tracing Flowchart plan](plans/container-tracing-flowchart-plan-2026-11-18.md): forward container nodes, backward graph and navigation; implemented, advanced acceptance limits recorded
 - [Container S2 implementation plan](plans/container-s2-implementation-plan-2026-11-18.md): seven authorized requirement groups and focused verification
 - [Container core completion plan (2026-11-17, scope updated 2026-11-18)](plans/container-core-completion-plan-2026-11-17.md): completed S1, requirement-mapped S2 tasks and excluded extensions; two implementation stages
 - [Container execution plan](plans/container-execution-plan-2026-11-13.md): implemented DIRECT_STOCK baseline and deferred blend/output dependencies

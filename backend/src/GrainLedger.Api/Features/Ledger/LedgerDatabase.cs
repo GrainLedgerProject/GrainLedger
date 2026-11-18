@@ -184,6 +184,9 @@ public static class LedgerDatabase
                 IF to_regprocedure('grainledger.ledger_container_action(uuid,text,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_action(uuid,text,jsonb) TO %I', runtime_role);
                 END IF;
+                IF to_regprocedure('grainledger.ledger_container_trace_graph(uuid,uuid)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_trace_graph(uuid,uuid) TO %I', runtime_role);
+                END IF;
                 IF to_regclass('grainledger.exports_blend_plan_decisions') IS NOT NULL THEN
                     EXECUTE format('GRANT SELECT, INSERT ON grainledger.exports_blend_plan_decisions TO %I', runtime_role);
                     EXECUTE format('GRANT SELECT, INSERT, DELETE ON grainledger.exports_active_blend_approvals TO %I', runtime_role);
@@ -390,6 +393,7 @@ public static class LedgerDatabase
               ('grainledger.ledger_container_action(uuid,text,jsonb)'),
               ('grainledger.ledger_export_container_read(uuid,uuid,text,integer,integer)'),
               ('grainledger.ledger_container_targets(uuid,uuid,uuid[])'),
+              ('grainledger.ledger_container_trace_graph(uuid,uuid)'),
               ('grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb)'),
               ('grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)'),
               ('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)')

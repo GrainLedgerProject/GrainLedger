@@ -73,3 +73,20 @@ it('shows container sources only on explicit authorized inspection and hides com
   expect(await screen.findByText('plot-1')).toBeInTheDocument();
   expect(within(screen.getByRole('table', { name: 'Actual container sources' })).getByText('source1')).toBeInTheDocument();
 });
+
+it('discards a previous container trace when navigating to another container while inspection is pending', async () => {
+  let resolveTrace!: (value: Response) => void;
+  fetchMock.mockImplementation(async input => {
+    if (String(input) === '/api/auth/csrf') return json({ token: 'csrf' });
+    if (String(input) === route + '/trace') return new Promise<Response>(resolve => { resolveTrace = resolve; });
+    return json({ container, readiness });
+  });
+  const browser = userEvent.setup(); const props = { userId: 'manager', canWrite: false, canHold: true, onNavigate: vi.fn() };
+  const view = render(<ContainerExecution id="c1" {...props} />);
+  await browser.click(await screen.findByRole('button', { name: 'Trace container sources' }));
+  await waitFor(() => expect(resolveTrace).toBeDefined());
+  view.rerender(<ContainerExecution id="c2" {...props} />);
+  resolveTrace(json({ loadedKg: '10', complete: true, sourceContributions: [{ sourceLotId: 'OLD-PRIVATE-SOURCE', quantityKg: '10' }] }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Trace container sources' })).toBeEnabled());
+  expect(screen.queryByText('OLD-PRIVATE-SOURCE')).not.toBeInTheDocument();
+});

@@ -43,3 +43,6 @@ Every mutation uses caller-owned READ COMMITTED, stock advisory lock `714928352`
 Mass is a positive decimal string with six-place kg precision, never a JSON number or JavaScript float. Ordinary workflow conflicts return 409, invalid payloads 400, wrong scope/role 403, missing schema 503. The web retains exact uncertain requests per user/container in IndexedDB, including document bytes too large for sessionStorage. Retry keeps operation ID, route and payload. A definitive rejection permits a fresh request after reload.
 
 See [S2 implementation plan](../plans/container-s2-implementation-plan-2026-11-18.md) and [web walkthrough](../guides/container-s2-web-test.md). A capability description is not a shared-deployment or acceptance result.
+
+
+Container source trace giữ nguyên endpoint và source totals; phần Flowchart mới bổ sung graph backward từ toàn bộ actual manifest. Xem [contract tracing](traceability-api.md#container-nodes-và-backward-từ-container) và [kịch bản web](../guides/container-tracing-flowchart-web-test.md). Migration tracing là bước deployment riêng, chưa được áp dụng chỉ vì code đã có.

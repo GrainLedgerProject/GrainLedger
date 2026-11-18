@@ -70,7 +70,7 @@ Source metadata được Capture cung cấp theo tập từ immutable procuremen
 - Không tự đưa replacement thành hậu duệ vật lý của original; xem `corrections` để hiểu thay thế.
 - Source đang pending arrival chưa có Ledger lot: bị từ chối như một identity chưa khả dụng trong scope. Không tạo stock, không tự cân/nhận hàng.
 
-Graph, positions, restrictions và attribution được đọc theo tập trong một câu SQL ở READ COMMITTED. Audit cùng transaction với graph và source enrichment; enrichment lỗi thì không commit success audit. Không dùng global stock-write lock hoặc response cache. Kết quả không phải snapshot ổn định qua nhiều lần chạy; cần chạy lại khi stock/evidence thay đổi.
+Graph, positions, restrictions, attribution và actual container loading được đọc theo tập trong transaction REPEATABLE READ; authority được kiểm tra lại bằng connection mới trước khi commit. Audit cùng transaction với graph và source enrichment; enrichment lỗi thì không commit success audit. Không dùng global stock-write lock hoặc response cache. Kết quả không phải snapshot ổn định qua nhiều lần chạy; cần chạy lại khi stock/evidence thay đổi.
 
 ## Lỗi và giới hạn
 
@@ -91,7 +91,7 @@ Sau **Run trace**, chọn **Table** hoặc **Flowchart** tại phần Trace resu
 - Chọn một node lô để xem stock/restrictions và phần source composition được API cho phép. Export Staff vẫn không có source composition.
 - Mỗi công đoạn chỉ có một node dùng chung cho các nhánh vào/ra. Quan hệ chỉ hiển thị trong phạm vi trace được trả; một công đoạn có thể còn inputs/outputs khác nằm ngoài hướng truy hiện tại. Các kg input/output xem trong **Operation quantities and exact relationships**, giữ nguyên decimal string, không cộng lặp các cặp input–output.
 - Correction references vẫn tách riêng, không dựng cạnh vật liệu ngược hay cạnh tự động original → replacement. Bản CORRECTED trong History giữ đúng status trên node công đoạn.
-- Để giữ thao tác tương tác gọn, Flowchart hỗ trợ tối đa **250 node lô/công đoạn/sự kiện kho và 500 quan hệ API**. Quá giới hạn thì thông báo rõ và cho **Show table**; không vẽ một phần rồi coi là đầy đủ. Giới hạn API 5.000 lô/20.000 cạnh vẫn giữ nguyên.
+- Để giữ thao tác tương tác gọn, Flowchart hỗ trợ tối đa **250 node lô/công đoạn/sự kiện kho/container và 500 quan hệ API hoặc 500 connections được vẽ (áp dụng cả loading)**. Quá giới hạn thì thông báo rõ và cho **Show table**; không vẽ một phần rồi coi là đầy đủ. Giới hạn API 5.000 lô/20.000 cạnh vẫn giữ nguyên.
 - Table hiện xếp lô bắt đầu trước, sau đó theo từng tầng truy xuất và mã lô trong cùng nhánh. Thứ tự hiển thị không còn phụ thuộc UUID và không thay đổi dữ liệu API.
 
 Flowchart được vẽ bằng HTML/SVG với React đang có; không thêm dependency, không cần migration mới và không thay đổi authorization/accounting backend.
@@ -167,3 +167,21 @@ Trên web, confirmed result có **Trace forward from result**. Chỉ chuẩn b�
 Panel **Residue evidence — selected lot** chỉ cho actor có `residue.evaluate` (không Admin). Bấm **View residue bounds for selected lot** mới mount component hiện có: live preview/history đọc riêng, không tải toàn graph; đổi node đóng panel. Table/Flowchart không chạy lại trace. Lock snapshot là thao tác ghi tường minh của residue module; không tự HOLD/release, không xem accounting shares là nồng độ.
 
 Forward migration `20261024000000_TraceEntryPoints` thêm selector và private metadata helper, thay trace routine bằng bản additive v2; không rewrite stock/history. Approved migration workflow cấu hình EXECUTE cho `ledger.trace_starts(uuid,text,text,uuid,uuid,integer,integer)` cùng trace routine hiện có. Runtime không được gọi trực tiếp `ledger.trace_lot_metadata(uuid,uuid[])`, không grant PUBLIC. Startup xác minh cả entry/helper ACL; nếu thiếu thì dừng với lỗi deployment rõ, không tự sửa quyền hoặc đổi sang owner connection. Đã áp dụng migration/grants mới lên shared DB theo yêu cầu sửa lỗi tiếp theo của người dùng; xem plan mục 13.3.
+
+
+## Container nodes và backward từ container
+
+Migration `20261118010000_ContainerTracingFlowchart` mở rộng contract đọc, không thay đổi stock hoặc history. Cần áp dụng migration và cấp riêng EXECUTE cho `grainledger.ledger_container_trace_graph(uuid,uuid)` trước khi nghiệm thu shared runtime; normal startup không tự cài đặt.
+
+- Lot trace giữ `targetLotId`, schemaVersion 2 và route cũ; thêm `root: { type: "lot", id }`.
+- Forward thêm `loadingEdges[]`: `lotId`, `containerId`, `quantityKg` (decimal string), `basis: ACTUAL_LOADING`, `lines[]` chứa `lineId`, `loadId`, `locationId`, `proposalId`, `loadedAt`, `quantityKg`. Chỉ từ actual committed load lines, giữ source-positive filtering cho source root. Không gửi source allocations cho Export.
+- Mỗi container trong `actualContainers` là một node trên graph; cạnh lot → container gom exact kg theo lot/container. Nhiều lần load vẫn giữ từng line reference và proposal gốc. Node là link tới `/export/containers/{id}`.
+- `linkedLoadedKg` chỉ là loading của các lots trên đường trace, có thể là một phần manifest; không phải số kg riêng của source đang trace. Restriction xét toàn manifest của container.
+- Backward bắt đầu từ lot không có downstream container. Bộ chọn starting lot không thêm chế độ container.
+- CM ở trang container dùng **Trace container sources** → Table/Flowchart. Endpoint cũ `POST /api/export-containers/{id}/execution/trace` trả thêm `graph` với `root: { type: "container", id }`, không có `targetLotId`; graph hợp nhất ancestry tất cả actual-loaded lots bằng một bulk traversal, không gọi/audit từng lot.
+- Container graph giữ `sourceContributionsVisible`, historical `lots/edges/operations/custodyEvents/corrections/sources` và chỉ một `actualContainers` header của container đang mở. Loading lines có thêm `sourceContributions` chính xác đã lưu. Source totals ở response ngoài cùng là actual kg của container; lot contributions trong graph vẫn là historical whole-lot composition.
+- Container chưa load: node riêng, nguồn rỗng, `NO_ACTUAL_LOADING`, complete false. Thiếu provenance hoặc thiếu source ancestor trả findings/incomplete, không tự tạo lineage.
+- Table giữ đủ lots/relationships/loading refs, phân trang cục bộ; Flowchart vượt limit không cắt graph và chuyển sang Table. Table/Flowchart/zoom/focus không gửi thêm trace hoặc audit.
+- Export không được gọi backward endpoint hoặc SQL graph đọc nguồn; CM own company/Administrator giữ scope hiện tại. Graph và provenance nằm cùng snapshot, fresh authority recheck trước commit. Chỉ có một TRACEBACK audit của lần container trace; enrichment/graph lỗi rollback audit.
+
+Hướng dẫn nghiệm thu: [container tracing web test](../guides/container-tracing-flowchart-web-test.md). Đã áp dụng migration và nghiệm thu luồng web chính sau phê duyệt; xem [deployment/web report](../reports/container-tracing-deployment-2026-11-18.md) và giới hạn quyền/fixtures ghi tại đó.
