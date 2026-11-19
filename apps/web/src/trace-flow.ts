@@ -1,7 +1,7 @@
-import type { LotTrace, TraceRelation } from './LedgerTraceability';
+import type { TraceGraph, TraceRelation } from './LedgerTraceability';
 
-export type FlowNode = { id: string; kind: 'lot' | 'operation' | 'custody'; recordId: string; x: number; y: number };
-export type FlowEdge = { id: string; from: string; to: string; quantityKg: string };
+export type FlowNode = { id: string; kind: 'lot' | 'operation' | 'custody' | 'container'; recordId: string; x: number; y: number };
+export type FlowEdge = { id: string; from: string; to: string; quantityKg: string; kind?: 'loading' };
 export type TraceFlow = { nodes: FlowNode[]; edges: FlowEdge[]; width: number; height: number; error?: string };
 export const flowCard = { width: 236, height: 148, columnGap: 96, rowGap: 32, padding: 28 };
 export const flowLimit = { nodes: 250, relationships: 500 };
@@ -9,7 +9,7 @@ export const flowLimit = { nodes: 250, relationships: 500 };
 export function traceRelationKey(edge: TraceRelation): string {
   return edge.relationType === 'CUSTODY' ? `custody:${edge.relationId}` : `operation:${edge.operationId}`;
 }
-export function traceRelationLabel(trace: LotTrace, edge: TraceRelation): string {
+export function traceRelationLabel(trace: TraceGraph, edge: TraceRelation): string {
   if (edge.relationType === 'CUSTODY') {
     const event = trace.custodyEvents?.find(event => event.id === edge.relationId);
     return event ? `${event.action === 'INGRESS' ? 'Pool ingress' : edge.outputLotId === event.primaryOutputLotId ? 'Withdrawal' : 'Remainder'} · revision ${event.revision}` : 'Custody';
@@ -19,7 +19,7 @@ export function traceRelationLabel(trace: LotTrace, edge: TraceRelation): string
 }
 
 // Only graph geometry uses JS numbers. Mass strings are carried unchanged from the API.
-export function traceLotOrder(trace: LotTrace): string[] {
+export function traceLotOrder(trace: TraceGraph): string[] {
   const byId = new Map(trace.lots.map(lot => [lot.id, lot]));
   const next = new Map<string, Set<string>>();
   for (const edge of trace.edges) {
@@ -29,7 +29,8 @@ export function traceLotOrder(trace: LotTrace): string[] {
     next.get(from)!.add(to);
   }
   const compare = (a: string, b: string) => (byId.get(a)?.code || a).localeCompare(byId.get(b)?.code || b) || a.localeCompare(b);
-  const result = [trace.targetLotId], seen = new Set(result);
+  const result = trace.root?.type === 'container' ? [...new Set((trace.loadingEdges || []).map(edge => edge.lotId))].sort(compare) : trace.targetLotId ? [trace.targetLotId] : [];
+  const seen = new Set(result);
   for (let cursor = 0; cursor < result.length; cursor++) {
     for (const id of [...(next.get(result[cursor]) || [])].sort(compare)) {
       if (byId.has(id) && !seen.has(id)) { seen.add(id); result.push(id); }
@@ -38,14 +39,21 @@ export function traceLotOrder(trace: LotTrace): string[] {
   return [...result.filter(id => byId.has(id)), ...trace.lots.map(lot => lot.id).filter(id => !seen.has(id)).sort(compare)];
 }
 
-export function buildTraceFlow(trace: LotTrace): TraceFlow {
+export function buildTraceFlow(trace: TraceGraph): TraceFlow {
   const unavailable = (error: string): TraceFlow => ({ nodes: [], edges: [], width: 0, height: 0, error });
+  const containers = trace.root?.type === 'container' || trace.direction === 'forward' ? trace.actualContainers || [] : [];
+  const loading = trace.root?.type === 'container' || trace.direction === 'forward' ? trace.loadingEdges || [] : [];
+  if (containers.length && trace.loadingEdges == null)
+    return unavailable('Container loading relationships are unavailable. Use Table view or install the tracing upgrade.');
   const relationIds = new Set(trace.edges.map(traceRelationKey));
-  if (trace.lots.length + relationIds.size > flowLimit.nodes || trace.edges.length > flowLimit.relationships)
-    return unavailable(`Flowchart supports up to ${flowLimit.nodes} lot/event nodes and ${flowLimit.relationships} relationships. The complete result remains available in Table view.`);
+  if (trace.lots.length + relationIds.size + containers.length > flowLimit.nodes || trace.edges.length + loading.length > flowLimit.relationships)
+    return unavailable(`Flowchart supports up to ${flowLimit.nodes} lot/event/container nodes and ${flowLimit.relationships} relationships. The complete result remains available in Table view.`);
   const lotIds = new Set(trace.lots.map(lot => lot.id));
   const nodes: FlowNode[] = traceLotOrder(trace).map(id => ({ id: `lot:${id}`, kind: 'lot', recordId: id, x: 0, y: 0 }));
   for (const id of [...relationIds].sort()) nodes.push({ id, kind: id.startsWith('custody:') ? 'custody' : 'operation', recordId: id.slice(id.indexOf(':') + 1), x: 0, y: 0 });
+  const containerIds = new Set(containers.map(container => container.containerId));
+  if (containerIds.size !== containers.length) return unavailable('Duplicate container identities. Use Table view.');
+  for (const container of containers) nodes.push({ id: `container:${container.containerId}`, kind: 'container', recordId: container.containerId, x: 0, y: 0 });
   const connections = new Map<string, FlowEdge>();
   for (const edge of trace.edges) {
     if (!lotIds.has(edge.inputLotId) || !lotIds.has(edge.outputLotId))
@@ -55,7 +63,16 @@ export function buildTraceFlow(trace: LotTrace): TraceFlow {
     connections.set(`${input}/${operation}`, { id: `${input}/${operation}`, from: input, to: operation, quantityKg: edge.inputEventKg || edge.inputConsumedKg });
     connections.set(`${operation}/${output}`, { id: `${operation}/${output}`, from: operation, to: output, quantityKg: edge.outputProducedKg });
   }
+  for (const edge of loading) {
+    if (!lotIds.has(edge.lotId) || !containerIds.has(edge.containerId))
+      return unavailable('Some loading endpoints are missing. Use Table view to inspect the returned result.');
+    const from = `lot:${edge.lotId}`, to = `container:${edge.containerId}`, id = `${from}/${to}`;
+    if (connections.has(id)) return unavailable('Duplicate loading relationships. Use Table view.');
+    connections.set(id, { id, from, to, quantityKg: edge.quantityKg, kind: 'loading' });
+  }
   const edges = [...connections.values()];
+  if (edges.length > flowLimit.relationships)
+    return unavailable(`Flowchart supports up to ${flowLimit.relationships} connections. The complete result remains available in Table view.`);
   const outgoing = new Map(nodes.map(node => [node.id, [] as string[]]));
   const incoming = new Map(nodes.map(node => [node.id, 0]));
   const levels = new Map(nodes.map(node => [node.id, 0]));

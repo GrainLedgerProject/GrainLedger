@@ -6,6 +6,7 @@ import { ResidueBounds } from './ResidueBounds';
 import { traceKindLabel } from './trace-kind';
 import { TraceSourceEvidence } from './TraceSourceEvidence';
 import { TraceFlowchart } from './TraceFlowchart';
+import { TraceLoadingTable } from './TraceLoadingTable';
 import { traceLotOrder, traceRelationKey, traceRelationLabel } from './trace-flow';
 
 type Contribution = { sourceLotId: string; quantityKg: string; denominatorKg: string; percentage: string };
@@ -16,13 +17,20 @@ export type TraceRelation = { relationType?: 'PROCESSING' | 'CUSTODY'; relationI
   operationId: string | null; inputLotId: string; outputLotId: string; inputConsumedKg: string; outputProducedKg: string; inputEventKg?: string;
   sourceAllocations?: { sourceLotId: string; quantityKg: string }[] | null };
 export type LabTraceOrigin = { reportId: string; resultId: string };
-export type LotTrace = { labOrigin?: LabTraceOrigin & { lotId: string; sampleId: string }; schemaVersion?: number; graphBasis?: string; positivePathCoverage?: string;
-  custodyEvents?: { id: string; action: 'INGRESS' | 'WITHDRAW'; locationId: string; revision: number; occurredAt: string; primaryOutputLotId: string }[]; traceId: string; targetLotId: string; direction: 'forward' | 'backward'; view: 'current' | 'history'; asOf: string; complete: boolean; lotCount: number; edgeCount: number;
+export type TraceContainer = { containerId: string; code: string; status: string; linkedLoadedKg: string; basis: string; held: boolean; restricted?: boolean };
+export type TraceLoadingEdge = { containerId: string; lotId: string; quantityKg: string; basis: 'ACTUAL_LOADING';
+  lines: { lineId: string; loadId: string; locationId: string; proposalId: string; loadedAt: string; quantityKg: string;
+    sourceContributions?: { sourceLotId: string; quantityKg: string }[] }[] };
+export type TraceGraph = { root?: { type: 'lot' | 'container'; id: string }; loadingEdges?: TraceLoadingEdge[] | null;
+  actualContainers?: TraceContainer[]; containerCoverage?: string; labOrigin?: LabTraceOrigin & { lotId: string; sampleId: string }; schemaVersion?: number; graphBasis?: string; positivePathCoverage?: string;
+  custodyEvents?: { id: string; action: 'INGRESS' | 'WITHDRAW'; locationId: string; revision: number; occurredAt: string; primaryOutputLotId: string }[]; traceId: string; targetLotId?: string; direction: 'forward' | 'backward'; view: 'current' | 'history'; asOf: string; complete: boolean; lotCount: number; edgeCount: number;
   sourceContributionsVisible: boolean; lots: TraceLot[];
   edges: TraceRelation[];
   operations: { id: string; kind: string; status: string; occurredAt: string; declaredLossKg: string; varianceKg: string }[];
   corrections: { id: string; originalOperationId: string; replacementOperationId: string | null; status: string }[];
   sources: { lotId: string; status: string; provenance: Provenance | null }[] };
+
+export type LotTrace = TraceGraph & { targetLotId: string };
 
 export function LedgerTraceability({ user, active = true, initialLotId, initialLabOrigin }: { user: User; active?: boolean; initialLotId?: string; initialLabOrigin?: LabTraceOrigin }) {
   const [lotId, setLotId] = useState(initialLotId || ''), [direction, setDirection] = useState<'forward' | 'backward'>('forward'), [view, setView] = useState<'current' | 'history'>('current');
@@ -89,6 +97,7 @@ export function LedgerTraceability({ user, active = true, initialLotId, initialL
       <Panel title="Trace result">
         <p role="status">Complete {result.direction} trace: {result.lotCount} lots, {result.edgeCount} relationships. {result.view === 'history' ? 'Historical operations include superseded records.' : 'Superseded operations excluded.'}</p>
         <p>Snapshot: {new Date(result.asOf).toLocaleString()} · Reference: {result.traceId}</p>
+        {result.direction === 'forward' && result.actualContainers && <section><h3>Actual container targets</h3><p className="muted">Committed loading linked to this material path. These are actual loaded kg, separate from planned allocations and current stock.</p>{result.actualContainers.length ? <div className="table-scroll"><table aria-label="Actual container targets"><thead><tr><th>Container</th><th>Linked loaded kg</th><th>Status</th><th>HOLD</th></tr></thead><tbody>{result.actualContainers.map(container => <tr key={container.containerId}><td><a href={`/export/containers/${container.containerId}`}>{container.code}</a></td><td>{container.linkedLoadedKg}</td><td>{container.status}</td><td>{container.held ? 'Container HOLD' : container.restricted ? 'Loaded lot restriction' : 'None'}</td></tr>)}</tbody></table></div> : <p>No actual containers on this path.</p>}</section>}
         <p>Storage generations and processing stages overlap. Do not add every row as a total mass. Recorded relationships do not establish contamination or compliance.</p>
         <div className="trace-display-options" role="group" aria-label="Trace result display"><button type="button" aria-pressed={display === 'table'} onClick={() => setDisplay('table')}>Table</button><button type="button" aria-pressed={display === 'flowchart'} onClick={() => setDisplay('flowchart')}>Flowchart</button></div>
         {display === 'flowchart' ? <TraceFlowchart key={result.traceId} trace={result} selectedId={selectedId} onSelect={selectLot} onShowTable={() => setDisplay('table')} /> : <>
@@ -97,6 +106,7 @@ export function LedgerTraceability({ user, active = true, initialLotId, initialL
           <td>{lot.positions.map(position => <p key={position.locationId}>{position.quantityKg} / {position.availableKg} · {position.locationName || position.locationId}</p>)}</td><td>{lot.restrictions.join(', ') || 'None'}{lot.effectiveHold && <small>{lot.directHold ? 'HOLD placed on this lot' : 'HOLD inherited through recorded source ancestry'}</small>}</td>
         </tr>)}</tbody></table></div>
         <Pagination label="traced lots" page={page} pageSize={25} totalCount={result.lots.length} onChange={setPage} />
+        {result.direction === 'forward' && result.loadingEdges && <TraceLoadingTable key={result.traceId} trace={result} />}
         </>}
       </Panel>
       {display === 'table' && <Panel title="Storage and processing relationships">

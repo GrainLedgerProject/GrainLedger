@@ -183,3 +183,31 @@ GrainLedger.Modules.Identity/
 ```
 
 Types keep the `GrainLedger.Modules.Identity` namespace; generated migrations retain their original namespace and contents. Endpoint files share the existing partial `IdentityEndpoints` class so route handlers and shared mappings can move without changing the public API. Contracts live alongside their features. Folder reorganization does not require a database migration or rerunning the development seed.
+
+## Container preparation after the monolith merge — 13 November 2026
+
+Container preparation lives in `Features/Ledger/Shipments`; its protected entry is `grainledger.ledger_container_action(uuid,text,jsonb)`. Forward AppDbContext migration `20261113000000_ContainerPreparation` adds only preparation/draft/history/request records and v2 routines. It does not change the dev baseline migration or enable actual loading/CLOSE. Runtime setup grants only the public entry, never direct preparation-table writes or private helpers. The free-stock picker preserves F15 reservation deductions.
+
+F13 planned containers (`exports_containers`) and legacy preparation (`ledger_containers`) are still distinct records. The next implementation must bind execution to the authoritative planned container instead of treating an arbitrary order reference as approval. See [current completion review](reports/container-completion-review-2026-11-13.md) and [preparation API](api/container-api.md).
+
+## Direct-stock container execution — 13 November 2026
+
+[Container execution](api/container-execution-api.md) uses F13's planned container ID/status/version with private Ledger extensions. Approved DIRECT_STOCK allocations can be loaded partially through atomic reservation consumption, stock debit and immutable source/custody records. The ordinary-position source complement uses exact micro-kg largest remainder allocation; ambiguous/custody-generation handoff remains blocked. BLEND_INPUT_STOCK awaits the blend owner's real production/output-reservation execution.
+
+LOADING/CLOSE reuse F12/F14 scientific policies and current reviewed dependency fingerprints under the existing writer boundary. Container restriction checks additionally follow positive source/physical ancestry, without auto-creating or releasing HOLDs. Closure freezes all actual loads and assessment references once, with role-redacted dossier retrieval and no second debit. Lot/container trace uses committed actual records, a consistent graph/stock/target snapshot and a fresh current-authority check; it is not a full-season benchmark. See [execution plan](plans/container-execution-plan-2026-11-13.md) for limits, tests and deferred work.
+
+
+## Approved container production — 18 November 2026
+
+S1 connects one approved BLEND_INPUT_STOCK plan to one complete Ledger BLENDING operation and one exact-target ordinary output. A protected SQL entry runs on the caller transaction; original INPUT consume, existing processing/lineage, OUTPUT reserve, marker and receipt are atomic. A separate CM actual-output review is required before loading. Reject/re-review before loading retains immutable decisions and reserve/release events; production does not itself count as loaded mass.
+
+Production commit/output review advance container version, while PLANNED → LOADING still requires actual loading. Scientific dependencies are checked before and after writes; readier output never rewrites the original proposal. The [production API](api/container-production-api.md) and [verification record](reports/container-production-implementation-2026-11-18.md) define scope. Full partial-execution revalidation, multiple plans/batches and pool/custody handoff remain deferred. The new migration and single runtime grant were applied to the configured shared database on 18/11/2026 after explicit approval; the [deployment record](reports/container-production-deployment-2026-11-18.md) distinguishes isolated browser tests from read-only shared verification.
+
+
+## Container S2 workflow — 18 November 2026
+
+S2 extends the S1 baseline above with retained ALL_REMAINING/OUTPUT_ONLY reviews, partial batches, plan activation and whole-manifest CLOSE. Actual outputs/loads retain their original proposal IDs; review transitions release only unfinished reservations. Current requirements and scientific dependencies are checked before and after mutation, including effective-time expiry without a new publisher write. Packaging stages are assessed independently without averaging residues or inventing process factors; product identity must remain consistent.
+
+Reviewed handoffs use the existing Ledger transfer/bagging and custody routines on the caller-owned READ COMMITTED transaction. Stock advisory lock precedes company/row locks; current actor/permission/facility are rechecked after waiting. INPUT authorization/consumption, exact remaining source complement, output claims/reservations and replay receipt commit together. Direct loading from a current pool remains blocked until an assigned Operator extracts reviewed ordinary stock. Missing attribution, other-plan pool reservations and unsupported generation changes fail closed.
+
+Versioned document files and supplements append to shipment history without editing the CLOSE snapshot. Container HOLD retains scoped CM/Export/MM notices and read state; assigned manager handling does not release restrictions. Post-HOLD release/resume and unload/reopen/reseal are excluded by the user's scope decision. The protected workflow entry is the only new runtime signature; its storage and helpers remain private. [API](api/container-workflow-api.md), [verification](reports/container-s2-implementation-2026-11-18.md) and [deployment package](guides/container-s2-deployment.md) define the supported scope. S2 was verified in isolated databases and subsequently applied to the configured shared Supabase after separate explicit approval; the [deployment record](reports/container-s2-deployment-2026-11-18.md) records runtime/read-only checks and the separation of test/shared business data.

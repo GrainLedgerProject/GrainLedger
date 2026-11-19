@@ -109,9 +109,39 @@ Normal application startup remains separate:
 dotnet run --project backend/src/GrainLedger.Api
 ```
 
+### Runtime grants after branch or deployment changes
+
+PostgreSQL grants persist across machine and API restarts. If startup rejects missing or excess runtime grants, compare the configured login, installed migration history and application version before changing anything. A database upgraded by another teammate can be incompatible with an older feature branch.
+
+When migrations are already installed and only runtime configuration needs repair, the approved migration owner can run this command instead of migrating or seeding:
+
+```bash
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.Api --no-launch-profile -- --configure-runtime-role
+```
+
+The command requires `ConnectionStrings__GrainLedgerMigration` and `Ledger__RuntimeRole`. Obtain explicit database-owner approval for shared databases. It revokes existing application grants and reapplies the finite list defined by the executing code: **use a branch/build containing every installed feature**, including container entry points when container is deployed. Running it from an older or incomplete branch can remove grants needed by other API instances. Keep normal startup on the restricted runtime connection; do not bypass validation or auto-repair using owner access.
+
+### Container preparation on the monolith branch
+
+`feat/container` adds forward AppDbContext migration `20261113000000_ContainerPreparation`, embedded `Data/Sql/ContainerPreparation.sql` and the finite runtime grant for `grainledger.ledger_container_action(uuid,text,jsonb)`. The four preparation tables and private helpers remain inaccessible directly to runtime. An absent optional feature migration does not newly block normal startup; its endpoint returns 503. If installed, its entry grant must pass runtime validation. Run the approved migration-owner workflow above only after separate environment approval. Old `20261021`/`20261025` Ledger-context migrations are historical, not an upgrade command for the monolith.
+
+This merge does not migrate/reset shared Supabase, transfer old-schema preparation data or claim the monolith cutover is deployed. Migrating between the old multi-schema database and the new baseline needs a separately reviewed backup/cutover/data-retention procedure. See [completion review](reports/container-completion-review-2026-11-13.md).
+
+### Direct-stock container execution
+
+Forward AppDbContext migration `20261113000100_ContainerExecution` adds private actual loading/source complement/HOLD/closure/request records and the protected planned-container command/read/target routines. Explicit runtime setup grants only these public entries, retaining no direct table/helper writes. It does not migrate legacy preparation into actuals, implement approved blend production or auto-repair startup grants. Apply only through the approved owner migration workflow after environment-specific approval; no shared deployment is asserted. [Execution API](api/container-execution-api.md) and [web guide](guides/container-execution-web-test.md) describe current supported stock and limits.
+
+### Approved container blend production
+
+Forward migration `20261117000000_ContainerProduction` implements one-batch approved production, actual-output review and output reservation for loading. It adds the finite runtime entry `grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)`; private tables/helpers stay denied. It was tested on disposable PostgreSQL, then applied with the single new grant to the configured shared Supabase on 18/11/2026 after explicit user approval; see the [deployment record](reports/container-production-deployment-2026-11-18.md). For other environments follow the [production deployment checklist](guides/container-production-deployment.md), including owner approval, backup and compatible API instances; old code does not understand the new RESERVE events/output authorization. Normal startup does not migrate or seed. See [verification](reports/container-production-implementation-2026-11-18.md).
+
 ### Historical module-era deployment notes
 
 The following migration-specific instructions preserve prior release history only. They describe old per-module schemas/migrations and must not be used as current cutover or deployment instructions. Confirm current database status independently; no reset or deployment is asserted here.
+
+## Container S2 workflow deployment — 18 November 2026
+
+Forward migration `20261118000000_ContainerWorkflow` and the matching API/web build add partial reviews/batches, plan activation/whole-manifest CLOSE, reviewed pool/transfer/bagging handoff, HOLD notices and versioned shipment records. It was verified on disposable PostgreSQL and subsequently applied to the configured shared Supabase after the user's separate explicit S2 approval; see the [deployment record](reports/container-s2-deployment-2026-11-18.md). Existing S1 approval was not reused; no broad ACL rebuild, shared seed or fixture copy was run. Approval for this deployment does not authorize future changes or other environments. Review the [S2 package](guides/container-s2-deployment.md) and obtain explicit approval before this shared migration and the single new EXECUTE grant on `grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)`. Do not run seeds, broad runtime-role reconfiguration or owner-credential application startup to enable it. Older writers are incompatible with S2 scope/reservation semantics.
 
 ## Historical mixed-bulk migration and activation
 

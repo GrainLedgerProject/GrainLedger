@@ -146,6 +146,62 @@ public sealed class BrowserWorkflowHost
             $"/api/source-lots/{mixedReceipt.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid()}");
         var mixedPool = traceSource!.CurrentStock.Single().CurrentStockLotId;
         await scenario.HoldAsync(mixedRoot);
+        using var containerExecution = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_CONTAINER_EXECUTION") == "true"
+            ? await ContainerExecutionScenario.CreateAsync(factory, preBlended: true) : null;
+        if (containerExecution is not null)
+        {
+            var (containerUser, containerSession) = await factory.SeedUserAsync(Roles.ExportStaff, containerExecution.Stock.OwnerId);
+            var containerClient = factory.CreateRealCookieClient(containerUser, containerSession);
+            scenario.Accounts.Add("containerExport", (containerUser, containerSession, containerClient));
+            scenario.Accounts.Add("containerCustomer", containerExecution.Stock.Accounts["customer"]);
+        }
+        using var containerProduction = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_CONTAINER_PRODUCTION") == "true"
+            ? await ContainerExecutionScenario.CreateAsync(factory, production: true) : null;
+        if (containerProduction is not null)
+        {
+            var (productionUser, productionSession) = await factory.SeedUserAsync(Roles.ExportStaff, containerProduction.Stock.OwnerId);
+            scenario.Accounts.Add("productionExport", (productionUser, productionSession, factory.CreateRealCookieClient(productionUser, productionSession)));
+            scenario.Accounts.Add("productionOperator", containerProduction.Stock.Accounts["operator"]);
+            scenario.Accounts.Add("productionCustomer", containerProduction.Stock.Accounts["customer"]);
+            scenario.Accounts.Add("productionManager", containerProduction.Stock.Accounts["manager"]);
+        }
+        var workflowEnabled = Environment.GetEnvironmentVariable("GRAINLEDGER_BROWSER_CONTAINER_WORKFLOW") == "true";
+        using var workflowDirect = workflowEnabled ? await ContainerExecutionScenario.CreateAsync(factory) : null;
+        using var workflowPool = workflowEnabled ? await ContainerExecutionScenario.CreateAsync(factory, preBlended: true, mixedStock: true, baggingRule: true) : null;
+        Guid? workflowLegacy = null;
+        if (workflowDirect is not null)
+        {
+            var retained = await ContainerRetainedTraceFixture.SeedAsync(factory, workflowDirect, Guid.NewGuid(), 10m, 1,
+                JsonSerializer.SerializeToElement(new { assessmentStatus = "INCOMPLETE", legacySyntheticHistory = true }), legacyWithoutCapture: true);
+            workflowLegacy = retained[0];
+            scenario.Accounts.Add("workflowPeerCustomer", workflowDirect.Stock.Accounts["foreignCustomer"]);
+            var (peerUser, peerSession) = await factory.SeedUserAsync(Roles.ExportStaff, workflowDirect.Stock.ForeignOwnerId);
+            scenario.Accounts.Add("workflowPeerExport", (peerUser, peerSession, factory.CreateRealCookieClient(peerUser, peerSession)));
+        }
+        var workflowExpiry = DateTimeOffset.UtcNow.AddMinutes(2);
+        using var workflowMrlExpiry = workflowEnabled ? await ContainerExecutionScenario.CreateAsync(factory, mrlExpiresAt: workflowExpiry) : null;
+        using var workflowPolicyExpiry = workflowEnabled ? await ContainerExecutionScenario.CreateAsync(factory, policyExpiresAt: workflowExpiry) : null;
+        JsonElement? workflowMrlBefore = null, workflowPolicyBefore = null;
+        if (workflowMrlExpiry is not null)
+        {
+            await workflowMrlExpiry.Post("loads", workflowMrlExpiry.Load(1, "4"));
+            workflowMrlBefore = await workflowMrlExpiry.Detail();
+        }
+        if (workflowPolicyExpiry is not null)
+        {
+            var loaded = await workflowPolicyExpiry.Post("loads", workflowPolicyExpiry.Load(1, "10"));
+            await workflowPolicyExpiry.Post("metadata", new GrainLedger.Api.Features.Exports.ContainerMetadataRequest(Guid.NewGuid(), loaded.GetProperty("version").GetInt32(), "SYNTHETIC-EXPIRY", "SYNTHETIC-SEAL"));
+            workflowPolicyBefore = await workflowPolicyExpiry.Detail();
+        }
+        foreach (var (label, fixture) in new[] { ("workflowDirect", workflowDirect), ("workflowPool", workflowPool), ("workflowMrl", workflowMrlExpiry), ("workflowPolicy", workflowPolicyExpiry) })
+        {
+            if (fixture is null) continue;
+            var (workflowUser, workflowSession) = await factory.SeedUserAsync(Roles.ExportStaff, fixture.Stock.OwnerId);
+            scenario.Accounts.Add(label + "Export", (workflowUser, workflowSession, factory.CreateRealCookieClient(workflowUser, workflowSession)));
+            scenario.Accounts.Add(label + "Customer", fixture.Stock.Accounts["customer"]);
+            scenario.Accounts.Add(label + "Operator", fixture.Stock.Accounts["operator"]);
+            scenario.Accounts.Add(label + "Manager", fixture.Stock.Accounts["manager"]);
+        }
         var accounts = new Dictionary<string, object>();
         foreach (var (label, account) in scenario.Accounts)
         {
@@ -335,6 +391,28 @@ public sealed class BrowserWorkflowHost
                     uncoveredSubstanceId = companyPolicy.OtherSubstanceId
                 },
                 evidenceId = scenario.EvidenceId, pendingProcurementId = pendingReceipt.GetProperty("id").GetGuid(),
+                containerWorkflow = workflowDirect is null || workflowPool is null ? null : new
+                {
+                    direct = new { id = workflowDirect.ContainerId, proposalId = workflowDirect.ProposalId, lotId = workflowDirect.LotId, facilityId = workflowDirect.Stock.FacilityId,
+                        qualityAttributeId = workflowDirect.QualityAttributeId, evidenceId = workflowDirect.Stock.EvidenceId, locationId = workflowDirect.LoadingLocationId, uiUrl = $"{uiUrl}/export/containers/{workflowDirect.ContainerId}" },
+                    pool = new { id = workflowPool.ContainerId, proposalId = workflowPool.ProposalId, lotId = workflowPool.LotId, facilityId = workflowPool.Stock.FacilityId,
+                        qualityAttributeId = workflowPool.QualityAttributeId, evidenceId = workflowPool.Stock.EvidenceId, locationId = workflowPool.LoadingLocationId,
+                        destinationLocationId = workflowPool.Stock.SecondLocationId, equipmentId = workflowPool.Stock.EquipmentId, uiUrl = $"{uiUrl}/export/containers/{workflowPool.ContainerId}" },
+                    legacy = new { id = workflowLegacy, uiUrl = $"{uiUrl}/export/containers/{workflowLegacy}" },
+                    expiryAt = workflowExpiry, mrl = new { id = workflowMrlExpiry?.ContainerId, before = workflowMrlBefore?.GetProperty("readiness") },
+                    policy = new { id = workflowPolicyExpiry?.ContainerId, before = workflowPolicyBefore?.GetProperty("readiness") }
+                },
+                containerProduction = containerProduction is null ? null : new {
+                    id = containerProduction.ContainerId, proposalId = containerProduction.ProposalId,
+                    facilityId = containerProduction.Stock.FacilityId, locationId = containerProduction.Stock.SecondLocationId,
+                    equipmentId = containerProduction.Stock.EquipmentId, qualityAttributeId = containerProduction.QualityAttributeId, evidenceId = containerProduction.Stock.EvidenceId,
+                    uiUrl = $"{uiUrl}/export/containers/{containerProduction.ContainerId}"
+                },
+                containerExecution = containerExecution is null ? null : new {
+                    id = containerExecution.ContainerId, route = containerExecution.Route, proposalId = containerExecution.ProposalId,
+                    lotId = containerExecution.LotId, locationId = containerExecution.Stock.LocationId,
+                    sourceId = containerExecution.SourceId, uiUrl = $"{uiUrl}/export/containers/{containerExecution.ContainerId}"
+                },
                 traceSourceLotId, traceOutputLotId, mixedRoot, mixedPool, accounts
             }, new JsonSerializerOptions { WriteIndented = true });
         try { await bridge.StartAsync(); await bridge.WaitForShutdownAsync(); }

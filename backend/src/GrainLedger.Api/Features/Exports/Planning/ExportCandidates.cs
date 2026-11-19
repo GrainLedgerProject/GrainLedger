@@ -79,7 +79,7 @@ public static partial class ExportModule
         if (string.IsNullOrWhiteSpace(target))
             return Problem(409, "PLAN_TARGET_MISSING", "Create a draft with a target product.");
         var planRevision = PlanScopeRevision(snapshot, plan, target);
-        var group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = planRevision }, selected, target,
+        var group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = planRevision, TargetMassKg = plan.TargetMassKg }, selected, target,
             request.Mode, request.ScopeRevision, request.CompatibilityPolicyId);
         if (group.Findings.Contains("CANDIDATE_SNAPSHOT_STALE"))
             return Problem(409, "CANDIDATE_SNAPSHOT_STALE", "Candidate inventory or blend policy changed. Reload candidates.");
@@ -108,7 +108,7 @@ public static partial class ExportModule
             catch (LedgerException ex) when (ex.StatusCode == 503) { /* Unapplied optional policy schema. */ }
         }
         if (publishedYield is not null)
-            group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = planRevision },
+            group = CandidateGroupValidator.Validate(snapshot with { ScopeRevision = planRevision, TargetMassKg = plan.TargetMassKg },
                 selected, target, request.Mode, request.ScopeRevision,
                 request.CompatibilityPolicyId, outputYieldPolicyAvailable: true);
         var previews = residueSelection.Inputs;

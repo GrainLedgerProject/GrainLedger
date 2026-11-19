@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using GrainLedger.Api.Features.Catalogs;
 using GrainLedger.Api.Features.Identity;
@@ -87,10 +88,24 @@ public static partial class ExportModule
     }
 
     private static BlendPlanDraftDto PlanDto(BlendPlanDraft p, bool canWrite, bool demandCurrent,
-        bool proposed = false) => new(p.Id, p.OrderId,
+        bool proposed = false, bool? demandChanged = null) => new(p.Id, p.OrderId,
         p.ContainerId, p.SpecificationId, p.VersionNo, p.Version, p.Status, ExportRules.Text(p.TargetMassKg),
         TargetProductFromSnapshot(p.DemandSnapshot), p.DemandSnapshot, p.CreatedAt, p.CancelledAt,
-        demandCurrent, canWrite && p.Status == "DRAFT" && !proposed, proposed);
+        demandCurrent, canWrite && p.Status == "DRAFT" && !proposed, proposed, demandChanged ?? !demandCurrent);
+
+    private static bool DemandContentIsCurrent(BlendPlanDraft plan, ExportOrder order, ExportContainer container)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(plan.DemandSnapshot);
+            var demand = document.RootElement;
+            return demand.GetProperty("orderVersion").GetInt32() == order.Version &&
+                demand.GetProperty("specificationVersion").GetInt32() == order.CurrentSpecificationVersion &&
+                demand.GetProperty("targetMassKg").GetString() == ExportRules.Text(plan.TargetMassKg) &&
+                (demand.TryGetProperty("containerTargetMassKg", out var originalTarget) ? originalTarget.GetString() : demand.GetProperty("targetMassKg").GetString()) == ExportRules.Text(container.TargetMassKg);
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { return false; }
+    }
 
     private static bool DemandIsCurrent(BlendPlanDraft plan, ExportOrder order, ExportContainer container)
     {
@@ -103,7 +118,8 @@ public static partial class ExportModule
             return demand.GetProperty("orderVersion").GetInt32() == order.Version &&
                 demand.GetProperty("containerVersion").GetInt32() == container.Version &&
                 plan.SpecificationId == (Guid)demand.GetProperty("specificationId").GetGuid() &&
-                plan.TargetMassKg == container.TargetMassKg &&
+                demand.GetProperty("targetMassKg").GetString() == ExportRules.Text(plan.TargetMassKg) &&
+                (demand.TryGetProperty("containerTargetMassKg", out var originalTarget) ? originalTarget.GetString() : demand.GetProperty("targetMassKg").GetString()) == ExportRules.Text(container.TargetMassKg) &&
                 demand.GetProperty("specificationVersion").GetInt32() == order.CurrentSpecificationVersion;
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
@@ -146,7 +162,7 @@ public static partial class ExportModule
         if (!await ProposalReadyAsync(db, ct)) dependencies.Add(new("PROPOSAL_STORAGE_NOT_READY",
             "Apply the reviewed Export proposal migration and runtime grants."));
         return Results.Ok(new BlendPlanningContextDto(id, order.Version, container.Version, ready,
-            ready && allowedProducts.Count > 0 && container.Status == "PLANNED" &&
+            ready && allowedProducts.Count > 0 && container.Status != "CLOSED" &&
             await access.HasPermissionAsync(Permissions.BlendPropose, ct),
             candidateReady, compatibilityReady, false, dependencies, allowedProducts));
     }
@@ -165,8 +181,10 @@ public static partial class ExportModule
             errors["targetProductIdentity"] = ["Choose a supported Ledger product identity."];
         if (errors.Count > 0) return Invalid(errors);
         var hash = ExportRules.Hash("plan-draft:" + id, request);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(714928352)", ct);
         await LockAsync(db, scope.Value.Company, ct);
+        if (await ScopeAsync(http, db, access, Permissions.BlendPropose, ct) != scope) return Results.Forbid();
         var prior = await db.Operations.AsNoTracking().SingleOrDefaultAsync(x => x.CompanyId == scope.Value.Company &&
             x.ActorId == scope.Value.Actor && x.OperationId == request.OperationId, ct);
         if (prior is not null) return ReplayPlan(prior, hash, http);
@@ -175,7 +193,10 @@ public static partial class ExportModule
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
         if (request.ContainerVersion != container.Version || request.OrderVersion != order.Version)
             return Problem(412, "EXPORT_VERSION_STALE", "Reload the order and container before creating a plan.");
-        if (container.Status != "PLANNED") return Problem(409, "CONTAINER_IN_USE", "Only planned containers accept a draft.");
+        if (container.Status == "CLOSED") return Problem(409, "CONTAINER_IN_USE", "Closed containers cannot accept a draft.");
+        var remaining = await WorkflowSqlAsync(scope.Value.Actor, id, "planning", EmptyContainerPayload, null, db, ct);
+        var planTarget = ParseKg(remaining.GetProperty("unplannedKg").GetString()!);
+        if (planTarget <= 0) return Problem(409, "DEMAND_ALREADY_PRODUCED", "Existing output already covers this demand; review that output instead of planning it again.");
         var commodityCode = await db.Commodities.AsNoTracking().Where(x => x.Id == order.CommodityId)
             .Select(x => x.Code).SingleAsync(ct);
         if (!ExportTargetProducts.ForCommodity(commodityCode).Contains(request.TargetProductIdentity))
@@ -189,13 +210,13 @@ public static partial class ExportModule
         var plan = new BlendPlanDraft
         {
             Id = Guid.NewGuid(), CompanyId = scope.Value.Company, OrderId = order.Id, ContainerId = id,
-            SpecificationId = spec.Id, VersionNo = version, TargetMassKg = container.TargetMassKg,
+            SpecificationId = spec.Id, VersionNo = version, TargetMassKg = planTarget,
             CreatedBy = scope.Value.Actor, CreatedAt = now,
             DemandSnapshot = JsonSerializer.Serialize(new
             {
                 orderId = order.Id, orderVersion = order.Version, marketId = order.MarketId, commodityId = order.CommodityId,
                 shippingFrom = order.ShippingFrom, shippingTo = order.ShippingTo, containerId = id,
-                containerVersion = container.Version, targetMassKg = ExportRules.Text(container.TargetMassKg),
+                containerVersion = container.Version, targetMassKg = ExportRules.Text(planTarget), containerTargetMassKg = ExportRules.Text(container.TargetMassKg),
                 targetProductIdentity = request.TargetProductIdentity,
                 specificationId = spec.Id, specificationVersion = spec.VersionNo, limits = limits.Select(ToDto).ToArray()
             }, new JsonSerializerOptions(JsonSerializerDefaults.Web))
@@ -246,7 +267,7 @@ public static partial class ExportModule
         var container = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == id, ct);
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
         return Results.Ok(new ExportPage<BlendPlanDraftDto>(rows.Select(x => PlanDto(x, canWrite,
-            DemandIsCurrent(x, order, container), proposedIds.Contains(x.Id))).ToArray(), page, size, total, (long)page * size < total));
+            DemandIsCurrent(x, order, container), proposedIds.Contains(x.Id), !DemandContentIsCurrent(x, order, container))).ToArray(), page, size, total, (long)page * size < total));
     }
 
     private static async Task<IResult> GetPlanDraftAsync(Guid id, HttpContext http,
@@ -262,7 +283,7 @@ public static partial class ExportModule
         var proposed = await ProposalReadyAsync(db, ct) && await db.BlendPlanProposals.AsNoTracking()
             .AnyAsync(x => x.PlanId == id && x.CompanyId == scope.Value.Company, ct);
         return Results.Ok(PlanDto(plan, await access.HasPermissionAsync(Permissions.BlendPropose, ct),
-            DemandIsCurrent(plan, order, container), proposed));
+            DemandIsCurrent(plan, order, container), proposed, !DemandContentIsCurrent(plan, order, container)));
     }
 
     private static async Task<IResult> CancelPlanDraftAsync(Guid id, CancelBlendPlanDraftRequest request,

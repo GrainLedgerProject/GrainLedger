@@ -55,7 +55,7 @@ public static partial class ExportModule
                d.recorded_at AS "RecordedAt", d.reason AS "Reason",
                a.proposal_id IS NOT NULL AS "ActiveApproval",
                r.lot_id AS "LotId", r.location_id AS "LocationId",
-               COALESCE(r.quantity_kg, 0) AS "ReservedKg",
+               COALESCE(r.quantity_kg, 0) + COALESCE(e.rereserved_kg, 0) AS "ReservedKg",
                COALESCE(e.released_kg, 0) AS "ReleasedKg",
                COALESCE(e.consumed_kg, 0) AS "ConsumedKg"
         FROM grainledger.exports_blend_plan_proposals p
@@ -69,7 +69,8 @@ public static partial class ExportModule
             ON a.proposal_id = p.id AND a.company_id = p.company_id
         LEFT JOIN grainledger.ledger_blend_reservations r ON r.proposal_id = p.id
         LEFT JOIN LATERAL (
-            SELECT SUM(quantity_kg) FILTER (WHERE action = 'RELEASE') AS released_kg,
+            SELECT SUM(quantity_kg) FILTER (WHERE action = 'RESERVE') AS rereserved_kg,
+                   SUM(quantity_kg) FILTER (WHERE action = 'RELEASE') AS released_kg,
                    SUM(quantity_kg) FILTER (WHERE action = 'CONSUME') AS consumed_kg
             FROM grainledger.ledger_blend_reservation_events
             WHERE proposal_id = r.proposal_id AND lot_id = r.lot_id AND location_id = r.location_id

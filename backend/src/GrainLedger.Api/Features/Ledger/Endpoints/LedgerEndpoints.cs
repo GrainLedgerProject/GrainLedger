@@ -12,6 +12,7 @@ public static class LedgerEndpoints
     {
         var group = endpoints.MapGroup("/api/ledger").RequireAuthorization().AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>().AddEndpointFilter<LedgerErrorFilter>();
         group.MapTraceability();
+        group.MapContainers();
         foreach (var route in new[] { "setup", "lookups" })
         {
             var action = route;

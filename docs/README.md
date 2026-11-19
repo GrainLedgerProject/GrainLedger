@@ -12,6 +12,10 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## API Specifications (`docs/api/`)
 
+- [Container S2 workflow API](api/container-workflow-api.md): partial reviews/batches, multi-plan CLOSE, reviewed handoffs, HOLD notices and shipment records
+- [Container production API](api/container-production-api.md): approved one-batch production, actual-output review and output reservation/loading
+- [Container execution API](api/container-execution-api.md): approved direct-stock loading, HOLD, closure dossier and actual container tracing
+- [Container preparation API](api/container-api.md): draft-only preparation; actual loading/CLOSE remain blocked
 - [Catalog API](api/catalog-api.md): active substances, commodities, units, and system master data
 - [Farmer API](api/farmer-api.md): farmer profiles, household registry, and farm registration
 - [MRL API](api/mrl-api.md): maximum residue limit versions, draft limits, and publication lifecycle
@@ -23,6 +27,10 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## Guides & Walkthroughs (`docs/guides/`)
 
+- [Demo container và tracing cho giảng viên](guides/container-tracing-lecturer-demo.md): one fixed seed/demo walkthrough using DEMO-CONTAINER/PADDY on Supabase, preselected stock and bidirectional tracing
+- [Container S2 deployment](guides/container-s2-deployment.md) · [S2 web walkthrough](guides/container-s2-web-test.md)
+- [Container production deployment](guides/container-production-deployment.md): migration/grant review, shared-environment approval and compatible-instance checklist
+- [Container execution web tests](guides/container-execution-web-test.md): direct-stock loading/closure and trace/exception scenarios
 - [Authentication & Scalar API Guide](guides/auth-email-password-scalar.md): email/password auth, JWT/refresh tokens, OTP, and Scalar UI
 - [Companion Capture Codes](guides/companion-capture-codes.md): offline client synchronization codes and short token generation
 - [Development Accounts & Demo Data](guides/development-accounts.md): seeded personas, test passwords, and demo mill stock
@@ -39,7 +47,18 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 ## Plans & Backlogs (`docs/plans/`)
 
 - [Admin Capture Enhancements Plan](plans/admin-capture-enhancements-plan.md): administrative capture tooling, review queue, and bulk updates
-- [Container Loading Plan](plans/container-loading-plan.md): container stuffing, sealing, export dispatch, and seal verification
+- [Fresh demo preparation and rehearsal](reports/container-demo-v2-preparation-2026-11-18.md): new source/stock API preparation, complete web walkthrough, stock preservation and infrastructure limits
+- [Fresh container and tracing lecturer demo](guides/container-tracing-lecturer-demo-2026-11-18-v2.md): preselected fresh BLD079 stock, web rehearsal complete, 10kg retained for one new presentation run
+- [Container tracing deployment and web results](reports/container-tracing-deployment-2026-11-18.md): approved Supabase migration, scoped EXECUTE restoration and CM/Export tracing acceptance; ACL recurrence recorded
+- [Container tracing implementation](reports/container-tracing-flowchart-implementation-2026-11-18.md): code complete, focused tests passed; links shared deployment and browser acceptance
+- [Container tracing web acceptance](guides/container-tracing-flowchart-web-test.md): focused forward container nodes and backward graph walkthrough; core shared web acceptance recorded
+- [Container tracing Flowchart plan](plans/container-tracing-flowchart-plan-2026-11-18.md): forward container nodes, backward graph and navigation; implemented, advanced acceptance limits recorded
+- [Container S2 implementation plan](plans/container-s2-implementation-plan-2026-11-18.md): seven authorized requirement groups and focused verification
+- [Container core completion plan (2026-11-17, scope updated 2026-11-18)](plans/container-core-completion-plan-2026-11-17.md): completed S1, requirement-mapped S2 tasks and excluded extensions; two implementation stages
+- [Container execution plan](plans/container-execution-plan-2026-11-13.md): implemented DIRECT_STOCK baseline and deferred blend/output dependencies
+- [Container completion review](reports/container-completion-review-2026-11-13.md): current post-merge gaps, questions and ordered acceptance plan
+- [Container Loading Plan](plans/container-loading-plan.md): historical scope and requirements
+- [Container implementation history](plans/container-loading-implementation-plan.md) · [previous execution plan](plans/container-loading-next-plan.md) · [integration checklist](plans/container-integration-handover.md)
 - [F07 Milestone Backlog](plans/f07-backlog.md): ledger processing milestone scope and remaining acceptance items
 - [Laboratory Flow Plan](plans/lab-flow-plan.md): sample lifecycle, laboratory integration architecture, and policy gates
 - [Ledger Implementation Plan](plans/ledger-implementation-plan.md): core ledger workflows, mass balance, stock postings, and audits
@@ -51,6 +70,14 @@ Index of GrainLedger architecture, specifications, API routes, operational guide
 
 ## Reports & Reviews (`docs/reports/`)
 
+- [Container S2 shared deployment](reports/container-s2-deployment-2026-11-18.md): approved migration/single grant applied, preserved existing data/ACLs, runtime read checks and local-versus-Supabase fixture explanation
+- [Container S2 additional browser walkthroughs](reports/container-s2-web-walkthroughs-2026-11-18.md): P1/P2 and pool/transfer/bagging through CLOSE, both PASS on fresh isolated fixtures
+- [Container S2 implementation and verification](reports/container-s2-implementation-2026-11-18.md): actual test/browser results, 1,000-container benchmark, deployment status and retained limits
+- [Container production S1 verification (2026-11-18)](reports/container-production-implementation-2026-11-18.md): implemented approved blend → output review/reservation → loading/CLOSE/trace; isolated tests/browser PASS
+- [Container production deployment (2026-11-18)](reports/container-production-deployment-2026-11-18.md): approved shared migration and single runtime grant applied; backup, unchanged existing ACLs and read-only runtime verification
+
+- [Container end-to-end business flow (2026-11-16)](reports/container-end-to-end-business-flow-2026-11-16.md): luồng chính từ export order qua duyệt, blend, bàn giao thành phẩm, loading, CLOSE và trace; ai làm và điểm cần nối tiếp
+- [Container web test report (2026-11-16)](reports/container-web-test-report-2026-11-16.md): 30 nhóm ca manual với dữ liệu đầu vào, từng bước web, stock/reservation reconciliation, blockers, retry, scope và các nhánh chưa hỗ trợ; checklist, chưa phải kết quả nghiệm thu
 - [Admin Capture Enhancements Report](reports/admin-capture-enhancements-report.md): implementation review and verification report
 - [Authentication QA Report (2026-10-10)](reports/auth-qa-report-2026-10-10.md): auth flow audit, session management, and test evidence
 - [Traceability Feasibility Review (2026-10-17)](reports/traceability-feasibility-review-2026-10-17.md): graph engine options and performance evaluation

@@ -36,6 +36,7 @@ beforeEach(() => {
  routes = {
   '/api/auth/csrf': { token: 'csrf' }, '/api/ledger/trace/starts': page([]), '/api/ledger/lookups': look, '/api/ledger/lots': page([lot]), '/api/ledger/lots/source': lot, '/api/ledger/holds': page([]), '/api/ledger/notifications': page([]), '/api/ledger/history': page([]), '/api/ledger/operations': page([draft]), '/api/ledger/corrections': page([]),
   '/api/ledger/setup': { ...look, assignments: [], policies: [], compatibilities: [] }, '/api/admin/users': [], '/api/commodities': page([]), '/api/measurement-units': page([]),
+  '/api/container-notifications': { items: [] },
   '/api/admin/organizations': [{ id: 'company', name: 'Customer', kind: 'Customer' }], '/api/ledger/receiving-thresholds/own-company': { companyId: 'company', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'default-r1' },
   '/api/farmers': page([{ id: 'farmer', name: 'Farmer', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plots': page([{ id: 'plot', farmerId: 'farmer', code: 'Plot', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/crop-seasons': page([{ id: 'season', name: 'Season', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plot-seasons': page([{ id: 'ps', plotId: 'plot', seasonId: 'season', riceVariety: 'IR', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]),
   '/api/procurement-reference-data': { receivingOptions: [{ collectionSiteId: 'site', collectionSiteCode: 'SITE', collectionSiteName: 'Site', receivingLocationId: 'loc', receivingLocationCode: 'Store' }], commodity: { id: 'paddy' }, massUnits: [{ code: 'KG', name: 'kg' }], page: 1, pageSize: 100, totalCount: 1, hasMore: false, maxLinesPerReceipt: 100 }, '/api/procurements': page([]),
@@ -688,5 +689,24 @@ it('replaces a laboratory entry when tracing a stock lot in the same workspace',
   expect(await screen.findByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('source');
   expect(screen.queryByText(/Starting from a confirmed laboratory result/)).not.toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: 'Trace direction' })).toBeEnabled();
+  expect(fetchMock.mock.calls.some(([url, init]) => String(url).startsWith('/api/ledger/trace') && init?.method === 'POST')).toBe(false);
+});
+
+it('opens the selected container loading lot in dev tracing and replaces laboratory context', async () => {
+  const container = { preparationVersion: 2, id: 'container', code: 'BOX-TRACE', status: 'OPEN', facilityId: 'facility', orderId: null, targetKg: '1', version: 'v1', committedLoadedKg: '0', remainingKg: '1', containerNumber: null, sealNumber: null,
+    drafts: [{ id: 'loading-draft', loadedAt: '2026-10-25T00:00:00Z', totalKg: '1', lines: [{ lotId: 'source', lotCode: 'Source lot', locationId: 'store', quantityKg: '1' }] }] };
+  const implementation = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (url, init) => String(url).startsWith('/api/ledger/containers?') ? response(page([container]))
+    : String(url) === '/api/ledger/containers/container' ? response(container)
+    : String(url).includes('/containers/container/history') ? response(page([])) : implementation(url, init));
+  render(<LedgerWorkspace user={{ ...actor, role: 'ExportStaff', organizationId: 'customer', permissions: ['containers.write', 'trace.read.tenant'] }} initialLabOrigin={{ reportId: 'old-report', resultId: 'old-result' }} />);
+  const browser = userEvent.setup();
+  await browser.click(screen.getByRole('button', { name: 'Containers' }));
+  await browser.click(await screen.findByRole('button', { name: 'BOX-TRACE' }));
+  await browser.click(screen.getByRole('button', { name: 'Inspect lot Source lot' }));
+  await browser.click(screen.getByRole('button', { name: 'Trace selected loading lot' }));
+  expect(screen.getByRole('button', { name: 'Traceability' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('textbox', { name: 'Ledger lot ID' })).toHaveValue('source');
+  expect(screen.queryByText(/Starting from a confirmed laboratory result/)).not.toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([url, init]) => String(url).startsWith('/api/ledger/trace') && init?.method === 'POST')).toBe(false);
 });

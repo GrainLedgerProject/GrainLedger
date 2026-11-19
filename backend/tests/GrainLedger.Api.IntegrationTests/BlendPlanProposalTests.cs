@@ -294,6 +294,14 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             var held = await writer.GetFromJsonAsync<JsonElement>(candidatesUrl + "&includeExcluded=true");
             Assert.Equal("0", held.GetProperty("items").EnumerateArray()
                 .Single(item => item.GetProperty("lotId").GetGuid() == head).GetProperty("availableKg").GetString());
+            // Container preparation must not put fully reserved stock back in the free-stock picker.
+            var freeLots = await writer.GetFromJsonAsync<JsonElement>(
+                $"/api/ledger/lots?facilityId={scenario.FacilityId}&availableOnly=true");
+            Assert.DoesNotContain(freeLots.GetProperty("items").EnumerateArray(),
+                item => item.GetProperty("id").GetGuid() == head);
+            var reservedLot = await writer.GetFromJsonAsync<JsonElement>($"/api/ledger/lots/{head}");
+            Assert.Equal("0.000000", Assert.Single(reservedLot.GetProperty("positions").EnumerateArray())
+                .GetProperty("availableKg").GetString());
             using var competingApproval = await scenario.Customer.PostAsJsonAsync(competingPath + "/approve",
                 new ApproveBlendPlanRequest(Guid.NewGuid(), competingProposal.GetProperty("id").GetGuid(), 0));
             Assert.Equal(HttpStatusCode.Conflict, competingApproval.StatusCode);

@@ -1,0 +1,125 @@
+{
+  "environment": "ISOLATED_TESTCONTAINERS_POSTGRESQL_REAL_COOKIE_CSRF_PRODUCTION_WEB_ASSETS",
+  "migration": "20261118000000_ContainerWorkflow (isolated database only)",
+  "sharedDatabaseChanged": false,
+  "P1P2": {
+    "alerts": [],
+    "case": "P1_P2_CLOSE_BROWSER",
+    "checkedAt": "2026-11-18T05:13:39.616Z",
+    "containerId": "42ebd5c8-a36a-4f41-a9c6-5819d21ffb8d",
+    "loads": [
+      {
+        "loadId": "d8c9246a-828a-4d46-b106-26883f2eba7c",
+        "proposalId": "1a9ac9f9-9ea3-4977-8b16-52b4e95b5fd3"
+      },
+      {
+        "loadId": "c074132c-8456-4641-b1d8-48482b9e2bd9",
+        "proposalId": "d03f1c58-e111-466a-8f1d-cdb89af1f9f4"
+      }
+    ],
+    "reviewedScopes": [
+      {
+        "dependency": "4D7EB2A48CA88D95A222D8248BA5784E93FCA8D47FC07934567EDA2A94489EB9",
+        "productionOperations": [],
+        "proposalId": "1a9ac9f9-9ea3-4977-8b16-52b4e95b5fd3",
+        "reviewId": "7d7c7838-a336-4b29-ab9d-ed7a13a9039e"
+      },
+      {
+        "dependency": "4D7EB2A48CA88D95A222D8248BA5784E93FCA8D47FC07934567EDA2A94489EB9",
+        "productionOperations": [],
+        "proposalId": "d03f1c58-e111-466a-8f1d-cdb89af1f9f4",
+        "reviewId": "10dc0841-5210-4319-b254-99aef2eab786"
+      }
+    ],
+    "sources": [
+      {
+        "percentage": "100.000000",
+        "quantityKg": "10.000000",
+        "sourceLotId": "ad037da2-040f-4489-a783-2e26ac6ce77f"
+      }
+    ],
+    "status": "CLOSED"
+  },
+  "pool": {
+    "alerts": [],
+    "case": "POOL_TRANSFER_PARTIAL_BAGGING_CLOSE_BROWSER",
+    "checkedAt": "2026-11-18T05:15:51.886Z",
+    "complete": true,
+    "containerId": "f3ef4bba-3747-4d7a-90e5-d4175fcedb13",
+    "handoffs": [
+      {
+        "kind": "TRANSFER",
+        "quantityKg": "10",
+        "state": "COMMITTED"
+      },
+      {
+        "kind": "BAGGING",
+        "quantityKg": "5.999999",
+        "state": "COMMITTED"
+      }
+    ],
+    "holds": 0,
+    "lines": [
+      {
+        "locationId": "65e94c92-1b09-4539-b430-9d829b61b810",
+        "lotId": "1cc0629b-e89d-4f26-95b1-216ec8dc9c7e",
+        "quantityKg": 5.999999
+      },
+      {
+        "locationId": "5bed6ca7-37c6-4c92-9150-ce061b56495c",
+        "lotId": "66a41f43-37b3-437a-9d00-cd254781ae28",
+        "quantityKg": 4.000001
+      }
+    ],
+    "loaded": "10.000000",
+    "loads": [
+      {
+        "loadId": "3ed4b698-3f72-4923-9d36-7eda1d2017e3",
+        "proposalId": "2f95c88e-7837-4ebe-b03d-870e28cae5e9"
+      },
+      {
+        "loadId": "79cd8001-c818-4a4e-8ce0-4420214c99f3",
+        "proposalId": "2f95c88e-7837-4ebe-b03d-870e28cae5e9"
+      }
+    ],
+    "reviewedScopes": [
+      {
+        "dependency": "E55923CEE3BF5E275DEEEA9DFEE2B5D29CD8A20C938958BABFE2D2378F25F7B5",
+        "productionOperations": [],
+        "proposalId": "2f95c88e-7837-4ebe-b03d-870e28cae5e9",
+        "reviewId": "c207396c-9c85-4a97-af92-25048a210e98"
+      }
+    ],
+    "sources": [
+      {
+        "percentage": "50",
+        "quantityKg": "5.000000",
+        "sourceLotId": "bd0d5566-da85-46b8-abc0-f0a49f4315a8",
+        "status": "RECORDED"
+      },
+      {
+        "percentage": "50",
+        "quantityKg": "5.000000",
+        "sourceLotId": "c18229e7-6a65-4d2d-b3e4-47ae918513dc",
+        "status": "RECORDED"
+      }
+    ],
+    "status": "CLOSED"
+  },
+  "poolRemainder": [
+    {
+      "code": "BLD-20261118-000046",
+      "id": "a07f174c-9349-4143-8a50-607428066da0",
+      "isCurrentPool": true,
+      "positions": [
+        {
+          "availableKg": "10.000000",
+          "facilityId": "8ba96a6a-12fd-444a-8804-0187549fd81a",
+          "locationId": "56aeb51e-863c-4f09-8d25-3e01a5123180",
+          "poolRevision": 2,
+          "quantityKg": "10.000000"
+        }
+      ]
+    }
+  ]
+}

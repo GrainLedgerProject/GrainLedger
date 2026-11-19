@@ -1,0 +1,139 @@
+{
+  "preview": {
+    "alerts": [],
+    "text": "← Back to container\nBLEND PLANNING\nPlan v1\n\nA saved proposal records an assessment. Stock is reserved later during approval.\n\nRefresh\nDemand snapshot\nCancel draft\nStatus\nDraft\nTarget\n10 kg\nProduct\nBlended rice\nDemand\nCurrent\n\nMarket: DEMO-CONTAINER · GrainLedger Demo Container Market (synthetic) · Commodity: PADDY · Paddy · Shipping 2026-11-19 to 2026-11-25.\n\nBuyer quality specification\nStock and sources\n\nFacility is the mill. A location is a silo or store within it. A lot or mixed pool is stock at a location. Physical stock status does not confirm that its product matches this plan.\n\nFacility\nSelect facility\nGrainLedger Demo Container Quality Mill (synthetic)\nGrainLedger Demo Container Test Mill (synthetic)\nGrainLedger Demo Mill (synthetic)\nShow other products\nShow excluded stock\nRefresh stock\nFacility positions\n14\nFacility stock\n170 kg\nDirect product match\n20 kg\nExcluded positions\n10\nLot\tLocation\tAvailable\tProduct\tPlan fit\tPhysical status\t\nBRK-20261117-000053\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBRK-20261118-000075\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nHDR-20261117-000063\tDemo Container Head Rice Store\t20 kg\tHead rice\tPossible blend input\tIn stock\tSources\nBRK-20261117-000056\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBLD-20261118-000079\tDemo Container Blend Store\t20 kg\tBlended rice\tDirect match\tIn stock\tSources\nBRK-20261117-000047\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBRK-20261118-000078\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBRK-20261117-000038\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBRK-20261117-000059\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBRK-20261117-000029\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBRK-20261117-000050\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBRK-20261117-000044\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nBRK-20261117-000032\tDemo Container Broken Rice Store\t10 kg\tBroken rice\tPossible blend input\tIn stock\tSources\nPage 1 · 13 total\nPrevious Next\nAssessed preview\n\nThe server selects candidate quantities and checks the complete plan.\n\nCalculate plan\nSearch\nPass\nAssessment\nPASS\nSelected input\n10 kg\nPredicted output\n10 kg\nSelected stock\n\nDirect stock\n\nLot\tLocation\tInput\nBLD-20261118-000079\tDemo Container Blend Store\t10 kg\nChecks and evidence\nArea\tCheck\tResult\tActual\tLimit\tNext step\nStock and output\tOutput mass\tPASS\t10 kg\t10 kg\t—\nResidues and market\tResidue limit\tPASS\t0.02 mg/kg\t0.9 mg/kg\t—\nProduct quality\tQuality limit\tPASS\t13.2 %\t≤ 14 %\t—\nEvidence versions and calculation details\n\nThis preview reference expires after ten minutes. The server checks all inputs again when you propose.\n\nSave proposal\nHistory\nDraft created · Demo ExportStaff · 11/18/2026, 7:03:22 PM\nPage 1 · 1 total\nPrevious Next"
+  },
+  "approval": {
+    "alerts": [],
+    "text": "← Back to container\nBLEND PLANNING\nPlan v1\n\nA saved proposal records an assessment. Stock is reserved later during approval.\n\nRefresh\nDemand snapshot\nStatus\nProposal saved\nTarget\n10 kg\nProduct\nBlended rice\nDemand\nCurrent\n\nMarket: DEMO-CONTAINER · GrainLedger Demo Container Market (synthetic) · Commodity: PADDY · Paddy · Shipping 2026-11-19 to 2026-11-25.\n\nBuyer quality specification\nSaved proposal\n\nRecorded 11/18/2026, 7:04:38 PM · Freshness: CURRENT\n\nSearch\nPass\nAssessment\nPASS\nSelected input\n10 kg\nPredicted output\n10 kg\nSelected stock\n\nDirect stock\n\nLot\tLocation\tInput\nBLD-20261118-000079\tDemo Container Blend Store\t10 kg\nChecks and evidence\nArea\tCheck\tResult\tActual\tLimit\tNext step\nStock and output\tOutput mass\tPASS\t10 kg\t10 kg\t—\nResidues and market\tResidue limit\tPASS\t0.02 mg/kg\t0.9 mg/kg\t—\nProduct quality\tQuality limit\tPASS\t13.2 %\t≤ 14 %\t—\nEvidence versions and calculation details\nProposal decision\nDecision\nApproved\nReservation\nHeld\nReserved\n10 kg\nStill held\n10 kg\nReleased\n0 kg\nConsumed\n0 kg\n\nDecided 11/18/2026, 7:05:48 PM\n\nHistory\nPlan proposed · Demo ExportStaff · 11/18/2026, 7:04:38 PM\nDraft created · Demo ExportStaff · 11/18/2026, 7:03:22 PM\nPage 1 · 2 total\nPrevious Next"
+  },
+  "partial": {
+    "alerts": [],
+    "requests": [
+      {
+        "loaded": "4.000000",
+        "loads": 1,
+        "remaining": "6.000000",
+        "status": 200
+      }
+    ]
+  },
+  "partialRefresh": {
+    "closeButtonDisabled": true,
+    "loadCount": 1,
+    "loaded": "4.000000",
+    "remaining": "6.000000"
+  },
+  "partialSources": {
+    "sources": "Source\tActual kg\tShare (%)\tPlot / provenance\nRAW-20261118-000072\t2.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317\nRAW-20261118-000071\t2.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317"
+  },
+  "partialGraph": {
+    "containerNodes": 1,
+    "loading": [
+      "4.000000 kg loaded"
+    ],
+    "sources": "Source\tActual kg\tShare (%)\tPlot / provenance\nRAW-20261118-000072\t2.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317\nRAW-20261118-000071\t2.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317"
+  },
+  "full": {
+    "loaded": "10.000000",
+    "remaining": "0.000000",
+    "loads": [
+      [
+        "4.000000"
+      ],
+      [
+        "6.000000"
+      ]
+    ],
+    "readiness": "PASS"
+  },
+  "closed": {
+    "code": "CTN-20261118-000025",
+    "dossierAvailable": true,
+    "hasLoadForm": false,
+    "loaded": "10.000000",
+    "loads": [
+      [
+        "4.000000"
+      ],
+      [
+        "6.000000"
+      ]
+    ],
+    "remaining": "0.000000",
+    "status": "CLOSED"
+  },
+  "closedBackward": {
+    "containerNodes": [
+      "STARTING CONTAINER\nCTN-20261118-000025\nCLOSED · 10.000000 kg linked actual loading\nNo recorded restrictions\nOpen container details"
+    ],
+    "loadLabels": [
+      "10.000000 kg loaded"
+    ],
+    "lotCount": 7,
+    "sourceTable": "Source\tActual kg\tShare (%)\tPlot / provenance\nRAW-20261118-000072\t5.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317\nRAW-20261118-000071\t5.000000\t50\ta0ced0f7-2e31-462f-a547-ce547a87b317"
+  },
+  "dossier": {
+    "containerId": "bf38e257-b045-49a9-8b4b-4946dc7b7415",
+    "loads": 2,
+    "sources": [
+      {
+        "percentage": "50.000000",
+        "quantityKg": "5.000000",
+        "sourceLotId": "048d5b61-949d-417e-955c-ea36435182aa"
+      },
+      {
+        "percentage": "50.000000",
+        "quantityKg": "5.000000",
+        "sourceLotId": "9a2da471-cb8c-474a-aeb8-e220dc3bafc0"
+      }
+    ],
+    "targetKg": "10.000000"
+  },
+  "forward": {
+    "alerts": [],
+    "targets": "Container\tLinked loaded kg\tStatus\tHOLD\nCTN-20261118-000025\t10.000000\tCLOSED\tNone"
+  },
+  "forwardGraph": {
+    "loads": [
+      "10.000000 kg loaded"
+    ],
+    "lots": [
+      "RAW-20261118-000071",
+      "DRY-20261118-000073",
+      "BRK-20261118-000075",
+      "HDR-20261118-000074",
+      "BLD-20261118-000079"
+    ],
+    "nodes": [
+      {
+        "href": "/export/containers/bf38e257-b045-49a9-8b4b-4946dc7b7415",
+        "label": "Open container CTN-20261118-000025"
+      }
+    ]
+  },
+  "stockLeftForLecturer": {
+    "checkedAt": "2026-11-18T12:13:17.889Z",
+    "code": "BLD-20261118-000079",
+    "contributions": [
+      {
+        "quantityKg": "10.000000",
+        "sourceLotId": "9a2da471-cb8c-474a-aeb8-e220dc3bafc0"
+      },
+      {
+        "quantityKg": "10.000000",
+        "sourceLotId": "048d5b61-949d-417e-955c-ea36435182aa"
+      }
+    ],
+    "lotId": "69f2035a-5dfe-4ffc-a7ff-504a22a138a2",
+    "positions": [
+      {
+        "availableKg": "10.000000",
+        "facilityId": "3e7c6c0c-2936-5a5c-9495-18e4ac027920",
+        "locationId": "05fee1f0-67a0-5cf4-94a7-72d27204beb2",
+        "quantityKg": "10.000000"
+      }
+    ],
+    "stage": "BLENDED_RICE"
+  }
+}

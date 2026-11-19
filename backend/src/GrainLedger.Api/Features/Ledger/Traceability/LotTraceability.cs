@@ -69,7 +69,7 @@ public static class LotTraceability
             return Results.Problem(statusCode: 400, title: "Valid Ledger lot or confirmed report/result IDs and trace view are required.");
         var actor = await ledger.ActorAsync(ct);
         await using var connection = await dataSource.OpenConnectionAsync(ct);
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
         try
         {
             await using (var timeout = new NpgsqlCommand("SET LOCAL statement_timeout='25s'", connection, transaction))
@@ -89,6 +89,7 @@ public static class LotTraceability
             command.Parameters.AddWithValue(actor); command.Parameters.AddWithValue(request.LotId);
             command.Parameters.AddWithValue(request.Direction); command.Parameters.AddWithValue(request.View);
             var result = JsonNode.Parse((string)(await command.ExecuteScalarAsync(ct))!)!.AsObject();
+            result["root"] = new JsonObject { ["type"] = "lot", ["id"] = request.LotId };
             if (result["schemaVersion"]?.GetValue<int>() != 2)
                 return Results.Problem(statusCode: 503, title: "Custody trace upgrade is not installed. Run approved owner migrations and runtime-role configuration.");
             if (result["sourceContributionsVisible"]!.GetValue<bool>())
@@ -106,11 +107,29 @@ public static class LotTraceability
             else result["sources"] = new JsonArray();
             if (origin is not null)
                 result["labOrigin"] = JsonSerializer.SerializeToNode(origin, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (request.Direction == "forward")
+            {
+                await using var installed = new NpgsqlCommand("SELECT to_regprocedure('grainledger.ledger_container_targets(uuid,uuid,uuid[])') IS NOT NULL", connection, transaction);
+                if (Equals(await installed.ExecuteScalarAsync(ct), true))
+                {
+                    await using var targets = new NpgsqlCommand("SELECT grainledger.ledger_container_targets($1,$2,$3)::text",connection,transaction);
+                    targets.Parameters.AddWithValue(actor);targets.Parameters.AddWithValue(request.LotId);
+                    targets.Parameters.AddWithValue(result["lots"]!.AsArray().Select(x=>x!["id"]!.GetValue<Guid>()).ToArray());
+                    var targetResult = JsonNode.Parse((string)(await targets.ExecuteScalarAsync(ct))!)!;
+                    result["actualContainers"] = targetResult["items"]!.DeepClone();
+                    result["loadingEdges"] = targetResult["loadingEdges"]?.DeepClone();
+                    result["containerCoverage"]="ACTUAL_LOADING";
+                }
+                else result["containerCoverage"]="NOT_INSTALLED";
+            }
+            // Graph, stock and actual targets share the transaction snapshot. Authority is checked
+            // again on a fresh runtime connection so revocation is not hidden by REPEATABLE READ.
+            await using var authorizationConnection = await dataSource.OpenConnectionAsync(ct);
             await using var authorize = new NpgsqlCommand("""
                 SELECT CASE WHEN $3 THEN grainledger.ledger_role($1) IN ('Administrator','CustomerManager')
                     ELSE grainledger.ledger_role($1) IN ('Administrator','CustomerManager','ExportStaff') END
                     AND (grainledger.ledger_role($1)='Administrator' OR grainledger.ledger_own($1,$2))
-                """, connection, transaction);
+                """, authorizationConnection);
             authorize.Parameters.AddWithValue(actor); authorize.Parameters.AddWithValue(result["ownerId"]!.GetValue<Guid>());
             authorize.Parameters.AddWithValue(result["sourceContributionsVisible"]!.GetValue<bool>());
             if (!Equals(await authorize.ExecuteScalarAsync(ct), true)) return Results.Forbid();
