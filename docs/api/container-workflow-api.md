@@ -33,11 +33,14 @@ Ordinary transfer retains lot identity; custody extraction uses existing aliquot
 - `POST .../workflow/documents`: Export `{operationId,version,documentType,filename,contentType,content,reason}` after CLOSED. `content` is base64, 1 byte–10 MiB; safe filename ≤200 characters, document type ≤80, reason ≤1000. Server computes SHA-256 and allocates the next per-container/type version under the writer lock. Same request replays without another version.
 - `POST .../workflow/documents/packing-list` accepts `{operationId,version}` from Export after CLOSE. The server generates printable HTML from recorded container and seal identifiers, order and commodity codes, closure time and net mass by loaded lot. Each request creates the next `PACKING_LIST` version with a SHA-256 hash. Retrying the same request returns its saved result. Package counts and gross or tare weights are omitted because the manifest does not record them.
 - `GET .../workflow/documents/{document}/file` returns a scoped Export/CM attachment with immutable bytes and hash.
+- Workflow document metadata includes `origin`. New Packing Lists generated from closure records use `GENERATED`. Uploaded files use `UPLOADED`, including uploads labeled `PACKING_LIST`. Records from before document origin was captured report `UNKNOWN`.
 - `POST .../workflow/supplements`: Export `{operationId,version,evidenceId,reason}` after CLOSED. Evidence must belong to the same company and a shipment facility. Append actor/time/reason without overwriting the closing snapshot or reopening CLOSE.
 
 ## HOLD notices and handling
 
 Trace HOLD forms submit immutable evidence and a reason. A Customer Manager can use `POST /api/ledger/holds` with `{id,lotId,evidenceId,reason}` or `POST /api/export-containers/{id}/execution/holds` with `{operationId,version,evidenceId,reason}`. Evidence must match the target company and a recorded facility. Older request shapes continue to work. In the placement transaction, the system retires any affected approval and releases only the unused reservation. Container HOLD blocks draft, preview, proposal approval and further execution. Lot HOLD alerts active own-company Export Officers and Mill Managers assigned to affected shipment positions, in addition to existing recipients.
+
+Inherited shipment HOLD is calculated from positive source ancestry. Candidate selection, reservation and execution use this restriction even before the first load. For ordinary lots already linked to a shipment through reservation, output claim or manifest, stock availability and ordinary transfers also honor the inherited HOLD. An assigned Mill Manager can use the existing isolation transfer with the original HOLD ID for the affected lot. The web persists the exact pending HOLD request for the signed-in actor and target across navigation. Container HOLD uses one evidence-backed form on the container page.
 
 Container HOLD creation commits unique per-recipient notices for responsible own-company CM/Export and assigned Mill Managers. Missing required recipients rolls back HOLD. `GET /api/container-notifications` returns only current authorized recipient notices, including unread notices retained while offline. `POST .../workflow/notifications/read` accepts `{operationId,version,noticeId}` and does not release restrictions.
 
@@ -46,6 +49,8 @@ Container HOLD creation commits unique per-recipient notices for responsible own
 ## Business history
 
 `GET /api/ledger/business-history` unifies permitted procurement and arrival, laboratory, export plan, reservation, container, HOLD, trace, processing/correction and administration events. Optional filters are `category`, exact `eventType`, partial `search` (record code/ID, event type or linked reference), inclusive UTC dates `from` and `to` in `YYYY-MM-DD`, `page` and `pageSize`. Warehouse visibility follows assigned facility scope. Tenant and administration records follow their current role permissions. Event summaries include actor, time, reference, selected versions and evidence references when permitted.
+
+Mill Managers assigned to a facility recorded in a container's proposal at HOLD time can find that container HOLD before its first load. A HOLD response uses the assigned facility retained on the response event.
 
 ## Transactions, errors and browser retries
 
@@ -59,3 +64,5 @@ See [S2 implementation plan](../plans/container-s2-implementation-plan-2026-11-1
 Container source trace giữ nguyên endpoint và source totals; phần Flowchart mới bổ sung graph backward từ toàn bộ actual manifest. Xem [contract tracing](traceability-api.md#container-nodes-và-backward-từ-container) và [kịch bản web](../guides/container-tracing-flowchart-web-test.md). Migration tracing là bước deployment riêng, chưa được áp dụng chỉ vì code đã có.
 
 The completion migration `20261123000000_ContainerTraceCompletion` adds the loading and HOLD guards and the scoped history and order-progress routines. Run the existing explicit migration and runtime-grant configuration before deploying the new code.
+
+The forward migration `20261123010000_ContainerTraceCorrections` updates the inherited HOLD scope and history permissions and adds document provenance. It retains existing document bytes, operation receipts and HOLD events.

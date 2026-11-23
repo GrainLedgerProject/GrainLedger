@@ -147,8 +147,12 @@ public static partial class ExportModule
             await WorkflowSqlAsync(actor, id, "detail", EmptyContainerPayload, null, db, ct);
             var company = await db.Containers.AsNoTracking().Where(x => x.Id == id).Select(x => x.CompanyId).SingleAsync(ct);
             await LockAsync(db, company, ct);
+            JsonElement? documentBasis = null;
             if (request is ContainerPackingListRequest packing)
+            {
                 payload = await GeneratePackingListAsync(actor, id, packing, db, ct);
+                documentBasis = JsonSerializer.SerializeToElement(new { documentOrigin = "GENERATED" }, ContainerJson);
+            }
             var replayPayload = System.Text.Json.Nodes.JsonNode.Parse(payload.GetRawText())!.AsObject(); replayPayload["replayAction"] = action;
             var replay = await WorkflowSqlAsync(actor, id, "replay", JsonSerializer.SerializeToElement(replayPayload), null, db, ct);
             if (!replay.TryGetProperty("replayMissing", out _)) { await tx.CommitAsync(ct); return Results.Ok(replay); }
@@ -162,7 +166,7 @@ public static partial class ExportModule
                 basis = await AssessHandoffAsync(actor, id, payload.GetProperty("handoffId").GetGuid(), db, ledger, residue, mrl, policies, ct);
             if (basis is { } b && b.GetProperty("assessmentStatus").GetString() != "PASS")
                 return Results.Json(new { code = "WORKFLOW_BLOCKED", readiness = b }, statusCode: 409);
-            var result = await WorkflowSqlAsync(actor, id, action, payload, basis, db, ct);
+            var result = await WorkflowSqlAsync(actor, id, action, payload, basis ?? documentBasis, db, ct);
             if (basis is not null)
             {
                 var final = request is ContainerScopeReviewRequest aReview

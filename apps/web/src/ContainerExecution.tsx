@@ -39,7 +39,7 @@ export function ContainerExecution({ id, userId, canWrite, canHold, canReview = 
   const route = `/api/export-containers/${id}/execution`, key = `grainledger.container.execution.${userId}.${id}`;
   const [detail, setDetail] = useState<Container | null>(null), [readiness, setReadiness] = useState<Readiness | null>(null);
   const [reload, setReload] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const [number, setNumber] = useState(''), [seal, setSeal] = useState(''), [reason, setReason] = useState('');
+  const [number, setNumber] = useState(''), [seal, setSeal] = useState('');
   const [selection, setSelection] = useState(''), [kg, setKg] = useState(''), [confirmation, setConfirmation] = useState(false);
   const [pending, setPending] = useState<Pending | null>(() => saved(key));
   const [history, setHistory] = useState<{ items: { id: string; kind: string; recorded_at: string }[]; page: number; hasMore: boolean } | null>(null);
@@ -61,7 +61,7 @@ export function ContainerExecution({ id, userId, canWrite, canHold, canReview = 
     try {
       const receipt = await api<Container>(request.path, { method: 'POST', body: request.body });
       if (!receipt || receipt.id !== id || !Number.isInteger(receipt.version) || typeof receipt.loadedKg !== 'string') throw new Error('The operation result is uncertain. Retry the same operation.');
-      sessionStorage.removeItem(key); setPending(null); setConfirmation(false); setKg(''); setSelection(''); setReason(''); setReload(n => n + 1); onChanged?.();
+      sessionStorage.removeItem(key); setPending(null); setConfirmation(false); setKg(''); setSelection(''); setReload(n => n + 1); onChanged?.();
     } catch (cause) {
       if (cause instanceof ApiError && cause.status < 500 && cause.status !== 408) { sessionStorage.removeItem(key); setPending(null); }
       setError(errorMessage(cause));
@@ -116,11 +116,10 @@ export function ContainerExecution({ id, userId, canWrite, canHold, canReview = 
         <button disabled={!selected || !confirmation || !kg}>Commit actual loading</button></fieldset></form>}
       <h3>Committed manifest</h3>{detail.loads.length ? detail.loads.map(load => <div key={load.id}><p>{new Date(load.loadedAt).toLocaleString()}</p><ul>{load.lines.map(line => <li key={`${line.lotId}:${line.locationId}`}><button className="text-button" onClick={() => onNavigate(`/ledger/lots/${line.lotId}`)}>{line.lotCode}</button> · {line.quantityKg} kg</li>)}</ul></div>) : <p className="empty">No actual loading recorded.</p>}
       {canWrite && detail.status === 'LOADING' && <button disabled={busy || !!pending || readiness?.phase !== 'CLOSE' || readiness.assessmentStatus !== 'PASS'} onClick={() => { if (window.confirm('Close this container and freeze its manifest?')) void mutate('close', {}); }}>Close container</button>}
-      {canHold && <form onSubmit={event => { event.preventDefault(); if (!pending) void mutate('holds', { reason }); }}><fieldset disabled={busy || !!pending}><legend>Place container HOLD</legend><label>HOLD reason<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label><button>Place container HOLD</button></fieldset></form>}
+      {canHold && detail.companyId && <TraceHoldForm key={id} target={{ type: 'container', id, code: detail.code, version: detail.version, held: detail.holds.length > 0 }}
+        userId={userId} ownerId={detail.companyId} disabled={busy || !!pending} onSaved={() => { setReload(n => n + 1); onChanged?.(); }} />}
       {(canHold || canWrite) && <div className="admin-form-actions">{canHold && <button className="secondary" disabled={busy || !!pending} onClick={() => void inspect('trace')}>Trace container sources</button>}{detail.dossierAvailable && <button className="secondary" disabled={busy || !!pending} onClick={() => void inspect('dossier')}>Read closure dossier</button>}</div>}
-      {trace && <><ContainerSourceTrace key={trace.graph?.traceId || 'sources'} trace={trace} />
-        {canHold && detail.companyId && !detail.holds.length && <TraceHoldForm target={{ type: 'container', id, code: detail.code, version: detail.version }} ownerId={detail.companyId} onSaved={() => { setReload(n => n + 1); onChanged?.(); }} />}
-      </>}
+      {trace && <ContainerSourceTrace key={trace.graph?.traceId || 'sources'} trace={trace} />}
       <section><h3>Container history</h3><button className="secondary" disabled={busy || !!pending} onClick={() => void readHistory(1)}>Read container history</button>{history && <><ul>{history.items.map(item => <li key={item.id}>{item.kind} · {new Date(item.recorded_at).toLocaleString()}</li>)}</ul><div className="form-footer"><span>Page {historyPage}</span><button className="secondary" disabled={busy || historyPage === 1} onClick={() => void readHistory(historyPage - 1)}>Previous history page</button><button className="secondary" disabled={busy || !history.hasMore} onClick={() => void readHistory(historyPage + 1)}>Next history page</button></div></>}</section>
       {dossier != null && <section><h3>Immutable closure dossier</h3><p className="muted">Historical decision and actual manifest; later HOLDs do not rewrite this snapshot.</p><pre className="table-scroll">{JSON.stringify(dossier, null, 2)}</pre><a className="text-button" download={`${detail.code}-dossier.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dossier, null, 2))}`}>Download dossier JSON</a></section>}
     </>}

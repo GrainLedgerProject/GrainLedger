@@ -8,7 +8,7 @@ type Proposal = { id: string; planId: string; version: number; context: { facili
 type Handoff = { id: string; proposalId: string; facilityId: string; kind: string; state: string; version: number; content: { lotId: string; quantityKg: string; fromLocationId: string; toLocationId: string } };
 type Workflow = { containerId: string; ownerId: string; status: string; version: number; proposals: Proposal[];
   reviews: { id: string; proposalId: string; scope: string; decision: string; reason: string; recordedAt: string }[];
-  handoffs: Handoff[]; documents: { id: string; documentType: string; version: number; filename: string; sha256: string }[];
+  handoffs: Handoff[]; documents: { id: string; documentType: string; version: number; origin?: 'GENERATED' | 'UPLOADED' | 'UNKNOWN'; filename: string; sha256: string }[];
   supplements: { id: string; evidenceId: string; reason: string; recordedAt: string }[];
   holds: { id: string; reason: string }[]; holdResponses: { id: string; action: string; reason: string; recordedAt: string }[] };
 const localTime = () => { const now = new Date(); return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
@@ -103,7 +103,7 @@ export function ContainerWorkflow({ id, userId, canReview = false, canWrite = fa
         <label>Document version reason<textarea required maxLength={1000} value={documentReason} onChange={event => setDocumentReason(event.target.value)} /></label>
         <button>Save document version</button>
       </fieldset></form>}
-      {data.documents.length > 0 && <section><h3>Versioned shipment documents</h3><ul>{data.documents.map(d => <li key={d.id}>{d.documentType} v{d.version} · <a href={`${route}/documents/${d.id}/file`}>{d.filename}</a></li>)}</ul></section>}
+      {data.documents.length > 0 && <section><h3>Versioned shipment documents</h3><ul>{data.documents.map(d => <li key={d.id}>{d.documentType} v{d.version} · {d.origin === 'GENERATED' ? 'Generated from closure dossier' : d.origin === 'UPLOADED' ? 'Uploaded file' : 'Origin unrecorded'} · <a href={`${route}/documents/${d.id}/file`}>{d.filename}</a></li>)}</ul></section>}
       {(canWrite && data.status === 'CLOSED' || manager && data.holds.length > 0) && <section>
         <label>Evidence facility<select required value={facility} onChange={event => { setFacility(event.target.value); setEvidence(''); }}><option value="">Select facility</option>{facilities.map(f => <option key={f} value={f}>{look?.facilities.find(l => l.id === f)?.name || `Shipment facility ${facilities.indexOf(f) + 1}`}</option>)}</select></label>
         <Evidence ownerId={data.ownerId} facilityId={facility} value={evidence} onChange={setEvidence} />

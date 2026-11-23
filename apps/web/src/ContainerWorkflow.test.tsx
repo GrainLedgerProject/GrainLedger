@@ -36,12 +36,19 @@ it('retains a scope review across remount and retries the exact uncertain reques
 });
 
 it('gives Export document and supplement controls without customer review or mill execution authority', async () => {
-  fetchMock.mockImplementation(async () => json({ ...data, status: 'CLOSED' }));
+  fetchMock.mockImplementation(async () => json({ ...data, status: 'CLOSED', documents: [
+    { id: 'generated', documentType: 'PACKING_LIST', version: 1, filename: 'packing-list.html', origin: 'GENERATED' },
+    { id: 'uploaded', documentType: 'PACKING_LIST', version: 2, filename: 'scanned-list.pdf', origin: 'UPLOADED' },
+    { id: 'historical', documentType: 'PACKING_LIST', version: 3, filename: 'old-list.html', origin: 'UNKNOWN' },
+  ] }));
   render(<ContainerWorkflow id="container1" userId="export1" canWrite />);
   await screen.findByRole('button', { name: 'Save document version' });
   expect(screen.getByRole('button', { name: 'Append evidence supplement' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Approve and activate scope' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Commit reviewed handoff' })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'packing-list.html' }).parentElement).toHaveTextContent('Generated from closure dossier');
+  expect(screen.getByRole('link', { name: 'scanned-list.pdf' }).parentElement).toHaveTextContent('Uploaded file');
+  expect(screen.getByRole('link', { name: 'old-list.html' }).parentElement).toHaveTextContent('Origin unrecorded');
 });
 
 it('lets the assigned Operator commit a reviewed handoff and never shows scope approval controls', async () => {

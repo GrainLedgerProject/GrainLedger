@@ -4,6 +4,51 @@ Kiểm thử ngày 19/11/2026. Đối chiếu yêu cầu ngày 23/11/2026. Mã �
 
 Ở bản dev được rà soát, luồng chính chạy được từ phương án đã duyệt, nạp từng phần đến CLOSE và truy vết hai chiều qua manifest. Dossier giữ nguyên sau HOLD. Đợt đối chiếu đó ghi nhận **6 nhóm yêu cầu chưa đáp ứng đầy đủ** và **7 lỗi hoặc điểm bất nhất**. Các mục bên dưới giữ lại hiện trạng và bước tái hiện ở bản dev này.
 
+## Bản sửa sau tái kiểm thử
+
+Đã sửa cả sáu lỗi tái hiện trên nhánh `feat/container-fix`. Kết quả dưới đây dùng bản sửa trên PostgreSQL cô lập và web build production.
+
+| Lỗi | Kết quả sau sửa |
+|---|---|
+| 1. Lô xuất hàng bị ảnh hưởng vẫn chuyển kho thường được và cách ly thất bại | Trace báo HOLD và `0` kg khả dụng. API chặn chuyển kho thường. Mill Manager mở cảnh báo của lô bị ảnh hưởng, cách ly đúng lô bằng mã HOLD gốc và ghi nhận phản hồi. |
+| 2. Có thể chọn lại lô bị ảnh hưởng cho container khác | Preview hiển thị hạn chế `HOLD` và `0` kg khả dụng. Backend kiểm lại phạm vi HOLD khi giữ chỗ, kể cả khi lô đang được chọn lần đầu cho container. |
+| 3. Mất phản hồi rồi đổi lô tạo hai HOLD | Form lưu yêu cầu đang gửi theo tài khoản, công ty và đối tượng. Chromium đã mô phỏng phản hồi mất sau khi API ghi thành công. Đổi lô rồi quay lại và retry dùng cùng mã yêu cầu. API chỉ lưu một HOLD. |
+| 4. Mill Manager thiếu lịch sử HOLD trước lần nạp đầu | Mill Manager phụ trách cơ sở của phương án thấy sự kiện đặt HOLD và phản hồi `ACKNOWLEDGE` của container `PLANNED`. Các bài test xác nhận Mill Manager ngoài phạm vi và tài khoản công ty khác bị giới hạn. |
+| 5. Hai form HOLD trên màn container | Màn chi tiết còn một form đặt HOLD yêu cầu evidence, kể cả khi bảng trace đang mở. |
+| 6. Packing List thiếu nguồn tạo | Danh sách phân biệt `Generated from dossier` và `Uploaded file`. Các chứng từ đã lưu trước migration hiện `Origin not recorded`. Phiên bản và nội dung chứng từ cũ được giữ nguyên. |
+
+Hai ca kiểm thử kho thường phát hiện phạm vi HOLD kế thừa ban đầu quá rộng. Phạm vi cuối giữ quy tắc HOLD trực tiếp cho lô kho thường ngoài luồng xuất hàng. Khi chọn lô cho container, preview và bước giữ chỗ kiểm tra HOLD theo nguồn đóng góp.
+
+- `dotnet test GrainLedger.slnx` đạt **655/655** trên PostgreSQL Testcontainers. Vitest đạt **259/259** và `npm run build` thành công.
+- HTTP và Chromium qua luồng loading, CLOSE, hoàn thành đơn, Packing List, trace hai chiều, truy xuôi từ lab đã xác nhận và quyền xem audit. Chromium kiểm thêm Fit graph trên desktop và mobile, giới hạn quyền Administrator, HOLD có evidence, retry sau khi mất phản hồi và lịch sử HOLD trước khi nạp.
+- Migration [`20261123010000_ContainerTraceCorrections`](../../backend/src/GrainLedger.Api/Data/Migrations/20261123010000_ContainerTraceCorrections.cs) đã chạy trong môi trường test cô lập. Supabase vẫn dùng migration đã triển khai trước đó.
+
+## Tái kiểm thử trước khi merge ngày 23/11/2026
+
+Bản kiểm thử là commit `ad76034` trên `feat/container-fix`. Dùng PostgreSQL Testcontainers, API qua HTTP loopback và build production của web. Dữ liệu, evidence và phiên đăng nhập là dữ liệu tổng hợp. Lượt này chạy lại cả bộ test backend và web, sau đó kiểm riêng những tình huống nằm ngoài các ca hồi quy đã có.
+
+**Kết luận cập nhật:** loading, CLOSE, tạo Packing List và truy vết trên luồng chính đạt. HOLD lô nguồn, retry HOLD và lịch sử của Mill Manager còn lỗi tái hiện được. Chưa đạt điều kiện merge.
+
+### Lỗi đã tái hiện
+
+1. **Cao · Lô phối trộn bị ảnh hưởng được chuyển kho thường nhưng không cách ly được (F19).** Nạp 4 kg từ một lô phối trộn rồi đặt HOLD lên lô nguồn có đóng góp. Mill Manager nhận cảnh báo cho lô phối trộn. Chuyển 1 kg vào khu cách ly với mã HOLD trả `409` vì lô thiếu effective HOLD. Mill Operator chuyển 1 kg của cùng lô giữa hai vị trí thường nhận `200`. Cùng một trace forward báo lô phối trộn còn kg khả dụng và thiếu cờ HOLD, trong khi container hiển thị hạn chế lô đã nạp. Phạm vi nhận diện lô ảnh hưởng cần nhất quán giữa cảnh báo, tồn khả dụng, chặn di chuyển và cách ly. [Tạo cảnh báo cho lô ảnh hưởng](../../backend/src/GrainLedger.Api/Data/Sql/ContainerTraceCompletion.sql#L82) · [Gác chuyển kho và cách ly](../../backend/src/GrainLedger.Api/Data/Sql/InitialSchema.sql#L1044)
+2. **Cao · Có thể duyệt lại lô bị ảnh hưởng cho container khác (F19).** Sau khi đặt HOLD lô nguồn và thu hồi reservation chưa dùng của container đầu, tạo đơn 10 kg mới và chọn lô phối trộn đó. Preview trả `PASS`, API chấp nhận proposal và approval. Actual loading của container mới mới bị chặn với `409`. Kết quả mong đợi là lô bị ảnh hưởng bị loại trước khi được giữ chỗ. [Kiểm tra tồn khả dụng khi reserve](../../backend/src/GrainLedger.Api/Data/Sql/BlendApprovalReservation.sql#L65) · [Kiểm tra hạn chế ở loading](../../backend/src/GrainLedger.Api/Data/Sql/ContainerTraceCompletion.sql#L470)
+3. **Cao · Mất phản hồi rồi đổi lô có thể tạo hai HOLD (F19).** Từ trace trên Chromium, đính kèm evidence và gửi HOLD. Mô phỏng mất phản hồi sau khi API đã trả `200`. Form hiện `Retry HOLD`. Chọn lô khác rồi quay lại lô ban đầu trong cùng kết quả trace và gửi lại. Trình duyệt tạo ID mới, API trả `200` lần nữa và danh sách HOLD xác nhận cả hai ID đã lưu. Cần duy trì cùng ID cho lần thử lại dù người dùng đổi lựa chọn hoặc mở lại màn hình. [Lưu retry trong form](../../apps/web/src/TraceHoldForm.tsx#L21) · [Form theo lô đang chọn](../../apps/web/src/LedgerTraceability.tsx#L138)
+4. **Trung bình · Business History thiếu HOLD của container chưa nạp đối với Mill Manager được phân công (F20).** Đặt HOLD có evidence cho container `PLANNED` đã có phương án. Mill Manager nhận thông báo và ghi được `ACKNOWLEDGE`. Khi lọc Business History theo `HOLD` và mã container, tài khoản đó nhận 0 sự kiện. Customer Manager thấy đủ 2 sự kiện và tài khoản công ty khác nhận 0. Lịch sử đang xét facility của execution, còn quyền nhận và xử lý HOLD đã có từ facility của phương án. [Điều kiện facility trong Business History](../../backend/src/GrainLedger.Api/Data/Sql/ContainerTraceCompletion.sql#L656)
+5. **Thấp · Hai điểm đặt HOLD trên cùng màn container.** Sau khi mở `Trace container sources`, Chromium hiển thị đồng thời nút ở form cũ chỉ nhập lý do và nút ở form trace yêu cầu evidence. Hai cách đặt cùng một HOLD khiến người dùng khó biết yêu cầu chứng từ nào áp dụng. [Các thao tác HOLD trên màn container](../../apps/web/src/ContainerExecution.tsx#L119)
+6. **Thấp · Danh sách Packing List thiếu dấu hiệu nguồn tạo.** Sau CLOSE, API chấp nhận upload một tệp gắn loại `PACKING_LIST`, rồi sinh một Packing List từ dossier. Hai mục nằm chung dãy `PACKING_LIST v1/v2`. Giao diện hiển thị loại, phiên bản và tên tệp. Nên hiện thêm nguồn tạo để người dùng nhận biết bản do hệ thống sinh. [Đường nhận chứng từ](../../backend/src/GrainLedger.Api/Features/Exports/Shipments/ContainerWorkflowEndpoints.cs#L125) · [Danh sách chứng từ](../../apps/web/src/ContainerWorkflow.tsx#L106)
+
+### Phần đã kiểm chứng đạt
+
+| Phạm vi | Kết quả |
+|---|---|
+| Loading và CLOSE | Chặn thời điểm nạp trước ngày tạo lô và sau thời điểm hệ thống. Hai container 5 kg trên cùng đơn chuyển tiến độ từ 5 kg và `IN_PROGRESS` sang 10 kg và `COMPLETE` sau lần CLOSE thứ hai. |
+| Production và số liệu | HTTP loopback thực hiện hai mẻ 10 kg, review chất lượng và retry commit bằng cùng ID. Nạp `4.000001 + 5.999999 + 10` kg, CLOSE 20 kg và trace ra đúng 10 kg cho mỗi nguồn. Bộ backend đi qua ca đổi phương án, handoff, bagging, mixed pool, ghi đồng thời, thu hồi quyền và rollback. |
+| Truy vết và phân quyền | HTTP kiểm truy xuôi từ lô và kết quả lab đã xác nhận, truy ngược từ manifest, khớp `traceId` với audit và chặn công ty khác tìm audit. Bộ backend kiểm cả việc Export thấy forward theo quyền, backward bị từ chối, và truy vết dữ liệu cũ thiếu provenance. |
+| Chứng từ và giao diện | API tải được Packing List có tổng khối lượng đúng. Chromium kiểm được tạo phiên bản, tổng hợp theo thửa, Fit graph tại 1280 và 375 px, trạng thái đơn hàng, HOLD có evidence, Business History và trang từ chối quyền của Administrator. |
+
+`dotnet test GrainLedger.slnx` đạt **653/653**. Vitest đạt **257/257** với hai worker, và web build production thành công. Benchmark tổng hợp 50 nguồn và 1.000 container đạt ngưỡng 30 giây trong cả ba lượt. Thời gian warm HTTP và parse JSON đo được là **1,69–2,04 giây forward** và **2,86–3,14 giây backward**. Các ca bổ sung chạy ngoài repository. T3 Preview báo lỗi khung hình hai lần, nên kiểm thử giao diện dùng Chromium.
+
 ## Triển khai ngày 23/11/2026
 
 Thay đổi nằm trên nhánh `feat/container-fix`. Các bước thực hiện và kết quả trong phạm vi đã chốt:

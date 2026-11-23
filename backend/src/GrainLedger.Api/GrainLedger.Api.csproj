@@ -34,6 +34,7 @@
     <EmbeddedResource Include="Data/Sql/ContainerWorkflow.sql" LogicalName="GrainLedger.Data.Sql.ContainerWorkflow.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerTracingFlowchart.sql" LogicalName="GrainLedger.Data.Sql.ContainerTracingFlowchart.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerTraceCompletion.sql" LogicalName="GrainLedger.Data.Sql.ContainerTraceCompletion.sql" />
+    <EmbeddedResource Include="Data/Sql/ContainerTraceCorrections.sql" LogicalName="GrainLedger.Data.Sql.ContainerTraceCorrections.sql" />
     <InternalsVisibleTo Include="GrainLedger.Api.IntegrationTests" />
   </ItemGroup>
 </Project>
