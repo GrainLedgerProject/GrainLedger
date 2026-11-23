@@ -102,6 +102,7 @@ public static class LedgerEndpoints
         LedgerManagementEndpoints.MapManagementRoutes(group);
         ResidueEvaluationEndpoints.MapResidueEvaluationRoutes(group);
         ResidueEvaluationEndpoints.MapResiduePreviewRoute(endpoints);
+        endpoints.MapResidueRiskRoutes();
         return endpoints;
     }
 }

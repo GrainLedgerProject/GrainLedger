@@ -148,6 +148,7 @@ public sealed class ContainerWorkflowTests(ApiFactory factory) : IClassFixture<A
         using var f = await ContainerExecutionScenario.CreateAsync(factory, production: true);
         var first = await Batch(f, "10", first: true); await Quality(f, first.Output);
         await Review(f, "ALL_REMAINING"); await Load(f, new ActualLoadLine(first.Output, f.Stock.SecondLocationId, "4.000001"));
+        await ResidueExportPropagationTests.VerifyPartialProductionAsync(factory, f);
         var second = await Batch(f, "10", first: false);
         var pending = (await f.Detail()).GetProperty("readiness"); Assert.Equal("INCOMPLETE", pending.GetProperty("assessmentStatus").GetString());
         await Quality(f, second.Output); await Review(f);

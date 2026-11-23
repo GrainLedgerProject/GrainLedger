@@ -230,7 +230,7 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
         return (nodes, policies, evidence);
     }
 
-    private static IReadOnlyList<ResidueResult> CalculateResults(Guid lotId, Guid[] substances,
+    internal static IReadOnlyList<ResidueResult> CalculateResults(Guid lotId, Guid[] substances,
         IReadOnlyList<ResidueNode> nodes, ResidueEvidenceSnapshot evidence, ResiduePolicySnapshot policies,
         DateTimeOffset snapshotAt, bool requireHomogeneousTargetStep = false)
     {

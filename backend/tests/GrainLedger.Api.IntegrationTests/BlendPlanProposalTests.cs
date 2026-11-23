@@ -26,6 +26,8 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
     public async Task Confirmed_evidence_can_propose_and_approve_with_exact_reservation(int flow)
     {
         using var scenario = await LedgerScenario.CreateAsync(factory);
@@ -186,6 +188,12 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             $"/api/blend-plans/{draft.Id}/proposal")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await scenario.ForeignCustomer.GetAsync(
             $"/api/blend-plans/{draft.Id}/proposal")).StatusCode);
+        if (flow is 6 or 7)
+        {
+            await ResidueExportPropagationTests.VerifyProposalAsync(factory, scenario, f, sample, report,
+                selectionId, proposal, draft.Id, writer, flow == 7);
+            return;
+        }
         if (flow is 1 or 2 or 3)
         {
             async Task<BlendExecutionStartResult> StartAsync(Guid targetContainer, Guid targetProposal,
