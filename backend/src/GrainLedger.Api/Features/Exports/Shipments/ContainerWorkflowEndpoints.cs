@@ -1,6 +1,7 @@
 using System.Data;
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GrainLedger.Api.Features.Catalogs;
@@ -25,6 +26,8 @@ public sealed record ContainerHandoffReviewRequest(Guid OperationId, int Version
 public sealed record ContainerHandoffCommitRequest(Guid OperationId, int Version, Guid HandoffId, int HandoffVersion);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ContainerDocumentRequest(Guid OperationId, int Version, string DocumentType, string Filename, string ContentType, string Content, string Reason);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ContainerPackingListRequest(Guid OperationId, int Version);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ContainerSupplementRequest(Guid OperationId, int Version, Guid EvidenceId, string Reason);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -77,6 +80,9 @@ public static partial class ExportModule
             LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead mrl, BlendAssessmentPolicyRead policies, CancellationToken ct) =>
             WorkflowMutationAsync(id, "handoff-commit", request, http, access, db, ledger, residue, mrl, policies, ct)).RequireAuthorization(Permissions.ConversionsWrite);
         routes.MapPost("/documents", (Guid id, ContainerDocumentRequest request, HttpContext http, ICurrentAccess access, AppDbContext db,
+            LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead mrl, BlendAssessmentPolicyRead policies, CancellationToken ct) =>
+            WorkflowMutationAsync(id, "document", request, http, access, db, ledger, residue, mrl, policies, ct)).RequireAuthorization(Permissions.ContainersWrite);
+        routes.MapPost("/documents/packing-list", (Guid id, ContainerPackingListRequest request, HttpContext http, ICurrentAccess access, AppDbContext db,
             LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead mrl, BlendAssessmentPolicyRead policies, CancellationToken ct) =>
             WorkflowMutationAsync(id, "document", request, http, access, db, ledger, residue, mrl, policies, ct)).RequireAuthorization(Permissions.ContainersWrite);
         routes.MapPost("/supplements", (Guid id, ContainerSupplementRequest request, HttpContext http, ICurrentAccess access, AppDbContext db,
@@ -141,6 +147,8 @@ public static partial class ExportModule
             await WorkflowSqlAsync(actor, id, "detail", EmptyContainerPayload, null, db, ct);
             var company = await db.Containers.AsNoTracking().Where(x => x.Id == id).Select(x => x.CompanyId).SingleAsync(ct);
             await LockAsync(db, company, ct);
+            if (request is ContainerPackingListRequest packing)
+                payload = await GeneratePackingListAsync(actor, id, packing, db, ct);
             var replayPayload = System.Text.Json.Nodes.JsonNode.Parse(payload.GetRawText())!.AsObject(); replayPayload["replayAction"] = action;
             var replay = await WorkflowSqlAsync(actor, id, "replay", JsonSerializer.SerializeToElement(replayPayload), null, db, ct);
             if (!replay.TryGetProperty("replayMissing", out _)) { await tx.CommitAsync(ct); return Results.Ok(replay); }
@@ -169,6 +177,54 @@ public static partial class ExportModule
         }
         catch (PostgresException ex) { return ContainerDatabaseError(ex); }
         catch (LedgerException ex) { return Problem(ex.StatusCode, "WORKFLOW_BLOCKED", ex.Message); }
+    }
+
+    private static async Task<JsonElement> GeneratePackingListAsync(Guid actor, Guid id, ContainerPackingListRequest request,
+        AppDbContext db, CancellationToken ct)
+    {
+        var dossier = await ReadExecutionAsync(actor, id, "dossier", db, ct);
+        var detail = await ReadExecutionAsync(actor, id, "detail", db, ct);
+        var orderId = dossier.GetProperty("orderId").GetGuid();
+        var order = await db.Orders.AsNoTracking().Where(o => o.Id == orderId)
+            .Select(o => new { o.Code, o.CommodityId }).SingleAsync(ct);
+        var commodityCode = await db.Commodities.AsNoTracking().Where(c => c.Id == order.CommodityId)
+            .Select(c => c.Code).SingleAsync(ct);
+        var lotCodes = detail.GetProperty("loads").EnumerateArray().SelectMany(l => l.GetProperty("lines").EnumerateArray())
+            .Select(l => (Id: l.GetProperty("lotId").GetGuid(), Code: l.GetProperty("lotCode").GetString()!))
+            .Distinct().ToDictionary(l => l.Id, l => l.Code);
+        var lines = dossier.GetProperty("lines").EnumerateArray().GroupBy(l => l.GetProperty("lot_id").GetGuid())
+            .Select(l => (Code: lotCodes[l.Key], Kg: l.Sum(row => row.GetProperty("quantity_kg").GetDecimal())))
+            .OrderBy(l => l.Code, StringComparer.Ordinal).ToArray();
+        var container = detail.GetProperty("code").GetString()!;
+        var rows = string.Concat(lines.Select(l => $"<tr><td>{Encode(l.Code)}</td><td>{MassText(l.Kg)}</td></tr>"));
+        const string style = "body{font:15px system-ui;margin:2cm}table{width:100%;border-collapse:collapse}th,td{border:1px solid #333;padding:.4em;text-align:left}";
+        var html = $"""
+            <!doctype html>
+            <html lang="en"><meta charset="utf-8"><title>Packing List {Encode(container)}</title>
+            <style>{style}</style>
+            <h1>Packing List</h1>
+            <dl>
+              <dt>Export order</dt><dd>{Encode(order.Code)}</dd>
+              <dt>Commodity code</dt><dd>{Encode(commodityCode)}</dd>
+              <dt>Shipment record</dt><dd>{Encode(container)}</dd>
+              <dt>Container number</dt><dd>{Encode(dossier.GetProperty("containerNumber").GetString()!)}</dd>
+              <dt>Seal number</dt><dd>{Encode(dossier.GetProperty("sealNumber").GetString()!)}</dd>
+              <dt>Closed at</dt><dd>{dossier.GetProperty("closedAt").GetDateTimeOffset().ToUniversalTime():u}</dd>
+            </dl>
+            <table><thead><tr><th>Loaded lot</th><th>Net weight (kg)</th></tr></thead>
+            <tbody>{rows}</tbody><tfoot><tr><th>Total net weight (kg)</th><td>{MassText(lines.Sum(l => l.Kg))}</td></tr></tfoot></table>
+            </html>
+            """;
+        var bytes = Encoding.UTF8.GetBytes(html);
+        return JsonSerializer.SerializeToElement(new
+        {
+            request.OperationId, request.Version, documentType = "PACKING_LIST", filename = $"Packing-List-{container}.html",
+            contentType = "text/html; charset=utf-8", content = Convert.ToBase64String(bytes),
+            reason = "Generated from the committed closure dossier", sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes))
+        }, ContainerJson);
+
+        static string Encode(string text) => System.Net.WebUtility.HtmlEncode(text);
+        static string MassText(decimal kg) => kg.ToString("0.000000", CultureInfo.InvariantCulture);
     }
 
     private static async Task<JsonElement> AssessWorkflowReviewAsync(Guid actor, Guid containerId, Guid proposalId, string scope, AppDbContext db,

@@ -3,11 +3,12 @@ import { api, ApiError, errorMessage } from './api';
 import { ContainerProduction } from './ContainerProduction';
 import { ContainerWorkflow } from './ContainerWorkflow';
 import { Mass, positive } from './ledger-ui';
+import { TraceHoldForm } from './TraceHoldForm';
 import { ContainerSourceTrace, type ContainerTrace } from './ContainerSourceTrace';
 
 type Allocation = { lotId: string; lotCode: string; locationId: string; reservedKg: string; remainingKg: string; restricted: boolean; loadingPositionReady: boolean };
-type Container = { id: string; code: string; orderId: string; targetKg: string; status: string; version: number; loadedKg: string; remainingKg: string; workflowAvailable?: boolean;
-  containerNumber: string | null; sealNumber: string | null; holds: { id: string; reason: string; recordedAt: string }[];
+type Container = { id: string; code: string; orderId: string; companyId?: string; targetKg: string; status: string; version: number; loadedKg: string; remainingKg: string; workflowAvailable?: boolean;
+  containerNumber: string | null; sealNumber: string | null; holds: { id: string; reason: string; evidenceId?: string | null; recordedAt: string }[];
   approval: null | { proposalId: string; decisionVersion: number; mode: string; allocations: Allocation[] };
   loads: { id: string; loadedAt: string; lines: { lotId: string; lotCode: string; locationId: string; quantityKg: string }[] }[]; dossierAvailable: boolean };
 type Readiness = { phase: string; checkedAt: string; assessmentStatus: string; findings: string[] };
@@ -99,7 +100,7 @@ export function ContainerExecution({ id, userId, canWrite, canHold, canReview = 
     {error && <div className="notice error" role="alert">{error}</div>}
     {pending && <div className="notice error" role="alert">A previous operation has an uncertain result. Retry the same operation before starting another. <button disabled={busy} onClick={() => void mutate('', {})}>Retry container operation</button></div>}
     {detail && <><dl className="export-facts"><div><dt>Actual loaded</dt><dd>{detail.loadedKg} kg</dd></div><div><dt>Remaining to target</dt><dd>{detail.remainingKg} kg</dd></div><div><dt>Execution status</dt><dd>{detail.status}</dd></div></dl>
-      {detail.holds.map(hold => <div key={hold.id} className="notice error"><strong>Container HOLD</strong>: {hold.reason}</div>)}
+      {detail.holds.map(hold => <div key={hold.id} className="notice error"><strong>Container HOLD</strong>: {hold.reason}{hold.evidenceId && canHold && <> · <a href={`/api/ledger/evidence/${hold.evidenceId}`}>HOLD evidence</a></>}</div>)}
       {readiness && <div className="notice"><strong>{readiness.phase === 'CLOSE' ? 'Closure' : 'Loading'} checks: {readiness.assessmentStatus}</strong><p className="muted">Checked {new Date(readiness.checkedAt).toLocaleString()}. Every commit checks again.</p>
         {readiness.findings.length > 0 && <ul>{readiness.findings.map(code => <li key={code}>{findings[code] ?? code.replaceAll('_', ' ')}</li>)}</ul>}</div>}
       <button className="secondary" disabled={busy || !!pending} onClick={() => setReload(n => n + 1)}>Refresh container checks</button>
@@ -117,7 +118,9 @@ export function ContainerExecution({ id, userId, canWrite, canHold, canReview = 
       {canWrite && detail.status === 'LOADING' && <button disabled={busy || !!pending || readiness?.phase !== 'CLOSE' || readiness.assessmentStatus !== 'PASS'} onClick={() => { if (window.confirm('Close this container and freeze its manifest?')) void mutate('close', {}); }}>Close container</button>}
       {canHold && <form onSubmit={event => { event.preventDefault(); if (!pending) void mutate('holds', { reason }); }}><fieldset disabled={busy || !!pending}><legend>Place container HOLD</legend><label>HOLD reason<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label><button>Place container HOLD</button></fieldset></form>}
       {(canHold || canWrite) && <div className="admin-form-actions">{canHold && <button className="secondary" disabled={busy || !!pending} onClick={() => void inspect('trace')}>Trace container sources</button>}{detail.dossierAvailable && <button className="secondary" disabled={busy || !!pending} onClick={() => void inspect('dossier')}>Read closure dossier</button>}</div>}
-      {trace && <ContainerSourceTrace key={trace.graph?.traceId || 'sources'} trace={trace} />}
+      {trace && <><ContainerSourceTrace key={trace.graph?.traceId || 'sources'} trace={trace} />
+        {canHold && detail.companyId && !detail.holds.length && <TraceHoldForm target={{ type: 'container', id, code: detail.code, version: detail.version }} ownerId={detail.companyId} onSaved={() => { setReload(n => n + 1); onChanged?.(); }} />}
+      </>}
       <section><h3>Container history</h3><button className="secondary" disabled={busy || !!pending} onClick={() => void readHistory(1)}>Read container history</button>{history && <><ul>{history.items.map(item => <li key={item.id}>{item.kind} · {new Date(item.recorded_at).toLocaleString()}</li>)}</ul><div className="form-footer"><span>Page {historyPage}</span><button className="secondary" disabled={busy || historyPage === 1} onClick={() => void readHistory(historyPage - 1)}>Previous history page</button><button className="secondary" disabled={busy || !history.hasMore} onClick={() => void readHistory(historyPage + 1)}>Next history page</button></div></>}</section>
       {dossier != null && <section><h3>Immutable closure dossier</h3><p className="muted">Historical decision and actual manifest; later HOLDs do not rewrite this snapshot.</p><pre className="table-scroll">{JSON.stringify(dossier, null, 2)}</pre><a className="text-button" download={`${detail.code}-dossier.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dossier, null, 2))}`}>Download dossier JSON</a></section>}
     </>}

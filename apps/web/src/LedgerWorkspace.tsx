@@ -7,6 +7,7 @@ import { LedgerSetup } from './LedgerSetup';
 import { LedgerStock } from './LedgerStock';
 import { LedgerContainers } from './LedgerContainers';
 import { LedgerTraceability, type LabTraceOrigin } from './LedgerTraceability';
+import { BusinessHistory } from './BusinessHistory';
 import { OwnReceivingThreshold } from './ReceivingThresholds';
 
 export const ledgerSections = [
@@ -16,6 +17,7 @@ export const ledgerSections = [
   { id: 'containers', label: 'Containers', description: 'Loading preparation & closure checks', permissions: ['containers.write', 'containers.operate', 'holds.process', 'blend.approve'] },
   { id: 'traceability', label: 'Traceability', description: 'Lot origins & affected lots', permissions: ['trace.read.tenant', 'trace.read.all'] },
   { id: 'operations', label: 'Process & correct', description: 'Processing, transfers & corrections', permissions: ['conversions.read', 'conversions.write', 'conversions.confirm', 'corrections.reconcile'] },
+  { id: 'business-history', label: 'Business history', description: 'Search recorded events', permissions: ['history.read', 'identity.manage'] },
   { id: 'setup', label: 'Setup', description: 'Catalog, facilities & policies', permissions: ['platform.read', 'platform.configure'] },
 ] as const;
 export function LedgerWorkspace({ user, initialLotId, initialLabOrigin }: { user: User; initialLotId?: string; initialLabOrigin?: LabTraceOrigin }) {
@@ -43,7 +45,7 @@ export function LedgerWorkspace({ user, initialLotId, initialLabOrigin }: { user
     {['CustomerManager', 'PurchasingStaff', 'ExportStaff'].includes(user.role || '') && <OwnReceivingThreshold active />}
     <nav className="ledger-nav" aria-label="Ledger sections">{allowed.map(section => <button key={section.id} aria-label={section.label} aria-current={tab === section.id ? 'page' : undefined} aria-controls={`ledger-${section.id}`} onClick={() => selectSection(section.id)}><strong>{section.label}</strong><small>{section.description}</small></button>)}</nav>
     {allowed.map(section => <div key={section.id} id={`ledger-${section.id}`} hidden={tab !== section.id}>
-      {(visited.includes(section.id) || tab === section.id) && (section.id === 'production' ? <ContainerProductionTasks user={user} active={tab === section.id} /> : section.id === 'containers' ? <LedgerContainers key={`${user.id}:${user.role}:${user.organizationId}:${user.permissions.join(',')}`} user={user} active={tab === section.id} onTrace={user.permissions.some(permission => permission === 'trace.read.tenant' || permission === 'trace.read.all') ? traceLot : undefined} /> : section.id === 'traceability' ? <LedgerTraceability key={traceStart.version} user={user} active={tab === section.id} initialLotId={traceStart?.lotId} initialLabOrigin={traceStart.labOrigin} /> : section.id === 'inventory' ? <LedgerStock user={user} active={tab === section.id} initialLotId={initialLotId} onTrace={traceLot} /> : section.id === 'receiving' ? <LedgerReceiving user={user} active={tab === section.id} /> : section.id === 'operations' ? <LedgerOperations user={user} active={tab === section.id} /> : <LedgerSetup user={user} active={tab === section.id} />)}
+      {(visited.includes(section.id) || tab === section.id) && (section.id === 'production' ? <ContainerProductionTasks user={user} active={tab === section.id} /> : section.id === 'containers' ? <LedgerContainers key={`${user.id}:${user.role}:${user.organizationId}:${user.permissions.join(',')}`} user={user} active={tab === section.id} onTrace={user.permissions.some(permission => permission === 'trace.read.tenant' || permission === 'trace.read.all') ? traceLot : undefined} /> : section.id === 'traceability' ? <LedgerTraceability key={traceStart.version} user={user} active={tab === section.id} initialLotId={traceStart?.lotId} initialLabOrigin={traceStart.labOrigin} /> : section.id === 'inventory' ? <LedgerStock user={user} active={tab === section.id} initialLotId={initialLotId} onTrace={traceLot} /> : section.id === 'receiving' ? <LedgerReceiving user={user} active={tab === section.id} /> : section.id === 'operations' ? <LedgerOperations user={user} active={tab === section.id} /> : section.id === 'business-history' ? <BusinessHistory key={`${user.id}:${user.role}:${user.organizationId}`} active={tab === section.id} /> : <LedgerSetup user={user} active={tab === section.id} />)}
     </div>)}
     {!allowed.length && <p className="notice">No ledger permissions assigned.</p>}
   </div>;

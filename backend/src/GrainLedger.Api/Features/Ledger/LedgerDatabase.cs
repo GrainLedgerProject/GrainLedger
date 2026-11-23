@@ -198,6 +198,9 @@ public static class LedgerDatabase
                 IF to_regprocedure('grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb) TO %I', runtime_role);
                 END IF;
+                IF to_regprocedure('grainledger.ledger_business_history(uuid,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_closed_order_kg(uuid,uuid), grainledger.ledger_business_history(uuid,jsonb) TO %I', runtime_role);
+                END IF;
                 IF to_regprocedure('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb) TO %I', runtime_role);
                 END IF;
@@ -396,7 +399,9 @@ public static class LedgerDatabase
               ('grainledger.ledger_container_trace_graph(uuid,uuid)'),
               ('grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb)'),
               ('grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)'),
-              ('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)')
+              ('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)'),
+              ('grainledger.ledger_closed_order_kg(uuid,uuid)'),
+              ('grainledger.ledger_business_history(uuid,jsonb)')
             ), expected_sequence(name,can_usage,can_select,can_update) AS (VALUES
               ('identity_audit_events_Id_seq',true,true,false),
               ('ledger_lot_code_serial',false,false,false)

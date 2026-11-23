@@ -3,8 +3,8 @@ import { traceKindLabel } from './trace-kind';
 import type { TraceGraph } from './LedgerTraceability';
 import { buildTraceFlow, flowCard, traceRelationKey, traceRelationLabel } from './trace-flow';
 
-export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
-  trace: TraceGraph; selectedId: string; onSelect: (id: string) => void; onShowTable: () => void;
+export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable, canOpenContainer = true }: {
+  trace: TraceGraph; selectedId: string; onSelect: (id: string) => void; onShowTable: () => void; canOpenContainer?: boolean;
 }) {
   const flow = useMemo(() => buildTraceFlow(trace), [trace]);
   const lots = useMemo(() => new Map(trace.lots.map(lot => [lot.id, lot])), [trace]);
@@ -33,7 +33,7 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
   }
   const selected = lots.get(selectedId);
   return <div className="trace-flow">
-    <p id={helpId}>Material flows left to right: lot → storage event or processing operation → lot → actual loading → container. {containerRoot ? 'Backward tracing starts at this container and shows the ancestry of its actual loaded lots to the left.' : trace.direction === 'backward' ? 'Backward tracing shows earlier inputs to the left of your starting lot.' : 'Forward tracing shows later outputs and actual container targets to the right of your starting lot.'} Only lots in this trace are shown; an operation may also have other inputs or outputs. Select a lot to inspect it below; open a container to view its dossier and source trace.</p>
+    <p id={helpId}>Material flows left to right: lot → storage event or processing operation → lot → actual loading → container. {containerRoot ? 'Backward tracing starts at this container and shows the ancestry of its actual loaded lots to the left.' : trace.direction === 'backward' ? 'Backward tracing shows earlier inputs to the left of your starting lot.' : 'Forward tracing shows later outputs and actual container targets to the right of your starting lot.'} Only lots in this trace are shown; an operation may also have other inputs or outputs. Select a lot to inspect it below.{canOpenContainer && ' Open a container to view its details.'}</p>
     {containerRoot && <p className="notice">Lot and processing quantities describe historical production. Loading edges describe actual container kg. Source contributions to this container are shown separately in Actual container sources; do not add the historical lot quantities as loaded mass.</p>}
     <div className="trace-flow-toolbar" role="group" aria-label="Flowchart controls">
       <button type="button" aria-label="Zoom out" disabled={zoom <= 0.4} onClick={() => setZoom(value => Math.max(0.4, value - 0.2))}>−</button>
@@ -41,15 +41,21 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
       <button type="button" aria-label="Zoom in" disabled={zoom >= 1.6} onClick={() => setZoom(value => Math.min(1.6, value + 0.2))}>+</button>
       <button type="button" onClick={() => {
         const area = viewport.current;
-        const height = area ? parseFloat(getComputedStyle(area).maxHeight) || 560 : flow.height;
-        setZoom(Math.min(1, Math.max(0.4, Math.min((area?.clientWidth || flow.width) / flow.width, height / flow.height))));
+        if (!area) return;
+        const style = getComputedStyle(area);
+        const verticalBorders = style.boxSizing === 'border-box'
+          ? (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0) : 0;
+        const maximumHeight = parseFloat(style.maxHeight) || area.clientHeight || flow.height;
+        setZoom(Math.min(1, (area.clientWidth || flow.width) / flow.width, (maximumHeight - verticalBorders) / flow.height));
+        area.scrollLeft = 0;
+        area.scrollTop = 0;
       }}>Fit graph</button>
       <button type="button" onClick={() => { setZoom(1); }}>Reset zoom</button>
       <button type="button" onClick={focusStart}>Focus starting {containerRoot ? 'container' : 'lot'}</button>
     </div>
     <div className="trace-flow-legend"><span className="trace-flow-lot-key">Lot</span><span className="trace-flow-operation-key">Processing / custody</span><span className="trace-flow-container-key">Container · actual loading</span><span className="trace-flow-start-key">Starting {containerRoot ? 'container' : 'lot'}</span><span>Badges show recorded restrictions, not a quality verdict.</span></div>
     <div className="trace-flow-viewport" ref={viewport} role="region" aria-label="Trace flowchart" aria-describedby={helpId} tabIndex={0}>
-      <div style={{ width: flow.width * zoom, height: flow.height * zoom }}>
+      <div style={{ width: flow.width * zoom, height: flow.height * zoom, overflow: 'clip' }}>
         <div className="trace-flow-canvas" style={{ width: flow.width, height: flow.height, transform: `scale(${zoom})` }}>
           <svg width={flow.width} height={flow.height} aria-hidden="true" className="trace-flow-lines">
             <defs><marker id={marker} markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="currentColor" /></marker></defs>
@@ -70,13 +76,17 @@ export function TraceFlowchart({ trace, selectedId, onSelect, onShowTable }: {
             const style = { left: node.x, top: node.y, width: flowCard.width, height: flowCard.height };
             if (node.kind === 'container') {
               const container = containers.get(node.recordId)!, start = containerRoot && trace.root!.id === node.recordId;
-              return <a key={node.id} ref={element => { if (start) startingLot.current = element; }} href={`/export/containers/${container.containerId}`} style={style}
-                className={`trace-flow-node trace-flow-container${start ? ' trace-flow-start' : ''}`} aria-label={`Open container ${container.code}${start ? ' — starting container' : ''}`}>
-                <span className="trace-flow-kicker">{start ? 'STARTING CONTAINER' : 'CONTAINER'}</span><strong>{container.code}</strong>
+              const className = `trace-flow-node trace-flow-container${start ? ' trace-flow-start' : ''}`;
+              const restrictions = [container.held && 'Container HOLD', container.restricted && 'Loaded lot restriction'].filter(Boolean).join(' · ');
+              const content = <>
+                {start && <span className="trace-flow-kicker">STARTING CONTAINER</span>}<strong>{container.code}</strong>
                 <span>{container.status} · {container.linkedLoadedKg} kg linked actual loading</span>
-                <span className={container.held || container.restricted ? 'trace-flow-restriction' : 'trace-flow-clear'}>{container.held ? 'Container HOLD' : container.restricted ? 'Loaded lot restriction' : 'No recorded restrictions'}</span>
-                <small>Open container details</small>
-              </a>;
+                <span className={restrictions ? 'trace-flow-restriction' : 'trace-flow-clear'}>{restrictions || 'No recorded restrictions'}</span>
+              </>;
+              return canOpenContainer
+                ? <a key={node.id} ref={element => { if (start) startingLot.current = element; }} href={`/export/containers/${container.containerId}`} style={style}
+                    className={className} aria-label={`Open container ${container.code}${start ? ' — starting container' : ''}`}>{content}</a>
+                : <div key={node.id} style={style} className={className}>{content}</div>;
             }
             if (node.kind === 'custody') {
               const event = trace.custodyEvents?.find(event => event.id === node.recordId);

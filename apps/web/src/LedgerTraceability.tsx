@@ -6,6 +6,7 @@ import { ResidueBounds } from './ResidueBounds';
 import { traceKindLabel } from './trace-kind';
 import { TraceSourceEvidence } from './TraceSourceEvidence';
 import { TraceFlowchart } from './TraceFlowchart';
+import { TraceHoldForm, type HoldTarget } from './TraceHoldForm';
 import { TraceLoadingTable } from './TraceLoadingTable';
 import { traceLotOrder, traceRelationKey, traceRelationLabel } from './trace-flow';
 
@@ -17,12 +18,12 @@ export type TraceRelation = { relationType?: 'PROCESSING' | 'CUSTODY'; relationI
   operationId: string | null; inputLotId: string; outputLotId: string; inputConsumedKg: string; outputProducedKg: string; inputEventKg?: string;
   sourceAllocations?: { sourceLotId: string; quantityKg: string }[] | null };
 export type LabTraceOrigin = { reportId: string; resultId: string };
-export type TraceContainer = { containerId: string; code: string; status: string; linkedLoadedKg: string; basis: string; held: boolean; restricted?: boolean };
+export type TraceContainer = { containerId: string; code: string; status: string; version?: number; linkedLoadedKg: string; sourceLoadedKg?: string | null; basis: string; held: boolean; restricted?: boolean };
 export type TraceLoadingEdge = { containerId: string; lotId: string; quantityKg: string; basis: 'ACTUAL_LOADING';
   lines: { lineId: string; loadId: string; locationId: string; proposalId: string; loadedAt: string; quantityKg: string;
     sourceContributions?: { sourceLotId: string; quantityKg: string }[] }[] };
 export type TraceGraph = { root?: { type: 'lot' | 'container'; id: string }; loadingEdges?: TraceLoadingEdge[] | null;
-  actualContainers?: TraceContainer[]; containerCoverage?: string; labOrigin?: LabTraceOrigin & { lotId: string; sampleId: string }; schemaVersion?: number; graphBasis?: string; positivePathCoverage?: string;
+  actualContainers?: TraceContainer[]; affectedPlans?: { proposalId: string; version: number; containerId: string; containerCode: string; containerVersion?: number; status: string; activeApproval: boolean }[] | null; containerCoverage?: string; labOrigin?: LabTraceOrigin & { lotId: string; sampleId: string }; schemaVersion?: number; graphBasis?: string; positivePathCoverage?: string;
   custodyEvents?: { id: string; action: 'INGRESS' | 'WITHDRAW'; locationId: string; revision: number; occurredAt: string; primaryOutputLotId: string }[]; traceId: string; targetLotId?: string; direction: 'forward' | 'backward'; view: 'current' | 'history'; asOf: string; complete: boolean; lotCount: number; edgeCount: number;
   sourceContributionsVisible: boolean; lots: TraceLot[];
   edges: TraceRelation[];
@@ -37,6 +38,7 @@ export function LedgerTraceability({ user, active = true, initialLotId, initialL
   const [result, setResult] = useState<LotTrace | null>(null), [selectedId, setSelectedId] = useState(''), [page, setPage] = useState(1), [edgePage, setEdgePage] = useState(1);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [evidenceSource, setEvidenceSource] = useState<string | null>(null);
+  const [holdTarget, setHoldTarget] = useState<HoldTarget | null>(null);
   const [labOrigin, setLabOrigin] = useState<LabTraceOrigin | null>(initialLabOrigin || null);
   const [residueLotId, setResidueLotId] = useState<string | null>(null), [browseGlobal, setBrowseGlobal] = useState(false);
   const [display, setDisplay] = useState<'table' | 'flowchart'>('table');
@@ -47,11 +49,13 @@ export function LedgerTraceability({ user, active = true, initialLotId, initialL
   }, [result]);
   const request = useRef(0), controller = useRef<AbortController | null>(null);
   const global = user.permissions.includes('trace.read.all');
+  const canOpenContainer = user.permissions.includes('export-orders.read');
+  const canHold = user.role === 'CustomerManager' && user.permissions.includes('holds.manage') && !!user.organizationId;
   const canTrace = global || user.permissions.includes('trace.read.tenant');
   const canSources = global || user.role === 'CustomerManager';
   const scope = `${user.id}:${user.role}:${user.organizationId}:${user.permissions.join(',')}`;
   const previousScope = useRef(scope);
-  function invalidate() { request.current++; controller.current?.abort(); setResult(null); setEvidenceSource(null); setResidueLotId(null); setError(''); setBusy(false); }
+  function invalidate() { request.current++; controller.current?.abort(); setResult(null); setEvidenceSource(null); setResidueLotId(null); setHoldTarget(null); setError(''); setBusy(false); }
   useEffect(() => { invalidate(); return () => { request.current++; controller.current?.abort(); }; }, [active, user.id, user.role, user.organizationId, user.permissions.join(',')]);
   useEffect(() => {
     if (previousScope.current !== scope) { setLabOrigin(null); setLotId(''); setBrowseGlobal(false); }
@@ -70,7 +74,7 @@ export function LedgerTraceability({ user, active = true, initialLotId, initialL
     finally { if (current === request.current) setBusy(false); }
   }
   function startFromLab(origin: LabTraceOrigin) { invalidate(); setLabOrigin(origin); setDirection('forward'); setLotId(''); }
-  function selectLot(id: string) { setSelectedId(id); setEvidenceSource(null); setResidueLotId(null); }
+  function selectLot(id: string) { setSelectedId(id); setHoldTarget(null); setEvidenceSource(null); setResidueLotId(null); }
   if (!canTrace) return null;
   const selected = result?.lots.find(lot => lot.id === selectedId);
   const lots = new Map(result?.lots.map(lot => [lot.id, lot]) ?? []);
@@ -97,10 +101,32 @@ export function LedgerTraceability({ user, active = true, initialLotId, initialL
       <Panel title="Trace result">
         <p role="status">Complete {result.direction} trace: {result.lotCount} lots, {result.edgeCount} relationships. {result.view === 'history' ? 'Historical operations include superseded records.' : 'Superseded operations excluded.'}</p>
         <p>Snapshot: {new Date(result.asOf).toLocaleString()} · Reference: {result.traceId}</p>
-        {result.direction === 'forward' && result.actualContainers && <section><h3>Actual container targets</h3><p className="muted">Committed loading linked to this material path. These are actual loaded kg, separate from planned allocations and current stock.</p>{result.actualContainers.length ? <div className="table-scroll"><table aria-label="Actual container targets"><thead><tr><th>Container</th><th>Linked loaded kg</th><th>Status</th><th>HOLD</th></tr></thead><tbody>{result.actualContainers.map(container => <tr key={container.containerId}><td><a href={`/export/containers/${container.containerId}`}>{container.code}</a></td><td>{container.linkedLoadedKg}</td><td>{container.status}</td><td>{container.held ? 'Container HOLD' : container.restricted ? 'Loaded lot restriction' : 'None'}</td></tr>)}</tbody></table></div> : <p>No actual containers on this path.</p>}</section>}
+        {result.direction === 'forward' && result.affectedPlans && <section>
+          <h3>Affected planning proposals</h3>
+          {result.affectedPlans.length ? <div className="table-scroll"><table aria-label="Affected planning proposals">
+            <thead><tr><th>Container</th><th>Plan version</th><th>Decision</th><th>Active approval</th>{canHold && <th>Control</th>}</tr></thead>
+            <tbody>{result.affectedPlans.map(plan => <tr key={plan.proposalId}>
+              <td>{canOpenContainer ? <a href={`/export/containers/${plan.containerId}`}>{plan.containerCode}</a> : plan.containerCode}</td>
+              <td>{plan.version}</td><td>{plan.status}</td><td>{plan.activeApproval ? 'Yes' : 'No'}</td>
+              {canHold && <td>{plan.containerVersion && !result.actualContainers?.some(container => container.containerId === plan.containerId) && <button type="button" onClick={() => setHoldTarget({ type: 'container', id: plan.containerId, version: plan.containerVersion, code: plan.containerCode })}>Select {plan.containerCode} for HOLD</button>}</td>}
+            </tr>)}</tbody>
+          </table></div> : <p>No saved planning proposals on this path.</p>}
+        </section>}
+        {result.direction === 'forward' && result.actualContainers && <section>
+          <h3>Actual container targets</h3>
+          {result.actualContainers.length ? <div className="table-scroll"><table aria-label="Actual container targets">
+            <thead><tr><th>Container</th><th>Linked loaded kg</th>{result.sourceContributionsVisible && <th>Loaded kg from starting source</th>}<th>Status</th><th>Restrictions</th>{canHold && <th>Control</th>}</tr></thead>
+            <tbody>{result.actualContainers.map(container => <tr key={container.containerId}>
+              <td>{canOpenContainer ? <a href={`/export/containers/${container.containerId}`}>{container.code}</a> : container.code}</td>
+              <td>{container.linkedLoadedKg}</td>{result.sourceContributionsVisible && <td>{container.sourceLoadedKg ?? '—'}</td>}
+              <td>{container.status}</td><td>{[container.held && 'Container HOLD', container.restricted && 'Loaded lot restriction'].filter(Boolean).join(' · ') || 'None'}</td>
+              {canHold && <td>{!container.held && container.version && <button type="button" onClick={() => setHoldTarget({ type: 'container', id: container.containerId, version: container.version, code: container.code })}>Select {container.code} for HOLD</button>}</td>}
+            </tr>)}</tbody>
+          </table></div> : <p>No actual containers on this path.</p>}
+        </section>}
         <p>Storage generations and processing stages overlap. Do not add every row as a total mass. Recorded relationships do not establish contamination or compliance.</p>
         <div className="trace-display-options" role="group" aria-label="Trace result display"><button type="button" aria-pressed={display === 'table'} onClick={() => setDisplay('table')}>Table</button><button type="button" aria-pressed={display === 'flowchart'} onClick={() => setDisplay('flowchart')}>Flowchart</button></div>
-        {display === 'flowchart' ? <TraceFlowchart key={result.traceId} trace={result} selectedId={selectedId} onSelect={selectLot} onShowTable={() => setDisplay('table')} /> : <>
+        {display === 'flowchart' ? <TraceFlowchart key={result.traceId} trace={result} canOpenContainer={canOpenContainer} selectedId={selectedId} onSelect={selectLot} onShowTable={() => setDisplay('table')} /> : <>
         <div className="table-scroll"><table aria-label="Traced lots"><thead><tr><th>Lot</th><th>Type / storage</th><th>Stage</th><th>Quantity when created (kg)</th><th>Current stock / available (kg)</th><th>Restrictions</th></tr></thead><tbody>{orderedLots.slice((page - 1) * 25, page * 25).map(lot => <tr key={lot.id}>
           <td><button type="button" aria-pressed={selectedId === lot.id} onClick={() => selectLot(lot.id)}>{lot.code}</button>{lot.id === result.targetLotId && <span className="trace-start-badge">Starting lot</span>}<small>{lot.id}</small></td><td>{traceKindLabel(lot)}{lot.enteredPool && <small>Pool ingress recorded</small>}{lot.positions.map(p => <small key={p.locationId}>{p.locationName || p.locationId}</small>)}</td><td>{lot.stage}{lot.poolRevision != null && <small>{lot.isCurrentPool ? 'Current pool' : 'Custody generation'} · revision {lot.poolRevision}</small>}</td><td>{lot.producedKg}</td>
           <td>{lot.positions.map(position => <p key={position.locationId}>{position.quantityKg} / {position.availableKg} · {position.locationName || position.locationId}</p>)}</td><td>{lot.restrictions.join(', ') || 'None'}{lot.effectiveHold && <small>{lot.directHold ? 'HOLD placed on this lot' : 'HOLD inherited through recorded source ancestry'}</small>}</td>
@@ -109,6 +135,11 @@ export function LedgerTraceability({ user, active = true, initialLotId, initialL
         {result.direction === 'forward' && result.loadingEdges && <TraceLoadingTable key={result.traceId} trace={result} />}
         </>}
       </Panel>
+      {canHold && (holdTarget || selected && !selected.directHold) && <Panel title="Trace HOLD">
+        {holdTarget
+          ? <TraceHoldForm key={holdTarget.id} target={holdTarget} ownerId={user.organizationId!} />
+          : selected && <TraceHoldForm key={selected.id} target={{ type: 'lot', id: selected.id, code: selected.code }} ownerId={user.organizationId!} />}
+      </Panel>}
       {display === 'table' && <Panel title="Storage and processing relationships">
         <p>Processing quantities belong to the operation. Custody input kg is the mass on that edge; output kg is the whole lot created. Source allocations are separate. Ordinary transfers preserve lot identity.</p>
         {!result.edges.length ? <p>No material relationships in this direction and view.</p> : <div className="table-scroll"><table aria-label="Storage and processing relationships"><thead><tr><th>Input lot</th><th>Storage event / operation</th><th>Output lot</th><th>Input / custody edge (kg)</th><th>Output lot created (kg)</th></tr></thead><tbody>{result.edges.slice((edgePage - 1) * 25, edgePage * 25).map(edge => <tr key={`${traceRelationKey(edge)}/${edge.inputLotId}/${edge.outputLotId}`}>

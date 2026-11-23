@@ -16,6 +16,17 @@ public sealed class ContainerExecutionTests(ApiFactory factory) : IClassFixture<
         using var f = await ContainerExecutionScenario.CreateAsync(factory);
         var initial = await f.Detail();
         Assert.Equal("PASS", initial.GetProperty("readiness").GetProperty("assessmentStatus").GetString());
+        var orderRoute = $"/api/export-orders/{initial.GetProperty("container").GetProperty("orderId").GetGuid()}";
+        var plannedOrder = await GetAsync(f.Export, orderRoute);
+        Assert.Equal("10", plannedOrder.GetProperty("allocatedMassKg").GetString());
+        Assert.Equal("0", plannedOrder.GetProperty("completedMassKg").GetString());
+        Assert.Equal("IN_PROGRESS", plannedOrder.GetProperty("fulfillmentStatus").GetString());
+        foreach (var invalidTime in new[] { DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1) })
+        {
+            var invalid = f.Load(1, "4") with { LoadedAt = invalidTime };
+            Assert.Equal(HttpStatusCode.Conflict, (await f.Export.PostAsJsonAsync(f.Route + "/loads", invalid)).StatusCode);
+        }
+        Assert.Equal("0.000000", (await f.Detail()).GetProperty("container").GetProperty("loadedKg").GetString());
         var first = f.Load(1, "4"); var loaded = await f.Post("loads", first);
         Assert.Equal("4.000000", loaded.GetProperty("loadedKg").GetString());
         Assert.Equal("LOADING", loaded.GetProperty("status").GetString());
@@ -23,11 +34,15 @@ public sealed class ContainerExecutionTests(ApiFactory factory) : IClassFixture<
         Assert.Equal(6m, Quantity(await f.Stock.LotAsync(f.LotId)));
         var second = await f.Post("loads", f.Load(loaded.GetProperty("version").GetInt32(), "6"));
         Assert.Equal("10.000000", second.GetProperty("loadedKg").GetString());
+        Assert.Equal("0", (await GetAsync(f.Export, orderRoute)).GetProperty("completedMassKg").GetString());
         Assert.Equal(0m, Quantity(await f.Stock.LotAsync(f.LotId)));
         var metadata = await f.Post("metadata", new ContainerMetadataRequest(Guid.NewGuid(), second.GetProperty("version").GetInt32(), "SYNTHETIC-C1", "SEAL-1"));
         var closing = new ContainerCloseRequest(Guid.NewGuid(), metadata.GetProperty("version").GetInt32());
         var closed = await f.Post("close", closing);
         Assert.Equal("CLOSED", closed.GetProperty("status").GetString());
+        var fulfilled = await GetAsync(f.Export, orderRoute);
+        Assert.Equal("10", fulfilled.GetProperty("completedMassKg").GetString());
+        Assert.Equal("COMPLETE", fulfilled.GetProperty("fulfillmentStatus").GetString());
         Assert.Equal(closed.GetRawText(), (await f.Post("close", closing)).GetRawText());
         Assert.Equal(HttpStatusCode.Conflict, (await f.Export.PostAsJsonAsync(f.Route + "/loads", f.Load(closed.GetProperty("version").GetInt32(), "1"))).StatusCode);
         var exportDossier = await GetAsync(f.Export, f.Route + "/dossier");

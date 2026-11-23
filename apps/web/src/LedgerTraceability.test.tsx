@@ -318,7 +318,7 @@ it('shows actual container targets separately from stock and keeps Export source
     return response({ ...trace, direction: 'forward', sourceContributionsVisible: false, sources: [], containerCoverage: 'ACTUAL_LOADING',
       actualContainers: [{ containerId: 'container-1', code: 'C1-ACTUAL', status: 'LOADING', linkedLoadedKg: '4.000001', basis: 'ACTUAL_LOADING', held: false, restricted: true }] });
   });
-  const browser = userEvent.setup(); render(<LedgerTraceability user={{ ...actor, role: 'ExportStaff', permissions: ['trace.read.tenant'], organizationId: 'customer' }} />);
+  const browser = userEvent.setup(); render(<LedgerTraceability user={{ ...actor, role: 'ExportStaff', permissions: ['trace.read.tenant', 'export-orders.read'], organizationId: 'customer' }} />);
   await browser.type(screen.getByLabelText('Ledger lot ID'), lotId);
   await browser.click(screen.getByRole('button', { name: 'Run trace' }));
   const targets = await screen.findByRole('table', { name: 'Actual container targets' });
@@ -334,13 +334,29 @@ it('opens actual container targets from the forward graph and keeps Table/Flowch
       actualContainers: [{ containerId: 'c1', code: 'CTN-FLOW', status: 'CLOSED', linkedLoadedKg: '0.000001', basis: 'ACTUAL_LOADING', held: false }],
       loadingEdges: [{ containerId: 'c1', lotId, quantityKg: '0.000001', basis: 'ACTUAL_LOADING', lines: [{ lineId: 'line1', loadId: 'load1', locationId: 'store', proposalId: 'p1', loadedAt: trace.asOf, quantityKg: '0.000001' }] }] });
   });
-  const user = userEvent.setup(); render(<LedgerTraceability user={actor} />);
+  const user = userEvent.setup(); const mounted = render(<LedgerTraceability user={{ ...actor, permissions: [...actor.permissions, 'export-orders.read'] }} />);
   await user.type(screen.getByLabelText('Ledger lot ID'), lotId);
   await user.click(screen.getByRole('button', { name: 'Run trace' }));
   await screen.findByRole('table', { name: 'Actual container targets' });
   await user.click(screen.getByRole('button', { name: 'Flowchart' }));
   expect(screen.getByRole('link', { name: 'Open container CTN-FLOW' })).toHaveAttribute('href', '/export/containers/c1');
+  const viewport = screen.getByRole('region', { name: 'Trace flowchart' });
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 200 });
+  await user.click(screen.getByRole('button', { name: 'Fit graph' }));
+  expect(screen.getByLabelText('Graph zoom')).toHaveTextContent('32%');
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 1000 });
+  Object.assign(viewport.style, { maxHeight: '200px', boxSizing: 'border-box', border: '3px solid' });
+  await user.click(screen.getByRole('button', { name: 'Fit graph' }));
+  expect(parseFloat((viewport.firstElementChild as HTMLElement).style.height)).toBeLessThanOrEqual(194);
   await user.click(screen.getByRole('button', { name: 'Table' }));
   expect(screen.getByRole('table', { name: 'Trace actual loading' })).toHaveTextContent('0.000001');
   expect(fetchMock.mock.calls.filter(([url]) => url === '/api/ledger/trace')).toHaveLength(1);
+  mounted.rerender(<LedgerTraceability user={actor} />);
+  await user.type(screen.getByLabelText('Ledger lot ID'), lotId);
+  await user.click(screen.getByRole('button', { name: 'Run trace' }));
+  const table = await screen.findByRole('table', { name: 'Actual container targets' });
+  expect(table).toHaveTextContent('CTN-FLOW');
+  expect(within(table).queryByRole('link')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Flowchart' }));
+  expect(screen.queryByRole('link', { name: 'Open container CTN-FLOW' })).not.toBeInTheDocument();
 });

@@ -96,6 +96,7 @@ export function ContainerWorkflow({ id, userId, canReview = false, canWrite = fa
         {canReview && h.state === 'DRAFT' && <button disabled={busy || !!pending || !reason.trim()} onClick={() => void mutate('handoffs/approve', { handoffId: h.id, handoffVersion: h.version, reason })}>Approve saved handoff</button>}
         {operator && h.state === 'APPROVED' && <button disabled={busy || !!pending} onClick={() => { if (window.confirm('Commit this actual reviewed handoff?')) void mutate('handoffs/commit', { handoffId: h.id, handoffVersion: h.version }); }}>Commit reviewed handoff</button>}
       </div>)}</section>}
+      {canWrite && data.status === 'CLOSED' && <button type="button" disabled={busy || !!pending} onClick={() => void mutate('documents/packing-list', {})}>Generate Packing List</button>}
       {canWrite && data.status === 'CLOSED' && <form onSubmit={event => void uploadDocument(event)}><fieldset disabled={busy || !!pending}><legend>Retain a shipment document version</legend>
         <label>Document type<input required maxLength={80} value={documentType} onChange={event => setDocumentType(event.target.value)} /></label>
         <label>Shipment document file<input type="file" required onChange={event => setFile(event.target.files?.[0] || null)} /></label>

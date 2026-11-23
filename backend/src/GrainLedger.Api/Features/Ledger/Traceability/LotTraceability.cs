@@ -118,6 +118,7 @@ public static class LotTraceability
                     var targetResult = JsonNode.Parse((string)(await targets.ExecuteScalarAsync(ct))!)!;
                     result["actualContainers"] = targetResult["items"]!.DeepClone();
                     result["loadingEdges"] = targetResult["loadingEdges"]?.DeepClone();
+                    result["affectedPlans"] = targetResult["plans"]?.DeepClone();
                     result["containerCoverage"]="ACTUAL_LOADING";
                 }
                 else result["containerCoverage"]="NOT_INSTALLED";
