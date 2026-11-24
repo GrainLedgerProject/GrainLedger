@@ -18,6 +18,11 @@ public sealed class ContainerTracingFlowchartTests(ApiFactory factory) : IClassF
         var empty = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/trace", new { });
         Assert.Empty(empty.GetProperty("graph").GetProperty("lots").EnumerateArray());
         Assert.Empty(empty.GetProperty("graph").GetProperty("loadingEdges").EnumerateArray());
+        var planned = await SendAsync(f.Stock.Customer, HttpMethod.Post, "/api/ledger/trace", new { lotId = f.SourceId, direction = "forward" });
+        Assert.Empty(planned.GetProperty("actualContainers").EnumerateArray());
+        var plan = Assert.Single(planned.GetProperty("affectedPlans").EnumerateArray());
+        Assert.Equal(f.ProposalId, plan.GetProperty("proposalId").GetGuid());
+        Assert.True(plan.GetProperty("activeApproval").GetBoolean());
         await f.Post("loads", f.Load(1, "4.000001"));
         var partial = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/trace", new { });
         Assert.Equal("4.000001", partial.GetProperty("loadedKg").GetString());
@@ -34,6 +39,15 @@ public sealed class ContainerTracingFlowchartTests(ApiFactory factory) : IClassF
         Assert.Equal("10.000000", edge.GetProperty("quantityKg").GetString());
         Assert.Equal(2, edge.GetProperty("lines").GetArrayLength());
         Assert.All(trace.GetProperty("sourceContributions").EnumerateArray(), x => Assert.Equal("5.000000", x.GetProperty("quantityKg").GetString()));
+        var plot = Assert.Single(trace.GetProperty("plotContributions").EnumerateArray());
+        Assert.Equal(2, plot.GetProperty("sourceCount").GetInt32());
+        Assert.Equal("10.000000", plot.GetProperty("quantityKg").GetString());
+        Assert.Equal("100", plot.GetProperty("percentage").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(plot.GetProperty("plotCode").GetString()));
+        var forward = await SendAsync(f.Stock.Customer, HttpMethod.Post, "/api/ledger/trace", new { lotId = f.SourceId, direction = "forward" });
+        var container = Assert.Single(forward.GetProperty("actualContainers").EnumerateArray());
+        Assert.Equal("10.000000", container.GetProperty("linkedLoadedKg").GetString());
+        Assert.Equal("5.000000", container.GetProperty("sourceLoadedKg").GetString());
         var historical = graph.GetProperty("lots").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == f.LotId);
         Assert.Equal("20.000000", historical.GetProperty("producedKg").GetString());
         foreach (var line in edge.GetProperty("lines").EnumerateArray())
@@ -43,6 +57,11 @@ public sealed class ContainerTracingFlowchartTests(ApiFactory factory) : IClassF
         await using var audits = new NpgsqlCommand("SELECT count(*) FROM grainledger.ledger_events WHERE kind='TRACEBACK' AND details->>'containerId'=$1", owner);
         audits.Parameters.AddWithValue(f.ContainerId.ToString());
         Assert.Equal(3L, await audits.ExecuteScalarAsync()); // empty, partial, full; no per-lot audits
+        var traceId = graph.GetProperty("traceId").GetGuid();
+        Assert.Equal(trace.GetProperty("traceId").GetGuid(), traceId);
+        var history = await GetAsync(f.Stock.Customer, $"/api/ledger/business-history?category=TRACE&search={traceId}");
+        Assert.Equal(traceId.ToString(), Assert.Single(history.GetProperty("items").EnumerateArray()).GetProperty("id").GetString());
+        Assert.Empty((await GetAsync(f.Stock.ForeignCustomer, $"/api/ledger/business-history?category=TRACE&search={traceId}")).GetProperty("items").EnumerateArray());
     }
 
     [Fact]
@@ -58,6 +77,8 @@ public sealed class ContainerTracingFlowchartTests(ApiFactory factory) : IClassF
         Assert.Equal(2, edges.Length);
         Assert.Equal(made.Order(), edges.Select(x => x.GetProperty("containerId").GetGuid()).Order());
         Assert.DoesNotContain("sourceContributions", forward.GetProperty("loadingEdges").GetRawText());
+        Assert.All(forward.GetProperty("actualContainers").EnumerateArray(), target =>
+            Assert.Equal(System.Text.Json.JsonValueKind.Null, target.GetProperty("sourceLoadedKg").ValueKind));
         var backward = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/trace", new { });
         Assert.Equal(f.ContainerId, Assert.Single(backward.GetProperty("graph").GetProperty("actualContainers").EnumerateArray()).GetProperty("containerId").GetGuid());
         var lotBackward = await SendAsync(f.Stock.Customer, HttpMethod.Post, "/api/ledger/trace", new { lotId = f.LotId, direction = "backward" });

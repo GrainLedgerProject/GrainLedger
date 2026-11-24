@@ -26,7 +26,7 @@ public sealed record ExportOrderSummary(Guid Id, string Code, Guid MarketId, Gui
 public sealed record ExportOrderDto(Guid Id, string Code, Guid MarketId, Guid CommodityId,
     string RequiredMassKg, string OriginalMass, string OriginalUnit, DateOnly ShippingFrom,
     DateOnly ShippingTo, int Version, int SpecificationVersion, IReadOnlyList<ExportLimitDto> Limits,
-    string AllocatedMassKg, string RemainingMassKg,
+    string AllocatedMassKg, string RemainingMassKg, string CompletedMassKg, string FulfillmentStatus,
     bool CanEdit);
 public sealed record ExportPage<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount, bool HasMore);
 public sealed record ExportSpecificationDto(int VersionNo, DateTimeOffset RecordedAt, IReadOnlyList<ExportLimitDto> Limits);

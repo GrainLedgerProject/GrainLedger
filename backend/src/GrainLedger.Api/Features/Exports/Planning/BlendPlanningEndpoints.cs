@@ -194,6 +194,8 @@ public static partial class ExportModule
         if (request.ContainerVersion != container.Version || request.OrderVersion != order.Version)
             return Problem(412, "EXPORT_VERSION_STALE", "Reload the order and container before creating a plan.");
         if (container.Status == "CLOSED") return Problem(409, "CONTAINER_IN_USE", "Closed containers cannot accept a draft.");
+        if ((await ReadExecutionAsync(scope.Value.Actor, id, "detail", db, ct)).GetProperty("holds").GetArrayLength() > 0)
+            return Problem(409, "CONTAINER_HELD", "A container HOLD blocks planning.");
         var remaining = await WorkflowSqlAsync(scope.Value.Actor, id, "planning", EmptyContainerPayload, null, db, ct);
         var planTarget = ParseKg(remaining.GetProperty("unplannedKg").GetString()!);
         if (planTarget <= 0) return Problem(409, "DEMAND_ALREADY_PRODUCED", "Existing output already covers this demand; review that output instead of planning it again.");

@@ -32,6 +32,9 @@ public static partial class ExportModule
                     (NpgsqlConnection)db.Database.GetDbConnection(), (NpgsqlTransaction)tx.GetDbTransaction()) { CommandTimeout = 30 };
                 graphCommand.Parameters.AddWithValue(actor); graphCommand.Parameters.AddWithValue(id);
                 var graph = JsonNode.Parse((string)(await graphCommand.ExecuteScalarAsync(ct))!)!.AsObject();
+                if (root["traceId"] is not { } traceId)
+                    return Results.Problem(statusCode: 503, title: "Container trace audit upgrade is not installed.");
+                graph["traceId"] = traceId.DeepClone();
                 var rows = root["sourceContributions"]!.AsArray();
                 var sourceIds = rows.Select(x => x!["sourceLotId"]!.GetValue<Guid>())
                     .Concat(graph["lots"]!.AsArray().SelectMany(l => l!["contributions"]!.AsArray())
@@ -41,6 +44,7 @@ public static partial class ExportModule
                 var mapping = provenance.ToDictionary(x => x.LotId);
                 var total = decimal.Parse(trace.GetProperty("loadedKg").GetString()!, CultureInfo.InvariantCulture);
                 var complete = total > 0; var unavailable = new JsonArray();
+                var plots = new Dictionary<Guid, (string? Code, decimal Kg, int Sources)>();
                 var graphLotIds = graph["lots"]!.AsArray().Select(l => l!["id"]!.GetValue<Guid>()).ToHashSet();
                 var missingAncestry = false;
                 foreach (var row in rows)
@@ -52,9 +56,23 @@ public static partial class ExportModule
                     source["status"] = facts is null ? "SOURCE_PROVENANCE_UNAVAILABLE" : "RECORDED";
                     source["provenance"] = JsonSerializer.SerializeToNode(facts, ContainerJson);
                     if (facts is null) { complete = false; unavailable.Add(sourceId.ToString()); }
+                    else
+                    {
+                        var plot = plots.GetValueOrDefault(facts.PlotId);
+                        plots[facts.PlotId] = (facts.CurrentReferenceLabels.PlotCode, plot.Kg + kg, plot.Sources + 1);
+                    }
                     if (!graphLotIds.Contains(sourceId)) { complete = false; missingAncestry = true; }
                 }
                 root["complete"] = complete; root["basis"] = "ACTUAL_LOADING";
+                root["plotContributions"] = JsonSerializer.SerializeToNode(plots.OrderBy(p => p.Value.Code).ThenBy(p => p.Key)
+                    .Select(p => new
+                    {
+                        PlotId = p.Key,
+                        PlotCode = p.Value.Code,
+                        QuantityKg = p.Value.Kg.ToString("0.000000", CultureInfo.InvariantCulture),
+                        Percentage = total == 0 ? "0" : (p.Value.Kg * 100 / total).ToString("0.######", CultureInfo.InvariantCulture),
+                        SourceCount = p.Value.Sources
+                    }), ContainerJson);
                 root["findings"] = total == 0 ? new JsonArray("NO_ACTUAL_LOADING") : unavailable.Count > 0 ? new JsonArray("SOURCE_PROVENANCE_UNAVAILABLE") : new JsonArray();
                 if (missingAncestry) root["findings"]!.AsArray().Add("SOURCE_ANCESTRY_UNAVAILABLE");
                 graph["sources"] = new JsonArray(sourceIds.Order().Select(sourceId =>

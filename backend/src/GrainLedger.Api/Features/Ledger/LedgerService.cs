@@ -69,6 +69,14 @@ public sealed partial class LedgerService(NpgsqlDataSource dataSource, IHttpCont
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
 
+    public async Task<JsonElement> BusinessHistoryAsync(JsonObject query, CancellationToken ct)
+    {
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        var result = await ExecuteAsync(connection, null, "SELECT grainledger.ledger_business_history($1,$2)::text", ct, actor, query);
+        return JsonSerializer.Deserialize<JsonElement>((string)result!);
+    }
+
     // Planning must inspect the whole owner/facility scope from one MVCC view.
     // This is stock inventory, not a compliance-qualified candidate set or reservation.
     public async Task<LedgerInventoryScope> ReadInventoryScopeAsync(Guid ownerId, Guid facilityId,

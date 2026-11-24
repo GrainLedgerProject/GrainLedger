@@ -6,8 +6,9 @@ import { Pagination } from './ledger-ui';
 import { TraceLoadingTable } from './TraceLoadingTable';
 
 export type ContainerTrace = { loadedKg: string; complete: boolean; findings?: string[]; graph?: TraceGraph;
+  plotContributions?: { plotId: string; plotCode: string | null; quantityKg: string; percentage: string; sourceCount: number }[];
   sourceContributions: { sourceLotId: string; quantityKg: string; percentage?: string; status?: string;
-    provenance?: { plotId: string; procurementCode: string } | null }[] };
+    provenance?: { plotId: string; procurementCode: string; currentReferenceLabels?: { plotCode?: string | null; farmerCode?: string | null; seasonName?: string | null } } | null }[] };
 
 export function ContainerSourceTrace({ trace }: { trace: ContainerTrace }) {
   const [display, setDisplay] = useState<'table' | 'flowchart'>('table');
@@ -18,7 +19,18 @@ export function ContainerSourceTrace({ trace }: { trace: ContainerTrace }) {
   return <section className="container-source-trace"><h3>Actual container sources</h3>
     <p>Actual loaded: {trace.loadedKg} kg. Source kg below belong to this container's committed manifest, including earlier plans.</p>
     {!trace.complete && <p className="notice error">Container source trace is incomplete: {trace.findings?.join(', ') || 'source provenance unavailable'}. Review the recorded facts before drawing conclusions.</p>}
-    <div className="table-scroll"><table aria-label="Actual container sources"><thead><tr><th>Source</th><th>Actual kg</th><th>Share (%)</th><th>Plot / provenance</th></tr></thead><tbody>{trace.sourceContributions.map(source => <tr key={source.sourceLotId}><td>{lots.get(source.sourceLotId)?.code || source.sourceLotId}</td><td>{source.quantityKg}</td><td>{source.percentage ?? '—'}</td><td>{source.provenance?.plotId ?? source.status ?? 'Unavailable'}</td></tr>)}</tbody></table></div>
+    <div className="table-scroll"><table aria-label="Actual container sources"><thead><tr><th>Source</th><th>Actual kg</th><th>Share (%)</th><th>Plot / provenance</th></tr></thead><tbody>{trace.sourceContributions.map(source => <tr key={source.sourceLotId}><td>{lots.get(source.sourceLotId)?.code || source.sourceLotId}</td><td>{source.quantityKg}</td><td>{source.percentage ?? '—'}</td><td>{source.provenance ? <>
+      <span title={source.provenance.plotId}>{source.provenance.currentReferenceLabels?.plotCode || source.provenance.plotId}</span>
+      <small>{[source.provenance.procurementCode, source.provenance.currentReferenceLabels?.farmerCode, source.provenance.currentReferenceLabels?.seasonName].filter(Boolean).join(' · ')}</small>
+    </> : source.status ?? 'Unavailable'}</td></tr>)}</tbody></table></div>
+    {!!trace.plotContributions?.length && <div className="table-scroll">
+      <table aria-label="Actual contributions by plot">
+        <thead><tr><th>Plot</th><th>Actual kg</th><th>Share (%)</th><th>Source lots</th></tr></thead>
+        <tbody>{trace.plotContributions.map(plot => <tr key={plot.plotId}>
+          <td title={plot.plotId}>{plot.plotCode || plot.plotId}</td><td>{plot.quantityKg}</td><td>{plot.percentage}</td><td>{plot.sourceCount}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>}
     {graph ? <>
       <p>Snapshot: {new Date(graph.asOf).toLocaleString()}. Historical production kg and actual container loading kg are different quantities.</p>
       <div className="trace-display-options" role="group" aria-label="Container trace display"><button type="button" aria-pressed={display === 'table'} onClick={() => setDisplay('table')}>Table</button><button type="button" aria-pressed={display === 'flowchart'} onClick={() => setDisplay('flowchart')}>Flowchart</button></div>
