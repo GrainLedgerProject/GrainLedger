@@ -7,7 +7,7 @@ public static class ResidueEvidenceResolver
 {
     public static IReadOnlyList<ResidueSourceBound> Resolve(IReadOnlyList<ResidueNode> nodes,
         IReadOnlyList<Guid> substances, ResidueEvidenceSnapshot evidence, ResiduePolicySnapshot policy,
-        DateTimeOffset snapshotAt)
+        DateTimeOffset snapshotAt, bool requireSourceLab = false)
     {
         var mappings = evidence.Sources.ToDictionary(x => x.LotId);
         var results = evidence.Results.GroupBy(x => (x.LotId, x.SubstanceId)).ToDictionary(x => x.Key, x => x.ToArray());
@@ -25,7 +25,8 @@ public static class ResidueEvidenceResolver
             var direct = results.GetValueOrDefault((node.LotId, substance)) ?? [];
             var candidates = (groupCodes.GetValueOrDefault((source.SourceId, substance)) ?? [])
                 .SelectMany(code => groups[(source.CompanyId, substance, code)]).ToArray();
-            var applicableGroups = candidates.Where(g => Effective(g.EffectiveFrom, g.EffectiveTo, source.ReceivedAt)).ToArray();
+            // Export uses selected source lab results, never GROUP_FIRST or fallback.
+            var applicableGroups = candidates.Where(g => !requireSourceLab && Effective(g.EffectiveFrom, g.EffectiveTo, source.ReceivedAt)).ToArray();
             var removedGroups = Superseded(applicableGroups.Select(x => x.Id), candidates.ToDictionary(x => x.Id, x => x.SupersedesId));
             applicableGroups = applicableGroups.Where(x => !removedGroups.Contains(x.Id) && x.SourceIds.Contains(source.SourceId)
                 && x.ProductStage == source.ProductStage && x.ProductIdentity == source.ProductIdentity
@@ -41,15 +42,21 @@ public static class ResidueEvidenceResolver
             if (group is not null && (group.Precedence == "GROUP_FIRST" || direct.Length == 0))
             { output.Add(GroupBound(group)); continue; }
             if (direct.Length == 0)
-            { output.Add(Unknown(node.LotId, substance, "No confirmed substance evidence or approved fallback")); continue; }
+            { output.Add(Unknown(node.LotId, substance, requireSourceLab
+                ? "SOURCE_LAB_REQUIRED: No confirmed laboratory evidence for this source and substance"
+                : "No confirmed substance evidence or approved fallback")); continue; }
             var selectionVersions = selections.GetValueOrDefault((source.SourceId, substance)) ?? [];
             var activeSelections = ActiveSelections(selectionVersions, snapshotAt);
             if (activeSelections.Length != 1)
-            { output.Add(Unknown(node.LotId, substance, activeSelections.Length == 0 ? "Missing reviewed report selection" : "Conflicting reviewed report selections", direct)); continue; }
+            { output.Add(Unknown(node.LotId, substance, activeSelections.Length == 0
+                ? (requireSourceLab ? "SOURCE_LAB_SELECTION_MISSING: Missing reviewed report selection" : "Missing reviewed report selection")
+                : (requireSourceLab ? "SOURCE_LAB_SELECTION_CONFLICT: Conflicting reviewed report selections" : "Conflicting reviewed report selections"), direct)); continue; }
             var selection = activeSelections[0];
             var remaining = direct.Where(x => !selection.SupersededResultIds.Contains(x.ResultId)).DistinctBy(x => x.ResultId).ToArray();
             if (remaining.Length != 1 || remaining[0].ResultId != selection.SelectedResultId)
-            { output.Add(Unknown(node.LotId, substance, "Conflicting confirmed reports require reviewed supersession", direct)); continue; }
+            { output.Add(Unknown(node.LotId, substance, requireSourceLab
+                ? "SOURCE_LAB_SELECTION_CONFLICT: Conflicting confirmed reports require reviewed supersession"
+                : "Conflicting confirmed reports require reviewed supersession", direct)); continue; }
             var raw = remaining[0];
             var rawSelection = selection;
             var normalization = ResidueConcentration.Normalize(raw, selection);

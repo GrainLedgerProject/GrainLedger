@@ -240,7 +240,7 @@ public static partial class ExportModule
             var rule = production?.EnumerateArray().SingleOrDefault(x => x.GetProperty("id").GetGuid() == policyId) ?? default;
             if (rule.ValueKind == JsonValueKind.Object) outputCommodity = rule.GetProperty("outputLedgerCommodityId").GetGuid();
         }
-        var boundsRead = await residue.PreviewSelectionAsync(selected.GroupBy(x => x.LotId).Select(g => new HypotheticalBlendInput(g.Key, ExportRules.Text(g.Sum(x => x.QuantityKg)))).ToArray(), outputCommodity, policy.RequiredSubstanceIds, ct);
+        var boundsRead = await residue.PreviewSelectionAsync(selected.GroupBy(x => x.LotId).Select(g => new HypotheticalBlendInput(g.Key, ExportRules.Text(g.Sum(x => x.QuantityKg)))).ToArray(), outputCommodity, policy.RequiredSubstanceIds, ct, requireSourceLab: true);
         if ((await policyReader.ResolveAsync(order.CompanyId, order.MarketId, order.CommodityId, boundsRead.SnapshotAt, ct))?.Id != policy.Id)
             throw new LedgerException(409, "Assessment policy changed during review.");
         // Bagging preserves product identity but creates a different physical stage. Retain and

@@ -177,6 +177,38 @@ describe('F14 planning workflow', () => {
     expect(screen.queryByRole('button', { name: 'Save proposal' })).not.toBeInTheDocument();
   });
 
+  it.each([false, true])('explains mandatory source lab and blocks saving an incomplete proposal (excluded=%s)', async excluded => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/blend-plans/plan-1') return json(plan, 200, { ETag: '"1"' });
+      if (path === '/api/blend-plans/plan-1/proposal') return json({}, 404);
+      if (path.includes('/history?')) return json(emptyPage);
+      if (path === '/api/ledger/lookups') return json({ facilities: [{ id: 'mill-1', name: 'Demo Mill' }], locations: [{ id: 'store-1', name: 'Dry Store', kind: 'STORE' }] });
+      if (path === '/api/markets/market-1') return json({ code: 'EU', name: 'Europe' });
+      if (path === '/api/commodities/rice-1') return json({ code: 'RICE', name: 'Rice' });
+      if (path.includes('/candidates?')) return json(candidates);
+      if (path === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (path === '/api/blend-plans/plan-1/preview' && init?.method === 'POST') return json({ ...preview, outcome: 'SEARCH_EXHAUSTED', assessmentStatus: 'INCOMPLETE',
+        selection: excluded ? null : preview.selection,
+        assessmentFindings: excluded ? [] : [{ code: 'SOURCE_LAB_REQUIRED', status: 'INCOMPLETE', actual: null, limit: null, unit: null, reference: null }],
+        inputResidueExclusions: excluded ? [{ lotId: 'lot-1', lotCode: 'HDR-261026-000001', substanceId: 'substance-1',
+          code: 'SOURCE_LAB_REQUIRED', status: 'INCOMPLETE', upper: null, mrl: null, unit: null }] : [],
+        previewReference: null, canPropose: false });
+      return json({}, 404);
+    });
+    const user = userEvent.setup();
+    render(<BlendPlanWorkspace planId="plan-1" userId="staff" canPropose canReadLedger onNavigate={vi.fn()} />);
+    await user.selectOptions(await screen.findByLabelText('Facility'), 'mill-1');
+    await user.click(await screen.findByRole('button', { name: 'Calculate plan' }));
+    if (excluded) expect(await screen.findByText('Lots excluded by source evidence or input MRL checks')).toBeInTheDocument();
+    else {
+      expect(await screen.findByText('Source lab required')).toBeInTheDocument();
+      expect(screen.getByText('Residues and market')).toBeInTheDocument();
+    }
+    expect(screen.getByText(/Source-group bounds cannot replace these results/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save proposal' })).not.toBeInTheDocument();
+  });
+
   it('explains why a raw paddy draft with enough stock cannot complete quality assessment', async () => {
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);

@@ -108,7 +108,7 @@ public sealed class ExportResiduePropagation(NpgsqlDataSource dataSource,
             var targetKg = decimal.Parse(section.GetProperty("targetKg").GetString()!, CultureInfo.InvariantCulture);
             var inputEvidence = selected.Select(x => x.LotId).Distinct().Select(id => new ResidueEvaluationPreview(id,
                 owner, at, ResidueCalculator.EngineVersion,
-                ResidueEvaluationService.CalculateResults(id, substances, nodes, facts, rules, at))).ToArray();
+                ResidueEvaluationService.CalculateResults(id, substances, nodes, facts, rules, at, requireSourceLab: true))).ToArray();
             var blend = mode == "BLEND_INPUT_STOCK";
             IReadOnlyList<ResidueResult> bounds = [];
             var currentNodes = nodes;
@@ -122,7 +122,7 @@ public sealed class ExportResiduePropagation(NpgsqlDataSource dataSource,
                 var node = new ResidueNode(id, owner, catalogOutput, "BLENDED_RICE", "BLENDED_RICE", at,
                     "BLENDING", null, null, inputs.Select(x => new ResidueParent(x.LotId, x.QuantityKg)).ToArray());
                 currentNodes = [.. nodes, node];
-                bounds = ResidueEvaluationService.CalculateResults(id, substances, currentNodes, facts, rules, at);
+                bounds = ResidueEvaluationService.CalculateResults(id, substances, currentNodes, facts, rules, at, requireSourceLab: true);
             }
             else if (!blend) bounds = DirectStockResidueAssessment.ConservativeBounds(inputEvidence, substances);
             var selectedQuality = quality.Where(q => selected.Any(a => a.LotId == q.LotId)).ToArray();

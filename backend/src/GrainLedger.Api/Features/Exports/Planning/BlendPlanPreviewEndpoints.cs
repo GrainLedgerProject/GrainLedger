@@ -127,7 +127,7 @@ public static partial class ExportModule
                 var evidence = await residue.PreviewSelectionAsync(selected.GroupBy(x => x.LotId)
                     .Select(x => new HypotheticalBlendInput(x.Key,
                         ExportRules.Text(x.Sum(y => y.QuantityKg)))).ToArray(),
-                    outputCommodity, policy.RequiredSubstanceIds, token);
+                    outputCommodity, policy.RequiredSubstanceIds, token, requireSourceLab: true);
                 evidenceAt = evidence.SnapshotAt;
                 inputEvidence = evidence.Inputs;
                 bounds = selection.Mode == "DIRECT_STOCK"
@@ -261,7 +261,7 @@ public static partial class ExportModule
                                 .Select(c => c.LotId).Distinct().ToArray();
                             if (blendIds.Length > 0)
                             {
-                                var inputs = await residue.PreviewLotsAsync(blendIds, assessmentRule.RequiredSubstances, deadline.Token);
+                                var inputs = await residue.PreviewLotsAsync(blendIds, assessmentRule.RequiredSubstances, deadline.Token, requireSourceLab: true);
                                 var inputMrl = await applicableMrl.ResolveAsync(order.MarketId, order.CommodityId,
                                     inputs[0].SnapshotAt, deadline.Token);
                                 inputResidueExclusions = BlendInputResidue.Screen(snapshot, blendIds, inputs, assessmentRule, inputMrl);
@@ -281,8 +281,8 @@ public static partial class ExportModule
                         {
                             if (output is { } commodityId)
                                 return (await residue.PreviewPlanningBlendBoundsAsync(lotIds, commodityId,
-                                    assessmentRule.RequiredSubstances, token)).PlanningBlendBounds;
-                            return (await residue.PreviewLotsAsync(lotIds, assessmentRule.RequiredSubstances, token))
+                                    assessmentRule.RequiredSubstances, token, requireSourceLab: true)).PlanningBlendBounds;
+                            return (await residue.PreviewLotsAsync(lotIds, assessmentRule.RequiredSubstances, token, requireSourceLab: true))
                                 .ToDictionary(x => x.LotId, x => x.Results);
                         }
 

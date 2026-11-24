@@ -151,7 +151,7 @@ public static partial class ExportModule
         var policy = await policyReader.ResolveAsync(order.CompanyId, order.MarketId, order.CommodityId, null, ct);
         if (policy is null) return IncompleteWorkflowAssessment("ASSESSMENT_POLICY_MISSING");
         var boundsRead = await residue.PreviewSelectionAsync(selected.GroupBy(x => x.LotId).Select(g => new HypotheticalBlendInput(g.Key, ExportRules.Text(g.Sum(x => x.QuantityKg)))).ToArray(),
-            output ? null : context.GetProperty("outputCommodityId").GetGuid(), policy.RequiredSubstanceIds, ct);
+            output ? null : context.GetProperty("outputCommodityId").GetGuid(), policy.RequiredSubstanceIds, ct, requireSourceLab: true);
         var currentPolicy = await policyReader.ResolveAsync(order.CompanyId, order.MarketId, order.CommodityId, boundsRead.SnapshotAt, ct);
         if (currentPolicy?.Id != policy.Id) throw new LedgerException(409, "Assessment policy changed during calculation.");
         var bounds = output ? DirectStockResidueAssessment.ConservativeBounds(boundsRead.Inputs, policy.RequiredSubstanceIds) : boundsRead.HypotheticalBlend?.Results;

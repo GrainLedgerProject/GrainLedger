@@ -98,28 +98,29 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
 
     // F14 can read several selected lots at one database snapshot. Each graph
     // remains owner-scoped by Ledger; this method does not append evaluations.
+    // Export requires source lab throughout the graph; ordinary F12 keeps reviewed groups.
     public async Task<IReadOnlyList<ResidueEvaluationPreview>> PreviewLotsAsync(
-        IReadOnlyList<Guid> lotIds, IReadOnlyList<Guid> substanceIds, CancellationToken ct)
+        IReadOnlyList<Guid> lotIds, IReadOnlyList<Guid> substanceIds, CancellationToken ct, bool requireSourceLab = false)
     {
         return (await PreviewSelectionAsync(lotIds.Select(x => new HypotheticalBlendInput(x, "1")).ToArray(),
-            null, substanceIds, ct)).Inputs;
+            null, substanceIds, ct, requireSourceLab)).Inputs;
     }
 
     // All input bounds and the optional in-memory BLENDING output share one
     // repeatable-read snapshot and one evidence/policy selection.
     public Task<ResidueSelectionPreview> PreviewSelectionAsync(
         IReadOnlyList<HypotheticalBlendInput> inputs, Guid? outputLedgerCommodityId,
-        IReadOnlyList<Guid> substanceIds, CancellationToken ct) =>
-        ReadSelectionAsync(inputs, outputLedgerCommodityId, substanceIds, false, ct);
+        IReadOnlyList<Guid> substanceIds, CancellationToken ct, bool requireSourceLab = false) =>
+        ReadSelectionAsync(inputs, outputLedgerCommodityId, substanceIds, false, ct, requireSourceLab);
 
     internal Task<ResidueSelectionPreview> PreviewPlanningBlendBoundsAsync(IReadOnlyList<Guid> lotIds,
-        Guid outputLedgerCommodityId, IReadOnlyList<Guid> substanceIds, CancellationToken ct) =>
+        Guid outputLedgerCommodityId, IReadOnlyList<Guid> substanceIds, CancellationToken ct, bool requireSourceLab = false) =>
         ReadSelectionAsync(lotIds.Select(id => new HypotheticalBlendInput(id, "1")).ToArray(),
-            outputLedgerCommodityId, substanceIds, true, ct);
+            outputLedgerCommodityId, substanceIds, true, ct, requireSourceLab);
 
     private async Task<ResidueSelectionPreview> ReadSelectionAsync(
         IReadOnlyList<HypotheticalBlendInput> inputs, Guid? outputLedgerCommodityId,
-        IReadOnlyList<Guid> substanceIds, bool planningBounds, CancellationToken ct)
+        IReadOnlyList<Guid> substanceIds, bool planningBounds, CancellationToken ct, bool requireSourceLab)
     {
         if (inputs.Count is < 1 or > 100 || outputLedgerCommodityId == Guid.Empty ||
             inputs.Any(x => x.LotId == Guid.Empty) || inputs.Select(x => x.LotId).Distinct().Count() != inputs.Count ||
@@ -205,15 +206,15 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
         var snapshotNodes = nodes.Values.ToArray();
         var previews = inputs.Select(x => new ResidueEvaluationPreview(x.LotId, owner, at,
             ResidueCalculator.EngineVersion,
-            CalculateResults(x.LotId, substances, snapshotNodes, evidence, policies, at))).ToArray();
+            CalculateResults(x.LotId, substances, snapshotNodes, evidence, policies, at, requireSourceLab: requireSourceLab))).ToArray();
         var hypothetical = syntheticId is { } id
             ? new HypotheticalBlendPreview(at, ResidueCalculator.EngineVersion,
-                CalculateResults(id, substances, snapshotNodes, evidence, policies, at)) : null;
+                CalculateResults(id, substances, snapshotNodes, evidence, policies, at, requireSourceLab: requireSourceLab)) : null;
         return new ResidueSelectionPreview(at, previews, hypothetical)
         {
             PlanningBlendBounds = planningTargets.ToDictionary(x => x.Key, x =>
                 CalculateResults(x.Value.LotId, substances, [.. snapshotNodes, x.Value],
-                    evidence, policies, at, requireHomogeneousTargetStep: true))
+                    evidence, policies, at, requireHomogeneousTargetStep: true, requireSourceLab: requireSourceLab))
         };
     }
 
@@ -232,9 +233,9 @@ public sealed partial class ResidueEvaluationService(NpgsqlDataSource dataSource
 
     internal static IReadOnlyList<ResidueResult> CalculateResults(Guid lotId, Guid[] substances,
         IReadOnlyList<ResidueNode> nodes, ResidueEvidenceSnapshot evidence, ResiduePolicySnapshot policies,
-        DateTimeOffset snapshotAt, bool requireHomogeneousTargetStep = false)
+        DateTimeOffset snapshotAt, bool requireHomogeneousTargetStep = false, bool requireSourceLab = false)
     {
-        var sources = ResidueEvidenceResolver.Resolve(nodes, substances, evidence, policies, snapshotAt);
+        var sources = ResidueEvidenceResolver.Resolve(nodes, substances, evidence, policies, snapshotAt, requireSourceLab);
         return ResidueCalculator.Calculate(lotId, substances, nodes, sources,
             ResidueEvidenceResolver.Factors(policies.Rules), policies, requireHomogeneousTargetStep);
     }
