@@ -163,6 +163,7 @@ public static class LedgerDatabase
                             grainledger.ledger_procurement_source_lineage(uuid,uuid),
                             grainledger.ledger_arrival_command(uuid,uuid,text,jsonb),
                             grainledger.ledger_receiving_threshold_read(uuid,text,jsonb),grainledger.ledger_receiving_threshold_command(uuid,text,jsonb),
+                            grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb),
                             grainledger.ledger_residue_graph(uuid,uuid),grainledger.ledger_residue_history(uuid,uuid,uuid),
                             grainledger.ledger_residue_replay(uuid,uuid,uuid,jsonb),grainledger.ledger_residue_append(uuid,uuid,uuid,jsonb,jsonb),
                             grainledger.catalog_publish_residue_rule(uuid,jsonb),grainledger.catalog_publish_residue_policy_setting(uuid,jsonb),grainledger.capture_publish_residue_group(uuid,jsonb),
@@ -290,6 +291,8 @@ public static class LedgerDatabase
               ('ledger_arrival_operations',true,false,false,false),
               ('ledger_arrival_reviews',true,false,false,false),
               ('ledger_assignments',true,false,false,false),
+              ('ledger_bulk_location_last_lots',false,false,false,false),
+              ('ledger_byproduct_variety_policy_revisions',false,false,false,false),
               ('ledger_catalog_commodities',true,false,false,false),
               ('ledger_commodities',true,false,false,false),
               ('ledger_compatibilities',true,false,false,false),
@@ -377,6 +380,7 @@ public static class LedgerDatabase
               ('grainledger.ledger_arrival_command(uuid,uuid,text,jsonb)'),
               ('grainledger.ledger_receiving_threshold_read(uuid,text,jsonb)'),
               ('grainledger.ledger_receiving_threshold_command(uuid,text,jsonb)'),
+              ('grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb)'),
               ('grainledger.ledger_residue_graph(uuid,uuid)'),
               ('grainledger.ledger_residue_history(uuid,uuid,uuid)'),
               ('grainledger.ledger_residue_replay(uuid,uuid,uuid,jsonb)'),
@@ -402,6 +406,11 @@ public static class LedgerDatabase
               ('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)'),
               ('grainledger.ledger_closed_order_kg(uuid,uuid)'),
               ('grainledger.ledger_business_history(uuid,jsonb)')
+            ), private_function(signature) AS (VALUES
+              ('grainledger.ledger_bulk_refill_guard(uuid,uuid)'),
+              ('grainledger.ledger_separate_bulk_deferred_guard()'),
+              ('grainledger.ledger_effective_byproduct_variety_policy(uuid,text)'),
+              ('grainledger.ledger_resolve_lot_variety(uuid,text,uuid[])')
             ), expected_sequence(name,can_usage,can_select,can_update) AS (VALUES
               ('identity_audit_events_Id_seq',true,true,false),
               ('ledger_lot_code_serial',false,false,false)
@@ -443,6 +452,7 @@ public static class LedgerDatabase
                 OR has_any_column_privilege($1,t.oid,'REFERENCES'))
              OR EXISTS (SELECT 1 FROM expected_function e WHERE to_regprocedure(e.signature) IS NULL OR NOT has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
              OR EXISTS (SELECT 1 FROM optional_function e WHERE to_regprocedure(e.signature) IS NOT NULL AND NOT has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
+             OR EXISTS (SELECT 1 FROM private_function e WHERE to_regprocedure(e.signature) IS NULL OR has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
              OR EXISTS (SELECT 1 FROM app_functions f WHERE has_function_privilege($1,f.oid,'EXECUTE') AND NOT EXISTS (SELECT 1 FROM (SELECT * FROM expected_function UNION ALL SELECT * FROM optional_function) e WHERE to_regprocedure(e.signature)=f.oid))
              OR EXISTS (SELECT 1 FROM expected_sequence e LEFT JOIN app_sequences s ON s.relname=e.name WHERE s.oid IS NULL)
              OR EXISTS (SELECT 1 FROM app_sequences s LEFT JOIN expected_sequence e ON e.name=s.relname WHERE

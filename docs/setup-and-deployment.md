@@ -180,6 +180,22 @@ Serve app through HTTPS reverse proxy on one origin. Configure trusted proxy add
 
 Apply the current monolith migrations through an approved migration-owner job before deploying the matching API. Pause Capture and Ledger writes during cutover; inventory pending receipts without lot-code reservations and older processing drafts first. Those records cannot proceed through the new write paths without an explicit remediation plan. Stored records are not rewritten. See [lot-code guide](guides/unified-lot-code-guide.md) and [Capture code guide](guides/companion-capture-codes.md).
 
+### Rice variety segregation cutover
+
+Forward migration `20261125000000_RiceVarietySegregation` and its embedded `Data/Sql/RiceVarietySegregation.sql` cover both Capture and Ledger. Deploy the matching API and web together; do not allow old API instances or clients to continue writing against the new schema. This migration is forward-only: agree on backup/restore recovery, not a code-only downgrade. Implementation does not imply deployment.
+
+Before each environment rollout:
+
+1. Obtain separate explicit database-owner approval for the shared environment before migration, grants, seeds, or data-changing verification. Confirm the target database, installed migration history, compatible API/web builds, deployment window and recovery procedure.
+2. Pause Capture and Ledger writes, including background writers and old instances. Back up the database and ensure the approved restore procedure is available before migration; keep writes paused until the coordinated cutover is complete.
+3. Inventory legacy pending procurements and their receiving destinations. Resolve pending legacy receipts destined for pools without variety IDs and multi-line receipts destined for non-mixed physical compartments through an approved process **before** cutover. If any remain unresolved, do not roll out that environment. Do not automatically reroute receipts or rewrite their snapshots.
+4. Inspect positive balances by physical location, including `SILO`, `COMPARTMENT` and mixed-bulk locations. A non-mixed silo or compartment with multiple positive-balance lots needs an operational plan: after cutover, withdraw or transfer stock to separated storage until the single-lot guard is satisfied; do not backfill stock. Non-mixed `STORE` holds physically separated lots and is not a shared bulk compartment.
+5. Identify legacy Plot Seasons and lots without verified catalog variety IDs. Existing lots become `UNKNOWN`; old text is not evidence for assigning a variety. Do not pool or merge unknown lots. Eligible single-lot drying, milling or bagging retains `UNKNOWN`; use permitted separated or isolation flows where appropriate. Assign an ID to an eligible legacy Plot Season only through the authorized application workflow; it does not rewrite old procurement snapshots or lot identities.
+6. Review previously used physical locations and arrange evidence-backed clearance when required. An emptied location is not automatically cleared: previously used locations with unknown last contents require clearance before refill, and changes of contents may also require it. Use the existing clearance workflow with an empty location, evidence and reason; do not treat setup edits or zero balance as clearance.
+7. Apply the migration through the approved object-owner job and configure only the matching build's finite restricted-runtime grants. Private tables and helpers remain inaccessible directly to runtime; never substitute owner credentials, broad grants or startup auto-repair. Start only matching API/web instances, then resume writes under the approved deployment procedure.
+
+Migration does not automatically rewrite historical receipts, events, postings, quantities, lot codes or procurement snapshots. Existing mixed or unknown stock is not silently converted to a verified single variety.
+
 ### External laboratory workflow
 
 Deploy the API/web changes with Capture migration `20261020000000_ExternalLaboratoryWorkflow` through the approved migration-owner procedure above. It adds sample material/laboratory handover fields, company-scoped original report bytes/result rows, and append-only confirmation guards. Historical sample material remains unknown (`NULL`); old handovers remain `HANDOVER`. It does not rewrite stock, receiving history or HOLDs, and does not install legal limits or assessment policy.

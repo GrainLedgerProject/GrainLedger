@@ -18,6 +18,8 @@ Within `Features`, Capture groups farmer, season, spray declaration, procurement
 
 Current Capture creation assigns farmer, plot, procurement and sample codes server-side; these four create requests require `payloadSchemaVersion: 2`, while other Capture operations retain their own version contracts. Procurement and sample codes include `YYYYMMDD` and independent continuous per-company/type counters. Stored codes remain unchanged. Ledger reserves source and processing lot codes; legacy processing drafts and unreserved source receipts fail closed. Migration and cutover require database-owner review and explicit shared-database approval; deployment status is unconfirmed. See [Capture code guide](guides/companion-capture-codes.md) and [lot-code guide](guides/unified-lot-code-guide.md).
 
+Customer Managers manage their own company's bran and husk cross-variety mixing independently under **Byproduct mixing**. Both default to allow; each override or reset requires a reason and the current revision. Changes apply to subsequent mixing commands, not existing stock or historical decisions. Configuration history is immutable and stock decisions use the persisted owner's policy.
+
 ## Historical module-era architecture snapshot
 
 The following sections record behavior and deployment details from the prior multi-context/multi-schema implementation. Treat old schema and migration names as historical identifiers, not instructions for the approved single-schema baseline. Current reset/deployment status must be established independently.

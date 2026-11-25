@@ -16,9 +16,11 @@ import { MrlLookup } from './MrlLookup';
 import { ExportOrders, initialExportListState, type ExportListState } from './ExportOrders';
 
 import { CompanyResiduePolicies } from './CompanyResiduePolicies';
+import { ByproductVarietyPolicy } from './ByproductVarietyPolicy';
 import { ExportAssessment } from './ExportAssessment';
-type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'lab' | 'mrl' | 'sprays' | 'export' | 'residue-policies' | 'export-assessment';
+type Tab = 'profile' | 'administration' | 'ledger' | 'farmers' | 'procurements' | 'samples' | 'lab' | 'mrl' | 'sprays' | 'export' | 'residue-policies' | 'export-assessment' | 'byproduct-mixing';
 function tabForPath(path: string): Tab {
+  if (path.startsWith('/byproduct-mixing')) return 'byproduct-mixing';
   if (path.startsWith('/export-assessment')) return 'export-assessment';
   if (path.startsWith('/export/')) return 'export';
   if (path.startsWith('/mrl')) return 'mrl';
@@ -76,7 +78,7 @@ export function App() {
   }, [user]);
 
   function openTab(next: Tab) {
-    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'lab' ? '/lab-reports' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : next === 'export' ? '/export/orders' : next === 'residue-policies' ? '/residue-policies' : next === 'export-assessment' ? '/export-assessment' : '/';
+    const nextPath = next === 'farmers' ? '/capture/farmers' : next === 'procurements' ? '/capture/procurements' : next === 'samples' ? '/capture/samples' : next === 'lab' ? '/lab-reports' : next === 'sprays' ? '/capture/spray-declarations' : next === 'ledger' ? '/ledger' : next === 'administration' ? '/admin' : next === 'mrl' ? '/mrl' : next === 'export' ? '/export/orders' : next === 'residue-policies' ? '/residue-policies' : next === 'export-assessment' ? '/export-assessment' : next === 'byproduct-mixing' ? '/byproduct-mixing' : '/';
     window.history.pushState({}, '', nextPath);
     setPath(nextPath);
     setTab(next);
@@ -186,12 +188,13 @@ export function App() {
         {exportReady && <button aria-current={tab === 'export' ? 'page' : undefined} onClick={() => openTab('export')}><span aria-hidden="true">▧</span> Export orders</button>}
         {(user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) && <button aria-current={tab === 'lab' ? 'page' : undefined} onClick={() => openTab('lab')}><span aria-hidden="true">▤</span> Laboratory reports</button>}
         {user.role === 'CustomerManager' && user.permissions.includes('residue.company-policy.manage') && <button aria-current={tab === 'residue-policies' ? 'page' : undefined} onClick={() => openTab('residue-policies')}><span aria-hidden="true">▧</span> Residue profiles</button>}
+        {user.role === 'CustomerManager' && user.permissions.includes('byproduct.variety-policy.manage') && <button aria-current={tab === 'byproduct-mixing' ? 'page' : undefined} onClick={() => openTab('byproduct-mixing')}><span aria-hidden="true">▧</span> Byproduct mixing</button>}
         {user.role === 'CustomerManager' && user.permissions.includes('blend.assessment-policy.manage') && user.permissions.includes('blend.quality-evidence.manage') && <button aria-current={tab === 'export-assessment' ? 'page' : undefined} onClick={() => openTab('export-assessment')}><span aria-hidden="true">▧</span> Export assessment</button>}
       </nav>
       <div className="sidebar-bottom"><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><span>{roleLabel(user.role)}</span></div></div>
     </aside>
     <div className="workspace-body">
-      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : tab === 'lab' ? 'Laboratory reports' : tab === 'export' ? 'Export orders' : tab === 'residue-policies' ? 'Residue profiles' : tab === 'export-assessment' ? 'Export assessment' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
+      <header className="topbar"><span>{user.organizationName || 'Personal account'} <span className="separator">/</span> {tab === 'profile' ? 'My profile' : tab === 'administration' ? 'Administration' : tab === 'ledger' ? 'Ledger' : tab === 'farmers' ? 'Farmers' : tab === 'sprays' ? 'Spray declarations' : tab === 'procurements' ? 'Paddy intake' : tab === 'mrl' ? 'Applicable MRL' : tab === 'lab' ? 'Laboratory reports' : tab === 'export' ? 'Export orders' : tab === 'residue-policies' ? 'Residue profiles' : tab === 'export-assessment' ? 'Export assessment' : tab === 'byproduct-mixing' ? 'Byproduct mixing' : 'Samples'}</span><button className="text-button" disabled={signingOut} onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button></header>
       <main className="content">
         {error && <div className="notice error" role="alert">{error}</div>}
         {tab === 'export-assessment' && user.role === 'CustomerManager' && user.permissions.includes('blend.assessment-policy.manage') && user.permissions.includes('blend.quality-evidence.manage') ? <ExportAssessment companyId={user.organizationId || ''} />
@@ -203,6 +206,8 @@ export function App() {
           : tab === 'administration' && user.role === 'Administrator' ? <AdminWorkspace user={user} section={adminSection} onSelect={openAdminSection} />
           : tab === 'ledger' && canOpenLedger ? <LedgerWorkspace user={user} initialLabOrigin={labTraceOrigin} initialLotId={path.match(/^\/ledger\/lots\/([^/]+)$/)?.[1]} />
           : tab === 'residue-policies' && user.role === 'CustomerManager' && user.permissions.includes('residue.company-policy.manage') ? <CompanyResiduePolicies active allowed companyId={user.organizationId || ''} />
+          : tab === 'byproduct-mixing' && user.role === 'CustomerManager' && user.permissions.includes('byproduct.variety-policy.manage') ? <ByproductVarietyPolicy />
+          : tab === 'byproduct-mixing' ? <div className="notice error" role="alert">Your account cannot manage byproduct mixing.</div>
           : tab === 'lab' && (user.permissions.includes('lab.read') || user.permissions.includes('lab.write')) ? <LabReports canWrite={user.permissions.includes('lab.write')} canManageResidueEvidence={user.permissions.includes('residue.evidence.manage')} companyId={user.organizationId || ''} onTraceResult={user.permissions.includes('trace.read.tenant') ? origin => openCapturePath(`/ledger/trace?reportId=${encodeURIComponent(origin.reportId)}&resultId=${encodeURIComponent(origin.resultId)}`, 'ledger') : undefined} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={canReadPurchases ? id => openCapturePath(`/capture/source-lots/${id}`, 'procurements') : undefined} />
           : tab === 'procurements' && selectedSourceLotId ? (canReadPurchases
             ? <SourceLotDetail id={selectedSourceLotId} canWriteSamples={canWritePurchases} canReadLab={user.permissions.includes('lab.read') || user.permissions.includes('lab.write')} userId={user.id} companyId={user.organizationId || ''} onBack={id => id ? openCapturePath(`/capture/procurements/${id}`, 'procurements') : openTab('procurements')} onOpenSample={id => openCapturePath(`/capture/samples/${id}`, 'samples')} onOpenSourceLot={id => openCapturePath(`/capture/source-lots/${id}`, 'procurements')} onOpenLedgerLot={canReadLedgerStock ? id => openCapturePath(`/ledger/lots/${encodeURIComponent(id)}`, 'ledger') : undefined} onOpenFarmer={canReadFarmers ? id => selectFarmer(id) : undefined} onOpenPlot={canReadFarmers ? selectPlot : undefined} onOpenPlotSeason={canReadFarmers ? selectPlotSeason : undefined} />

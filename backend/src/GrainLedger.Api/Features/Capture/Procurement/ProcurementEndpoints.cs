@@ -28,7 +28,7 @@ public sealed record ProcurementLineResponse(Guid Id, int LineNo, Guid PlotSeaso
     Guid SeasonId, string RiceVariety, string MeasuredValue, string MeasuredUnit,
     string NetMassKg, string MoisturePercent, Guid SourceLotId, Guid LotId,
     string LotCode, string Stage, ProcurementInitialStock InitialStock,
-    string? PlotCode = null, string? SeasonName = null);
+    string? PlotCode = null, string? SeasonName = null, Guid? RiceVarietyId = null);
 public sealed record ProcurementResponse(Guid Id, string Code, Guid FarmerId, Guid CollectionSiteId,
     Guid ReceivingLocationId, Guid CommodityId, string Status, Guid ReceivedBy,
     DateTimeOffset ReceivedAt, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt,
@@ -52,7 +52,7 @@ public sealed record SourceLotResponse(Guid Id, Guid LotId, string LotCode, Guid
     IReadOnlyList<ProcurementStockPosition> CurrentStock, IReadOnlyList<ProcurementLineageLink> Lineage,
     IReadOnlyList<Guid> SampleIds, IReadOnlyList<Guid> ConfirmedLabReportIds,
     DateTimeOffset StockAsOf, string ReceivingStatus, string UsableStockKg, string? FarmerName = null,
-    string? FarmerCode = null, string? PlotCode = null, string? SeasonName = null);
+    string? FarmerCode = null, string? PlotCode = null, string? SeasonName = null, Guid? RiceVarietyId = null);
 internal sealed record ReceivingProjection(Guid ProcurementId, string Status, int Version);
 
 public static class ProcurementEndpoints
@@ -178,9 +178,12 @@ public static class ProcurementEndpoints
             join p in db.Plots.AsNoTracking() on new { ps.CompanyId, Id = ps.PlotId } equals new { p.CompanyId, p.Id }
             join s in db.CropSeasons.AsNoTracking() on new { ps.CompanyId, Id = ps.SeasonId } equals new { s.CompanyId, s.Id }
             where ps.CompanyId == companyId && seasonIds.Contains(ps.Id) && p.FarmerId == farmer.Id
-            select new { ps.Id, ps.PlotId, ps.SeasonId, ps.RiceVariety }).ToListAsync(ct);
+            select new { ps.Id, ps.PlotId, ps.SeasonId, ps.RiceVarietyId,
+                RiceVariety = db.RiceVarieties.Where(v => v.Id == ps.RiceVarietyId).Select(v => v.Name).FirstOrDefault() }).ToListAsync(ct);
         if (sources.Count != seasonIds.Length)
             return Problem(409, "SOURCE_RECORD_NOT_READY", "Every plot-season must belong to this farmer and company.");
+        if (sources.Any(x => x.RiceVarietyId is null || x.RiceVariety is null))
+            return Problem(409, "RICE_VARIETY_UNRESOLVED", "Assign a catalog rice variety to every plot-season before procurement.");
         // Catalog reads share Capture's locked transaction; a second pooled connection can deadlock lock waiters.
         var paddy = await db.Database.SqlQuery<bool>($"SELECT EXISTS(SELECT 1 FROM grainledger.catalog_commodities WHERE id={payload.CommodityId} AND code='PADDY' AND is_archived=false) AS \"Value\"").SingleAsync(ct);
         if (!paddy) return Validation("payload.commodityId", "Select the configured PADDY commodity.");
@@ -236,10 +239,10 @@ public static class ProcurementEndpoints
             {
                 var source = sources.Single(s => s.Id == x.Input.PlotSeasonId);
                 return new ProcurementLineResponse(x.Input.ItemId, x.Input.LineNo, x.Input.PlotSeasonId,
-                    source.PlotId, source.SeasonId, source.RiceVariety, Number(x.Measured), x.Unit,
+                    source.PlotId, source.SeasonId, source.RiceVariety!, Number(x.Measured), x.Unit,
                     Number(x.Kg), Number(x.Moisture), x.Input.SourceLotId, x.Input.LotId,
                     codes[x.Input.LotId], "RAW_PADDY",
-                    new ProcurementInitialStock(payload.ReceivingLocationId, "0"));
+                    new ProcurementInitialStock(payload.ReceivingLocationId, "0"), RiceVarietyId: source.RiceVarietyId);
             }).ToArray();
             result = new ProcurementResponse(payload.EntityId, code, farmer.Id, payload.CollectionSiteId,
                 payload.ReceivingLocationId, payload.CommodityId, "PENDING_ARRIVAL", actorId, receivedAt,
@@ -450,7 +453,7 @@ public static class ProcurementEndpoints
                 line.MoisturePercent, stock, lineage.Descendants, sampleIds, reportIds, clock.GetUtcNow(),
                 state?.Status ?? snapshot.Status,
                 Number(stock.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture))),
-                metadata.Farmer?.Name, metadata.Farmer?.Code, metadata.PlotCode, metadata.SeasonName));
+                metadata.Farmer?.Name, metadata.Farmer?.Code, metadata.PlotCode, metadata.SeasonName, line.RiceVarietyId));
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }

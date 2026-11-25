@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, errorMessage, type User } from './api';
-import { Choice, Enum, Evidence, Feedback, isUnavailableHistoricalMixedLot, ListControls, Mass, Pagination, Panel, Table, emptyLookup, id, iso, kinds, localTime, mutate, name, now, positive, useAction, type Lookup, type Lot, type Operation, type Page, type Row } from './ledger-ui';
+import { Choice, Enum, Evidence, Feedback, isUnavailableHistoricalMixedLot, ListControls, lotVariety, Mass, Pagination, Panel, Table, emptyLookup, id, iso, kinds, localTime, mutate, name, now, positive, useAction, type Lookup, type Lot, type Operation, type Page, type Row } from './ledger-ui';
 import { LedgerLotPicker } from './LedgerLotPicker';
 import { TransferForm } from './LedgerStock';
 
@@ -76,7 +76,7 @@ export function LedgerOperations({ user, active = true }: { user: User; active?:
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
-    void linkedRecords<Lot>('lots', [...operations.data.items, ...linkedOperations].flatMap(operation => operation.inputs.map(row => row.lotId)), controller.signal).then(rows => {
+    void linkedRecords<Lot>('lots', [...operations.data.items, ...linkedOperations].flatMap(operation => [...operation.inputs.map(row => row.lotId), ...(operation.status === 'DRAFT' ? [] : operation.outputs.map(row => row.id))]), controller.signal).then(rows => {
       if (!controller.signal.aborted) setLots(rows);
     }).catch(error => { if (!controller.signal.aborted) void action.run(async () => { throw error; }); });
     return () => controller.abort();
@@ -237,8 +237,8 @@ function OperationEditor({ look, lots, operation, replacement, command, onSaved,
   </form></Panel>;
 }
 function OperationDetail({ operation, lots, look, user, command, onEdit }: { operation: Operation; lots: Lot[]; look: Lookup; user: User; command: (path: string, body: Row, method?: string) => Promise<Row>; onEdit: () => void }) {
-  const outputSummary = operation.outputs.map(row => `${row.quantityKg} kg ${name(look.commodities, row.commodityId)} (${row.stage}) — ${row.code}`).join('; ');
-  const inputSummary = operation.inputs.map(row => `${row.quantityKg} kg — ${lots.find(lot => lot.id === row.lotId)?.code || name(look.locations, row.locationId)}`).join('; ');
+  const outputSummary = operation.outputs.map(row => { const lot = lots.find(item => item.id === row.id); return `${row.quantityKg} kg ${name(look.commodities, row.commodityId)} (${row.stage}) — ${row.code}${lot ? ` — ${lotVariety(lot)}` : ''}`; }).join('; ');
+  const inputSummary = operation.inputs.map(row => { const lot = lots.find(item => item.id === row.lotId); return `${row.quantityKg} kg — ${lot ? `${lot.code} — ${lotVariety(lot)}` : name(look.locations, row.locationId)}`; }).join('; ');
   const action = useAction(), [evidence, setEvidence] = useState(''), [reason, setReason] = useState('');
   const [visited, setVisited] = useState(false);
   useEffect(() => { action.setError(''); action.setStatus(''); }, [operation.version]);

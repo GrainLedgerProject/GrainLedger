@@ -16,6 +16,7 @@ beforeEach(() => {
     if (url.pathname === '/api/auth/csrf') return response({ token: 'test-token' });
     if (url.pathname === '/api/farmers') return url.searchParams.get('search') ? response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false }) : response({ items: [farmer], page: 1, pageSize: 25, totalCount: 1, hasMore: false });
     if (url.pathname === '/api/plots' || url.pathname === '/api/crop-seasons' || url.pathname === '/api/plot-seasons') return response({ items: [], page: 1, pageSize: 25, totalCount: 0, hasMore: false });
+    if (url.pathname === '/api/rice-varieties') return response({ items: [{ id: 'variety-1', code: 'ST25', name: 'ST25' }], page: 1, pageSize: 100, hasMore: false });
     if (url.pathname === '/api/farmers/farmer-1' && init?.method === 'DELETE') return response({ title: 'Farmer is referenced by a plot.' }, 409);
     if (url.pathname === '/api/farmers/farmer-1') return response(farmer);
     return response({ title: `Unexpected route ${url.pathname}` }, 404);

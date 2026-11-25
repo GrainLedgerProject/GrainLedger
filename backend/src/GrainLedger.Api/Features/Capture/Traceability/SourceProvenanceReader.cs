@@ -9,7 +9,7 @@ public sealed record SourceReferenceLabels(string? FarmerCode, string? FarmerNam
 
 public sealed record SourceProvenance(Guid LotId, Guid SourceRecordId, Guid ProcurementId,
     string ProcurementCode, Guid ProcurementItemId, Guid FarmerId, Guid PlotId, Guid SeasonId,
-    Guid PlotSeasonId, string RiceVariety, string ExpectedKg, string OriginalValue, string OriginalUnit, SourceReferenceLabels CurrentReferenceLabels);
+    Guid PlotSeasonId, string RiceVariety, string ExpectedKg, string OriginalValue, string OriginalUnit, SourceReferenceLabels CurrentReferenceLabels, Guid? RiceVarietyId = null);
 
 public sealed class SourceProvenanceReader
 {
@@ -47,7 +47,8 @@ public sealed class SourceProvenanceReader
                 l.GetProperty("PlotSeasonId").GetGuid(), l.GetProperty("RiceVariety").GetString()!,
                 l.GetProperty("NetMassKg").GetString()!, l.GetProperty("MeasuredValue").GetString()!, l.GetProperty("MeasuredUnit").GetString()!,
                 new(rows.IsDBNull(7) ? null : rows.GetString(7), rows.IsDBNull(8) ? null : rows.GetString(8),
-                    rows.IsDBNull(9) ? null : rows.GetString(9), rows.IsDBNull(10) ? null : rows.GetString(10))));
+                    rows.IsDBNull(9) ? null : rows.GetString(9), rows.IsDBNull(10) ? null : rows.GetString(10)),
+                l.TryGetProperty("RiceVarietyId", out var varietyId) && varietyId.ValueKind == JsonValueKind.String ? varietyId.GetGuid() : null));
         }
         return result;
     }

@@ -38,7 +38,7 @@ beforeEach(() => {
   '/api/ledger/setup': { ...look, assignments: [], policies: [], compatibilities: [] }, '/api/admin/users': [], '/api/commodities': page([]), '/api/measurement-units': page([]),
   '/api/container-notifications': { items: [] },
   '/api/admin/organizations': [{ id: 'company', name: 'Customer', kind: 'Customer' }], '/api/ledger/receiving-thresholds/own-company': { companyId: 'company', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'default-r1' },
-  '/api/farmers': page([{ id: 'farmer', name: 'Farmer', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plots': page([{ id: 'plot', farmerId: 'farmer', code: 'Plot', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/crop-seasons': page([{ id: 'season', name: 'Season', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plot-seasons': page([{ id: 'ps', plotId: 'plot', seasonId: 'season', riceVariety: 'IR', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]),
+  '/api/farmers': page([{ id: 'farmer', name: 'Farmer', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plots': page([{ id: 'plot', farmerId: 'farmer', code: 'Plot', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/crop-seasons': page([{ id: 'season', name: 'Season', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/plot-seasons': page([{ id: 'ps', plotId: 'plot', seasonId: 'season', riceVariety: 'IR', riceVarietyId: 'variety', createdBy: 'actor', version: 1, canEdit: true, canDelete: true }]), '/api/rice-varieties': page([{ id: 'variety', code: 'IR', name: 'IR' }]),
   '/api/procurement-reference-data': { receivingOptions: [{ collectionSiteId: 'site', collectionSiteCode: 'SITE', collectionSiteName: 'Site', receivingLocationId: 'loc', receivingLocationCode: 'Store' }], commodity: { id: 'paddy' }, massUnits: [{ code: 'KG', name: 'kg' }], page: 1, pageSize: 100, totalCount: 1, hasMore: false, maxLinesPerReceipt: 100 }, '/api/procurements': page([]),
   '/api/ledger/receiving-tasks': page([receivingTask]), '/api/ledger/receiving/arrival': receivingTask,
  };
@@ -461,6 +461,33 @@ it('uses scoped owner lookup names in processing and stock details without admin
  const stockDetail = (await screen.findByRole('button', { name: 'Close lot detail' })).closest('section')!;
  expect(within(stockDetail).getByText('Customer Company', { selector: 'dd' })).toBeInTheDocument();
  expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/admin/organizations'))).toBe(false);
+});
+it('shows snapshot variety, mixed, and unknown identities in stock and processing', async () => {
+ const single = { ...lot, varietyStatus: 'SINGLE', riceVarietyId: 'variety', riceVariety: 'ST25 snapshot' };
+ const mixed = { ...lot, id: 'mixed', code: 'Mixed lot', varietyStatus: 'MIXED', riceVarietyId: null, riceVariety: null };
+ const unknown = { ...lot, id: 'unknown', code: 'Legacy lot', varietyStatus: 'UNKNOWN', riceVarietyId: null, riceVariety: null };
+ routes['/api/ledger/lots'] = page([single, mixed, unknown]);
+ routes['/api/ledger/lots/source'] = single;
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write', 'lots.read.tenant'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByRole('button', { name: 'Stock & HOLDs' }));
+ expect(await screen.findByRole('row', { name: /Source lot.*ST25 snapshot/ })).toBeInTheDocument();
+ expect(screen.getByRole('row', { name: /Mixed lot.*Mixed varieties/ })).toBeInTheDocument();
+ expect(screen.getByRole('row', { name: /Legacy lot.*Unknown variety/ })).toBeInTheDocument();
+ await browser.click(screen.getByRole('button', { name: 'Open lot detail for Source lot' }));
+ const detail = (await screen.findByRole('button', { name: 'Close lot detail' })).closest('section')!;
+ expect(within(detail).getByText('ST25 snapshot')).toBeInTheDocument();
+ await browser.click(screen.getByRole('button', { name: 'Process & correct' }));
+ await browser.click(await screen.findByText(/Customer Company — DRYING:.*Dried lot.*DRAFT/));
+ expect(await screen.findByText(/10.000001 kg — Source lot — ST25 snapshot/)).toBeInTheDocument();
+ await browser.click(screen.getByText('Create processing draft', { selector: 'summary' }));
+ const editor = within(screen.getByRole('heading', { name: 'New processing draft' }).closest('section')!);
+ await browser.selectOptions(editor.getByLabelText('Stock owner'), 'customer');
+ await browser.selectOptions(editor.getByLabelText('Processing facility'), 'facility');
+ const picker = editor.getByLabelText('Input lot');
+ expect(await within(picker).findByRole('option', { name: /Source lot.*ST25 snapshot/ })).toBeInTheDocument();
+ expect(within(picker).getByRole('option', { name: /Mixed lot.*Mixed varieties/ })).toBeInTheDocument();
+ expect(within(picker).getByRole('option', { name: /Legacy lot.*Unknown variety/ })).toBeInTheDocument();
 });
 it('limits ledger navigation and processing actions to assigned permissions', async () => {
  render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.confirm'] }} />);

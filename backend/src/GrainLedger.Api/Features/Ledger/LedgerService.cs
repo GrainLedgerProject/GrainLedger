@@ -154,6 +154,13 @@ public sealed partial class LedgerService(NpgsqlDataSource dataSource, IHttpCont
         var value = await ExecuteAsync(connection, null, $"SELECT {routine}($1,$2,$3)::text", ct, actor, action, payload);
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
+    public async Task<JsonElement> ByproductVarietyPolicyAsync(string action, JsonObject payload, CancellationToken ct = default)
+    {
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        var value = await ExecuteAsync(connection, null, "SELECT grainledger.ledger_byproduct_variety_policy($1,$2,$3)::text", ct, actor, action, payload);
+        return JsonSerializer.Deserialize<JsonElement>((string)value!);
+    }
     public async Task<bool> CanAccessEvidenceAsync(Guid evidenceId, Guid ownerId, Guid facilityId, CancellationToken ct = default)
     {
         await using var connection = await OpenAsync(ct);

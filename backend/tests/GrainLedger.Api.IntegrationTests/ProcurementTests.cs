@@ -21,6 +21,9 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         var reference = await GetAsync(s.Purchaser, $"/api/procurement-reference-data?collectionSiteId={s.FacilityId}");
         Assert.Equal(s.CatalogCommodityId, reference.GetProperty("commodity").GetProperty("id").GetGuid());
         Assert.Contains(reference.GetProperty("receivingOptions").EnumerateArray(), x => x.GetProperty("receivingLocationId").GetGuid() == s.LocationId);
+        var storeOption = reference.GetProperty("receivingOptions").EnumerateArray().Single(x => x.GetProperty("receivingLocationId").GetGuid() == s.LocationId);
+        Assert.Equal("STORE", storeOption.GetProperty("receivingLocationKind").GetString());
+        Assert.False(storeOption.GetProperty("receivingLocationMixedBulk").GetBoolean());
         Assert.DoesNotContain(reference.GetProperty("receivingOptions").EnumerateArray(), x => x.GetProperty("receivingLocationId").GetGuid() == s.IsolationLocationId);
         var optionsPage = await GetAsync(s.Purchaser,
             $"/api/procurement-reference-data?collectionSiteId={s.FacilityId}&search=Synthetic&page=1&pageSize=1&sortBy=receivingLocationCode&sortDirection=desc");
@@ -73,6 +76,24 @@ public sealed class ProcurementTests(ApiFactory factory) : IClassFixture<ApiFact
         Assert.Empty(await scope.ServiceProvider.GetRequiredService<ProcurementLedgerPort>().GetCurrentStockAsync(s.ForeignOwnerId, lotId, default));
         var wrongSource = s.ReceiptBody(Guid.NewGuid(), ["1"]);
         await RejectedAsync(s.Accounts["foreignPurchaser"].Client, HttpMethod.Post, "/api/procurements", wrongSource, HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Single_lot_bulk_rejects_multiple_receipt_lines_before_registration()
+    {
+        using var s = await CreateAsync(factory);
+        var silo = Guid.NewGuid();
+        await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/locations",
+            new { id = silo, facilityId = s.FacilityId, name = "Single lot silo", kind = "SILO", mixedBulk = false });
+        var options = await GetAsync(s.Purchaser, $"/api/procurement-reference-data?collectionSiteId={s.FacilityId}");
+        var option = options.GetProperty("receivingOptions").EnumerateArray().Single(x => x.GetProperty("receivingLocationId").GetGuid() == silo);
+        Assert.Equal("SILO", option.GetProperty("receivingLocationKind").GetString());
+        Assert.False(option.GetProperty("receivingLocationMixedBulk").GetBoolean());
+        var id = Guid.NewGuid();
+        using var response = await RawAsync(s.Purchaser, HttpMethod.Post, "/api/procurements", s.ReceiptBody(id, ["10", "8"], silo));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("Choose separated storage or register one line for this bulk location", await response.Content.ReadAsStringAsync());
+        Assert.Equal(0L, await ScalarAsync<long>("SELECT count(*) FROM grainledger.capture_procurements WHERE id=@id", id));
     }
 
     [Fact]

@@ -70,6 +70,7 @@ export function LedgerSetup({ user, active = true }: { user: User; active?: bool
               <label>Location name<input required value={locationName} onChange={e => setLocationName(e.target.value)} /></label>
               <label>Location kind<Enum values={['STORE', 'SILO', 'COMPARTMENT', 'ISOLATION']} value={locationKind} onChange={setLocationKind} /></label>
               <label><input type="checkbox" checked={locationMixedBulk} onChange={e => setLocationMixedBulk(e.target.checked)} /> Enable mixed-bulk storage</label>
+              <p className="muted">A non-mixed STORE holds separate lots. A non-mixed SILO or COMPARTMENT holds one lot. Mixed-bulk locations require approved pooling; use separate locations for different products such as bran and husk.</p>
               <button disabled={action.busy || !facility}>{editing?.path === 'locations' ? 'Save location' : 'Add location'}</button>{editing?.path === 'locations' && <button type="button" onClick={() => setEditing(null)}>Cancel edit</button>}
             </form>
             <form ref={editing?.path === 'equipment' ? editForm : null} onSubmit={e => void save(e, editing?.path === 'equipment' ? `equipment/${editing.id}` : 'equipment', { ...(editing?.path === 'equipment' ? { name: equipmentName, facilityId: facility, version: editing.version } : { id: id(), facilityId: facility, name: equipmentName }) })}>

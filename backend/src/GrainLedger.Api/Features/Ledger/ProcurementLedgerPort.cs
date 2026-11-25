@@ -44,7 +44,7 @@ public sealed class ProcurementLedgerPort(NpgsqlDataSource dataSource)
         count.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = (object?)pattern ?? DBNull.Value });
         var totalCount = Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
         await using var command = new NpgsqlCommand($"""
-            SELECT f.id,f.name,l.id,l.name FROM grainledger.ledger_locations l JOIN grainledger.ledger_facilities f ON f.id=l.facility_id
+            SELECT f.id,f.name,l.id,l.name,l.kind,l.mixed_bulk FROM grainledger.ledger_locations l JOIN grainledger.ledger_facilities f ON f.id=l.facility_id
             WHERE NOT l.is_deleted AND NOT f.is_deleted AND l.kind IN ('STORE','SILO','COMPARTMENT')
               AND (l.owner_id=$1 OR l.owner_id IS NULL AND (l.kind<>'COMPARTMENT' OR l.cleared))
               AND ($2::uuid IS NULL OR f.id=$2)
@@ -63,7 +63,7 @@ public sealed class ProcurementLedgerPort(NpgsqlDataSource dataSource)
         {
             while (await reader.ReadAsync(ct))
                 options.Add(new(reader.GetGuid(0), reader.GetGuid(0).ToString("N"), reader.GetString(1),
-                    reader.GetGuid(2), reader.GetString(3)));
+                    reader.GetGuid(2), reader.GetString(3), reader.GetString(4), reader.GetBoolean(5)));
         }
         await transaction.CommitAsync(ct);
         return new ProcurementReceivingOptionsPage(options, totalCount);
