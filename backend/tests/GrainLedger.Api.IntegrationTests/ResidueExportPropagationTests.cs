@@ -225,6 +225,9 @@ public sealed class ResidueExportPropagationTests
     public async Task Upgrade_backfills_export_contexts_of_completed_lot_jobs_without_rewriting_lot_evaluations()
     {
         await using var factory = new ApiFactory { MigrationTarget = "20261123030000_ResidueRiskReads" }; await factory.InitializeAsync();
+        // Current Capture writes a variety ID, but this historical schema predates that column.
+        // Remove the fixture-only column before migration so the real cutover sees the original schema.
+        await Owner(factory, "ALTER TABLE grainledger.capture_plot_seasons ADD COLUMN rice_variety_id uuid");
         using var f = await ContainerExecutionScenario.CreateAsync(factory);
         var job = (Guid)(await Owner(factory, """
             INSERT INTO grainledger.ledger_residue_changes(company_id,cause_kind,subject_id,subject_version,actor_id,origin,root_lot_ids,substance_ids)
@@ -244,6 +247,7 @@ public sealed class ResidueExportPropagationTests
             Assert.True((await Rpc(factory, lease, "ledger_residue_job", "FINISH")).GetProperty("completed").GetBoolean());
         }
         var original = (string)(await Owner(factory, "SELECT jsonb_agg(to_jsonb(e) ORDER BY id)::text FROM grainledger.ledger_residue_evaluations e"))!;
+        await Owner(factory, "ALTER TABLE grainledger.capture_plot_seasons DROP COLUMN rice_variety_id");
         var options = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(factory.OwnerConnectionString,
             x => x.MigrationsHistoryTable("__EFMigrationsHistory", "grainledger")).Options;
         await using (var db = new AppDbContext(options)) await db.Database.MigrateAsync();
