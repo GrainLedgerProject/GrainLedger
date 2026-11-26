@@ -1,6 +1,6 @@
 import { ResidueBounds } from './ResidueBounds';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, type User } from './api';
+import { api, errorMessage, type User } from './api';
 import { Choice, Enum, Evidence, Feedback, hasPositivePhysicalPosition, isUnavailableHistoricalMixedLot, ListControls, lotVariety, Mass, Pagination, Panel, Table, emptyLookup, id, iso, mutate, name, now, positive, stages, useAction, type Lookup, type Lot, type Page, type Row } from './ledger-ui';
 import { LedgerLotPicker } from './LedgerLotPicker';
 import { ContainerNotices } from './ContainerWorkflow';
@@ -47,6 +47,7 @@ export function LedgerStock({ user, active = true, initialLotId, onTrace }: { us
     <nav className="ledger-task-nav" aria-label="Stock tasks">{([['stock', 'Stock'], ['holds', 'HOLDs & alerts'], ['history', 'History']] as const).map(([key, label]) => <button key={key} aria-pressed={task === key} onClick={() => setTask(key)}>{label}</button>)}</nav>
     <section hidden={task !== 'stock'}>
       <div className="ledger-task-intro"><h2>Stock</h2><p>Search scoped inventory and inspect lot positions, lineage and restrictions.</p></div>
+      <LocationStock active={active && task === 'stock'} look={look} revision={stockRevision} onOpenLot={lotId => { setSelected(null); setSelectedId(lotId); }} />
       <Panel title="Scoped stock search">
         <ListControls label="stock" search={search} onSearch={value => reset(() => setSearch(value))} sortBy={sortBy} onSortBy={value => reset(() => setSortBy(value))} sortDirection={direction} onSortDirection={value => reset(() => setDirection(value))} sortOptions={stockSort}>
           <label>Facility filter<Choice rows={look.facilities} value={facility} onChange={value => reset(() => { setFacility(value); setLocation(''); })} optional /></label>
@@ -74,6 +75,39 @@ export function LedgerStock({ user, active = true, initialLotId, onTrace }: { us
     <section hidden={task !== 'history'}><div className="ledger-task-intro"><h2>History</h2><p>Chronological events retain original postings and reversal references.</p></div><History active={active && task === 'history'} look={look} /></section>
     <section hidden={task !== 'holds'}><div className="ledger-task-intro"><h2>HOLDs & alerts</h2><p>HOLD stays active after acknowledgement, isolation, response or notification read. No release workflow.</p></div><Holds active={active && task === 'holds'} look={look} user={user} onChanged={refresh} /></section>
   </>;
+}
+type LocationPosition = { lotId: string; code: string; stage: string; productIdentity: string | null; riceVariety: string | null; varietyStatus: string; ownerName: string; quantityKg: string; availableKg: string; restrictions: string[] };
+type LocationStockPage = Page<LocationPosition> & { locationId: string; totalKg: string };
+
+function LocationStock({ active, look, revision, onOpenLot }: { active: boolean; look: Lookup; revision: number; onOpenLot: (lotId: string) => void }) {
+  const [locationId, setLocationId] = useState(''), [page, setPage] = useState(1), [result, setResult] = useState<LocationStockPage | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState(''), [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!active || !locationId) return;
+    let current = true;
+    setResult(null); setError(''); setLoading(true);
+    void api<LocationStockPage>(`/api/ledger/locations/${encodeURIComponent(locationId)}/stock?page=${page}&pageSize=25`).then(
+      next => { if (current) { setResult(next); setLoading(false); } },
+      reason => { if (current) { setError(errorMessage(reason)); setLoading(false); } },
+    );
+    return () => { current = false; };
+  }, [active, locationId, page, revision, retry]);
+  return <Panel title="Physical stock by location">
+    <p>Choose a location to see physical stock, including stock on HOLD or reserved. Total covers all pages of stock you are authorized to see.</p>
+    <label>Stock location<select value={locationId} onChange={event => { setLocationId(event.target.value); setPage(1); setResult(null); setError(''); }}>
+      <option value="">Select a location…</option>
+      {look.locations.map(location => <option key={location.id} value={location.id}>{name(look.facilities, location.facilityId)} — {location.name}</option>)}
+    </select></label>
+    {!locationId && <p className="empty">Select a location to view its stock.</p>}
+    {locationId && loading && <p role="status">Loading location stock…</p>}
+    {locationId && error && <div className="notice error" role="alert">Could not load location stock: {error} <button type="button" onClick={() => setRetry(value => value + 1)}>Retry</button></div>}
+    {locationId && result && !loading && !error && <>
+      <p><strong>Authorized physical stock total: {result.totalKg} kg</strong> across {result.totalCount} positions.</p>
+      {result.items.length ? <div className="table-scroll"><table aria-label="Location stock positions"><thead><tr><th scope="col">Lot</th><th scope="col">Stage / identity</th><th scope="col">Rice variety</th><th scope="col">Owner</th><th scope="col">Physical (kg)</th><th scope="col">Available (kg)</th><th scope="col">Restrictions</th><th scope="col">Detail</th></tr></thead><tbody>
+        {result.items.map(position => <tr key={position.lotId}><td>{position.code}</td><td>{position.stage} / {position.productIdentity || '—'}</td><td>{position.varietyStatus === 'MIXED' ? 'Mixed varieties' : position.varietyStatus === 'SINGLE' && position.riceVariety?.trim() ? position.riceVariety : 'Unknown variety'}</td><td>{position.ownerName}</td><td>{position.quantityKg}</td><td>{position.availableKg}</td><td>{position.restrictions.join(', ') || 'None'}</td><td><button type="button" aria-label={`Open lot detail for ${position.code}`} onClick={() => onOpenLot(position.lotId)}>Open lot detail</button></td></tr>)}
+      </tbody></table></div> : <p className="empty">No authorized physical stock at this location.</p>}
+      <Pagination page={result.page} pageSize={result.pageSize} totalCount={result.totalCount} onChange={setPage} label="location stock" busy={loading} />
+    </>}
+  </Panel>;
 }
 function LotHistory({ lotId, initial }: { lotId: string; initial: Page<Row> }) {
   const [page, setPage] = useState(initial.page), [search, setSearch] = useState(''), [sortBy, setSortBy] = useState('occurredAt'), [direction, setDirection] = useState<'asc' | 'desc'>('asc'), [result, setResult] = useState(initial), action = useAction(), requestId = useRef(0);

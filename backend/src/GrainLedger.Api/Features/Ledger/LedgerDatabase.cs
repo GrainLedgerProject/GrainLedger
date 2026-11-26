@@ -152,6 +152,7 @@ public static class LedgerDatabase
 
             GRANT EXECUTE ON FUNCTION 
                             grainledger.ledger_command(uuid,text,jsonb),grainledger.ledger_read(uuid,text,jsonb),grainledger.ledger_trace_lot(uuid,uuid,text,text),grainledger.ledger_trace_starts(uuid,text,text,uuid,uuid,integer,integer),grainledger.ledger_lock_writes(),
+                            grainledger.ledger_location_stock(uuid,uuid,jsonb),
                             grainledger.ledger_provision_catalog_commodities(uuid),
                             grainledger.ledger_register_pending_procurement(uuid,uuid),grainledger.ledger_reserve_source_lot_code(uuid,uuid,uuid,uuid),
                             grainledger.ledger_receiving_detail(uuid,uuid),grainledger.ledger_receiving_tasks(uuid,uuid,integer,integer),
@@ -360,6 +361,7 @@ public static class LedgerDatabase
             ), expected_function(signature) AS (VALUES
               ('grainledger.ledger_command(uuid,text,jsonb)'),
               ('grainledger.ledger_read(uuid,text,jsonb)'),
+              ('grainledger.ledger_location_stock(uuid,uuid,jsonb)'),
               ('grainledger.ledger_trace_lot(uuid,uuid,text,text)'),
               ('grainledger.ledger_trace_starts(uuid,text,text,uuid,uuid,integer,integer)'),
               ('grainledger.ledger_lock_writes()'),

@@ -69,6 +69,14 @@ public sealed partial class LedgerService(NpgsqlDataSource dataSource, IHttpCont
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
 
+    public async Task<JsonElement> LocationStockAsync(Guid locationId, JsonObject query, CancellationToken ct)
+    {
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        var result = await ExecuteAsync(connection, null, "SELECT grainledger.ledger_location_stock($1,$2,$3)::text", ct, actor, locationId, query);
+        return JsonSerializer.Deserialize<JsonElement>((string)result!);
+    }
+
     public async Task<JsonElement> BusinessHistoryAsync(JsonObject query, CancellationToken ct)
     {
         var actor = await ActorAsync(ct);
