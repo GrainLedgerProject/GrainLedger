@@ -207,6 +207,12 @@ public static class LedgerDatabase
                 IF to_regprocedure('grainledger.ledger_residue_change_claim(uuid,integer,integer)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_residue_change_claim(uuid,integer,integer), grainledger.ledger_residue_change_read(uuid,text,uuid,jsonb) TO %I', runtime_role);
                 END IF;
+                IF to_regprocedure('grainledger.ledger_closed_order_kg(uuid,uuid)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_closed_order_kg(uuid,uuid) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_business_history(uuid,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_business_history(uuid,jsonb) TO %I', runtime_role);
+                END IF;
                 IF to_regprocedure('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb) TO %I', runtime_role);
                 END IF;
@@ -416,7 +422,9 @@ public static class LedgerDatabase
               ('grainledger.ledger_residue_change_read(uuid,text,uuid,jsonb)'),
               ('grainledger.exports_residue_job(uuid,uuid,integer,text,uuid,jsonb)'),
               ('grainledger.exports_residue_freshness_read(uuid,text,uuid,text)'),
-              ('grainledger.ledger_residue_job(uuid,uuid,integer,text,uuid,jsonb)')
+              ('grainledger.ledger_residue_job(uuid,uuid,integer,text,uuid,jsonb)'),
+              ('grainledger.ledger_closed_order_kg(uuid,uuid)'),
+              ('grainledger.ledger_business_history(uuid,jsonb)')
             ), expected_sequence(name,can_usage,can_select,can_update) AS (VALUES
               ('identity_audit_events_Id_seq',true,true,false),
               ('ledger_lot_code_serial',false,false,false),
