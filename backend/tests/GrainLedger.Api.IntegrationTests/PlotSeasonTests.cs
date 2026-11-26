@@ -2,6 +2,8 @@ using GrainLedger.Api.Data;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using GrainLedger.Api.Features.Capture;
 using GrainLedger.Api.Features.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -67,19 +69,64 @@ public sealed class PlotSeasonTests(ApiFactory factory) : IClassFixture<ApiFacto
                 new { companyId = company.Id, name = "Unauthorized", startsOn = "2026-11-01", endsOn = "2027-03-31" })).StatusCode);
         var foreignSeasons = await outsiderClient.GetFromJsonAsync<CropSeasonListResponse>("/api/crop-seasons");
         Assert.DoesNotContain(foreignSeasons!.Items, x => x.Id == season.Id);
+        var varietyResponse = await adminClient.PostAsJsonAsync("/api/rice-varieties", new { code = $"TEST-{Guid.NewGuid():N}", name = "ST25" });
+        Assert.Equal(HttpStatusCode.Created, varietyResponse.StatusCode);
+        var varietyId = (await varietyResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        object InvalidRequest(object payload) => new { deviceId = "test-browser", clientOperationId = Guid.NewGuid(),
+            capturedAt = DateTimeOffset.UtcNow, payloadSchemaVersion = 1, payload };
+        Assert.Equal(HttpStatusCode.BadRequest, (await customerClient.PostAsJsonAsync("/api/plot-seasons",
+            InvalidRequest(new { entityId = Guid.NewGuid(), plotId = plot.Id, seasonId = season.Id }))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await customerClient.PostAsJsonAsync("/api/plot-seasons",
+            InvalidRequest(new { entityId = Guid.NewGuid(), plotId = plot.Id, seasonId = season.Id, riceVarietyId = Guid.NewGuid() }))).StatusCode);
+        var legacyResponse = await customerClient.PostAsJsonAsync("/api/plot-seasons",
+            InvalidRequest(new { entityId = Guid.NewGuid(), plotId = plot.Id, seasonId = season.Id, riceVariety = "ST25" }));
+        Assert.Equal(HttpStatusCode.Conflict, legacyResponse.StatusCode);
+        Assert.Equal("LEGACY_VARIETY_RESELECT_REQUIRED",
+            (await legacyResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        var legacyId = Guid.NewGuid();
+        var legacyOperationId = Guid.NewGuid();
+        var legacyTime = DateTimeOffset.UtcNow;
+        var legacyCanonical = JsonSerializer.Serialize(new { operationType = "PLOT_SEASON_REGISTERED", PayloadSchemaVersion = 1,
+            capturedAt = legacyTime, EntityId = legacyId, PlotId = plot.Id, SeasonId = season.Id, riceVariety = "ST25" });
+        using (var legacyScope = factory.Services.CreateScope())
+        {
+            var legacyDb = legacyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var legacyEvent = new CaptureBusinessEvent { CompanyId = company.Id, ActorId = purchaser.Id,
+                EventType = "PLOT_SEASON_REGISTERED", OccurredAt = legacyTime, RecordedAt = legacyTime,
+                CorrelationId = legacyOperationId, Payload = "{}" };
+            legacyDb.BusinessEvents.Add(legacyEvent);
+            await legacyDb.SaveChangesAsync();
+            legacyDb.OfflineOperations.Add(new CaptureOperation { CompanyId = company.Id, SubmittedBy = purchaser.Id,
+                DeviceId = "legacy-browser", ClientOperationId = legacyOperationId,
+                PayloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(legacyCanonical))),
+                Payload = legacyCanonical, CapturedAt = legacyTime, ReceivedAt = legacyTime, Status = "APPLIED",
+                AppliedEventId = legacyEvent.Id, ResultPayload = JsonSerializer.Serialize(new { Id = legacyId, PlotId = plot.Id,
+                    SeasonId = season.Id, RiceVariety = "ST25" }) });
+            await legacyDb.SaveChangesAsync();
+        }
+        var legacyRequest = new { deviceId = "legacy-browser", clientOperationId = legacyOperationId,
+            capturedAt = legacyTime, payloadSchemaVersion = 1,
+            payload = new { entityId = legacyId, plotId = plot.Id, seasonId = season.Id, riceVariety = "ST25" } };
+        var replay = await customerClient.PostAsJsonAsync("/api/plot-seasons", legacyRequest);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var replayResult = await replay.Content.ReadFromJsonAsync<PlotSeasonResponse>();
+        Assert.Equal(legacyId, replayResult!.Id);
+        Assert.Null(replayResult.RiceVarietyId);
+
 
         var id = Guid.NewGuid();
         var operationId = Guid.NewGuid();
         var capturedAt = DateTimeOffset.UtcNow;
         var request = new { deviceId = "test-browser", clientOperationId = operationId,
             capturedAt, payloadSchemaVersion = 1,
-            payload = new { entityId = id, plotId = plot.Id, seasonId = season.Id, riceVariety = "ST25" } };
+            payload = new { entityId = id, plotId = plot.Id, seasonId = season.Id, riceVarietyId = varietyId } };
         var created = await customerClient.PostAsJsonAsync("/api/plot-seasons", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         Assert.Equal($"/api/plot-seasons/{id}", created.Headers.Location?.OriginalString);
         Assert.Equal(HttpStatusCode.OK, (await customerClient.PostAsJsonAsync("/api/plot-seasons", request)).StatusCode);
         var detail = await customerClient.GetFromJsonAsync<PlotSeasonReferenceResponse>($"/api/plot-seasons/{id}");
         Assert.Equal("ST25", detail!.RiceVariety);
+        Assert.Equal(varietyId, detail.RiceVarietyId);
         Assert.False(string.IsNullOrWhiteSpace(detail.PlotCode));
         Assert.Equal(season.Name, detail.SeasonName);
         var list = await customerClient.GetFromJsonAsync<PlotSeasonListResponse>($"/api/plot-seasons?plotId={plot.Id}");
@@ -115,9 +162,17 @@ public sealed class PlotSeasonTests(ApiFactory factory) : IClassFixture<ApiFacto
         var (user, session) = await factory.SeedUserAsync(Roles.PurchasingStaff, company.Id);
         using var client = factory.CreateRealCookieClient(user, session);
         await AddCsrfAsync(client);
+        Guid varietyId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            varietyId = Guid.NewGuid();
+            db.RiceVarieties.Add(new GrainLedger.Api.Features.Catalogs.RiceVariety { Id = varietyId, Code = $"TEST-{varietyId:N}", Name = "ST25" });
+            await db.SaveChangesAsync();
+        }
         object Request(Guid plotId) => new { deviceId = "test-browser", clientOperationId = Guid.NewGuid(),
             capturedAt = DateTimeOffset.UtcNow, payloadSchemaVersion = 1,
-            payload = new { entityId = Guid.NewGuid(), plotId, seasonId, riceVariety = "ST25" } };
+            payload = new { entityId = Guid.NewGuid(), plotId, seasonId, riceVarietyId = varietyId } };
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/plot-seasons", Request(foreignPlot.Id))).StatusCode);
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/plot-seasons", Request(plot.Id))).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/plot-seasons", Request(plot.Id))).StatusCode);

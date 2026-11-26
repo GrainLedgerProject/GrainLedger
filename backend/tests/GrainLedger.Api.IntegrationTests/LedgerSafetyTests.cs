@@ -217,6 +217,29 @@ public sealed class LedgerSafetyTests(ApiFactory factory) : IClassFixture<ApiFac
         await RejectedAsync(s.Operator, HttpMethod.Post, $"/api/ledger/operations/{invalidFraction.GetProperty("id").GetGuid()}/commit", new { });
     }
 
+    [Theory]
+    [InlineData("SILO")]
+    [InlineData("COMPARTMENT")]
+    public async Task Separate_bulk_rejects_second_lot_until_first_is_drained(string kind)
+    {
+        using var s = await CreateAsync(factory);
+        var location = Guid.NewGuid();
+        await SendAsync(s.Admin, HttpMethod.Post, "/api/ledger/locations",
+            new { id = location, facilityId = s.FacilityId, name = "Separate bulk", kind, mixedBulk = false });
+        var first = Lots(await s.ReceiptAsync("10"))[0];
+        var second = Lots(await s.ReceiptAsync("5"))[0];
+        await s.TransferAsync(first, "10", to: location);
+        await RejectedAsync(s.Operator, HttpMethod.Post, "/api/ledger/transfers", new
+        {
+            id = Guid.NewGuid(), lotId = second, fromLocationId = s.LocationId,
+            toLocationId = location, quantityKg = "5", occurredAt = DateTimeOffset.UtcNow
+        }, HttpStatusCode.Conflict);
+        Assert.Equal(10m, Quantity(await s.LotAsync(first)));
+        Assert.Equal(5m, Quantity(await s.LotAsync(second)));
+        await s.TransferAsync(first, "10", from: location, to: s.LocationId);
+        await s.TransferAsync(second, "5", to: location);
+    }
+
     [Fact]
     public async Task Compartment_owner_switch_requires_empty_stock_and_recorded_clearance()
     {

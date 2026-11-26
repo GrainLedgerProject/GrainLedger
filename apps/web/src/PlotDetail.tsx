@@ -8,7 +8,7 @@ type Point = { type: 'Point'; coordinates: [number, number] };
 type Polygon = { type: 'Polygon'; coordinates: number[][][] };
 type Plot = { id: string; farmerId: string; code: string; areaHa: number; geometry: Point | Polygon; canEdit?: boolean; canDelete?: boolean; version?: number };
 type Farmer = { id: string; name: string; code: string };
-type PlotSeason = { id: string; plotId: string; seasonId: string; riceVariety: string };
+type PlotSeason = { id: string; plotId: string; seasonId: string; riceVariety: string; riceVarietyCode?: string | null };
 type PlotSeasonList = { items: PlotSeason[]; page: number; pageSize: number; hasMore: boolean };
 const PlotMap = lazy(() => import('./PlotMap'));
 
@@ -126,7 +126,7 @@ export function PlotDetail({ id, onBack, onOpenPlotSeason, canCreate, userId, co
         {plotSeasonsLoading && <p role="status">Loading crop seasons…</p>}
         {plotSeasonsError && <div className="notice error" role="alert">{plotSeasonsError} <button className="text-button" onClick={() => setPlotSeasonsRetry(value => value + 1)}>Try again</button></div>}
         {seasonNamesError && <p className="muted small" role="status">Season names could not be loaded. Their IDs are shown instead.</p>}
-        {plotSeasons && (plotSeasons.items.length === 0 ? <p className="empty">No crop seasons registered for this plot yet.</p> : <div className="table-scroll"><table><thead><tr><th scope="col">Crop season</th><th scope="col">Rice variety</th></tr></thead><tbody>{plotSeasons.items.map(item => <tr key={item.id}><td><button className="text-button farmer-plot-link" onClick={() => onOpenPlotSeason(item.id)}>{seasonNames.get(item.seasonId)?.name ?? item.seasonId} <span aria-hidden="true">↗</span></button></td><td>{item.riceVariety}</td></tr>)}</tbody></table></div>)}
+        {plotSeasons && (plotSeasons.items.length === 0 ? <p className="empty">No crop seasons registered for this plot yet.</p> : <div className="table-scroll"><table><thead><tr><th scope="col">Crop season</th><th scope="col">Rice variety</th></tr></thead><tbody>{plotSeasons.items.map(item => <tr key={item.id}><td><button className="text-button farmer-plot-link" onClick={() => onOpenPlotSeason(item.id)}>{seasonNames.get(item.seasonId)?.name ?? item.seasonId} <span aria-hidden="true">↗</span></button></td><td>{item.riceVariety || 'Unknown variety'}{item.riceVarietyCode ? ` (${item.riceVarietyCode})` : ''}</td></tr>)}</tbody></table></div>)}
         {plotSeasons && <div className="farmer-pagination"><span>Page {plotSeasons.page}</span><button className="secondary" disabled={plotSeasonsPage === 1 || plotSeasonsLoading} onClick={() => setPlotSeasonsPage(value => value - 1)}>Previous</button><button className="secondary" disabled={!plotSeasons.hasMore || plotSeasonsLoading} onClick={() => setPlotSeasonsPage(value => value + 1)}>Next</button></div>}
       </section>
       {showSeasonCreate && canCreate && <PlotSeasonCreate plotId={plot.id} plotCode={plot.code} userId={userId} companyId={companyId} onCancel={() => setShowSeasonCreate(false)} onCreated={createdId => { setShowSeasonCreate(false); onOpenPlotSeason(createdId); }} />}

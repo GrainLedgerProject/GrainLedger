@@ -3,7 +3,8 @@ using Npgsql;
 namespace GrainLedger.Api.Features.Capture;
 
 public sealed record ProcurementReceivingOption(Guid CollectionSiteId, string CollectionSiteCode,
-    string CollectionSiteName, Guid ReceivingLocationId, string ReceivingLocationCode);
+    string CollectionSiteName, Guid ReceivingLocationId, string ReceivingLocationCode,
+    string ReceivingLocationKind, bool ReceivingLocationMixedBulk);
 public sealed record ProcurementReceivingOptionsPage(
     IReadOnlyList<ProcurementReceivingOption> Items, int TotalCount);
 public sealed record ProcurementListPageItem(Guid Id, string Status);

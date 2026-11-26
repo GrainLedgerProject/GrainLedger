@@ -8,7 +8,7 @@ type RegisterPlotSeasonRequest = {
   clientOperationId: string;
   capturedAt: string;
   payloadSchemaVersion: 1;
-  payload: { entityId: string; plotId: string; seasonId: string; riceVariety: string };
+  payload: { entityId: string; plotId: string; seasonId: string; riceVarietyId?: string; riceVariety?: string };
 };
 
 function readPending(key: string, plotId: string): RegisterPlotSeasonRequest | null {
@@ -17,7 +17,7 @@ function readPending(key: string, plotId: string): RegisterPlotSeasonRequest | n
     if (!raw) return null;
     const request = JSON.parse(raw) as RegisterPlotSeasonRequest;
     return request.deviceId && request.clientOperationId && request.payload?.entityId &&
-      request.payload.plotId === plotId && request.payload.seasonId && request.payload.riceVariety
+      request.payload.plotId === plotId && request.payload.seasonId && (request.payload.riceVarietyId || request.payload.riceVariety)
       ? request : null;
   } catch { return null; }
 }
@@ -44,7 +44,7 @@ export function PlotSeasonCreate({ plotId, plotCode, userId, companyId, onCancel
   const key = `grainledger:plot-season-create:${userId}:${companyId}:${plotId}`;
   const [pending, setPending] = useState<RegisterPlotSeasonRequest | null>(() => readPending(key, plotId));
   const [seasonId, setSeasonId] = useState(() => readPending(key, plotId)?.payload.seasonId ?? '');
-  const [riceVariety, setRiceVariety] = useState(() => readPending(key, plotId)?.payload.riceVariety ?? '');
+  const [riceVariety, setRiceVariety] = useState(() => readPending(key, plotId)?.payload.riceVarietyId ?? '');
   const [seasonSearch, setSeasonSearch] = useState('');
   const [seasons, setSeasons] = useState<CropSeason[]>([]);
   const [seasonsLoading, setSeasonsLoading] = useState(true);
@@ -80,7 +80,7 @@ export function PlotSeasonCreate({ plotId, plotCode, userId, companyId, onCancel
       clientOperationId: crypto.randomUUID(),
       capturedAt: new Date().toISOString(),
       payloadSchemaVersion: 1,
-      payload: { entityId: crypto.randomUUID(), plotId, seasonId, riceVariety: riceVariety.trim() },
+      payload: { entityId: crypto.randomUUID(), plotId, seasonId, riceVarietyId: riceVariety },
     };
     if (!pending) {
       setPending(request);
@@ -96,7 +96,7 @@ export function PlotSeasonCreate({ plotId, plotCode, userId, companyId, onCancel
         try { window.sessionStorage.removeItem(key); } catch { /* Storage may be disabled. */ }
         setPending(null);
       }
-      setError(errorMessage(cause));
+      setError(cause instanceof ApiError && cause.code === 'LEGACY_VARIETY_RESELECT_REQUIRED' ? 'Select a rice variety and register again.' : errorMessage(cause));
     } finally {
       sending.current = false;
       setBusy(false);
@@ -108,7 +108,7 @@ export function PlotSeasonCreate({ plotId, plotCode, userId, companyId, onCancel
   return <div className="farmer-modal-backdrop">
     <section className="farmer-modal" role="dialog" aria-modal="true" aria-labelledby="register-plot-season-title" onKeyDown={event => { if (event.key === 'Escape' && !busy) onCancel(); }}>
       <div className="farmer-modal-heading"><div><span className="eyebrow">CROP RECORDS</span><h2 id="register-plot-season-title">Register crop season</h2></div><button className="farmer-modal-close" type="button" onClick={onCancel} disabled={busy} aria-label="Close crop season form">×</button></div>
-      <p className="muted">Choose an existing company season for plot <strong>{plotCode}</strong>, then enter the rice variety grown in that season.</p>
+      <p className="muted">Choose an existing company season for plot <strong>{plotCode}</strong>, then select the rice variety grown in that season.</p>
       {seasonsLoading && <p role="status">Loading company crop seasons…</p>}
       {seasonsError && <div className="notice error" role="alert">{seasonsError} <button className="text-button" onClick={() => setSeasonsRetry(value => value + 1)}>Try again</button></div>}
       {!seasonsLoading && !seasonsError && seasons.length === 0 && <div className="notice pending">No crop seasons are configured for your company. Ask an administrator to add one before registering this plot.</div>}

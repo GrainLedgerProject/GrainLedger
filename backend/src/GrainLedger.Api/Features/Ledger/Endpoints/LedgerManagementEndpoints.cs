@@ -59,6 +59,16 @@ public static class LedgerManagementEndpoints
             request["id"] = id;
             return Results.Ok(await ledger.CommandAsync("draft_delete", request, ct));
         }).RequireAuthorization("conversions.write");
+        group.MapGet("/byproduct-variety-policy", async (LedgerService ledger, CancellationToken ct) =>
+            Results.Ok(await ledger.ByproductVarietyPolicyAsync("read", new JsonObject(), ct)))
+            .RequireAuthorization("byproduct.variety-policy.manage");
+        group.MapPut("/byproduct-variety-policy/{stage}", async (string stage, JsonObject request, LedgerService ledger, CancellationToken ct) =>
+        {
+            if (stage is not ("BRAN" or "HUSK") || request.ContainsKey("stage"))
+                throw new LedgerException(400, "Invalid policy request");
+            request["stage"] = stage;
+            return Results.Ok(await ledger.ByproductVarietyPolicyAsync("write", request, ct));
+        }).RequireAuthorization("byproduct.variety-policy.manage");
         group.MapGet("/receiving-thresholds", async (LedgerService ledger, CancellationToken ct) =>
             Results.Ok(await ledger.ReceivingThresholdAsync(false, "settings", new JsonObject(), ct)))
             .RequireAuthorization("platform.configure");

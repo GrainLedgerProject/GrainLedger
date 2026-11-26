@@ -146,9 +146,17 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
             Assert.Equal(HttpStatusCode.PreconditionFailed, staleDelete.StatusCode);
         using (var deleted = await DeleteAsync(adminClient, $"/api/crop-seasons/{ids.SeasonA}", 2))
             Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        var varietyId = Guid.NewGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.RiceVarieties.Add(new GrainLedger.Api.Features.Catalogs.RiceVariety { Id = varietyId, Code = $"TEST-{varietyId:N}", Name = "ST25 Updated" });
+            await db.SaveChangesAsync();
+        }
+
 
         using (var updated = await ownerClient.PutAsJsonAsync($"/api/plot-seasons/{ids.PlotSeasonA}",
-                   new UpdatePlotSeasonRequest(ids.SupportPlotA, ids.SupportSeason, "ST25 Updated", 1)))
+                   new UpdatePlotSeasonRequest(ids.SupportPlotA, ids.SupportSeason, varietyId, 1)))
         {
             Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
             Assert.Equal(2, (await updated.Content.ReadFromJsonAsync<PlotSeasonReferenceResponse>())!.Version);
@@ -193,9 +201,11 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
         var plotId = Guid.NewGuid();
         var seasonId = Guid.NewGuid();
         var plotSeasonId = Guid.NewGuid();
+        var legacyVarietyId = Guid.NewGuid();
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.RiceVarieties.Add(new GrainLedger.Api.Features.Catalogs.RiceVariety { Id = legacyVarietyId, Code = $"TEST-{legacyVarietyId:N}", Name = "ST25 catalog" });
             db.Farmers.Add(new Farmer { Id = farmerId, CompanyId = company.Id, Code = "IN-USE-FARMER", Name = "In Use Farmer",
                 CreatedAt = DateTimeOffset.UtcNow, CreatedBy = owner.Id });
             await db.SaveChangesAsync();
@@ -229,10 +239,23 @@ public sealed class CaptureReferenceManagementTests(ApiFactory factory) : IClass
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using (var response = await DeleteAsync(adminClient, $"/api/crop-seasons/{seasonId}", 1))
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var legacyDetail = await ownerClient.GetFromJsonAsync<PlotSeasonReferenceResponse>($"/api/plot-seasons/{plotSeasonId}");
+        Assert.True(legacyDetail!.CanAssignRiceVariety);
+        Assert.False(legacyDetail.CanEdit);
+        using (var assigned = await ownerClient.PutAsJsonAsync($"/api/plot-seasons/{plotSeasonId}",
+                   new UpdatePlotSeasonRequest(plotId, seasonId, legacyVarietyId, 1)))
+            Assert.Equal(HttpStatusCode.OK, assigned.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var stored = await db.PlotSeasons.SingleAsync(x => x.Id == plotSeasonId);
+            Assert.Equal("ST25", stored.RiceVariety);
+            Assert.Equal(legacyVarietyId, stored.RiceVarietyId);
+        }
         using (var response = await ownerClient.PutAsJsonAsync($"/api/plot-seasons/{plotSeasonId}",
-                   new UpdatePlotSeasonRequest(plotId, seasonId, "ST25 Updated", 1)))
+                   new UpdatePlotSeasonRequest(plotId, Guid.NewGuid(), Guid.NewGuid(), 2)))
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        using (var response = await DeleteAsync(ownerClient, $"/api/plot-seasons/{plotSeasonId}", 1))
+        using (var response = await DeleteAsync(ownerClient, $"/api/plot-seasons/{plotSeasonId}", 2))
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 

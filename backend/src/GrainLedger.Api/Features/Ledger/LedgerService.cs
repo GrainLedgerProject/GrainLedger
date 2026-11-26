@@ -69,6 +69,14 @@ public sealed partial class LedgerService(NpgsqlDataSource dataSource, IHttpCont
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
 
+    public async Task<JsonElement> LocationStockAsync(Guid locationId, JsonObject query, CancellationToken ct)
+    {
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        var result = await ExecuteAsync(connection, null, "SELECT grainledger.ledger_location_stock($1,$2,$3)::text", ct, actor, locationId, query);
+        return JsonSerializer.Deserialize<JsonElement>((string)result!);
+    }
+
     public async Task<JsonElement> BusinessHistoryAsync(JsonObject query, CancellationToken ct)
     {
         var actor = await ActorAsync(ct);
@@ -152,6 +160,13 @@ public sealed partial class LedgerService(NpgsqlDataSource dataSource, IHttpCont
         await using var connection = await OpenAsync(ct);
         var routine = command ? "grainledger.ledger_receiving_threshold_command" : "grainledger.ledger_receiving_threshold_read";
         var value = await ExecuteAsync(connection, null, $"SELECT {routine}($1,$2,$3)::text", ct, actor, action, payload);
+        return JsonSerializer.Deserialize<JsonElement>((string)value!);
+    }
+    public async Task<JsonElement> ByproductVarietyPolicyAsync(string action, JsonObject payload, CancellationToken ct = default)
+    {
+        var actor = await ActorAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        var value = await ExecuteAsync(connection, null, "SELECT grainledger.ledger_byproduct_variety_policy($1,$2,$3)::text", ct, actor, action, payload);
         return JsonSerializer.Deserialize<JsonElement>((string)value!);
     }
     public async Task<bool> CanAccessEvidenceAsync(Guid evidenceId, Guid ownerId, Guid facilityId, CancellationToken ct = default)

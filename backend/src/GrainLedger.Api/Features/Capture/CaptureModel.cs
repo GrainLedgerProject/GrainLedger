@@ -121,6 +121,10 @@ internal static class CaptureModel
             b.Property(x => x.CompanyId).HasColumnName("company_id");
             b.Property(x => x.PlotId).HasColumnName("plot_id");
             b.Property(x => x.SeasonId).HasColumnName("season_id");
+            b.Property(x => x.RiceVarietyId).HasColumnName("rice_variety_id");
+            b.HasOne<GrainLedger.Api.Features.Catalogs.RiceVariety>().WithMany().HasForeignKey(x => x.RiceVarietyId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("capture_fk_plot_seasons_rice_variety");
+            b.HasIndex(x => x.RiceVarietyId).HasDatabaseName("capture_ix_plot_seasons_rice_variety_id");
             b.Property(x => x.RiceVariety).HasColumnName("rice_variety").IsRequired();
             b.Property(x => x.CreatedBy).HasColumnName("created_by");
             b.Property(x => x.Version).HasColumnName("version").HasDefaultValue(1).IsConcurrencyToken();

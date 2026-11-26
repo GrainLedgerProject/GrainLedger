@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { clearLocalSession } from './api';
+import { receivingLocationMode } from './procurementTypes';
 
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -14,6 +15,12 @@ const plotSeasonId = '06d238e3-d388-4a91-b142-24b90b5dba25';
 beforeEach(() => { vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset(); clearLocalSession(); window.sessionStorage.clear(); window.localStorage.clear(); window.history.replaceState({}, '', '/'); });
 
 describe('Capture journey', () => {
+  it('labels receiving modes by physical storage behavior', () => {
+    expect(receivingLocationMode({ receivingLocationKind: 'STORE', receivingLocationMixedBulk: false })).toBe('Separated storage');
+    expect(receivingLocationMode({ receivingLocationKind: 'SILO', receivingLocationMixedBulk: false })).toBe('Single-lot bulk');
+    expect(receivingLocationMode({ receivingLocationKind: 'COMPARTMENT', receivingLocationMixedBulk: true })).toBe('Approved pooling required');
+  });
+
   it('does not warn that the outcome is uncertain while a pesticide declaration is saving', async () => {
     let finishSave: ((response: Response) => void) | undefined;
     fetchMock.mockImplementation(async url => {
@@ -100,7 +107,7 @@ describe('Capture journey', () => {
       if (path.startsWith('/api/procurement-reference-data?')) return json({ receivingOptions: [{ collectionSiteId: siteId, collectionSiteCode: 'SITE-1', collectionSiteName: 'Site One', receivingLocationId: locationId, receivingLocationCode: 'LOC-1' }], commodity: { id: 'commodity-id', code: 'PADDY', name: 'Paddy' }, massUnits: [{ code: 'KG', name: 'Kilogram', kgFactor: '1' }], page: 1, pageSize: 100, hasMore: false, maxLinesPerReceipt: 100 });
       if (path.startsWith('/api/farmers?')) return json({ items: [{ id: farmerId, code: 'ND-1', name: 'Farmer A' }], page: 1, pageSize: 100, hasMore: false });
       if (path.startsWith('/api/plots?')) return json({ items: [{ id: plotId, farmerId, code: 'TR-1' }], page: 1, pageSize: 100, hasMore: false });
-      if (path.startsWith('/api/plot-seasons?')) return json({ items: [{ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25' }], page: 1, pageSize: 100, hasMore: false });
+      if (path.startsWith('/api/plot-seasons?')) return json({ items: [{ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25', riceVarietyId: 'variety-1', riceVarietyCode: 'V-1' }, { id: 'plot-season-2', plotId, seasonId: 'season-1', riceVariety: 'ST25', riceVarietyId: 'variety-2', riceVarietyCode: 'V-2' }, { id: 'plot-season-legacy', plotId, seasonId: 'season-1', riceVariety: 'Legacy', riceVarietyId: null }], page: 1, pageSize: 100, hasMore: false });
       return json({}, 404);
     });
     render(<App />); const browser = userEvent.setup();
@@ -112,6 +119,9 @@ describe('Capture journey', () => {
     expect(screen.getByText('Select a farmer first.')).toBeInTheDocument();
     await browser.selectOptions(await screen.findByLabelText('Farmer'), farmerId);
     expect(screen.getByLabelText('Plot season')).toBeEnabled();
+    expect(await screen.findByRole('option', { name: 'TR-1 · ST25 (V-1)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'TR-1 · ST25 (V-2)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /TR-1 · Legacy — assign rice variety first/ })).toBeDisabled();
     await browser.selectOptions(await screen.findByLabelText('Collection site'), siteId);
     expect(screen.getByLabelText('Receiving location')).toBeEnabled();
     await browser.selectOptions(screen.getByLabelText('Receiving location'), locationId);
@@ -145,7 +155,7 @@ describe('Capture journey', () => {
       if (path.startsWith('/api/procurement-reference-data?')) return json({ receivingOptions: [{ collectionSiteId: siteId, collectionSiteCode: 'SITE-1', collectionSiteName: 'Site One', receivingLocationId: locationId, receivingLocationCode: 'LOC-1' }], commodity: { id: commodityId, code: 'PADDY', name: 'Paddy' }, massUnits: [{ code: 'KG', name: 'Kilogram', kgFactor: '1' }], page: 1, pageSize: 100, hasMore: false, maxLinesPerReceipt: 100 });
       if (path.startsWith('/api/farmers?')) return json({ items: [{ id: farmerId, code: 'ND-1', name: 'Farmer A' }], page: 1, pageSize: 100, hasMore: false });
       if (path.startsWith('/api/plots?')) return json({ items: [{ id: plotId, farmerId, code: 'TR-1' }], page: 1, pageSize: 100, hasMore: false });
-      if (path.startsWith('/api/plot-seasons?')) return json({ items: [{ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25' }], page: 1, pageSize: 100, hasMore: false });
+      if (path.startsWith('/api/plot-seasons?')) return json({ items: [{ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25', riceVarietyId: 'variety-1' }], page: 1, pageSize: 100, hasMore: false });
       if (path === '/api/procurements') {
         const request = JSON.parse(String(init?.body)); const p = request.payload; sourceLotId = p.items[0].sourceLotId;
         receipt = { id: p.entityId, code: 'PN-001', farmerId, collectionSiteId: siteId, receivingLocationId: locationId, commodityId, status: 'PENDING_ARRIVAL', receivedAt: p.receivedAt, capturedAt: request.capturedAt, recordedAt: request.capturedAt, totalNetMassKg: '600', items: [{ id: p.items[0].itemId, lineNo: 1, plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25', measuredValue: '600', measuredUnit: 'KG', netMassKg: '600', moisturePercent: '22.5', sourceLotId, lotId: p.items[0].lotId, lotCode: 'LOT-1', stage: 'RAW_PADDY', initialStock: { locationId, receivedKg: '0' } }] };

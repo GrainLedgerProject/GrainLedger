@@ -1,5 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
+using GrainLedger.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using GrainLedger.Api.Features.Capture;
 using Xunit;
 using static GrainLedger.Api.IntegrationTests.LedgerScenario;
@@ -8,6 +11,29 @@ namespace GrainLedger.Api.IntegrationTests;
 
 public sealed class CaptureSourceTraceabilityTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
+    [Fact]
+    public async Task Procurement_rejects_unassigned_legacy_variety()
+    {
+        using var scenario = await CreateAsync(factory, policies: false);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var plotSeason = await db.PlotSeasons.SingleAsync(x => x.Id == scenario.PlotSeasonId);
+            plotSeason.RiceVarietyId = null;
+            await db.SaveChangesAsync();
+        }
+        var legacy = await scenario.Purchaser.GetFromJsonAsync<PlotSeasonReferenceResponse>(
+            $"/api/plot-seasons/{scenario.PlotSeasonId}");
+        Assert.Equal("ST25", legacy!.RiceVariety);
+        Assert.Null(legacy.RiceVarietyId);
+        Assert.Null(legacy.RiceVarietyCode);
+        var response = await scenario.Purchaser.PostAsJsonAsync("/api/procurements",
+            scenario.ReceiptBody(Guid.NewGuid(), ["100"]));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("RICE_VARIETY_UNRESOLVED", problem.GetProperty("code").GetString());
+    }
+
     [Fact]
     public async Task IT01_spray_intake_source_lot_and_sample_preserve_the_same_origin()
     {
@@ -33,6 +59,20 @@ public sealed class CaptureSourceTraceabilityTests(ApiFactory factory) : IClassF
         var registered = await SendAsync(purchaser, HttpMethod.Post, "/api/procurements",
             scenario.ReceiptBody(receiptId, ["100"]));
         var sourceLotId = registered.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
+        string varietyCode;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var variety = await db.RiceVarieties.SingleAsync(x => x.Id == scenario.RiceVarietyId);
+            varietyCode = variety.Code;
+            variety.Name = "ST25 renamed";
+            await db.SaveChangesAsync();
+        }
+        var currentPlotSeason = await purchaser.GetFromJsonAsync<PlotSeasonReferenceResponse>($"/api/plot-seasons/{scenario.PlotSeasonId}");
+        Assert.Equal("ST25 renamed", currentPlotSeason!.RiceVariety);
+        Assert.Equal(varietyCode, currentPlotSeason.RiceVarietyCode);
+        var plotSeasons = await purchaser.GetFromJsonAsync<PlotSeasonListResponse>($"/api/plot-seasons?plotId={plotSeason.PlotId}");
+        Assert.Equal(varietyCode, Assert.Single(plotSeasons!.Items).RiceVarietyCode);
 
         var sampleId = Guid.NewGuid();
         await SendAsync(purchaser, HttpMethod.Post, "/api/samples", CaptureCommand(new
@@ -59,6 +99,10 @@ public sealed class CaptureSourceTraceabilityTests(ApiFactory factory) : IClassF
         Assert.Equal(declaration.PlotSeasonId, line.PlotSeasonId);
         Assert.Equal(plotSeason.PlotId, line.PlotId);
         Assert.Equal(plotSeason.SeasonId, line.SeasonId);
+        Assert.Equal(scenario.RiceVarietyId, line.RiceVarietyId);
+        Assert.Equal("ST25", line.RiceVariety);
+        Assert.Equal("ST25 renamed", line.CurrentRiceVarietyName);
+        Assert.Equal(varietyCode, line.CurrentRiceVarietyCode);
         Assert.Equal(sourceLotId, line.SourceLotId);
         Assert.Equal(receiptId, source.ProcurementId);
         Assert.Equal(line.Id, source.ProcurementItemId);
@@ -66,6 +110,10 @@ public sealed class CaptureSourceTraceabilityTests(ApiFactory factory) : IClassF
         Assert.Equal(line.PlotSeasonId, source.PlotSeasonId);
         Assert.Equal(line.PlotId, source.PlotId);
         Assert.Equal(line.SeasonId, source.SeasonId);
+        Assert.Equal(line.RiceVarietyId, source.RiceVarietyId);
+        Assert.Equal(line.RiceVariety, source.RiceVariety);
+        Assert.Equal(line.CurrentRiceVarietyName, source.CurrentRiceVarietyName);
+        Assert.Equal(line.CurrentRiceVarietyCode, source.CurrentRiceVarietyCode);
         Assert.Equal(sourceLotId, sample.SourceLotId);
         Assert.Equal(sampleId, Assert.Single(source.SampleIds));
 

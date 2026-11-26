@@ -34,6 +34,7 @@ public static class Permissions
     public const string ExportOrdersWrite = "export-orders.write";
     public const string ResiduePolicyManage = "residue.policy.manage";
     public const string ResidueCompanyPolicyManage = "residue.company-policy.manage";
+    public const string ByproductVarietyPolicyManage = "byproduct.variety-policy.manage";
     public const string ResidueEvidenceManage = "residue.evidence.manage";
     public const string ResidueEvaluate = "residue.evaluate";
     public const string BlendAssessmentPolicyManage = "blend.assessment-policy.manage";
@@ -49,7 +50,7 @@ public static class Permissions
         BlendApprove, HoldsManage, TraceReadTenant, MrlRead, LabRead, BlendPropose,
         ContainersWrite, FarmsWrite, PurchasesWrite, ExportOrdersRead, ExportOrdersWrite,
         ResiduePolicyManage, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate,
-        BlendAssessmentPolicyManage, BlendYieldPolicyManage, BlendQualityEvidenceManage
+        BlendAssessmentPolicyManage, BlendYieldPolicyManage, BlendQualityEvidenceManage, ByproductVarietyPolicyManage
     ]);
 
     public static string[] ForRole(string role) => role switch
@@ -57,7 +58,7 @@ public static class Permissions
         Roles.Administrator => [IdentityManage, PlatformConfigure, TraceReadAll, ResiduePolicyManage],
         Roles.MillManager => [PlatformRead, LotsReadAll, ConversionsRead, ConversionsConfirm, CorrectionsReconcile, ReceivingReconcile, HoldsProcess, ReconciliationRead, HistoryRead, ResidueEvaluate, BlendYieldPolicyManage],
         Roles.MillOperator => [PlatformRead, LotsReadFacility, LotsReceive, ConversionsWrite, ContainersOperate, HistoryRead, ResidueEvaluate],
-        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead, ExportOrdersRead, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate, BlendAssessmentPolicyManage, BlendQualityEvidenceManage],
+        Roles.CustomerManager => [FarmsRead, LotsReadTenant, LabWrite, BlendApprove, HoldsManage, TraceReadTenant, HistoryRead, ExportOrdersRead, ResidueCompanyPolicyManage, ResidueEvidenceManage, ResidueEvaluate, BlendAssessmentPolicyManage, BlendQualityEvidenceManage, ByproductVarietyPolicyManage],
         Roles.ExportStaff => [MrlRead, LotsReadTenant, LabRead, BlendPropose, ContainersWrite, TraceReadTenant, HistoryRead, ExportOrdersRead, ExportOrdersWrite, ResidueEvaluate],
         Roles.PurchasingStaff => [FarmsWrite, PurchasesWrite, HistoryRead],
         _ => []

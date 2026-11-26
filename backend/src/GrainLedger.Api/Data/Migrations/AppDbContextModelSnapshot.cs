@@ -811,6 +811,10 @@ namespace GrainLedger.Api.Data.Migrations
                         .HasColumnType("text")
                         .HasColumnName("rice_variety");
 
+                    b.Property<Guid?>("RiceVarietyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rice_variety_id");
+
                     b.Property<Guid>("SeasonId")
                         .HasColumnType("uuid")
                         .HasColumnName("season_id");
@@ -823,6 +827,9 @@ namespace GrainLedger.Api.Data.Migrations
                         .HasColumnName("version");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("RiceVarietyId")
+                        .HasDatabaseName("capture_ix_plot_seasons_rice_variety_id");
 
                     b.HasIndex("SeasonId");
 
@@ -2464,6 +2471,15 @@ namespace GrainLedger.Api.Data.Migrations
 
                     b.ToTable("identity_users", "grainledger");
                 });
+            modelBuilder.Entity("GrainLedger.Api.Features.Capture.PlotSeason", b =>
+                {
+                    b.HasOne("GrainLedger.Api.Features.Catalogs.RiceVariety", null)
+                        .WithMany()
+                        .HasForeignKey("RiceVarietyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("capture_fk_plot_seasons_rice_variety");
+                });
+
 
             modelBuilder.Entity("GrainLedger.Api.Features.Capture.LabConfirmedAssociation", b =>
                 {

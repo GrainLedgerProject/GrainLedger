@@ -57,6 +57,17 @@ public static class LedgerEndpoints
                 return Results.Ok(await ledger.ReadAsync(action, query, ct));
             });
         }
+        group.MapGet("/locations/{id:guid}/stock", async (Guid id, HttpRequest request, LedgerService ledger, CancellationToken ct) =>
+        {
+            var query = new JsonObject();
+            foreach (var key in new[] { "page", "pageSize" })
+            {
+                if (!request.Query.TryGetValue(key, out var value)) continue;
+                if (value.Count != 1 || string.IsNullOrWhiteSpace(value[0])) throw new LedgerException(400, "Invalid query value");
+                query[key] = value[0];
+            }
+            return Results.Ok(await ledger.LocationStockAsync(id, query, ct));
+        });
         group.MapGet("/lots/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("lot", new JsonObject { ["lotId"] = id }, ct)));
         group.MapGet("/operations/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) => Results.Ok(await ledger.ReadAsync("operation", new JsonObject { ["id"] = id }, ct)));
         group.MapGet("/receiving/{id:guid}", async (Guid id, LedgerService ledger, CancellationToken ct) =>

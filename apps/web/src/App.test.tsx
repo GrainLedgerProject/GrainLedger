@@ -157,6 +157,7 @@ describe('Account experience', () => {
     const plotId = '11408862-f173-49d8-9f02-fe57483bd6e6';
     const farmerId = '6114dc9c-f08c-4b25-a90f-91c7c88a05b0';
     const seasonId = '81504cfe-cf51-4bce-9eb2-44159e97fb03';
+    const varietyId = '7edfd01b-26f1-4a82-9695-3c7ca6605421';
     const recordId = '06d238e3-d388-4a91-b142-24b90b5dba25';
     const staff = { ...user, role: 'PurchasingStaff', organizationId: 'company-1', organizationName: 'Customer A', permissions: ['farms.write'] };
     let attempts = 0;
@@ -174,6 +175,7 @@ describe('Account experience', () => {
       if (String(url).startsWith('/api/plot-seasons?')) return json({ items: [], page: 1, pageSize: 10, hasMore: false });
       if (String(url).startsWith('/api/crop-seasons?page=1')) return json({ items: [{ id: 'other-season', companyId: 'company-1', name: 'Hè Thu', startsOn: '2026-04-01', endsOn: '2026-08-31' }], page: 1, pageSize: 100, hasMore: true });
       if (String(url).startsWith('/api/crop-seasons?page=2')) return json({ items: [{ id: seasonId, companyId: 'company-1', name: 'Đông Xuân', startsOn: '2026-11-01', endsOn: '2027-03-31' }], page: 2, pageSize: 100, hasMore: false });
+      if (String(url).startsWith('/api/rice-varieties?')) return json({ items: [{ id: varietyId, code: 'ST25', name: 'ST25' }], page: 1, pageSize: 100, hasMore: false });
       return json({}, 404);
     });
     window.history.replaceState({}, '', `/capture/plots/${plotId}`);
@@ -182,7 +184,8 @@ describe('Account experience', () => {
     await browser.click(await screen.findByRole('button', { name: /Register season/ }));
     expect(screen.getByRole('dialog', { name: 'Register crop season' })).toBeInTheDocument();
     await browser.selectOptions(await screen.findByLabelText(/Crop season/), seasonId);
-    await browser.type(screen.getByLabelText(/Rice variety/), 'ST25');
+    await screen.findByRole('option', { name: 'ST25 — ST25' });
+    await browser.selectOptions(screen.getByLabelText(/Rice variety/), varietyId);
     await browser.click(screen.getByRole('button', { name: 'Register season' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Connection interrupted');
     await browser.click(screen.getByRole('button', { name: 'Retry save' }));
@@ -193,7 +196,8 @@ describe('Account experience', () => {
     expect(posts).toHaveLength(2);
     expect(posts[0][1]?.body).toBe(posts[1][1]?.body);
     const submitted = JSON.parse(String(posts[0][1]?.body));
-    expect(submitted.payload).toMatchObject({ plotId, seasonId, riceVariety: 'ST25' });
+    expect(submitted.payload).toMatchObject({ plotId, seasonId, riceVarietyId: varietyId });
+    expect(submitted.payload).not.toHaveProperty('riceVariety');
     expect(submitted.payload.entityId).toBeTruthy();
     expect(submitted.clientOperationId).toBeTruthy();
   });

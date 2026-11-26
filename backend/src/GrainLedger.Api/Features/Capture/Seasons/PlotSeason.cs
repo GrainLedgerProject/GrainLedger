@@ -6,6 +6,7 @@ public sealed class PlotSeason
     public Guid CompanyId { get; set; }
     public Guid PlotId { get; set; }
     public Guid SeasonId { get; set; }
+    public Guid? RiceVarietyId { get; set; }
     public required string RiceVariety { get; set; }
     public Guid? CreatedBy { get; set; }
     public int Version { get; set; } = 1;

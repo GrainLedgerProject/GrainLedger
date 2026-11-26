@@ -26,6 +26,7 @@ internal sealed class LedgerScenario : IDisposable
     public Guid EquipmentId { get; private set; } = Guid.NewGuid();
     public Guid CommodityId { get; private set; }
     public Guid CatalogCommodityId { get; private set; }
+    public Guid RiceVarietyId { get; private set; }
     public Guid FarmerId { get; private set; } = Guid.NewGuid();
     public Guid SeasonId { get; private set; } = Guid.NewGuid();
     public Guid PlotSeasonId { get; private set; } = Guid.NewGuid();
@@ -78,6 +79,8 @@ internal sealed class LedgerScenario : IDisposable
                     catalog.MeasurementUnits.Add(new MeasurementUnit { Id = Guid.NewGuid(), Code = unit, Name = unit, QuantityKind = "MASS" });
             await catalog.SaveChangesAsync();
         }
+        s.RiceVarietyId = (await SendAsync(s.Admin, HttpMethod.Post, "/api/rice-varieties",
+            new { code = $"TEST-{Guid.NewGuid():N}", name = "ST25" })).GetProperty("id").GetGuid();
         s.CommodityId = (await GetAsync(s.Admin, "/api/ledger/setup")).GetProperty("commodities").EnumerateArray()
             .Single(x => x.GetProperty("catalogId").ValueKind == JsonValueKind.String &&
                 x.GetProperty("catalogId").GetGuid() == s.CatalogCommodityId).GetProperty("id").GetGuid();
@@ -105,7 +108,7 @@ internal sealed class LedgerScenario : IDisposable
         await SendAsync(client, HttpMethod.Post, "/api/plots", CaptureCommand(new { entityId = plot, farmerId = farmer,
             areaHa = 1m, geometry = new { type = "Point", coordinates = new[] { 106.123456m, 10.123456m } } }, 2));
         var season = (await SendAsync(Admin, HttpMethod.Post, "/api/crop-seasons", new { companyId = company, name = "Test season", startsOn = "2026-01-01", endsOn = "2026-12-31" })).GetProperty("id").GetGuid();
-        await SendAsync(client, HttpMethod.Post, "/api/plot-seasons", CaptureCommand(new { entityId = plotSeason, plotId = plot, seasonId = season, riceVariety = "ST25" }));
+        await SendAsync(client, HttpMethod.Post, "/api/plot-seasons", CaptureCommand(new { entityId = plotSeason, plotId = plot, seasonId = season, riceVarietyId = RiceVarietyId }));
         return (farmer, season, plotSeason);
     }
 

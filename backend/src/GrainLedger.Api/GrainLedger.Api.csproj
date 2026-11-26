@@ -40,6 +40,7 @@
     <EmbeddedResource Include="Data/Sql/ResidueRiskReads.sql" LogicalName="GrainLedger.Data.Sql.ResidueRiskReads.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerTraceCompletion.sql" LogicalName="GrainLedger.Data.Sql.ContainerTraceCompletion.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerTraceCorrections.sql" LogicalName="GrainLedger.Data.Sql.ContainerTraceCorrections.sql" />
+    <EmbeddedResource Include="Data/Sql/RiceVarietySegregation.sql" LogicalName="GrainLedger.Data.Sql.RiceVarietySegregation.sql" />
     <InternalsVisibleTo Include="GrainLedger.Api.IntegrationTests" />
   </ItemGroup>
 </Project>

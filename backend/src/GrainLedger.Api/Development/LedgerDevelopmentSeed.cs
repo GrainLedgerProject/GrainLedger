@@ -115,6 +115,8 @@ internal static class LedgerDevelopmentSeed
                     await PostAsync("/api/measurement-units", new { code = "KG", name = "Kilogram", quantityKind = "MASS" });
                 if (unit.GetProperty("quantityKind").GetString() != "MASS")
                     throw new InvalidOperationException("Existing KG catalog unit is not MASS; left unchanged.");
+                var variety = (await FindAsync("/api/rice-varieties?q=DEMO-ST25", "code", "DEMO-ST25")) ??
+                    await PostAsync("/api/rice-varieties", new { code = "DEMO-ST25", name = "ST25 (synthetic demo)" });
 
                 Use(purchaser);
                 if (await GetOptionalAsync($"/api/farmers/{Id(10)}") is null)
@@ -137,7 +139,10 @@ internal static class LedgerDevelopmentSeed
                     seasonId = season.GetProperty("id").GetGuid();
                 }
                 Use(purchaser);
-                await PostAsync("/api/plot-seasons", Capture(32, new { entityId = Id(12), plotId = Id(11), seasonId, riceVariety = "ST25 (synthetic demo)" }));
+                if (plotSeason is null)
+                    await PostAsync("/api/plot-seasons", Capture(32, new { entityId = Id(12), plotId = Id(11), seasonId, riceVarietyId = variety.GetProperty("id").GetGuid() }));
+                else if (plotSeason.Value.GetProperty("riceVarietyId").ValueKind == JsonValueKind.Null)
+                    throw new InvalidOperationException("Synthetic plot season has no catalog variety; assign one before rerunning seed.");
                 receipt = await PostAsync("/api/procurements", Capture(33, new
                 {
                     entityId = Id(20), farmerId = Id(10), collectionSiteId = Id(1), receivingLocationId = Id(2),
