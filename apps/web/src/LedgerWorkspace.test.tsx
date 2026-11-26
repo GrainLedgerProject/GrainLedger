@@ -105,6 +105,28 @@ it('submits complete operator measurements with exact decimals and explicit arri
  expect(request.operationId).toBe(firstRequest.operationId);
  expect(request.capturedAt).toBe(firstRequest.capturedAt);
 });
+it('shows procurement variety snapshots and distinguishes unknown legacy identities on arrival lines', async () => {
+ const task = {
+  ...receivingTask,
+  items: [
+   { ...receivingTask.items[0], riceVariety: 'Original name', riceVarietyId: 'variety' },
+   { ...receivingTask.items[0], id: 'item-2', lineNo: 2, lotCode: 'Legacy lot', riceVariety: 'Old description', riceVarietyId: null },
+   { ...receivingTask.items[0], id: 'item-3', lineNo: 3, lotCode: 'Unknown lot', riceVariety: null, riceVarietyId: null },
+  ],
+  measurementSets: [{ id: 'set-1', recordedAt: '2026-10-14T00:00:00Z', observations: '', threshold: null, items: [{ procurementItemId: 'item-2', measuredValue: '10', measuredUnit: 'KG', actualKg: '10' }] }],
+ };
+ routes['/api/ledger/receiving-tasks'] = page([task]); routes['/api/ledger/receiving/arrival'] = task;
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['lots.receive'] }} />);
+ const browser = userEvent.setup();
+ await browser.selectOptions(await screen.findByLabelText('Assigned facility'), 'facility');
+ await browser.click(await screen.findByRole('button', { name: /ARR-1.*Pending mill arrival/ }));
+ const arrivalTable = within(screen.getByRole('columnheader', { name: 'Rice variety (procurement snapshot)' }).closest('table')!);
+ expect(arrivalTable.getByText('Original name')).toBeInTheDocument();
+ expect(arrivalTable.getByText('Old description (legacy description; identity unknown)')).toBeInTheDocument();
+ expect(arrivalTable.getByText('Unknown — no variety snapshot')).toBeInTheDocument();
+ await browser.click(screen.getByText('View 1 measured lines'));
+ expect(within(screen.getByRole('table', { name: 'Measurement lines' })).getByText('Old description (legacy description; identity unknown)')).toBeInTheDocument();
+});
 it('previews exact threshold boundary with decimal arithmetic and marks one micro-kg beyond for review', async () => {
  const task = { ...receivingTask, effectiveThreshold: { companyId: 'customer', percentage: '2', source: 'SYSTEM_DEFAULT', revision: 'default-r1' }, expectedTotalKg: '100', items: [{ ...receivingTask.items[0], expectedValue: '100', expectedKg: '100' }] };
  routes['/api/ledger/receiving-tasks'] = page([task]); routes['/api/ledger/receiving/arrival'] = task;
@@ -189,6 +211,33 @@ it('edits processing draft with decimal strings and supports multiple actual out
  await browser.click(await screen.findByText('Create processing draft', { selector: 'summary' }));
  await browser.click(screen.getByRole('button', { name: 'Add actual output' }));
  expect(screen.getAllByLabelText('Actual output (kg)')).toHaveLength(2);
+});
+it('advises on input varieties and output storage without blocking policy exceptions', async () => {
+ const bran = { ...lot, stage: 'BRAN', productIdentity: 'BRAN', varietyStatus: 'SINGLE', riceVarietyId: 'v1', riceVariety: 'Variety one' };
+ const other = { ...bran, id: 'other', code: 'Other lot', riceVarietyId: 'v2', riceVariety: 'Variety two' };
+ const unknown = { ...bran, id: 'unknown', code: 'Unknown lot', varietyStatus: 'UNKNOWN', riceVarietyId: null, riceVariety: null };
+ routes['/api/ledger/lots'] = page([bran, other, unknown]);
+ routes['/api/ledger/lookups'] = { ...look, locations: [...look.locations, { id: 'silo', facilityId: 'facility', name: 'Silo', kind: 'SILO', mixedBulk: false }, { id: 'pool', facilityId: 'facility', name: 'Pool', kind: 'STORE', mixedBulk: true }] };
+ routes['/api/ledger/operations'] = page([{ ...draft, kind: 'MERGE', inputs: [draft.inputs[0], { ...draft.inputs[0], lotId: 'other' }] }]);
+ render(<LedgerWorkspace user={{ ...actor, permissions: ['conversions.write'] }} />);
+ const browser = userEvent.setup();
+ await browser.click(await screen.findByText(/MERGE:.*DRAFT/));
+ await browser.click(screen.getByRole('button', { name: 'Edit processing draft' }));
+ const editor = within(screen.getByRole('heading', { name: 'Edit processing draft' }).closest('section')!);
+ expect(await editor.findByText(/Cross-variety byproduct merge may require applicable company policy/)).toBeInTheDocument();
+ expect(editor.getByRole('button', { name: 'Save draft changes' })).toBeEnabled();
+ const location = editor.getByLabelText('Output physical location');
+ expect(within(location).getByRole('option', { name: 'Silo — SILO — separate storage' })).toHaveValue('silo');
+ await browser.selectOptions(location, 'silo');
+ expect(editor.getByText(/one lot at a time; changing contents may require recorded clearance/)).toBeInTheDocument();
+ await browser.selectOptions(editor.getByLabelText('Output physical location'), 'pool');
+ expect(editor.getByText(/applicable pool policy and current contents are checked by the server/)).toBeInTheDocument();
+ const secondInput = editor.getAllByLabelText('Input lot')[1];
+ await within(secondInput).findByRole('option', { name: /Unknown lot/ });
+ await browser.selectOptions(secondInput, 'unknown');
+ expect(await editor.findByText(/Selected inputs include unknown rice variety/)).toBeInTheDocument();
+ expect(editor.queryByText(/Cross-variety byproduct merge may require/)).not.toBeInTheDocument();
+ expect(editor.getByRole('button', { name: 'Save draft changes' })).toBeEnabled();
 });
 it('requires explicit refresh and reselect for stale mixed-bulk draft inputs', async () => {
  const historicalLot = { ...lot, positions: lot.positions.map(position => ({ ...position, quantityKg: '0', availableKg: '0' })), mixedBulk: true, isCurrentPool: false, poolLocationId: 'store', poolRevision: 1 };

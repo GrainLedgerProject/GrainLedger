@@ -4,7 +4,7 @@ import { loadCropSeasons, type CropSeason } from './cropSeasons';
 import { SpraySection } from './Spray';
 import { RiceVarietyInput } from './RiceVarietyInput';
 
-type PlotSeason = { id: string; plotId: string; seasonId: string; riceVariety: string; riceVarietyId?: string | null; version?: number; canEdit?: boolean; canDelete?: boolean; canAssignRiceVariety?: boolean };
+type PlotSeason = { id: string; plotId: string; seasonId: string; riceVariety: string; riceVarietyId?: string | null; riceVarietyCode?: string | null; version?: number; canEdit?: boolean; canDelete?: boolean; canAssignRiceVariety?: boolean };
 type Plot = { id: string; code: string; farmerId: string };
 
 export function PlotSeasonDetail({ id, onBack, onOpenSpray, canCreate, userId, companyId }: { id: string; onBack: (plotId: string | null) => void; onOpenSpray: (id: string) => void; canCreate: boolean; userId: string; companyId: string }) {
@@ -72,7 +72,7 @@ export function PlotSeasonDetail({ id, onBack, onOpenSpray, canCreate, userId, c
     {record && <section className="panel plot-season-record">
       <div className="plot-season-record-hero"><span className="eyebrow">REGISTERED SEASON</span><h2>{season?.name ?? 'Crop season'}</h2><p className="muted">{plot ? `Plot ${plot.code}` : `Plot ID: ${record.plotId}`}</p><div className="admin-form-actions">{(record.canEdit || record.canAssignRiceVariety) && <button className="secondary" type="button" onClick={() => { setEditSeasonId(record.seasonId); setEditVariety(record.riceVarietyId ?? ''); setActionError(''); setEditOpen(true); }}>{record.canEdit ? 'Edit registration' : 'Assign rice variety'}</button>}{record.canDelete && <button className="secondary" type="button" onClick={() => { setActionError(''); setArchiveOpen(true); }}>Archive registration</button>}</div></div>
       <div className="plot-season-facts">
-        <div><span>Rice variety</span><strong>{record.riceVariety}</strong></div>
+        <div><span>Rice variety</span><strong>{record.riceVariety || 'Unknown variety'}{record.riceVarietyCode ? ` (${record.riceVarietyCode})` : ''}</strong></div>
         <div><span>Season</span><strong>{season?.name ?? record.seasonId}</strong></div>
         {season && <><div><span>Starts on</span><strong>{season.startsOn}</strong></div><div><span>Ends on</span><strong>{season.endsOn}</strong></div></>}
       </div>

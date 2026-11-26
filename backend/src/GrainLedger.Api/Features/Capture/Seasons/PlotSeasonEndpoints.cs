@@ -16,9 +16,9 @@ public sealed record RegisterPlotSeasonRequest(string? DeviceId, Guid ClientOper
     int PayloadSchemaVersion, PlotSeasonInput? Payload);
 public sealed record PlotSeasonResponse(Guid Id, Guid PlotId, Guid SeasonId, string RiceVariety, Guid? RiceVarietyId = null);
 public sealed record PlotSeasonReferenceItem(Guid Id, Guid PlotId, Guid SeasonId, string PlotCode, string SeasonName, string RiceVariety,
-    Guid? CreatedBy, int Version, bool CanEdit, bool CanDelete, Guid? RiceVarietyId, bool CanAssignRiceVariety);
+    Guid? CreatedBy, int Version, bool CanEdit, bool CanDelete, Guid? RiceVarietyId, bool CanAssignRiceVariety, string? RiceVarietyCode);
 public sealed record PlotSeasonReferenceResponse(Guid Id, Guid PlotId, Guid SeasonId, string PlotCode, string SeasonName, string RiceVariety,
-    Guid? CreatedBy, int Version, bool CanEdit, bool CanDelete, Guid? RiceVarietyId, bool CanAssignRiceVariety);
+    Guid? CreatedBy, int Version, bool CanEdit, bool CanDelete, Guid? RiceVarietyId, bool CanAssignRiceVariety, string? RiceVarietyCode);
 public sealed record PlotSeasonListResponse(IReadOnlyList<PlotSeasonReferenceItem> Items,
     int Page, int PageSize, int TotalCount, bool HasMore);
 public sealed record UpdatePlotSeasonRequest(Guid PlotId, Guid SeasonId, Guid? RiceVarietyId, int ExpectedVersion);
@@ -161,7 +161,8 @@ public static class PlotSeasonEndpoints
             join plotRecord in db.Plots.AsNoTracking() on new { item.CompanyId, Id = item.PlotId } equals new { plotRecord.CompanyId, plotRecord.Id }
             join seasonRecord in db.CropSeasons.AsNoTracking() on new { item.CompanyId, Id = item.SeasonId } equals new { seasonRecord.CompanyId, seasonRecord.Id }
             select new { Item = item, PlotCode = plotRecord.Code, SeasonName = seasonRecord.Name,
-                Variety = db.RiceVarieties.Where(v => v.Id == item.RiceVarietyId).Select(v => v.Name).FirstOrDefault() ?? item.RiceVariety })
+                Variety = db.RiceVarieties.Where(v => v.Id == item.RiceVarietyId).Select(v => v.Name).FirstOrDefault() ?? item.RiceVariety,
+                VarietyCode = db.RiceVarieties.Where(v => v.Id == item.RiceVarietyId).Select(v => v.Code).FirstOrDefault() })
             .Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
         var canManage = await access.HasPermissionAsync("farms.write", ct);
         var actorId = GetUserId(principal);
@@ -171,7 +172,7 @@ public static class PlotSeasonEndpoints
         var sprayRefs = await db.SprayDeclarations.AsNoTracking().Where(x => x.CompanyId == companyId.Value && ids.Contains(x.PlotSeasonId))
             .Select(x => x.PlotSeasonId).Distinct().ToArrayAsync(ct);
         var inUse = procurementRefs.Concat(sprayRefs).ToHashSet();
-        var items = rows.Select(x => ToReferenceItem(x.Item, x.PlotCode, x.SeasonName, x.Variety, actorId,
+        var items = rows.Select(x => ToReferenceItem(x.Item, x.PlotCode, x.SeasonName, x.Variety, x.VarietyCode, actorId,
             canManage, !inUse.Contains(x.Item.Id))).ToArray();
         return Results.Ok(new PlotSeasonListResponse(items, currentPage, size, totalCount,
             (long)currentPage * size < totalCount));
@@ -186,10 +187,11 @@ public static class PlotSeasonEndpoints
             join plot in db.Plots.AsNoTracking() on new { item.CompanyId, Id = item.PlotId } equals new { plot.CompanyId, plot.Id }
             join season in db.CropSeasons.AsNoTracking() on new { item.CompanyId, Id = item.SeasonId } equals new { season.CompanyId, season.Id }
             select new { Item = item, PlotCode = plot.Code, SeasonName = season.Name,
-                Variety = db.RiceVarieties.Where(v => v.Id == item.RiceVarietyId).Select(v => v.Name).FirstOrDefault() ?? item.RiceVariety }).SingleOrDefaultAsync(ct);
+                Variety = db.RiceVarieties.Where(v => v.Id == item.RiceVarietyId).Select(v => v.Name).FirstOrDefault() ?? item.RiceVariety,
+                VarietyCode = db.RiceVarieties.Where(v => v.Id == item.RiceVarietyId).Select(v => v.Code).FirstOrDefault() }).SingleOrDefaultAsync(ct);
         if (row is null) return Problem(404, "PLOT_SEASON_NOT_FOUND", "Plot-season not found.");
         var canManage = await access.HasPermissionAsync("farms.write", ct);
-        return Results.Ok(ToReferenceResponse(row.Item, row.PlotCode, row.SeasonName, row.Variety, GetUserId(principal),
+        return Results.Ok(ToReferenceResponse(row.Item, row.PlotCode, row.SeasonName, row.Variety, row.VarietyCode, GetUserId(principal),
             canManage, !await PlotSeasonInUseAsync(db, companyId.Value, id, ct)));
     }
     private static async Task<IResult> UpdateAsync(Guid id, UpdatePlotSeasonRequest request,
@@ -215,7 +217,7 @@ public static class PlotSeasonEndpoints
         if (inUse && !(item.RiceVarietyId is null && item.PlotId == request.PlotId && item.SeasonId == request.SeasonId))
             return Problem(409, "REFERENCE_IN_USE", "A referenced plot-season cannot be edited.");
         var variety = await db.RiceVarieties.AsNoTracking().Where(x => x.Id == request.RiceVarietyId)
-            .Select(x => x.Name).SingleOrDefaultAsync(ct);
+            .Select(x => new { x.Name, x.Code }).SingleOrDefaultAsync(ct);
         if (variety is null) return Problem(409, "RICE_VARIETY_NOT_AVAILABLE", "The selected rice variety is not available.");
         if (!await db.Plots.AnyAsync(x => x.CompanyId == companyId.Value && x.Id == request.PlotId, ct) ||
             !await db.CropSeasons.AnyAsync(x => x.CompanyId == companyId.Value && x.Id == request.SeasonId, ct))
@@ -227,7 +229,7 @@ public static class PlotSeasonEndpoints
         item.PlotId = request.PlotId;
         item.SeasonId = request.SeasonId;
         item.RiceVarietyId = request.RiceVarietyId;
-        if (!inUse) item.RiceVariety = variety;
+        if (!inUse) item.RiceVariety = variety.Name;
         item.Version++;
         var now = clock.GetUtcNow();
         db.BusinessEvents.Add(new CaptureBusinessEvent
@@ -245,7 +247,7 @@ public static class PlotSeasonEndpoints
                 where plot.CompanyId == item.CompanyId && plot.Id == item.PlotId
                 select new { PlotCode = plot.Code, SeasonName = season.Name }).SingleAsync(ct);
             await transaction.CommitAsync(ct);
-            return Results.Ok(ToReferenceResponse(item, labels.PlotCode, labels.SeasonName, variety, actorId, true, !inUse));
+            return Results.Ok(ToReferenceResponse(item, labels.PlotCode, labels.SeasonName, variety.Name, variety.Code, actorId, true, !inUse));
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -304,21 +306,21 @@ public static class PlotSeasonEndpoints
         await db.SprayDeclarations.AnyAsync(x => x.CompanyId == companyId && x.PlotSeasonId == id, ct);
 
     private static PlotSeasonReferenceItem ToReferenceItem(PlotSeason item, string plotCode, string seasonName,
-        string variety, Guid actorId, bool canManage, bool unused)
+        string variety, string? varietyCode, Guid actorId, bool canManage, bool unused)
     {
         var canEdit = item.CreatedBy == actorId && canManage && unused;
         return new PlotSeasonReferenceItem(item.Id, item.PlotId, item.SeasonId, plotCode, seasonName, variety,
             item.CreatedBy, item.Version, canEdit, canEdit, item.RiceVarietyId,
-            item.RiceVarietyId is null && item.CreatedBy == actorId && canManage);
+            item.RiceVarietyId is null && item.CreatedBy == actorId && canManage, varietyCode);
     }
 
     private static PlotSeasonReferenceResponse ToReferenceResponse(PlotSeason item, string plotCode, string seasonName,
-        string variety, Guid actorId, bool canManage, bool unused)
+        string variety, string? varietyCode, Guid actorId, bool canManage, bool unused)
     {
         var canEdit = item.CreatedBy == actorId && canManage && unused;
         return new PlotSeasonReferenceResponse(item.Id, item.PlotId, item.SeasonId, plotCode, seasonName, variety,
             item.CreatedBy, item.Version, canEdit, canEdit, item.RiceVarietyId,
-            item.RiceVarietyId is null && item.CreatedBy == actorId && canManage);
+            item.RiceVarietyId is null && item.CreatedBy == actorId && canManage, varietyCode);
     }
 
 

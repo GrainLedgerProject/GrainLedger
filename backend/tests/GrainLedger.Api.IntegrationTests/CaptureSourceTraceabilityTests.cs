@@ -22,6 +22,11 @@ public sealed class CaptureSourceTraceabilityTests(ApiFactory factory) : IClassF
             plotSeason.RiceVarietyId = null;
             await db.SaveChangesAsync();
         }
+        var legacy = await scenario.Purchaser.GetFromJsonAsync<PlotSeasonReferenceResponse>(
+            $"/api/plot-seasons/{scenario.PlotSeasonId}");
+        Assert.Equal("ST25", legacy!.RiceVariety);
+        Assert.Null(legacy.RiceVarietyId);
+        Assert.Null(legacy.RiceVarietyCode);
         var response = await scenario.Purchaser.PostAsJsonAsync("/api/procurements",
             scenario.ReceiptBody(Guid.NewGuid(), ["100"]));
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -54,15 +59,20 @@ public sealed class CaptureSourceTraceabilityTests(ApiFactory factory) : IClassF
         var registered = await SendAsync(purchaser, HttpMethod.Post, "/api/procurements",
             scenario.ReceiptBody(receiptId, ["100"]));
         var sourceLotId = registered.GetProperty("items")[0].GetProperty("sourceLotId").GetGuid();
+        string varietyCode;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var variety = await db.RiceVarieties.SingleAsync(x => x.Id == scenario.RiceVarietyId);
+            varietyCode = variety.Code;
             variety.Name = "ST25 renamed";
             await db.SaveChangesAsync();
         }
         var currentPlotSeason = await purchaser.GetFromJsonAsync<PlotSeasonReferenceResponse>($"/api/plot-seasons/{scenario.PlotSeasonId}");
         Assert.Equal("ST25 renamed", currentPlotSeason!.RiceVariety);
+        Assert.Equal(varietyCode, currentPlotSeason.RiceVarietyCode);
+        var plotSeasons = await purchaser.GetFromJsonAsync<PlotSeasonListResponse>($"/api/plot-seasons?plotId={plotSeason.PlotId}");
+        Assert.Equal(varietyCode, Assert.Single(plotSeasons!.Items).RiceVarietyCode);
 
         var sampleId = Guid.NewGuid();
         await SendAsync(purchaser, HttpMethod.Post, "/api/samples", CaptureCommand(new
@@ -91,6 +101,8 @@ public sealed class CaptureSourceTraceabilityTests(ApiFactory factory) : IClassF
         Assert.Equal(plotSeason.SeasonId, line.SeasonId);
         Assert.Equal(scenario.RiceVarietyId, line.RiceVarietyId);
         Assert.Equal("ST25", line.RiceVariety);
+        Assert.Equal("ST25 renamed", line.CurrentRiceVarietyName);
+        Assert.Equal(varietyCode, line.CurrentRiceVarietyCode);
         Assert.Equal(sourceLotId, line.SourceLotId);
         Assert.Equal(receiptId, source.ProcurementId);
         Assert.Equal(line.Id, source.ProcurementItemId);
@@ -100,6 +112,8 @@ public sealed class CaptureSourceTraceabilityTests(ApiFactory factory) : IClassF
         Assert.Equal(line.SeasonId, source.SeasonId);
         Assert.Equal(line.RiceVarietyId, source.RiceVarietyId);
         Assert.Equal(line.RiceVariety, source.RiceVariety);
+        Assert.Equal(line.CurrentRiceVarietyName, source.CurrentRiceVarietyName);
+        Assert.Equal(line.CurrentRiceVarietyCode, source.CurrentRiceVarietyCode);
         Assert.Equal(sourceLotId, sample.SourceLotId);
         Assert.Equal(sampleId, Assert.Single(source.SampleIds));
 

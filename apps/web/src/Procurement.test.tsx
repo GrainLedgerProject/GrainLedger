@@ -20,3 +20,18 @@ it('shows within-tolerance receipt as accepted with no pending-arrival warning',
   expect(await screen.findByText('Received — within tolerance')).toBeInTheDocument();
   expect(screen.queryByText(/mill has not accepted this arrival/i)).not.toBeInTheDocument();
 });
+
+it('separates recorded variety from current catalog label and retains legacy names', async () => {
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ ...procurement, items: [
+    { ...procurement.items[0], currentRiceVarietyName: 'Renamed', currentRiceVarietyCode: 'V-1' },
+    { ...procurement.items[0], id: 'item-2', lineNo: 2, riceVariety: 'Legacy variety' },
+    { ...procurement.items[0], id: 'item-3', lineNo: 3, riceVariety: '' },
+  ] }), { headers: { 'Content-Type': 'application/json' } }));
+  render(<ProcurementDetail id="procurement-1" onBack={() => {}} onOpenSourceLot={() => {}} />);
+  expect(await screen.findByText('Renamed (V-1)')).toBeInTheDocument();
+  expect(screen.getByText('IR')).toBeInTheDocument();
+  expect(screen.getByText('Legacy variety')).toBeInTheDocument();
+  expect(screen.getByText('Unknown variety')).toBeInTheDocument();
+  expect(screen.getAllByText('Recorded rice variety')).toHaveLength(3);
+  expect(screen.getAllByText('Current catalog variety')).toHaveLength(1);
+});

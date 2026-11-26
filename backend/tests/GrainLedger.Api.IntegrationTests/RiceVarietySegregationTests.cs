@@ -42,6 +42,10 @@ public sealed class RiceVarietySegregationTests(ApiFactory factory) : IClassFixt
         Assert.Equal("SINGLE", lot.GetProperty("varietyStatus").GetString());
         AssertIdentity(lot, s.RiceVarietyId, "ST25");
         Assert.Equal(10m, Quantity(lot));
+        var locationStock = await GetAsync(s.Operator, $"/api/ledger/locations/{s.LocationId}/stock");
+        var position = Assert.Single(locationStock.GetProperty("items").EnumerateArray());
+        Assert.Equal(s.RiceVarietyId, position.GetProperty("riceVarietyId").GetGuid());
+        Assert.Equal("ST25", position.GetProperty("riceVariety").GetString());
         var source = await GetAsync(s.Purchaser, $"/api/source-lots/{line.GetProperty("sourceLotId").GetGuid()}");
         AssertIdentity(source, s.RiceVarietyId, "ST25");
         Assert.Equal(HttpStatusCode.NotFound,

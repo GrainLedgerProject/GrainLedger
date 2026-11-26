@@ -156,6 +156,11 @@ function OperationEditor({ look, lots, operation, replacement, command, onSaved,
     return () => controller.abort();
   }, [operation?.id]);
   const firstLot = selectedLots.find(lot => lot.id === inputs[0]?.lotId);
+  const inputLots = [...new Set(inputs.map(input => input.lotId).filter(Boolean))].map(lotId => selectedLots.find(lot => lot.id === lotId)).filter((lot): lot is Lot => !!lot);
+  const knownVarieties = new Set(inputLots.filter(lot => lot.varietyStatus === 'SINGLE' && lot.riceVarietyId).map(lot => lot.riceVarietyId));
+  const mixedInputs = knownVarieties.size > 1 || inputLots.some(lot => lot.varietyStatus === 'MIXED');
+  const unknownInputs = inputLots.some(lot => lot.varietyStatus === 'UNKNOWN');
+  const byproductMerge = kind === 'MERGE' && inputLots.length > 0 && inputLots.every(lot => (lot.stage === 'BRAN' || lot.stage === 'HUSK') && lot.productIdentity === lot.stage && lot.stage === inputLots[0].stage);
   function selectedLot(lot: Lot | undefined) {
     if (lot) setSelectedLots(rows => rows.find(row => row.id === lot.id) === lot ? rows : [...rows.filter(row => row.id !== lot.id), lot]);
   }
@@ -207,6 +212,8 @@ function OperationEditor({ look, lots, operation, replacement, command, onSaved,
     <label>Processing facility<Choice rows={look.facilities.filter(row => !operation || row.id === operation.facilityId)} value={facility} onChange={value => { setFacility(value); setSelectedLots([]); setEquipment(''); setInputs([{ lotId: '', locationId: '', quantityKg: '' }]); setOutputs(rows => rows.map(row => ({ ...row, locationId: '' }))); }} /></label>
     <label>Processing kind<Enum values={kinds} value={kind} onChange={changeKind} /></label><label>Equipment<Choice rows={look.equipment.filter(row => row.facilityId === facility)} value={equipment} onChange={setEquipment} /></label><label>Operation occurred at<input required type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} /></label>
     <h3>Input allocations</h3>
+    {mixedInputs && <p className="notice" role="status">Selected inputs include different or mixed rice varieties. {byproductMerge ? 'Cross-variety byproduct merge may require applicable company policy.' : 'Processing these together may be rejected; byproduct merges can have policy exceptions.'} The server checks eligibility when committing.</p>}
+    {unknownInputs && (inputLots.length > 1 || kind === 'MERGE' || kind === 'BLENDING') && <p className="notice" role="status">Selected inputs include unknown rice variety. This combination may be rejected; the server checks eligibility when committing.</p>}
     {inputs.map((input, index) => {
       const lot = selectedLots.find(lot => lot.id === input.lotId);
       return <fieldset key={index}>
@@ -227,7 +234,14 @@ function OperationEditor({ look, lots, operation, replacement, command, onSaved,
       {kind === 'BLENDING' ? <label>Output commodity<Choice rows={look.commodities} value={output.commodityId} onChange={value => updateOutput(index, { commodityId: value })} /></label> : <label>Output commodity<input readOnly value={name(look.commodities, firstLot?.commodityId || '')} aria-label="Output commodity (derived from first input)" /></label>}
       {kind === 'MILLING' ? <label>Produced fraction<Enum values={fractions} value={output.stage} onChange={value => updateOutput(index, { stage: value })} /></label> : <p>Output stage: {outputRules(output).stage}</p>}
       {kind === 'BAGGING' || kind === 'MERGE' ? <p>Underlying product identity: {outputRules(output).productIdentity || 'Set first input lot to derive'}</p> : null}
-      <label>Output physical location<Choice rows={look.locations.filter(row => replacement || row.facilityId === facility)} value={output.locationId} onChange={value => updateOutput(index, { locationId: value })} /></label>
+      <label>Output physical location<Choice rows={look.locations.filter(row => replacement || row.facilityId === facility).map(row => ({ ...row, name: `${row.name} — ${row.kind || 'type unavailable'} — ${row.mixedBulk === true ? 'mixed-bulk enabled' : row.mixedBulk === false ? 'separate storage' : 'storage mode unavailable'}` }))} value={output.locationId} onChange={value => updateOutput(index, { locationId: value })} /></label>
+      {(() => {
+        const location = look.locations.find(row => row.id === output.locationId);
+        if (!location) return null;
+        if (location.mixedBulk === true) return <p>Mixed-bulk destination: applicable pool policy and current contents are checked by the server when committing.</p>;
+        if (location.mixedBulk === false && (location.kind === 'SILO' || location.kind === 'COMPARTMENT')) return <p>Separate {location.kind.toLowerCase()}: one lot at a time; changing contents may require recorded clearance. The server checks current contents and clearance when committing.</p>;
+        return null;
+      })()}
       <Mass label="Actual output (kg)" value={output.quantityKg} onChange={value => updateOutput(index, { quantityKg: value })} />
       <button type="button" disabled={outputs.length === 1} onClick={() => setOutputs(rows => rows.filter((_, i) => i !== index))}>Remove output</button>
     </fieldset>)}

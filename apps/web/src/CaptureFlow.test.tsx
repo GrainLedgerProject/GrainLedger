@@ -107,7 +107,7 @@ describe('Capture journey', () => {
       if (path.startsWith('/api/procurement-reference-data?')) return json({ receivingOptions: [{ collectionSiteId: siteId, collectionSiteCode: 'SITE-1', collectionSiteName: 'Site One', receivingLocationId: locationId, receivingLocationCode: 'LOC-1' }], commodity: { id: 'commodity-id', code: 'PADDY', name: 'Paddy' }, massUnits: [{ code: 'KG', name: 'Kilogram', kgFactor: '1' }], page: 1, pageSize: 100, hasMore: false, maxLinesPerReceipt: 100 });
       if (path.startsWith('/api/farmers?')) return json({ items: [{ id: farmerId, code: 'ND-1', name: 'Farmer A' }], page: 1, pageSize: 100, hasMore: false });
       if (path.startsWith('/api/plots?')) return json({ items: [{ id: plotId, farmerId, code: 'TR-1' }], page: 1, pageSize: 100, hasMore: false });
-      if (path.startsWith('/api/plot-seasons?')) return json({ items: [{ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25', riceVarietyId: 'variety-1' }], page: 1, pageSize: 100, hasMore: false });
+      if (path.startsWith('/api/plot-seasons?')) return json({ items: [{ id: plotSeasonId, plotId, seasonId: 'season-1', riceVariety: 'ST25', riceVarietyId: 'variety-1', riceVarietyCode: 'V-1' }, { id: 'plot-season-2', plotId, seasonId: 'season-1', riceVariety: 'ST25', riceVarietyId: 'variety-2', riceVarietyCode: 'V-2' }, { id: 'plot-season-legacy', plotId, seasonId: 'season-1', riceVariety: 'Legacy', riceVarietyId: null }], page: 1, pageSize: 100, hasMore: false });
       return json({}, 404);
     });
     render(<App />); const browser = userEvent.setup();
@@ -119,6 +119,9 @@ describe('Capture journey', () => {
     expect(screen.getByText('Select a farmer first.')).toBeInTheDocument();
     await browser.selectOptions(await screen.findByLabelText('Farmer'), farmerId);
     expect(screen.getByLabelText('Plot season')).toBeEnabled();
+    expect(await screen.findByRole('option', { name: 'TR-1 · ST25 (V-1)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'TR-1 · ST25 (V-2)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /TR-1 · Legacy — assign rice variety first/ })).toBeDisabled();
     await browser.selectOptions(await screen.findByLabelText('Collection site'), siteId);
     expect(screen.getByLabelText('Receiving location')).toBeEnabled();
     await browser.selectOptions(screen.getByLabelText('Receiving location'), locationId);

@@ -28,7 +28,8 @@ public sealed record ProcurementLineResponse(Guid Id, int LineNo, Guid PlotSeaso
     Guid SeasonId, string RiceVariety, string MeasuredValue, string MeasuredUnit,
     string NetMassKg, string MoisturePercent, Guid SourceLotId, Guid LotId,
     string LotCode, string Stage, ProcurementInitialStock InitialStock,
-    string? PlotCode = null, string? SeasonName = null, Guid? RiceVarietyId = null);
+    string? PlotCode = null, string? SeasonName = null, Guid? RiceVarietyId = null,
+    string? CurrentRiceVarietyName = null, string? CurrentRiceVarietyCode = null);
 public sealed record ProcurementResponse(Guid Id, string Code, Guid FarmerId, Guid CollectionSiteId,
     Guid ReceivingLocationId, Guid CommodityId, string Status, Guid ReceivedBy,
     DateTimeOffset ReceivedAt, DateTimeOffset CapturedAt, DateTimeOffset RecordedAt,
@@ -52,7 +53,8 @@ public sealed record SourceLotResponse(Guid Id, Guid LotId, string LotCode, Guid
     IReadOnlyList<ProcurementStockPosition> CurrentStock, IReadOnlyList<ProcurementLineageLink> Lineage,
     IReadOnlyList<Guid> SampleIds, IReadOnlyList<Guid> ConfirmedLabReportIds,
     DateTimeOffset StockAsOf, string ReceivingStatus, string UsableStockKg, string? FarmerName = null,
-    string? FarmerCode = null, string? PlotCode = null, string? SeasonName = null, Guid? RiceVarietyId = null);
+    string? FarmerCode = null, string? PlotCode = null, string? SeasonName = null, Guid? RiceVarietyId = null,
+    string? CurrentRiceVarietyName = null, string? CurrentRiceVarietyCode = null);
 internal sealed record ReceivingProjection(Guid ProcurementId, string Status, int Version);
 
 public static class ProcurementEndpoints
@@ -383,13 +385,18 @@ public static class ProcurementEndpoints
         var seasons = await db.CropSeasons.IgnoreQueryFilters().AsNoTracking()
             .Where(x => x.CompanyId == companyId && seasonIds.Contains(x.Id))
             .Select(x => new { x.Id, x.Name }).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        var varietyIds = result.Items.Where(x => x.RiceVarietyId.HasValue).Select(x => x.RiceVarietyId!.Value).Distinct().ToArray();
+        var varieties = await db.RiceVarieties.AsNoTracking().Where(x => varietyIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name, x.Code }).ToDictionaryAsync(x => x.Id, ct);
         var enriched = result with
         {
             Status = state?.Status ?? result.Status, ReceivingVersion = state?.Version ?? result.ReceivingVersion,
             FarmerName = farmer?.Name, FarmerCode = farmer?.Code,
             Items = result.Items.Select(x => x with
             {
-                PlotCode = plots.GetValueOrDefault(x.PlotId), SeasonName = seasons.GetValueOrDefault(x.SeasonId)
+                PlotCode = plots.GetValueOrDefault(x.PlotId), SeasonName = seasons.GetValueOrDefault(x.SeasonId),
+                CurrentRiceVarietyName = x.RiceVarietyId is { } varietyId && varieties.TryGetValue(varietyId, out var variety) ? variety.Name : null,
+                CurrentRiceVarietyCode = x.RiceVarietyId is { } codeId && varieties.TryGetValue(codeId, out var codeVariety) ? codeVariety.Code : null
             }).ToArray()
         };
         return Results.Ok(enriched);
@@ -446,6 +453,10 @@ public static class ProcurementEndpoints
                     SeasonName = db.CropSeasons.IgnoreQueryFilters().Where(s => s.CompanyId == companyId && s.Id == line.SeasonId)
                         .Select(s => s.Name).SingleOrDefault()
                 }).SingleAsync(ct);
+            var variety = line.RiceVarietyId is { } varietyId
+                ? await db.RiceVarieties.AsNoTracking().Where(x => x.Id == varietyId)
+                    .Select(x => new { x.Name, x.Code }).SingleOrDefaultAsync(ct)
+                : null;
             return Results.Ok(new SourceLotResponse(source.Id, source.LotId, line.LotCode,
                 snapshot.CommodityId, line.Stage, header.Id, header.Code, history.ItemId, header.FarmerId,
                 line.PlotId, line.SeasonId, line.PlotSeasonId, line.RiceVariety, header.ReceivedAt,
@@ -453,7 +464,8 @@ public static class ProcurementEndpoints
                 line.MoisturePercent, stock, lineage.Descendants, sampleIds, reportIds, clock.GetUtcNow(),
                 state?.Status ?? snapshot.Status,
                 Number(stock.Sum(x => decimal.Parse(x.AvailableKg, CultureInfo.InvariantCulture))),
-                metadata.Farmer?.Name, metadata.Farmer?.Code, metadata.PlotCode, metadata.SeasonName, line.RiceVarietyId));
+                metadata.Farmer?.Name, metadata.Farmer?.Code, metadata.PlotCode, metadata.SeasonName, line.RiceVarietyId,
+                variety?.Name, variety?.Code));
         }
         catch (ProcurementLedgerUnavailableException) { return LedgerUnavailable(); }
     }
