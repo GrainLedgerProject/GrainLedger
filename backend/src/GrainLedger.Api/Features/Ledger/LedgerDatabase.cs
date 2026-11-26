@@ -152,7 +152,6 @@ public static class LedgerDatabase
 
             GRANT EXECUTE ON FUNCTION 
                             grainledger.ledger_command(uuid,text,jsonb),grainledger.ledger_read(uuid,text,jsonb),grainledger.ledger_trace_lot(uuid,uuid,text,text),grainledger.ledger_trace_starts(uuid,text,text,uuid,uuid,integer,integer),grainledger.ledger_lock_writes(),
-                            grainledger.ledger_location_stock(uuid,uuid,jsonb),
                             grainledger.ledger_provision_catalog_commodities(uuid),
                             grainledger.ledger_register_pending_procurement(uuid,uuid),grainledger.ledger_reserve_source_lot_code(uuid,uuid,uuid,uuid),
                             grainledger.ledger_receiving_detail(uuid,uuid),grainledger.ledger_receiving_tasks(uuid,uuid,integer,integer),
@@ -164,7 +163,6 @@ public static class LedgerDatabase
                             grainledger.ledger_procurement_source_lineage(uuid,uuid),
                             grainledger.ledger_arrival_command(uuid,uuid,text,jsonb),
                             grainledger.ledger_receiving_threshold_read(uuid,text,jsonb),grainledger.ledger_receiving_threshold_command(uuid,text,jsonb),
-                            grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb),
                             grainledger.ledger_residue_graph(uuid,uuid),grainledger.ledger_residue_history(uuid,uuid,uuid),
                             grainledger.ledger_residue_replay(uuid,uuid,uuid,jsonb),grainledger.ledger_residue_append(uuid,uuid,uuid,jsonb,jsonb),
                             grainledger.catalog_publish_residue_rule(uuid,jsonb),grainledger.catalog_publish_residue_policy_setting(uuid,jsonb),grainledger.capture_publish_residue_group(uuid,jsonb),
@@ -181,7 +179,13 @@ public static class LedgerDatabase
             DECLARE runtime_role text := current_setting('grainledger.runtime_role');
             BEGIN
                 IF to_regprocedure('grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
-                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb), grainledger.ledger_export_container_read(uuid,uuid,text,integer,integer), grainledger.ledger_container_targets(uuid,uuid,uuid[]) TO %I', runtime_role);
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_export_container_read(uuid,uuid,text,integer,integer)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_export_container_read(uuid,uuid,text,integer,integer) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_container_targets(uuid,uuid,uuid[])') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_targets(uuid,uuid,uuid[]) TO %I', runtime_role);
                 END IF;
                 IF to_regprocedure('grainledger.ledger_container_action(uuid,text,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_action(uuid,text,jsonb) TO %I', runtime_role);
@@ -204,16 +208,28 @@ public static class LedgerDatabase
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_residue_job(uuid,uuid,integer,text,uuid,jsonb) TO %I', runtime_role);
                 END IF;
                 IF to_regprocedure('grainledger.exports_residue_job(uuid,uuid,integer,text,uuid,jsonb)') IS NOT NULL THEN
-                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.exports_residue_job(uuid,uuid,integer,text,uuid,jsonb), grainledger.exports_residue_freshness_read(uuid,text,uuid,text) TO %I', runtime_role);
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.exports_residue_job(uuid,uuid,integer,text,uuid,jsonb) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.exports_residue_freshness_read(uuid,text,uuid,text)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.exports_residue_freshness_read(uuid,text,uuid,text) TO %I', runtime_role);
                 END IF;
                 IF to_regprocedure('grainledger.ledger_residue_change_claim(uuid,integer,integer)') IS NOT NULL THEN
-                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_residue_change_claim(uuid,integer,integer), grainledger.ledger_residue_change_read(uuid,text,uuid,jsonb) TO %I', runtime_role);
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_residue_change_claim(uuid,integer,integer) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_residue_change_read(uuid,text,uuid,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_residue_change_read(uuid,text,uuid,jsonb) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb) TO %I', runtime_role);
                 END IF;
                 IF to_regprocedure('grainledger.ledger_closed_order_kg(uuid,uuid)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_closed_order_kg(uuid,uuid) TO %I', runtime_role);
                 END IF;
                 IF to_regprocedure('grainledger.ledger_business_history(uuid,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_business_history(uuid,jsonb) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_location_stock(uuid,uuid,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_location_stock(uuid,uuid,jsonb) TO %I', runtime_role);
                 END IF;
                 IF to_regprocedure('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb) TO %I', runtime_role);
@@ -304,8 +320,6 @@ public static class LedgerDatabase
               ('ledger_arrival_operations',true,false,false,false),
               ('ledger_arrival_reviews',true,false,false,false),
               ('ledger_assignments',true,false,false,false),
-              ('ledger_bulk_location_last_lots',false,false,false,false),
-              ('ledger_byproduct_variety_policy_revisions',false,false,false,false),
               ('ledger_catalog_commodities',true,false,false,false),
               ('ledger_commodities',true,false,false,false),
               ('ledger_compatibilities',true,false,false,false),
@@ -343,6 +357,8 @@ public static class LedgerDatabase
               ('ledger_receiving_threshold_overrides',false,false,false,false),
               ('ledger_residue_evaluations',false,false,false,false)
             ), optional_table(name,can_select,can_insert,can_update,can_delete) AS (VALUES
+              ('ledger_bulk_location_last_lots',false,false,false,false),
+              ('ledger_byproduct_variety_policy_revisions',false,false,false,false),
               ('ledger_residue_frontier',false,false,false,false),
               ('ledger_residue_current',false,false,false,false),
               ('exports_residue_freshness',false,false,false,false),
@@ -379,7 +395,6 @@ public static class LedgerDatabase
             ), expected_function(signature) AS (VALUES
               ('grainledger.ledger_command(uuid,text,jsonb)'),
               ('grainledger.ledger_read(uuid,text,jsonb)'),
-              ('grainledger.ledger_location_stock(uuid,uuid,jsonb)'),
               ('grainledger.ledger_trace_lot(uuid,uuid,text,text)'),
               ('grainledger.ledger_trace_starts(uuid,text,text,uuid,uuid,integer,integer)'),
               ('grainledger.ledger_lock_writes()'),
@@ -400,7 +415,6 @@ public static class LedgerDatabase
               ('grainledger.ledger_arrival_command(uuid,uuid,text,jsonb)'),
               ('grainledger.ledger_receiving_threshold_read(uuid,text,jsonb)'),
               ('grainledger.ledger_receiving_threshold_command(uuid,text,jsonb)'),
-              ('grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb)'),
               ('grainledger.ledger_residue_graph(uuid,uuid)'),
               ('grainledger.ledger_residue_history(uuid,uuid,uuid)'),
               ('grainledger.ledger_residue_replay(uuid,uuid,uuid,jsonb)'),
@@ -416,6 +430,7 @@ public static class LedgerDatabase
               ('grainledger.ledger_own(uuid,uuid)'),
               ('grainledger.ledger_role(uuid)')
             ), optional_function(signature) AS (VALUES ('grainledger.ledger_reserve_approved_blend(uuid,uuid)'),
+              ('grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb)'),
               ('grainledger.ledger_release_revoked_blend(uuid,uuid)'),
               ('grainledger.ledger_container_action(uuid,text,jsonb)'),
               ('grainledger.ledger_export_container_read(uuid,uuid,text,integer,integer)'),
@@ -429,6 +444,7 @@ public static class LedgerDatabase
               ('grainledger.exports_residue_job(uuid,uuid,integer,text,uuid,jsonb)'),
               ('grainledger.exports_residue_freshness_read(uuid,text,uuid,text)'),
               ('grainledger.ledger_residue_job(uuid,uuid,integer,text,uuid,jsonb)'),
+              ('grainledger.ledger_location_stock(uuid,uuid,jsonb)'),
               ('grainledger.ledger_closed_order_kg(uuid,uuid)'),
               ('grainledger.ledger_business_history(uuid,jsonb)')
             ), private_function(signature) AS (VALUES
@@ -478,7 +494,7 @@ public static class LedgerDatabase
                 OR has_any_column_privilege($1,t.oid,'REFERENCES'))
              OR EXISTS (SELECT 1 FROM expected_function e WHERE to_regprocedure(e.signature) IS NULL OR NOT has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
              OR EXISTS (SELECT 1 FROM optional_function e WHERE to_regprocedure(e.signature) IS NOT NULL AND NOT has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
-             OR EXISTS (SELECT 1 FROM private_function e WHERE to_regprocedure(e.signature) IS NULL OR has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
+             OR EXISTS (SELECT 1 FROM private_function e WHERE to_regprocedure(e.signature) IS NOT NULL AND has_function_privilege($1,to_regprocedure(e.signature),'EXECUTE'))
              OR EXISTS (SELECT 1 FROM app_functions f WHERE has_function_privilege($1,f.oid,'EXECUTE') AND NOT EXISTS (SELECT 1 FROM (SELECT * FROM expected_function UNION ALL SELECT * FROM optional_function) e WHERE to_regprocedure(e.signature)=f.oid))
              OR EXISTS (SELECT 1 FROM expected_sequence e LEFT JOIN app_sequences s ON s.relname=e.name WHERE s.oid IS NULL)
              OR EXISTS (SELECT 1 FROM app_sequences s LEFT JOIN expected_sequence e ON e.name=s.relname WHERE

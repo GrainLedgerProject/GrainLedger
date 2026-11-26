@@ -153,13 +153,24 @@ public sealed class ResiduePropagationTests
     {
         await using var factory = new ApiFactory { MigrationTarget = "20261123000000_ResidueChangeFoundation" };
         await factory.InitializeAsync();
+        Assert.Equal(true, await Owner(factory, "SELECT to_regprocedure('grainledger.ledger_location_stock(uuid,uuid,jsonb)') IS NULL"));
+        // The current capture endpoint needs this later column to create historical test data.
+        // Remove it before upgrading so the real variety migration still runs against its original schema.
+        await Owner(factory, "ALTER TABLE grainledger.capture_plot_seasons ADD COLUMN rice_variety_id uuid");
         using var s = await CreateAsync(factory); var f = await ResidueScenario.CreateAsync(s);
         var sample = await SampleAsync(s, await s.ReceiptAsync("10"));
         var (_, report) = await f.ReportAsync(sample); await f.PublishRuleAsync(); await f.SelectAsync(sample, report);
         var manual = await f.EvaluateAsync(sample.LotId);
+        await Owner(factory, "ALTER TABLE grainledger.capture_plot_seasons DROP COLUMN rice_variety_id");
         var options = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(factory.OwnerConnectionString,
             p => p.MigrationsHistoryTable("__EFMigrationsHistory", "grainledger")).Options;
         await using (var db = new AppDbContext(options)) await db.Database.MigrateAsync();
+        await LedgerDatabase.ConfigureRuntimeRoleAsync(factory.OwnerConnectionString, "grainledger_test_runtime");
+        await LedgerDatabase.ValidateRuntimeAsync(factory.RuntimeConnectionString);
+        Assert.Equal(true, await Owner(factory, "SELECT has_function_privilege('grainledger_test_runtime','grainledger.ledger_location_stock(uuid,uuid,jsonb)','EXECUTE')"));
+        Assert.Equal(false, await Owner(factory, "SELECT EXISTS (SELECT 1 FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl WHERE p.oid=to_regprocedure('grainledger.ledger_location_stock(uuid,uuid,jsonb)') AND acl.grantee=0 AND acl.privilege_type='EXECUTE')"));
+        await Owner(factory, "REVOKE EXECUTE ON FUNCTION grainledger.ledger_location_stock(uuid,uuid,jsonb) FROM grainledger_test_runtime");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => LedgerDatabase.ValidateRuntimeAsync(factory.RuntimeConnectionString));
         await LedgerDatabase.ConfigureRuntimeRoleAsync(factory.OwnerConnectionString, "grainledger_test_runtime");
         await LedgerDatabase.ValidateRuntimeAsync(factory.RuntimeConnectionString);
         var job = (Guid)(await Owner(factory, "SELECT id FROM grainledger.ledger_residue_changes WHERE company_id=@c AND origin->>'cutover'='true'", ("c", s.OwnerId)))!;

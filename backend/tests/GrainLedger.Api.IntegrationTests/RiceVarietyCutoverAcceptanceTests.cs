@@ -58,6 +58,9 @@ public sealed class RiceVarietyCutoverAcceptanceTests
         var result = JsonSerializer.Serialize(new { Id = plotSeason, PlotId = plot, SeasonId = season, RiceVariety = "Historic ST25" });
         await using var owner = new NpgsqlConnection(ownerString);
         await owner.OpenAsync();
+        Assert.Equal("true", await Scalar(owner, "SELECT (to_regprocedure('grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb)') IS NULL)::text"));
+        await LedgerDatabase.ConfigureRuntimeRoleAsync(ownerString, "grainledger_test_runtime");
+        await LedgerDatabase.ValidateRuntimeAsync(runtimeString);
         await using (var tx = await owner.BeginTransactionAsync())
         {
             await Exec(owner, "INSERT INTO grainledger.identity_organizations (\"Id\",\"Name\",\"Kind\",\"CreatedAt\") VALUES ($1,'Cutover customer','Customer',now())", company);
@@ -97,6 +100,14 @@ public sealed class RiceVarietyCutoverAcceptanceTests
         var beforeCapture = await Scalar(owner, "SELECT to_jsonb(e)::text FROM grainledger.capture_business_events e WHERE id=$1", captureEvent);
         await using (var db = new AppDbContext(options)) await db.Database.MigrateAsync();
         await LedgerDatabase.ConfigureRuntimeRoleAsync(ownerString, "grainledger_test_runtime");
+        Assert.Equal("true", await Scalar(owner, "SELECT has_function_privilege('grainledger_test_runtime','grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb)','EXECUTE')::text"));
+        Assert.Equal("false", await Scalar(owner, """
+            SELECT EXISTS (
+                SELECT 1 FROM pg_proc p, LATERAL aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) acl
+                WHERE p.oid = 'grainledger.ledger_byproduct_variety_policy(uuid,text,jsonb)'::regprocedure
+                  AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+            )::text
+            """));
         Assert.Equal(beforeEvent, await Scalar(owner, "SELECT to_jsonb(e)::text FROM grainledger.ledger_events e WHERE id=$1", ledgerEvent));
         Assert.Equal(beforePosting, await Scalar(owner, "SELECT to_jsonb(p)::text FROM grainledger.ledger_postings p WHERE id=$1", posting));
         Assert.Equal(beforeSource, await Scalar(owner, "SELECT to_jsonb(s)::text FROM grainledger.capture_source_lots s WHERE id=$1", source));
