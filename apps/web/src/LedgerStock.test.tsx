@@ -37,6 +37,34 @@ it('loads stock pages from server and shows records beyond first 25', async () =
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ledger/lots?') && new URL(String(url), 'http://localhost').searchParams.get('page') === '2')).toBe(true));
   expect(screen.getByRole('button', { name: 'Page 2 of stock' })).toHaveAttribute('aria-current', 'page');
 });
+
+it('opens isolation for the affected lot in a Mill Manager HOLD notification', async () => {
+  const affected = { ...lot('blend-1', 'BLEND-001'), restrictions: ['HOLD'],
+    positions: [{ locationId: 'store-a', facilityId: 'facility-a', quantityKg: '10', availableKg: '0' }] };
+  const page = (items: unknown[]) => ({ items, page: 1, pageSize: 25, totalCount: items.length, hasMore: false });
+  fetchMock.mockImplementation(async url => {
+    const path = String(url).split('?')[0];
+    if (path === '/api/ledger/lookups') return response({
+      owners: [{ id: 'owner-a', name: 'Owner A' }],
+      facilities: [{ id: 'facility-a', name: 'Warehouse A' }],
+      locations: [{ id: 'store-a', facilityId: 'facility-a', name: 'Store A', kind: 'STORE' }],
+      commodities: [], equipment: [],
+    });
+    if (path === '/api/ledger/holds' || path === '/api/container-notifications') return response(page([]));
+    if (path === '/api/ledger/notifications') return response(page([
+      { id: 'notice-a', holdId: 'root-hold', lotId: affected.id, lotCode: affected.code, ownerId: 'owner-a', message: 'Synthetic source HOLD' },
+    ]));
+    if (path === '/api/ledger/lots') return response(page([affected]));
+    if (path === '/api/ledger/lots/blend-1') return response(affected);
+    throw Error('Unexpected API request');
+  });
+  const browser = userEvent.setup();
+  render(<LedgerStock user={{ ...user, role: 'MillManager', permissions: ['holds.process'] }} />);
+  await browser.click(screen.getByRole('button', { name: 'HOLDs & alerts' }));
+  await browser.click(await screen.findByText('Handle HOLD for BLEND-001'));
+  expect(screen.getByRole('heading', { name: 'Authorized HOLD isolation transfer' })).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByLabelText('Transfer lot')).toHaveValue('blend-1'));
+});
 it('refreshes selected lot detail when stock view becomes active again', async () => {
   const browser = userEvent.setup();
   let detailReads = 0;

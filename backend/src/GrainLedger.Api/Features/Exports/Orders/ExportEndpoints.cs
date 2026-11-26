@@ -128,7 +128,7 @@ public static partial class ExportModule
     private static ExportOrderSummary ToSummary(ExportOrder o) => new(o.Id, o.Code, o.MarketId,
         o.CommodityId, ExportRules.Text(o.RequiredMassKg), o.ShippingFrom, o.ShippingTo, o.CreatedAt, o.Version);
 
-    private static async Task<ExportOrderDto> DetailAsync(AppDbContext db, ExportOrder order, bool canEdit,
+    private static async Task<ExportOrderDto> DetailAsync(AppDbContext db, ExportOrder order, Guid actor, bool canEdit,
         CancellationToken ct)
     {
         var spec = await db.Specifications.AsNoTracking()
@@ -142,12 +142,15 @@ public static partial class ExportModule
         var limits = await db.Limits.AsNoTracking().Where(x => x.SpecificationId == spec.Id)
             .OrderBy(x => x.AttributeCode).ToListAsync(ct);
         var allocated = spec.Allocated;
+        var completed = await db.Database.SqlQuery<decimal>($"""
+            SELECT grainledger.ledger_closed_order_kg({actor},{order.Id}) AS "Value"
+            """).SingleAsync(ct);
         return new(order.Id, order.Code, order.MarketId, order.CommodityId,
             ExportRules.Text(order.RequiredMassKg), order.OriginalMass, order.OriginalUnit,
             order.ShippingFrom, order.ShippingTo, order.Version, order.CurrentSpecificationVersion,
             limits.Select(ToDto).ToArray(),
             ExportRules.Text(allocated), ExportRules.Text(order.RequiredMassKg - allocated),
-            canEdit);
+            ExportRules.Text(completed), completed >= order.RequiredMassKg ? "COMPLETE" : "IN_PROGRESS", canEdit);
     }
 
     private static async Task<IResult> ListAsync(HttpContext http,
@@ -197,7 +200,7 @@ public static partial class ExportModule
         var order = await db.Orders.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == scope.Value.Company, ct);
         if (order is null) return Results.NotFound();
         SetEtag(http, order.Version);
-        return Results.Ok(await DetailAsync(db, order, await access.HasPermissionAsync(Permissions.ExportOrdersWrite, ct), ct));
+        return Results.Ok(await DetailAsync(db, order, scope.Value.Actor, await access.HasPermissionAsync(Permissions.ExportOrdersWrite, ct), ct));
     }
 
     private static async Task<IResult> CreateAsync(CreateExportOrderRequest request, HttpContext http, ICurrentAccess access, AppDbContext db,
@@ -235,7 +238,7 @@ public static partial class ExportModule
         await AddContainerRowsAsync(db, order, request.Containers!, now, ct);
         Event(db, order, scope.Value.Actor, "ORDER_CREATED", request, now);
         await db.SaveChangesAsync(ct);
-        var response = await DetailAsync(db, order, true, ct);
+        var response = await DetailAsync(db, order, scope.Value.Actor, true, ct);
         await StoreResultAsync(db, new ExportOperation { Id = Guid.NewGuid(), ActorId = scope.Value.Actor,
             CompanyId = scope.Value.Company, OperationId = request.OperationId, RequestHash = hash, OrderId = id },
             response, 201, order.Version, ct);
@@ -442,7 +445,7 @@ public static partial class ExportModule
         var now = clock.GetUtcNow();
         Event(db, order, scope.Value.Actor, "ORDER_UPDATED", request, now);
         await db.SaveChangesAsync(ct);
-        var response = await DetailAsync(db, order, true, ct);
+        var response = await DetailAsync(db, order, scope.Value.Actor, true, ct);
         await StoreResultAsync(db, new ExportOperation { Id = Guid.NewGuid(), CompanyId = scope.Value.Company,
             ActorId = scope.Value.Actor, OperationId = request.OperationId, RequestHash = hash, OrderId = id },
             response, 200, order.Version, ct);
@@ -488,7 +491,7 @@ public static partial class ExportModule
             request.Limits!, scope.Value.Actor, now, ct);
         Event(db, order, scope.Value.Actor, "SPECIFICATION_VERSION_ADDED", request, now);
         await db.SaveChangesAsync(ct);
-        var response = await DetailAsync(db, order, true, ct);
+        var response = await DetailAsync(db, order, scope.Value.Actor, true, ct);
         await StoreResultAsync(db, new ExportOperation { Id = Guid.NewGuid(), CompanyId = scope.Value.Company,
             ActorId = scope.Value.Actor, OperationId = request.OperationId, RequestHash = hash,
             OrderId = id, SpecificationVersion = order.CurrentSpecificationVersion },
@@ -530,7 +533,7 @@ public static partial class ExportModule
         order.Version++;
         Event(db, order, scope.Value.Actor, "CONTAINERS_ADDED", request, now);
         await db.SaveChangesAsync(ct);
-        var response = await DetailAsync(db, order, true, ct);
+        var response = await DetailAsync(db, order, scope.Value.Actor, true, ct);
         await StoreResultAsync(db, new ExportOperation { Id = Guid.NewGuid(), CompanyId = scope.Value.Company,
             ActorId = scope.Value.Actor, OperationId = request.OperationId, RequestHash = hash,
             OrderId = id, ContainerId = rows.Count == 1 ? rows[0].Id : null },

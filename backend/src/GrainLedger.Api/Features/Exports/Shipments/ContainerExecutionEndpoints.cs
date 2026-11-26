@@ -15,7 +15,8 @@ namespace GrainLedger.Api.Features.Exports;
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ContainerMetadataRequest(Guid OperationId, int Version, string? ContainerNumber, string? SealNumber);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record ContainerHoldRequest(Guid OperationId, int Version, string Reason);
+public sealed record ContainerHoldRequest(Guid OperationId, int Version, string Reason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? EvidenceId = null);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ActualLoadLine(Guid LotId, Guid LocationId, string QuantityKg);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -119,7 +120,7 @@ public static partial class ExportModule
             return Problem(400, "CONTAINER_REQUEST_INVALID", "Provide approval, loading time and positive exact kg lines.");
         if (request is ContainerMetadataRequest metadata && (metadata.ContainerNumber?.Trim().Length > 80 || metadata.SealNumber?.Trim().Length > 80))
             return Problem(400, "CONTAINER_REQUEST_INVALID", "Container number and seal have maximum 80 characters.");
-        if (request is ContainerHoldRequest hold && (string.IsNullOrWhiteSpace(hold.Reason) || hold.Reason.Length > 1000))
+        if (request is ContainerHoldRequest hold && (string.IsNullOrWhiteSpace(hold.Reason) || hold.Reason.Length > 1000 || hold.EvidenceId == Guid.Empty))
             return Problem(400, "CONTAINER_REQUEST_INVALID", "A HOLD reason of one to 1000 characters is required.");
         try
         {
@@ -219,6 +220,10 @@ public static partial class ExportModule
         var findings = new List<string>();
         if (!finalCheck && detail.GetProperty("status").GetString() == "CLOSED") findings.Add("CONTAINER_CLOSED");
         if (detail.GetProperty("holds").GetArrayLength() != 0) findings.Add("CONTAINER_HOLD");
+        if (phase == "LOADING" && detail.GetProperty("loads").EnumerateArray()
+            .SelectMany(load => load.GetProperty("lines").EnumerateArray())
+            .Any(line => line.GetProperty("restricted").GetBoolean()))
+            findings.Add("LOT_RESTRICTED");
         if (phase == "CLOSE")
         {
             if (detail.GetProperty("remainingKg").GetString() != "0.000000") findings.Add("EXACT_TARGET_NOT_LOADED");

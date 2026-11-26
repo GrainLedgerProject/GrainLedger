@@ -44,6 +44,8 @@ public static partial class ExportModule
             x.Id == id && x.CompanyId == scope.Value.Company, ct);
         if (plan is null) return Results.NotFound();
         var container = await db.Containers.AsNoTracking().SingleAsync(x => x.Id == plan.ContainerId, ct);
+        if ((await ReadExecutionAsync(scope.Value.Actor, container.Id, "detail", db, ct)).GetProperty("holds").GetArrayLength() > 0)
+            return Problem(409, "CONTAINER_HELD", "A container HOLD blocks planning.");
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == plan.OrderId, ct);
         if (plan.Status != "DRAFT" || !DemandIsCurrent(plan, order, container))
             return Problem(409, "PLAN_DEMAND_STALE", "Create a current draft before previewing a blend.");

@@ -16,6 +16,10 @@ public sealed class RuntimeRoleCompatibilityTests
         await factory.InitializeAsync();
         await using var owner = new NpgsqlConnection(factory.OwnerConnectionString);
         await owner.OpenAsync();
+        // The merged baseline installs both optional reads. Remove them only
+        // in this isolated database to exercise partial deployments as well.
+        await ExecuteAsync("DROP FUNCTION IF EXISTS grainledger.ledger_business_history(uuid,jsonb)");
+        await ExecuteAsync("DROP FUNCTION IF EXISTS grainledger.ledger_closed_order_kg(uuid,uuid)");
         // Signature-only stubs model an independently deployed feature. Its
         // business authorization is outside this runtime-grant regression.
         if (history) await ExecuteAsync("CREATE FUNCTION grainledger.ledger_business_history(uuid,jsonb) RETURNS jsonb LANGUAGE sql AS 'SELECT null::jsonb'");

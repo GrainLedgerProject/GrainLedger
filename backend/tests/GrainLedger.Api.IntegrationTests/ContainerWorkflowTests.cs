@@ -224,6 +224,7 @@ public sealed class ContainerWorkflowTests(ApiFactory factory) : IClassFixture<A
         Assert.Equal(first.GetRawText(), (await SendAsync(f.Export, HttpMethod.Post, Route(f) + "/documents", request)).GetRawText());
         var second = await SendAsync(f.Export, HttpMethod.Post, Route(f) + "/documents", request with { OperationId = Guid.NewGuid(), Version = first.GetProperty("version").GetInt32(), Reason = "Synthetic second version" });
         Assert.Equal(new[] { 1, 2 }, second.GetProperty("documents").EnumerateArray().Select(x => x.GetProperty("version").GetInt32()).ToArray());
+        Assert.All(second.GetProperty("documents").EnumerateArray(), x => Assert.Equal("UPLOADED", x.GetProperty("origin").GetString()));
         var path = Route(f) + $"/documents/{request.OperationId}/file";
         Assert.Equal(bytes, await f.Export.GetByteArrayAsync(path));
         Assert.Equal(HttpStatusCode.Forbidden, (await f.Stock.ForeignCustomer.GetAsync(path)).StatusCode);
@@ -235,11 +236,69 @@ public sealed class ContainerWorkflowTests(ApiFactory factory) : IClassFixture<A
     }
 
     [Fact]
+    public async Task Packing_list_generates_versioned_download_from_closed_manifest()
+    {
+        using var f = await ContainerExecutionScenario.CreateAsync(factory);
+        var route = Route(f) + "/documents/packing-list";
+        var request = new ContainerPackingListRequest(Guid.NewGuid(), await Version(f));
+        Assert.Equal(HttpStatusCode.Conflict, (await f.Export.PostAsJsonAsync(route, request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await f.Stock.Customer.PostAsJsonAsync(route, request)).StatusCode);
+        await Load(f, new ActualLoadLine(f.LotId, f.LoadingLocationId, "4.000001"));
+        await Load(f, new ActualLoadLine(f.LotId, f.LoadingLocationId, "5.999999"));
+        await Close(f);
+        var dossier = await GetAsync(f.Stock.Customer, f.Route + "/dossier");
+        request = request with { Version = await Version(f) };
+        var first = await SendAsync(f.Export, HttpMethod.Post, route, request);
+        Assert.Equal(first.GetRawText(), (await SendAsync(f.Export, HttpMethod.Post, route, request)).GetRawText());
+        var second = await SendAsync(f.Export, HttpMethod.Post, route, new ContainerPackingListRequest(Guid.NewGuid(), first.GetProperty("version").GetInt32()));
+        Assert.Equal(new[] { 1, 2 }, second.GetProperty("documents").EnumerateArray().Select(x => x.GetProperty("version").GetInt32()));
+        Assert.All(second.GetProperty("documents").EnumerateArray(), x => Assert.Equal("PACKING_LIST", x.GetProperty("documentType").GetString()));
+        Assert.All(second.GetProperty("documents").EnumerateArray(), x => Assert.Equal("GENERATED", x.GetProperty("origin").GetString()));
+        var upload = await SendAsync(f.Export, HttpMethod.Post, Route(f) + "/documents",
+            new ContainerDocumentRequest(Guid.NewGuid(), second.GetProperty("version").GetInt32(), "PACKING_LIST",
+                "manual.txt", "text/plain", Convert.ToBase64String("Synthetic uploaded Packing List"u8), "Synthetic upload"));
+        Assert.Equal("UPLOADED", upload.GetProperty("documents")[2].GetProperty("origin").GetString());
+        var path = Route(f) + $"/documents/{request.OperationId}/file";
+        using var file = await f.Export.GetAsync(path);
+        Assert.Equal("attachment", file.Content.Headers.ContentDisposition?.DispositionType);
+        var content = await file.Content.ReadAsStringAsync();
+        Assert.Contains("Packing List", content);
+        Assert.Contains(dossier.GetProperty("sealNumber").GetString()!, content);
+        Assert.Contains("10.000000", content);
+        Assert.DoesNotContain(f.SourceId.ToString(), content);
+        Assert.Equal(HttpStatusCode.Forbidden, (await f.Stock.ForeignCustomer.GetAsync(path)).StatusCode);
+        Assert.Equal(dossier.GetRawText(), (await GetAsync(f.Stock.Customer, f.Route + "/dossier")).GetRawText());
+        var day = dossier.GetProperty("closedAt").GetDateTimeOffset().ToUniversalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var history = await GetAsync(f.Export, $"/api/ledger/business-history?category=CONTAINER&eventType=CLOSE&from={day}&to={day}&search={f.ContainerId}");
+        var closeEvent = Assert.Single(history.GetProperty("items").EnumerateArray());
+        Assert.Equal(f.ActorId, closeEvent.GetProperty("actorId").GetGuid());
+        Assert.False(string.IsNullOrEmpty(closeEvent.GetProperty("actorName").GetString()));
+        Assert.Equal(JsonValueKind.Number, closeEvent.GetProperty("context").GetProperty("version").ValueKind);
+        Assert.Empty((await GetAsync(f.Stock.ForeignCustomer,
+            $"/api/ledger/business-history?category=CONTAINER&eventType=CLOSE&search={f.ContainerId}")).GetProperty("items").EnumerateArray());
+        Assert.Empty((await GetAsync(f.Export,
+            $"/api/ledger/business-history?category=CONTAINER&eventType=CLOSE&to=2000-01-01&search={f.ContainerId}")).GetProperty("items").EnumerateArray());
+        Assert.Equal(HttpStatusCode.BadRequest, (await f.Export.GetAsync(
+            "/api/ledger/business-history?from=2026-11-23&to=2026-11-22")).StatusCode);
+    }
+
+    [Fact]
     public async Task Hold_notices_are_unique_retained_scoped_and_handling_never_releases_restrictions()
     {
         using var f = await ContainerExecutionScenario.CreateAsync(factory); await Load(f, new ActualLoadLine(f.LotId, f.LoadingLocationId, "4"));
-        var request = new ContainerHoldRequest(Guid.NewGuid(), await Version(f), "Synthetic S2 HOLD");
+        var request = new ContainerHoldRequest(Guid.NewGuid(), await Version(f), "Synthetic S2 HOLD", f.Stock.EvidenceId);
         var held = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/holds", request);
+        Assert.Equal(f.Stock.EvidenceId, held.GetProperty("holds")[0].GetProperty("evidenceId").GetGuid());
+        Assert.Equal(JsonValueKind.Null, held.GetProperty("approval").ValueKind);
+        Assert.Equal(6m, await Scalar("SELECT sum(quantity_kg) FROM grainledger.ledger_blend_reservation_events WHERE proposal_id=$1 AND action='RELEASE'", f.ProposalId));
+        var order = await GetAsync(f.Export, $"/api/export-orders/{held.GetProperty("orderId").GetGuid()}");
+        var blocked = await f.Export.PostAsJsonAsync($"/api/export-containers/{f.ContainerId}/blend-plans/drafts",
+            new CreateBlendPlanDraftRequest(Guid.NewGuid(), order.GetProperty("version").GetInt32(), held.GetProperty("version").GetInt32(), "HEAD_RICE"));
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+        var trace = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/trace", new { });
+        var target = trace.GetProperty("graph").GetProperty("actualContainers")[0];
+        Assert.True(target.GetProperty("held").GetBoolean());
+        Assert.False(target.GetProperty("restricted").GetBoolean());
         Assert.Equal(held.GetRawText(), (await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/holds", request)).GetRawText());
         var notices = await GetAsync(f.Export, "/api/container-notifications"); var notice = Assert.Single(notices.GetProperty("items").EnumerateArray());
         Assert.Equal(f.ContainerId, notice.GetProperty("containerId").GetGuid()); Assert.Equal(JsonValueKind.Null, notice.GetProperty("readAt").ValueKind);
@@ -251,6 +310,100 @@ public sealed class ContainerWorkflowTests(ApiFactory factory) : IClassFixture<A
         Assert.Equal(4m, await Scalar("SELECT sum(l.quantity_kg) FROM grainledger.ledger_container_load_lines l JOIN grainledger.ledger_container_loads h ON h.id=l.load_id WHERE h.container_id=$1", f.ContainerId));
         Assert.Equal(1m, await Scalar("SELECT count(*) FROM grainledger.ledger_container_holds WHERE container_id=$1", f.ContainerId));
         Assert.Equal(HttpStatusCode.BadRequest, (await f.Stock.Manager.PostAsJsonAsync(Route(f) + "/hold-responses", new ContainerHoldResponseRequest(Guid.NewGuid(), await Version(f), request.OperationId, f.Stock.FacilityId, "RELEASE", f.Stock.EvidenceId, "Unsupported"))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Lot_hold_links_scoped_evidence_and_notifies_export_with_unused_reservation_release()
+    {
+        using var f = await ContainerExecutionScenario.CreateAsync(factory, preBlended: true);
+        await Load(f, new ActualLoadLine(f.LotId, f.LoadingLocationId, "4"));
+        var request = new { id = Guid.NewGuid(), lotId = f.SourceId, reason = "Synthetic traced lab finding", evidenceId = f.Stock.EvidenceId };
+        Assert.Equal(HttpStatusCode.Forbidden, (await f.Stock.Customer.PostAsJsonAsync("/api/ledger/holds", request with { evidenceId = Guid.NewGuid() })).StatusCode);
+        Assert.Equal(0m, await Scalar("SELECT count(*) FROM grainledger.ledger_holds WHERE id=$1", request.id));
+        var hold = await SendAsync(f.Stock.Customer, HttpMethod.Post, "/api/ledger/holds", request);
+        Assert.Equal(hold.GetRawText(), (await SendAsync(f.Stock.Customer, HttpMethod.Post, "/api/ledger/holds", request)).GetRawText());
+        Assert.Equal(6m, await Scalar("SELECT sum(quantity_kg) FROM grainledger.ledger_blend_reservation_events WHERE proposal_id=$1 AND action='RELEASE'", f.ProposalId));
+        Assert.Equal(1m, await Scalar("SELECT count(*) FROM grainledger.ledger_events WHERE kind='HOLD' AND (details->>'evidenceId')::uuid=$1", f.Stock.EvidenceId));
+        var inbox = await GetAsync(f.Export, "/api/ledger/notifications");
+        Assert.Equal(request.id, Assert.Single(inbox.GetProperty("items").EnumerateArray()).GetProperty("holdId").GetGuid());
+        var millInbox = await GetAsync(f.Stock.Manager, "/api/ledger/notifications");
+        Assert.Contains(millInbox.GetProperty("items").EnumerateArray(), notice =>
+            notice.GetProperty("holdId").GetGuid() == request.id && notice.GetProperty("lotId").GetGuid() == f.LotId);
+        var historyRoute = $"/api/ledger/business-history?category=HOLD&search={request.id}";
+        var ownHistory = await GetAsync(f.Stock.Customer, historyRoute);
+        Assert.Equal(f.Stock.EvidenceId, Assert.Single(ownHistory.GetProperty("items").EnumerateArray()).GetProperty("evidenceId").GetGuid());
+        var exportHistory = await GetAsync(f.Export, historyRoute);
+        Assert.Equal(JsonValueKind.Null, Assert.Single(exportHistory.GetProperty("items").EnumerateArray()).GetProperty("evidenceId").ValueKind);
+        var trace = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/trace", new { });
+        var target = trace.GetProperty("graph").GetProperty("actualContainers")[0];
+        Assert.False(target.GetProperty("held").GetBoolean());
+        Assert.True(target.GetProperty("restricted").GetBoolean());
+        var forward = await SendAsync(f.Stock.Customer, HttpMethod.Post, "/api/ledger/trace", new { lotId = f.SourceId, direction = "forward" });
+        var blend = Assert.Single(forward.GetProperty("lots").EnumerateArray(), lot => lot.GetProperty("id").GetGuid() == f.LotId);
+        Assert.True(blend.GetProperty("effectiveHold").GetBoolean());
+        Assert.All(blend.GetProperty("positions").EnumerateArray(), position =>
+            Assert.Equal("0.000000", position.GetProperty("availableKg").GetString()));
+
+        var transfer = new { id = Guid.NewGuid(), lotId = f.LotId, fromLocationId = f.LoadingLocationId,
+            toLocationId = f.Stock.SecondLocationId, quantityKg = "1", occurredAt = DateTimeOffset.UtcNow };
+        Assert.Equal(HttpStatusCode.Conflict, (await f.Stock.Operator.PostAsJsonAsync("/api/ledger/transfers", transfer)).StatusCode);
+        await SendAsync(f.Stock.Manager, HttpMethod.Post, "/api/ledger/transfers", new {
+            id = Guid.NewGuid(), transfer.lotId, transfer.fromLocationId, toLocationId = f.Stock.IsolationLocationId,
+            transfer.quantityKg, transfer.occurredAt, holdId = request.id });
+        Assert.Equal(1m, await Scalar("SELECT quantity_kg FROM grainledger.ledger_positions WHERE lot_id=$1 AND location_id=$2",
+            f.LotId, f.Stock.IsolationLocationId));
+        await SendAsync(f.Stock.Manager, HttpMethod.Post, $"/api/ledger/holds/{request.id}/respond",
+            new { status = "ACKNOWLEDGED", response = "Synthetic affected stock identified", evidenceId = f.Stock.EvidenceId });
+    }
+
+    [Fact]
+    public async Task An_affected_blend_is_excluded_from_a_different_containers_preview()
+    {
+        using var f = await ContainerExecutionScenario.CreateAsync(factory, preBlended: true);
+        await Load(f, new ActualLoadLine(f.LotId, f.LoadingLocationId, "4"));
+        await SendAsync(f.Stock.Customer, HttpMethod.Post, "/api/ledger/holds",
+            new { id = Guid.NewGuid(), lotId = f.SourceId, reason = "Synthetic source HOLD", evidenceId = f.Stock.EvidenceId });
+        var initial = (await f.Detail()).GetProperty("container");
+        var first = await GetAsync(f.Export, $"/api/export-orders/{initial.GetProperty("orderId").GetGuid()}");
+        var order = await SendAsync(f.Export, HttpMethod.Post, "/api/export-orders", new
+        {
+            operationId = Guid.NewGuid(), marketId = first.GetProperty("marketId").GetGuid(),
+            commodityId = first.GetProperty("commodityId").GetGuid(), requiredMass = "10", unit = "KG",
+            shippingFrom = "2026-11-23", shippingTo = "2026-11-25",
+            limits = new[] { new { attributeId = f.QualityAttributeId, minValue = (string?)null, maxValue = "14" } },
+            containers = new[] { new { targetMass = "10", unit = "KG" } }
+        });
+        var containers = await GetAsync(f.Export, $"/api/export-orders/{order.GetProperty("id").GetGuid()}/containers");
+        var container = Assert.Single(containers.GetProperty("items").EnumerateArray()).GetProperty("id").GetGuid();
+        var draft = await SendAsync(f.Export, HttpMethod.Post, $"/api/export-containers/{container}/blend-plans/drafts",
+            new CreateBlendPlanDraftRequest(Guid.NewGuid(), 1, 1, "BLENDED_RICE"));
+        var draftId = draft.GetProperty("id").GetGuid();
+        var candidates = await GetAsync(f.Export, $"/api/export-containers/{container}/candidates?facilityId={f.Stock.FacilityId}&planId={draftId}");
+        var preview = await SendAsync(f.Export, HttpMethod.Post, $"/api/blend-plans/{draftId}/preview",
+            new PreviewBlendPlanRequest(f.Stock.FacilityId, candidates.GetProperty("scopeRevision").GetString()!));
+        Assert.NotEqual("PASS", preview.GetProperty("assessmentStatus").GetString());
+        Assert.Equal(JsonValueKind.Null, preview.GetProperty("previewReference").ValueKind);
+    }
+
+    [Fact]
+    public async Task Assigned_mill_manager_sees_history_of_hold_and_response_before_loading()
+    {
+        using var f = await ContainerExecutionScenario.CreateAsync(factory);
+        var holdId = Guid.NewGuid();
+        var held = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/holds",
+            new ContainerHoldRequest(holdId, 1, "Synthetic planned HOLD", f.Stock.EvidenceId));
+        Assert.Equal("PLANNED", held.GetProperty("status").GetString());
+        await SendAsync(f.Stock.Manager, HttpMethod.Post, Route(f) + "/hold-responses",
+            new ContainerHoldResponseRequest(Guid.NewGuid(), held.GetProperty("version").GetInt32(), holdId,
+                f.Stock.FacilityId, "ACKNOWLEDGE", f.Stock.EvidenceId, "Synthetic assigned response"));
+        var query = $"/api/ledger/business-history?category=HOLD&search={f.ContainerId}";
+        var history = await GetAsync(f.Stock.Manager, query);
+        Assert.Equal(new[] { "CONTAINER_HOLD", "HOLD_RESPONSE" },
+            history.GetProperty("items").EnumerateArray().Select(e => e.GetProperty("eventType").GetString()).Order());
+        Assert.Empty((await GetAsync(f.Stock.ForeignCustomer, query)).GetProperty("items").EnumerateArray());
+        var (otherUser, otherSession) = await factory.SeedUserAsync(Roles.MillManager, f.Stock.Accounts["manager"].User.OrganizationId);
+        using var unassigned = factory.CreateRealCookieClient(otherUser, otherSession);
+        Assert.Empty((await GetAsync(unassigned, query)).GetProperty("items").EnumerateArray());
     }
 
     [Fact]

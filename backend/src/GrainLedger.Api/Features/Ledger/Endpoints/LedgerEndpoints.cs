@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 using GrainLedger.Api.Features.Identity;
 using Microsoft.AspNetCore.Builder;
@@ -13,6 +14,29 @@ public static class LedgerEndpoints
         var group = endpoints.MapGroup("/api/ledger").RequireAuthorization().AddEndpointFilter<NoStoreFilter>().AddEndpointFilter<MutationAntiforgeryFilter>().AddEndpointFilter<LedgerErrorFilter>();
         group.MapTraceability();
         group.MapContainers();
+        group.MapGet("/business-history", async (HttpRequest request, ICurrentAccess access, LedgerService ledger, CancellationToken ct) =>
+        {
+            if (!await access.HasPermissionAsync(Permissions.HistoryRead, ct) &&
+                !await access.HasPermissionAsync(Permissions.IdentityManage, ct)) return Results.Forbid();
+            var query = new JsonObject();
+            foreach (var key in new[] { "category", "eventType", "search", "page", "pageSize" })
+            {
+                if (!request.Query.TryGetValue(key, out var value)) continue;
+                if (value.Count != 1 || string.IsNullOrWhiteSpace(value[0]))
+                    return Results.BadRequest(new { message = $"Provide one value for {key}." });
+                query[key] = value[0]!.Trim();
+            }
+            foreach (var key in new[] { "from", "to" })
+            {
+                if (!request.Query.TryGetValue(key, out var value)) continue;
+                if (value.Count != 1 || !DateOnly.TryParseExact(value[0], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day)
+                    || key == "to" && day == DateOnly.MaxValue)
+                    return Results.BadRequest(new { message = $"Use YYYY-MM-DD for {key}." });
+                query[key == "from" ? "from" : "before"] = (key == "from" ? day : day.AddDays(1))
+                    .ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture);
+            }
+            return Results.Ok(await ledger.BusinessHistoryAsync(query, ct));
+        });
         foreach (var route in new[] { "setup", "lookups" })
         {
             var action = route;
