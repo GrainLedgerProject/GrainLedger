@@ -99,7 +99,7 @@ public static partial class ExportModule
         var residueSelection = await residue.PreviewSelectionAsync(
             selected.GroupBy(x => x.LotId).Select(x => new HypotheticalBlendInput(
                 x.Key, ExportRules.Text(x.Sum(y => y.QuantityKg)))).ToArray(),
-            outputLedgerCommodityId, request.SubstanceIds, ct);
+            outputLedgerCommodityId, request.SubstanceIds, ct, requireSourceLab: true);
         PlanningYieldRule? publishedYield = null;
         if (request.Mode == "BLEND_INPUT_STOCK" && request.CompatibilityPolicyId is { } yieldCompatibility)
         {

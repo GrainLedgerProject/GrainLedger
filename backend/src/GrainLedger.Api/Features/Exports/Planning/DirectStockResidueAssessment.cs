@@ -36,7 +36,8 @@ internal static class DirectStockResidueAssessment
                 Unit = complete ? resolved[0].Unit : null,
                 ProfileCode = resolved.Select(x => x.ProfileCode).Distinct().Count() == 1
                     ? resolved[0].ProfileCode : null,
-                Reasons = complete ? [] : ["DIRECT_LOT_RESIDUE_INCOMPLETE"],
+                Reasons = complete ? [] : resolved.SelectMany(x => x.Reasons)
+                    .Append("DIRECT_LOT_RESIDUE_INCOMPLETE").Distinct().Order(StringComparer.Ordinal).ToArray(),
                 Provenance = resolved.SelectMany(x => x.Provenance).ToArray(),
                 Rules = resolved.SelectMany(x => x.Rules).ToArray(),
                 Dependencies = resolved.SelectMany(x => x.Dependencies).ToArray()

@@ -120,6 +120,7 @@ public static partial class ExportModule
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == plan.OrderId, ct);
         var storedPreview = await db.BlendPlanPreviews.AsNoTracking()
             .SingleAsync(x => x.Id == proposal.PreviewId && x.CompanyId == scope.Value.Company, ct);
+        var residueFreshness = await ReadResidueFreshnessAsync(db, scope.Value.Actor, id, proposal.Id, ct);
         // F14 availability excludes reservations, including this plan's own.
         // The decision endpoint reports recorded reservation state; execution revalidates separately.
         try
@@ -129,8 +130,11 @@ public static partial class ExportModule
                 return Results.Ok(new { proposal.Id, proposal.PlanId, proposal.PreviewId,
                     proposal.ProposedAt, assessment = JsonSerializer.Deserialize<JsonElement>(proposal.SnapshotJson),
                     demandCurrent = DemandIsCurrent(plan, order, container),
-                    stockAndEvidenceCurrent = (bool?)null, freshness = "NOT_RECHECKED",
-                    freshnessReasons = Array.Empty<string>(),
+                    stockAndEvidenceCurrent = (bool?)null,
+                    residueFreshness,
+                    freshness = residueFreshness?.GetProperty("freshness").GetString() ?? "NOT_RECHECKED",
+                    freshnessReasons = residueFreshness?.GetProperty("freshness").GetString() is "STALE" or "REVIEW_REQUIRED"
+                        ? new[] { "RESIDUE_REASSESSMENT_CHANGED" } : Array.Empty<string>(),
                     stockReserved = decision.Any(row => row.ReservedKg > row.ReleasedKg + row.ConsumedKg) });
         }
         catch (PostgresException ex) when (DecisionStorageUnavailable(ex)) { }
@@ -162,8 +166,30 @@ public static partial class ExportModule
         return Results.Ok(new { proposal.Id, proposal.PlanId, proposal.PreviewId,
             proposal.ProposedAt, assessment = JsonSerializer.Deserialize<JsonElement>(proposal.SnapshotJson),
             demandCurrent = DemandIsCurrent(plan, order, container),
+            residueFreshness,
             stockAndEvidenceCurrent = reasons.Count == 0,
             freshness = reasons.Count == 0 ? "CURRENT" : "STALE",
             freshnessReasons = reasons, stockReserved = false });
+    }
+
+    // This projection reports background compliance only; it cannot authorize execution.
+    private static async Task<JsonElement?> ReadResidueFreshnessAsync(AppDbContext db, Guid actor, Guid plan,
+        Guid proposal, CancellationToken ct)
+    {
+        var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        var close = connection.State != System.Data.ConnectionState.Open;
+        if (close) await connection.OpenAsync(ct);
+        try
+        {
+            await using var ready = new NpgsqlCommand("SELECT to_regprocedure('grainledger.exports_residue_freshness_read(uuid,text,uuid,text)') IS NOT NULL", connection);
+            if (await ready.ExecuteScalarAsync(ct) is not true) return null;
+            await using var query = new NpgsqlCommand("SELECT grainledger.exports_residue_freshness_read($1,'PLAN',$2,$3)::text", connection);
+            query.Parameters.AddWithValue(actor); query.Parameters.AddWithValue(plan); query.Parameters.AddWithValue(proposal.ToString());
+            var raw = await query.ExecuteScalarAsync(ct);
+            if (raw is not string text) return null;
+            using var doc = JsonDocument.Parse(text);
+            return doc.RootElement.Clone();
+        }
+        finally { if (close) await connection.CloseAsync(); }
     }
 }

@@ -84,6 +84,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     }
     public bool BrowserCookies { get; init; }
     public TimeProvider Clock { get; init; } = TimeProvider.System;
+    public string? MigrationTarget { get; init; }
+    public bool EnableResidueWorker { get; init; }
     public Action<IServiceCollection>? ConfigureTestServices { get; init; }
 
     private static int ReserveHostPort()
@@ -109,6 +111,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             ["ConnectionStrings:GrainLedger"] = RuntimeConnectionString,
             ["ConnectionStrings:GrainLedgerMigration"] = OwnerConnectionString,
             ["Ledger:RuntimeRole"] = "grainledger_test_runtime",
+            ["ResiduePropagation:Enabled"] = EnableResidueWorker.ToString(),
+            ["ResiduePropagation:PollSeconds"] = "1",
+            ["ResiduePropagation:BatchSize"] = "2",
             ["Authentication:Google:ClientId"] = "tests-client",
             ["Authentication:Google:ClientSecret"] = "tests-secret",
             ["Authentication:Jwt:SigningKey"] = "tests-only-signing-key-at-least-thirty-two-bytes-long",
@@ -150,7 +155,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 .MigrationsHistoryTable("__EFMigrationsHistory", "grainledger"))
             .Options;
         await using (var db = new AppDbContext(options))
-            await db.Database.MigrateAsync();
+        {
+            if (MigrationTarget is null) await db.Database.MigrateAsync();
+            else await Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db).MigrateAsync(MigrationTarget);
+        }
         await using var owner = new NpgsqlConnection(OwnerConnectionString);
         await owner.OpenAsync();
         await using (var command = new NpgsqlCommand("CREATE ROLE grainledger_test_runtime LOGIN PASSWORD 'test-runtime' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT", owner))

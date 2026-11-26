@@ -26,7 +26,23 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
-    public async Task Confirmed_evidence_can_propose_and_approve_with_exact_reservation(int flow)
+    [InlineData(6)]
+    [InlineData(7)]
+    public Task Confirmed_evidence_can_propose_and_approve_with_exact_reservation(int flow) => RunSourceLabScenarioAsync(flow);
+
+    [Theory]
+    [InlineData(8)] // Approved group only, no lab.
+    [InlineData(9)] // Draft lab plus approved group.
+    [InlineData(10)] // Confirmed lab without reviewed selection.
+    [InlineData(11)] // GROUP_FIRST must not replace the selected direct lab.
+    [InlineData(12)] // Unreviewed retest conflict cannot be hidden by a group.
+    [InlineData(13)] // Evidence changes after preview, before proposal.
+    [InlineData(14)] // Evidence changes after proposal, before approval.
+    [InlineData(15)] // Required panel contains a substance absent from the lab.
+    [InlineData(16)] // Ignore an untested candidate when a tested candidate can meet demand.
+    public Task Export_requires_confirmed_selected_source_lab_even_with_approved_groups(int flow) => RunSourceLabScenarioAsync(flow);
+
+    private async Task RunSourceLabScenarioAsync(int flow)
     {
         using var scenario = await LedgerScenario.CreateAsync(factory);
         var f = await ResidueScenario.CreateAsync(scenario);
@@ -39,15 +55,28 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         await f.PublishRuleAsync(profile);
         var receipt = await scenario.ReceiptAsync("20");
         var sample = await SampleAsync(scenario, receipt);
-        var (_, report) = await f.ReportAsync(sample);
+        JsonElement report = default;
+        if (flow is not (8 or 16)) (_, report) = await f.ReportAsync(sample, confirm: flow != 9);
         // Publication uses the database clock. Selection reads the policy at the API clock.
         var settings = await LedgerScenario.GetAsync(scenario.Customer, "/api/residue-policy-settings");
         var adopted = Assert.Single(settings.GetProperty("items").EnumerateArray(),
             setting => setting.GetProperty("ruleCode").GetString() == f.ProfileCode);
         await WaitForFixtureTimestampAsync(adopted.GetProperty("publishedAt").GetDateTimeOffset());
-        var selectionId = await f.SelectAsync(sample, report);
-        await WaitForFixtureWriteAsync(
-            "SELECT published_at FROM grainledger.capture_residue_report_selections WHERE id=$1", selectionId);
+        var selectionId = Guid.Empty;
+        if (flow is not (8 or 9 or 10 or 16))
+        {
+            selectionId = await f.SelectAsync(sample, report);
+            await WaitForFixtureWriteAsync(
+                "SELECT published_at FROM grainledger.capture_residue_report_selections WHERE id=$1", selectionId);
+        }
+        if (flow >= 8)
+        {
+            var group = f.GroupBody([sample.SourceLotId], [], "0.001", "0.002", "GROUP_FIRST");
+            await LedgerScenario.SendAsync(scenario.Customer, HttpMethod.Post, "/api/residue-source-groups", group);
+            await WaitForFixtureWriteAsync(
+                "SELECT published_at FROM grainledger.capture_residue_source_group_versions WHERE id=$1", group["id"]!.GetValue<Guid>());
+        }
+        if (flow == 12) await f.ReportAsync(sample);
         var drying = await scenario.DraftAsync("DRYING", [(sample.LotId, "20")],
             [("DRIED_PADDY", "20")]);
         await scenario.CommitAsync(drying);
@@ -56,6 +85,22 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             [("HEAD_RICE", "10"), ("BROKEN_RICE", "10")]);
         await scenario.CommitAsync(milling);
         var head = LedgerScenario.Output(milling, 0);
+        Guid? eligibleHead = null;
+        if (flow == 16)
+        {
+            var testedReceipt = await scenario.ReceiptAsync("20");
+            var testedSample = await SampleAsync(scenario, testedReceipt);
+            var (_, testedReport) = await f.ReportAsync(testedSample);
+            var testedSelection = await f.SelectAsync(testedSample, testedReport);
+            await WaitForFixtureWriteAsync(
+                "SELECT published_at FROM grainledger.capture_residue_report_selections WHERE id=$1", testedSelection);
+            var dry = await scenario.DraftAsync("DRYING", [(testedSample.LotId, "20")], [("DRIED_PADDY", "20")]);
+            await scenario.CommitAsync(dry);
+            var mill = await scenario.DraftAsync("MILLING", [(LedgerScenario.Output(dry), "20")],
+                [("HEAD_RICE", "10"), ("BROKEN_RICE", "10")]);
+            await scenario.CommitAsync(mill);
+            eligibleHead = LedgerScenario.Output(mill, 0);
+        }
         var marketId = Guid.NewGuid();
         var attributeId = Guid.NewGuid();
         var mrlId = Guid.NewGuid();
@@ -86,14 +131,17 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             await db.SaveChangesAsync();
             db.MrlLimits.Add(new MrlLimit { Id = Guid.NewGuid(), MrlVersionId = mrlId,
                 SubstanceId = f.SubstanceId, LimitValue = 1m, Unit = "mg/kg" });
+            if (flow == 15) db.MrlLimits.Add(new MrlLimit { Id = Guid.NewGuid(), MrlVersionId = mrlId,
+                SubstanceId = f.OtherSubstanceId, LimitValue = 1m, Unit = "mg/kg" });
             await db.SaveChangesAsync();
         }
         await PublishQualityAsync(head, 1, "13");
+        if (eligibleHead is { } testedHead) await PublishQualityAsync(testedHead, 1, "13");
         var policyId = Guid.NewGuid();
         using var policy = await scenario.Customer.PostAsJsonAsync("/api/blend-assessment-policies",
             new PublishBlendAssessmentPolicyRequest(policyId, marketId,
                 assessmentCommodity, 1, DateTimeOffset.UtcNow.AddMinutes(-1),
-                null, [f.SubstanceId], "0.1", "AS_RECEIVED",
+                null, flow == 15 ? [f.SubstanceId, f.OtherSubstanceId] : [f.SubstanceId], "0.1", "AS_RECEIVED",
                 [new PublishedQualityPropagationRule(attributeId, "%", "MASS_WEIGHTED_MEAN")],
                 "Synthetic approved policy", "Synthetic reviewer",
                 "Synthetic authority", DateTimeOffset.UtcNow.AddMinutes(-2)));
@@ -130,10 +178,35 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
                 before.GetProperty("scopeRevision").GetString()!, 8));
         Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
         var preview = await previewResponse.Content.ReadFromJsonAsync<JsonElement>();
+        if (flow is 8 or 9 or 10 or 12 or 15)
+        {
+            Assert.NotEqual("PASS", preview.GetProperty("assessmentStatus").GetString());
+            Assert.NotEqual("PASS", preview.GetProperty("outcome").GetString());
+            var expectedCode = flow switch { 10 => "SOURCE_LAB_SELECTION_MISSING", 12 => "SOURCE_LAB_SELECTION_CONFLICT", _ => "SOURCE_LAB_REQUIRED" };
+            Assert.Contains(preview.GetProperty("assessmentFindings").EnumerateArray(),
+                finding => finding.GetProperty("code").GetString() == expectedCode);
+            Assert.False((await writer.GetFromJsonAsync<BlendPlanDraftDto>($"/api/blend-plans/{draft.Id}"))!.HasProposal);
+            // General F12 still permits approved groups. Export alone requires source lab.
+            ResidueScenario.Complete(ResidueScenario.ResultOf(await f.EvaluateAsync(head), f.SubstanceId), 0.0005m, 0.001m);
+            return;
+        }
+        if (flow == 11)
+        {
+            var residueFinding = Assert.Single(preview.GetProperty("assessmentFindings").EnumerateArray(),
+                item => item.GetProperty("code").GetString() == "RESIDUE_LIMIT");
+            Assert.Equal(0.1m, decimal.Parse(residueFinding.GetProperty("actual").GetString()!, System.Globalization.CultureInfo.InvariantCulture));
+        }
         Assert.True(preview.GetProperty("assessmentStatus").GetString() == "PASS",
             $"Expected a PASS preview for flow {flow}. " +
             $"Findings: {preview.GetProperty("assessmentFindings").GetRawText()}. " +
             $"Search reasons: {preview.GetProperty("reasons").GetRawText()}.");
+        if (eligibleHead is { } expectedHead)
+        {
+            var allocations = preview.GetProperty("selection").GetProperty("allocations").EnumerateArray().ToArray();
+            Assert.Equal(expectedHead, Assert.Single(allocations).GetProperty("lotId").GetGuid());
+            Assert.DoesNotContain(allocations, item => item.GetProperty("lotId").GetGuid() == head);
+            return;
+        }
         var reference = preview.GetProperty("previewReference").GetGuid();
         async Task<(long Positions, decimal Mass, long Postings, long Holds)> StockAsync()
         {
@@ -152,8 +225,16 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
         }
         var stockBeforeProposal = await StockAsync();
         var proposeBody = new ProposeBlendPlanRequest(Guid.NewGuid(), reference);
+        if (flow == 13) await f.ReportAsync(sample);
         var proposeResponse = await writer.PostAsJsonAsync(
             $"/api/blend-plans/{draft.Id}/propose", proposeBody);
+        if (flow == 13)
+        {
+            Assert.Equal(HttpStatusCode.Conflict, proposeResponse.StatusCode);
+            Assert.Equal(stockBeforeProposal, await StockAsync());
+            Assert.False((await writer.GetFromJsonAsync<BlendPlanDraftDto>($"/api/blend-plans/{draft.Id}"))!.HasProposal);
+            return;
+        }
         Assert.Equal(HttpStatusCode.Created, proposeResponse.StatusCode);
         var proposal = await proposeResponse.Content.ReadFromJsonAsync<JsonElement>();
         var proposedDraft = await writer.GetFromJsonAsync<BlendPlanDraftDto>(
@@ -186,6 +267,24 @@ public sealed class BlendPlanProposalTests(ApiFactory factory) : IClassFixture<A
             $"/api/blend-plans/{draft.Id}/proposal")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await scenario.ForeignCustomer.GetAsync(
             $"/api/blend-plans/{draft.Id}/proposal")).StatusCode);
+        if (flow == 14)
+        {
+            await f.ReportAsync(sample);
+            using var approve = await scenario.Customer.PostAsJsonAsync($"/api/blend-plans/{draft.Id}/approve",
+                new ApproveBlendPlanRequest(Guid.NewGuid(), proposal.GetProperty("id").GetGuid(), 0));
+            Assert.Equal(HttpStatusCode.Conflict, approve.StatusCode);
+            var pending = await writer.GetFromJsonAsync<JsonElement>($"/api/blend-plans/{draft.Id}/decision");
+            Assert.Equal("PENDING", pending.GetProperty("status").GetString());
+            Assert.Empty(pending.GetProperty("reservation").GetProperty("lines").EnumerateArray());
+            Assert.Equal(stockBeforeProposal, await StockAsync());
+            return;
+        }
+        if (flow is 6 or 7)
+        {
+            await ResidueExportPropagationTests.VerifyProposalAsync(factory, scenario, f, sample, report,
+                selectionId, proposal, draft.Id, writer, flow == 7);
+            return;
+        }
         if (flow is 1 or 2 or 3)
         {
             async Task<BlendExecutionStartResult> StartAsync(Guid targetContainer, Guid targetProposal,

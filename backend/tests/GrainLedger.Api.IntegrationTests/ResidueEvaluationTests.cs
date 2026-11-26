@@ -153,8 +153,36 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         var sample = await SampleAsync(s, await s.ReceiptAsync("100"));
         var (_, report) = await f.ReportAsync(sample); await f.PublishRuleAsync(); await f.SelectAsync(sample, report);
         for (var i = 0; i < groupCount; i++)
-            await SendAsync(s.Customer, HttpMethod.Post, "/api/residue-source-groups",
+        {
+            using var response = await s.Customer.PostAsJsonAsync("/api/residue-source-groups",
                 f.GroupBody([sample.SourceLotId], [report.GetProperty("resultSets")[0].GetProperty("results")[0].GetProperty("id").GetGuid()], precedence: precedence));
+            var diagnostic = "";
+            if (response.StatusCode != HttpStatusCode.Created)
+            {
+                // Preserve applicability diagnostics for intermittent clock failures.
+                // This only reads the isolated fixture DB; it never retries a rejected publication.
+                await using var connection = new NpgsqlConnection(factory.OwnerConnectionString);
+                await connection.OpenAsync();
+                await using var command = new NpgsqlCommand("""
+                    SELECT jsonb_build_object('dbNow',clock_timestamp(),'expectedCommodity',$4::uuid,
+                      'rules',(SELECT jsonb_agg(jsonb_build_object('id',id,'code',code,'commodity',commodity_id,
+                        'publishedAt',published_at,'effectiveFrom',effective_from,'effectiveTo',effective_to))
+                        FROM grainledger.catalog_residue_rule_versions WHERE substance_id=$2),
+                      'settings',(SELECT jsonb_agg(jsonb_build_object('code',rule_code,'publishedAt',published_at,
+                        'effectiveFrom',effective_from,'effectiveTo',effective_to,'mode',payload->>'Mode'))
+                        FROM grainledger.catalog_residue_policy_setting_versions WHERE company_id=$1),
+                      'source',(SELECT jsonb_build_object('receivedAt',p.received_at,'commodity',coalesce(m.catalog_commodity_id,l.commodity_id))
+                        FROM grainledger.capture_source_lots sl JOIN grainledger.capture_procurement_items i ON i.id=sl.procurement_item_id
+                        JOIN grainledger.capture_procurements p ON p.id=i.procurement_id JOIN grainledger.ledger_lots l ON l.id=sl.lot_id
+                        LEFT JOIN grainledger.ledger_catalog_commodities m ON m.ledger_commodity_id=l.commodity_id WHERE sl.id=$3))::text
+                    """,connection);
+                command.Parameters.AddWithValue(s.OwnerId);command.Parameters.AddWithValue(f.SubstanceId);
+                command.Parameters.AddWithValue(sample.SourceLotId);command.Parameters.AddWithValue(s.CatalogCommodityId);
+                diagnostic = (string)(await command.ExecuteScalarAsync())!;
+            }
+            Assert.True(response.StatusCode == HttpStatusCode.Created,
+                await response.Content.ReadAsStringAsync() + " Fixture applicability: " + diagnostic);
+        }
         Complete(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId),
             decimal.Parse(lower, System.Globalization.CultureInfo.InvariantCulture), decimal.Parse(upper, System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -349,6 +377,34 @@ public sealed class ResidueEvaluationTests(ApiFactory factory) : IClassFixture<A
         Assert.Equal(stableState, await f.BusinessStateAsync());
         Assert.Equal(0m, Quantity(await s.LotAsync(sample.LotId)));
         Assert.Equal(0m, Quantity(await s.LotAsync(dried), "availableKg"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Newly_published_profile_can_be_selected_when_api_clock_lags_database_clock(bool group)
+    {
+        await using var isolated = new ApiFactory { Clock = new LaggingClock() };
+        await isolated.InitializeAsync();
+        using var s = await CreateAsync(isolated);
+        var f = await ResidueScenario.CreateAsync(s);
+        var sample = await SampleAsync(s, await s.ReceiptAsync("10"));
+        var (_, report) = await f.ReportAsync(sample);
+        await f.PublishRuleAsync();
+        if (group)
+            await SendAsync(s.Customer, HttpMethod.Post, "/api/residue-source-groups", f.GroupBody([sample.SourceLotId], []));
+        var selection = await f.SelectAsync(sample, report);
+        // Publication and immediate GET share the DB time basis, even when
+        // the application's injected clock is intentionally behind it.
+        var listed = await GetAsync(s.Customer, "/api/residue-report-selections");
+        Assert.Contains(listed.GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetGuid() == selection);
+        if (group) Assert.Single((await GetAsync(s.Customer, "/api/residue-source-groups")).GetProperty("items").EnumerateArray());
+        Complete(ResultOf(await f.EvaluateAsync(sample.LotId), f.SubstanceId), 0.1m, 0.2m);
+    }
+
+    private sealed class LaggingClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.UtcNow.AddSeconds(-5);
     }
 
     [Fact]

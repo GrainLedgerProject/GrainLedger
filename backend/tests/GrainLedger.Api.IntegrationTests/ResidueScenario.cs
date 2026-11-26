@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
@@ -160,8 +161,33 @@ internal sealed class ResidueScenario(LedgerScenario ledger)
         string? threshold = null, Guid[]? supersededResults = null, Guid? supersedesId = null)
     {
         var body = SelectionBody(sample, report, uncertainty, threshold, supersededResults, supersedesId);
-        await SendAsync(Ledger.Customer, HttpMethod.Post, "/api/residue-report-selections", body);
+        using var response = await Ledger.Customer.PostAsJsonAsync("/api/residue-report-selections", body);
+        var diagnostic = response.StatusCode == System.Net.HttpStatusCode.Created ? "" : await ApplicabilityDiagnosticsAsync(sample.SourceLotId);
+        Assert.True(response.StatusCode == System.Net.HttpStatusCode.Created,
+            await response.Content.ReadAsStringAsync() + " Fixture applicability: " + diagnostic);
         return body["id"]!.GetValue<Guid>();
+    }
+
+    private async Task<string> ApplicabilityDiagnosticsAsync(Guid source)
+    {
+        await using var connection = new NpgsqlConnection(Ledger.Factory.OwnerConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT jsonb_build_object('dbNow',clock_timestamp(),'expectedCommodity',$4::uuid,
+              'rules',(SELECT jsonb_agg(jsonb_build_object('id',id,'code',code,'commodity',commodity_id,
+                'publishedAt',published_at,'effectiveFrom',effective_from,'effectiveTo',effective_to))
+                FROM grainledger.catalog_residue_rule_versions WHERE substance_id=$2),
+              'settings',(SELECT jsonb_agg(jsonb_build_object('code',rule_code,'publishedAt',published_at,
+                'effectiveFrom',effective_from,'effectiveTo',effective_to,'mode',payload->>'Mode'))
+                FROM grainledger.catalog_residue_policy_setting_versions WHERE company_id=$1),
+              'source',(SELECT jsonb_build_object('receivedAt',p.received_at,'commodity',coalesce(m.catalog_commodity_id,l.commodity_id))
+                FROM grainledger.capture_source_lots sl JOIN grainledger.capture_procurement_items i ON i.id=sl.procurement_item_id
+                JOIN grainledger.capture_procurements p ON p.id=i.procurement_id JOIN grainledger.ledger_lots l ON l.id=sl.lot_id
+                LEFT JOIN grainledger.ledger_catalog_commodities m ON m.ledger_commodity_id=l.commodity_id WHERE sl.id=$3))::text
+            """,connection);
+        command.Parameters.AddWithValue(Ledger.OwnerId);command.Parameters.AddWithValue(SubstanceId);
+        command.Parameters.AddWithValue(source);command.Parameters.AddWithValue(Ledger.CatalogCommodityId);
+        return (string)(await command.ExecuteScalarAsync())!;
     }
 
     public JsonObject GroupBody(Guid[] sourceIds, Guid[] supportingResultIds, string lower = "0.3", string upper = "0.8",

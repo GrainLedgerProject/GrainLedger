@@ -47,6 +47,12 @@ This section provisions a **new, local-only** Compose database. Do not run its r
 
    These example connections are for the new local Compose database only. For an existing database, retain its current connection settings and ask its owner for the intended migration procedure. Runtime role must remain restricted; startup rejects elevated or owner credentials.
 
+### Runtime grants when feature branches share a database
+
+Use a runtime-role configurator that knows every installed public entry point. F12 propagation and the container/history extension must coexist: the approved grant set includes the residue job/read routines and, when installed, `ledger_closed_order_kg(uuid,uuid)` and `ledger_business_history(uuid,jsonb)`.
+
+An older branch can remove another feature's EXECUTE grants when it runs `--configure-runtime-role`, because the command revokes application privileges before rebuilding its allowlist. A branch that does not recognize newer public routines can also reject their existing grants at startup. Compare the exact missing and unexpected signatures with reviewed feature code; do not disable runtime validation, allow arbitrary helpers, or rerun migrations to repair an EXECUTE-only mismatch. Reconfigure through the approved owner procedure using the combined code. Shared-database permission changes still require database-owner approval.
+
 ## Authentication and application configuration
 
 Set only features you intend to use. Key names below correspond to `.env.example`:

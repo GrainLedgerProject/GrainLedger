@@ -33,6 +33,11 @@
     <EmbeddedResource Include="Data/Sql/ContainerProduction.sql" LogicalName="GrainLedger.Data.Sql.ContainerProduction.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerWorkflow.sql" LogicalName="GrainLedger.Data.Sql.ContainerWorkflow.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerTracingFlowchart.sql" LogicalName="GrainLedger.Data.Sql.ContainerTracingFlowchart.sql" />
+    <EmbeddedResource Include="Data/Sql/ResidueChanges.sql" LogicalName="GrainLedger.Data.Sql.ResidueChanges.sql" />
+    <EmbeddedResource Include="Data/Sql/ResidueChangePublication.sql" LogicalName="GrainLedger.Data.Sql.ResidueChangePublication.sql" />
+    <EmbeddedResource Include="Data/Sql/ResiduePropagation.sql" LogicalName="GrainLedger.Data.Sql.ResiduePropagation.sql" />
+    <EmbeddedResource Include="Data/Sql/ResidueExportPropagation.sql" LogicalName="GrainLedger.Data.Sql.ResidueExportPropagation.sql" />
+    <EmbeddedResource Include="Data/Sql/ResidueRiskReads.sql" LogicalName="GrainLedger.Data.Sql.ResidueRiskReads.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerTraceCompletion.sql" LogicalName="GrainLedger.Data.Sql.ContainerTraceCompletion.sql" />
     <EmbeddedResource Include="Data/Sql/ContainerTraceCorrections.sql" LogicalName="GrainLedger.Data.Sql.ContainerTraceCorrections.sql" />
     <EmbeddedResource Include="Data/Sql/RiceVarietySegregation.sql" LogicalName="GrainLedger.Data.Sql.RiceVarietySegregation.sql" />

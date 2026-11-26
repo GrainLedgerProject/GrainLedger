@@ -51,6 +51,13 @@ if (seedLedger || seedSetup)
     });
 }
 
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+    policy.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials()
+        .WithExposedHeaders("ETag", "Location")));
+
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi(options =>
 {
@@ -109,6 +116,8 @@ app.UseExceptionHandler();
 if (!seedLedger && !seedSetup) app.UseHttpsRedirection();
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseRouting();
+app.UseCors();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

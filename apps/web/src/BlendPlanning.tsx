@@ -22,7 +22,7 @@ type Preview = Assessment & { previewReference: string | null; canPropose: boole
   substanceNames?: Record<string, string>;
   ratioQuality?: { attributeId: string; first: string; second: string; unit: string }[] | null;
   residueHeadroom?: { substanceId: string; ratio: number } | null;
-  inputResidueExclusions?: { lotId: string; lotCode: string; substanceId: string; code: string;
+  inputResidueExclusions?: { lotId: string; lotCode: string; substanceId: string; code: string; status: string;
     upper: string | null; mrl: string | null; unit: string | null }[];
 };
 
@@ -147,7 +147,7 @@ function displayFindingLimit(finding: Finding) {
   return `${concise(minimum)}–${concise(maximum)}`;
 }
 function findingArea(code: string) {
-  if (code.includes('MRL') || code.startsWith('RESIDUE') || code.startsWith('ASSESSMENT')) return 'Residues and market';
+  if (code.startsWith('SOURCE_LAB_') || code.includes('MRL') || code.startsWith('RESIDUE') || code.startsWith('ASSESSMENT')) return 'Residues and market';
   if (code.startsWith('QUALITY')) return 'Product quality';
   return 'Stock and output';
 }
@@ -158,6 +158,9 @@ function findingAction(code: string, status: string) {
   if (code === 'OUTPUT_YIELD_POLICY_MISSING') return 'Mill Manager: publish a facility yield rule.';
   if (code === 'QUALITY_RULE_MISSING') return 'Customer Manager: add a reviewed quality calculation rule.';
   if (code === 'QUALITY_EVIDENCE_MISSING') return 'Customer Manager: confirm finished-lot quality with Ledger evidence.';
+  if (code === 'SOURCE_LAB_SELECTION_MISSING') return 'Customer Manager: review and confirm a laboratory report selection for every contributing source and required substance.';
+  if (code === 'SOURCE_LAB_SELECTION_CONFLICT') return 'Customer Manager: review conflicting laboratory reports and confirm supersession before planning.';
+  if (code === 'SOURCE_LAB_REQUIRED') return 'Customer Manager: confirm laboratory results and review report selections for every contributing source and required substance. Source-group bounds cannot replace these results.';
   if (code === 'RESIDUE_COVERAGE_INCOMPLETE') return 'Review residue evidence, interpretation rules and required substances.';
   if (code === 'QUALITY_SPECIFICATION_MISSING') return 'Add buyer quality requirements to the export order.';
   if (code === 'OUTPUT_MASS') return 'Check target mass, eligible stock and the yield rule.';
@@ -610,9 +613,10 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
       {!pendingPropose && <Notice error={previewError} />}
       {!canPropose && <p className="notice">Your role can inspect drafts but cannot calculate or propose a plan.</p>}
       {preview && <>{!!preview.inputResidueExclusions?.length && <div className="notice pending" role="status">
-        <strong>Lots excluded by the input MRL check</strong>
+        <strong>Lots excluded by source evidence or input MRL checks</strong>
         <ul>{preview.inputResidueExclusions.map(row => <li key={`${row.lotId}:${row.substanceId}`}>
           {row.lotCode} · {preview.substanceNames?.[row.substanceId] ?? 'Required substance'} · {label(row.code)}
+          {row.code.startsWith('SOURCE_LAB_') && <p>{findingAction(row.code, row.status)}</p>}
           {row.upper !== null && ` · ${row.upper} ${row.unit} upper bound / ${row.mrl} ${row.unit} MRL`}
         </li>)}</ul>
       </div>}
