@@ -121,6 +121,12 @@ ASPNETCORE_ENVIRONMENT=Development dotnet run --project backend/src/GrainLedger.
 
 The command requires `ConnectionStrings__GrainLedgerMigration` and `Ledger__RuntimeRole`. Obtain explicit database-owner approval for shared databases. It revokes existing application grants and reapplies the finite list defined by the executing code: **use a branch/build containing every installed feature**, including container entry points when container is deployed. Running it from an older or incomplete branch can remove grants needed by other API instances. Keep normal startup on the restricted runtime connection; do not bypass validation or auto-repair using owner access.
 
+### Physical stock by location
+
+Forward AppDbContext migration `20261126000000_LocationStock` creates `grainledger.ledger_location_stock(uuid,uuid,jsonb)`. It revokes PUBLIC access; the matching runtime-role configuration grants the restricted runtime role EXECUTE on this entry function, not direct access to private tables or helpers. Migration `Down` is unsupported; plan recovery through an approved backup/restore procedure.
+
+Before applying to a shared database, obtain explicit database-owner approval for both migration and grant changes; confirm target, installed history, compatible builds, backup and recovery. Apply through the approved migration-owner workflow above, then ensure the matching restricted runtime grant is configured before deploying the matching API/web builds. Normal startup neither migrates nor repairs grants. Use a complete current build for any role-configuration command, since it reapplies the finite grant list. No shared-database deployment is implied by this feature.
+
 ### Container preparation on the monolith branch
 
 `feat/container` adds forward AppDbContext migration `20261113000000_ContainerPreparation`, embedded `Data/Sql/ContainerPreparation.sql` and the finite runtime grant for `grainledger.ledger_container_action(uuid,text,jsonb)`. The four preparation tables and private helpers remain inaccessible directly to runtime. An absent optional feature migration does not newly block normal startup; its endpoint returns 503. If installed, its entry grant must pass runtime validation. Run the approved migration-owner workflow above only after separate environment approval. Old `20261021`/`20261025` Ledger-context migrations are historical, not an upgrade command for the monolith.

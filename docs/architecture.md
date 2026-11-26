@@ -20,6 +20,14 @@ Current Capture creation assigns farmer, plot, procurement and sample codes serv
 
 Customer Managers manage their own company's bran and husk cross-variety mixing independently under **Byproduct mixing**. Both default to allow; each override or reset requires a reason and the current revision. Changes apply to subsequent mixing commands, not existing stock or historical decisions. Configuration history is immutable and stock decisions use the persisted owner's policy.
 
+### Physical stock by location
+
+Ledger → Stock → **Physical stock by location** lets a user select a location, page through its positive physical positions and open lot detail. It shows the authorized physical total across all pages, with each lot's physical and available kg, owner, stage, identity, rice variety and restrictions. HOLD and reserved stock remain in the physical total; they can reduce availability. This is not a capacity, free-space or utilization calculation.
+
+`GET /api/ledger/locations/{locationId}/stock?page=1&pageSize=25` requires authentication. CustomerManager, ExportStaff and PurchasingStaff see only their own organization's lots; MillManager and MillOperator see lots at assigned facilities. Other roles are forbidden, as are mill users requesting an unassigned location. The total is scoped to the caller, not necessarily all stock physically at the location. Only positive positions at active locations and facilities count; for mixed-bulk locations only the current pool lot counts, not historical generations or source-attribution shares.
+
+The response contains `locationId`, `totalKg`, `items`, `page`, `pageSize`, `totalCount` and `hasMore`. `totalKg` is an exact decimal string in kg summed over the entire authorized result before pagination, not a sum of the displayed page. Each item contains `lotId`, `code`, `stage`, `productIdentity`, `riceVariety`, `varietyStatus`, `ownerName`, `quantityKg`, `availableKg` and `restrictions`; quantities are decimal strings. Blocked lots have zero available kg; otherwise availability subtracts blend reservations, floored at zero. Results sort by lot code then ID. Pagination defaults to page 1 and size 25, with page size 1–100. Empty authorized scope returns zero total and no items.
+
 ## Historical module-era architecture snapshot
 
 The following sections record behavior and deployment details from the prior multi-context/multi-schema implementation. Treat old schema and migration names as historical identifiers, not instructions for the approved single-schema baseline. Current reset/deployment status must be established independently.
