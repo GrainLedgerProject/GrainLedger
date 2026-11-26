@@ -22,6 +22,10 @@ internal sealed record BlendAssessmentResult(string Status, decimal? PredictedOu
 
 internal static class BlendInputResidue
 {
+    internal static string EvidenceCode(ResidueResult? bound, string fallback) =>
+        new[] { "SOURCE_LAB_REQUIRED", "SOURCE_LAB_SELECTION_MISSING", "SOURCE_LAB_SELECTION_CONFLICT" }
+            .FirstOrDefault(code => bound?.Reasons.Any(reason => reason.StartsWith(code + ":", StringComparison.Ordinal)) == true) ?? fallback;
+
     internal sealed record Exclusion(Guid LotId, string LotCode, Guid SubstanceId, string Code,
         string Status, string? Upper, string? Mrl, string? Unit);
 
@@ -49,7 +53,7 @@ internal static class BlendInputResidue
                         snapshot, candidate.ProductIdentity) ||
                     !decimal.TryParse(bound.Upper, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var upper))
                 {
-                    exclusions.Add(new(candidate.LotId, candidate.LotCode, substance, "RESIDUE_INPUT_EVIDENCE_MISSING",
+                    exclusions.Add(new(candidate.LotId, candidate.LotCode, substance, EvidenceCode(bound, "RESIDUE_INPUT_EVIDENCE_MISSING"),
                         "INCOMPLETE", null, null, null));
                     continue;
                 }
@@ -143,7 +147,7 @@ internal static class BlendAssessment
                     bound.Unit != legal.Unit || policy.ResidueBasis != "AS_RECEIVED" ||
                     !(matchesResidue?.Invoke(bound) ?? bound.CommodityId == policy.CommodityId))
                 {
-                    Add("RESIDUE_COVERAGE_INCOMPLETE", "INCOMPLETE", reference: substance.ToString());
+                    Add(BlendInputResidue.EvidenceCode(bound, "RESIDUE_COVERAGE_INCOMPLETE"), "INCOMPLETE", reference: substance.ToString());
                     continue;
                 }
                 var threshold = legal.LimitValue * (1 - policy.MrlMarginFraction);

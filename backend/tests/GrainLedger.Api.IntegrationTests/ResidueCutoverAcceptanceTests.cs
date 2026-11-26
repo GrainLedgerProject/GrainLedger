@@ -139,7 +139,16 @@ public sealed class ResidueCutoverAcceptanceTests
         await using var runtime = new NpgsqlConnection(runtimeString); await runtime.OpenAsync();
         foreach (var (table, id) in Tables)
         {
-            await using var persisted = new NpgsqlCommand($"SELECT to_jsonb(t)::text FROM grainledger.{table} t WHERE id=$1", ownerAfter);
+            // The forward worker migration adds nullable orchestration references.
+            // All original columns (including immutable request/snapshot JSON) must be identical.
+            var projection = table == "ledger_residue_evaluations"
+                ? "(to_jsonb(t)-'change_target_id'-'dependency_revision')" : "to_jsonb(t)";
+            if (table == "ledger_residue_evaluations")
+            {
+                await using var metadata = new NpgsqlCommand("SELECT change_target_id IS NULL AND dependency_revision IS NULL FROM grainledger.ledger_residue_evaluations WHERE id=$1",ownerAfter);
+                metadata.Parameters.AddWithValue(id(ids));Assert.Equal(true,await metadata.ExecuteScalarAsync());
+            }
+            await using var persisted = new NpgsqlCommand($"SELECT {projection}::text FROM grainledger.{table} t WHERE id=$1", ownerAfter);
             persisted.Parameters.AddWithValue(id(ids));
             Assert.Equal(before[table], (string)(await persisted.ExecuteScalarAsync())!);
             foreach (var privilege in new[] { "INSERT", "UPDATE", "DELETE", "TRUNCATE" })

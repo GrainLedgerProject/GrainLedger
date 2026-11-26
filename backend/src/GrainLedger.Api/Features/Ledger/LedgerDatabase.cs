@@ -198,8 +198,20 @@ public static class LedgerDatabase
                 IF to_regprocedure('grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb) TO %I', runtime_role);
                 END IF;
+                IF to_regprocedure('grainledger.ledger_residue_job(uuid,uuid,integer,text,uuid,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_residue_job(uuid,uuid,integer,text,uuid,jsonb) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.exports_residue_job(uuid,uuid,integer,text,uuid,jsonb)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.exports_residue_job(uuid,uuid,integer,text,uuid,jsonb), grainledger.exports_residue_freshness_read(uuid,text,uuid,text) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_residue_change_claim(uuid,integer,integer)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_residue_change_claim(uuid,integer,integer), grainledger.ledger_residue_change_read(uuid,text,uuid,jsonb) TO %I', runtime_role);
+                END IF;
+                IF to_regprocedure('grainledger.ledger_closed_order_kg(uuid,uuid)') IS NOT NULL THEN
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_closed_order_kg(uuid,uuid) TO %I', runtime_role);
+                END IF;
                 IF to_regprocedure('grainledger.ledger_business_history(uuid,jsonb)') IS NOT NULL THEN
-                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_closed_order_kg(uuid,uuid), grainledger.ledger_business_history(uuid,jsonb) TO %I', runtime_role);
+                    EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_business_history(uuid,jsonb) TO %I', runtime_role);
                 END IF;
                 IF to_regprocedure('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)') IS NOT NULL THEN
                     EXECUTE format('GRANT EXECUTE ON FUNCTION grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb) TO %I', runtime_role);
@@ -327,6 +339,12 @@ public static class LedgerDatabase
               ('ledger_receiving_threshold_overrides',false,false,false,false),
               ('ledger_residue_evaluations',false,false,false,false)
             ), optional_table(name,can_select,can_insert,can_update,can_delete) AS (VALUES
+              ('ledger_residue_frontier',false,false,false,false),
+              ('ledger_residue_current',false,false,false,false),
+              ('exports_residue_freshness',false,false,false,false),
+              ('ledger_residue_changes',false,false,false,false),
+              ('ledger_residue_change_targets',false,false,false,false),
+              ('ledger_residue_risk_events',false,false,false,false),
               ('ledger_container_execution',false,false,false,false),
               ('ledger_container_batches',false,false,false,false),
               ('ledger_container_output_claims',false,false,false,false),
@@ -400,11 +418,17 @@ public static class LedgerDatabase
               ('grainledger.ledger_export_container_command(uuid,uuid,text,jsonb,jsonb)'),
               ('grainledger.ledger_container_production(uuid,uuid,text,jsonb,jsonb)'),
               ('grainledger.ledger_container_workflow(uuid,uuid,text,jsonb,jsonb)'),
+              ('grainledger.ledger_residue_change_claim(uuid,integer,integer)'),
+              ('grainledger.ledger_residue_change_read(uuid,text,uuid,jsonb)'),
+              ('grainledger.exports_residue_job(uuid,uuid,integer,text,uuid,jsonb)'),
+              ('grainledger.exports_residue_freshness_read(uuid,text,uuid,text)'),
+              ('grainledger.ledger_residue_job(uuid,uuid,integer,text,uuid,jsonb)'),
               ('grainledger.ledger_closed_order_kg(uuid,uuid)'),
               ('grainledger.ledger_business_history(uuid,jsonb)')
             ), expected_sequence(name,can_usage,can_select,can_update) AS (VALUES
               ('identity_audit_events_Id_seq',true,true,false),
-              ('ledger_lot_code_serial',false,false,false)
+              ('ledger_lot_code_serial',false,false,false),
+              ('ledger_residue_change_serial',false,false,false)
             ), app_tables AS (
               SELECT c.oid,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
               WHERE n.nspname='grainledger' AND c.relkind IN ('r','p','v','m','f')
@@ -482,6 +506,10 @@ public static class LedgerModuleRegistration
     {
         services.AddScoped<LedgerService>();
         services.AddScoped<ResidueEvaluationService>();
+        services.AddScoped<ResiduePropagationRunner>();
+        services.AddScoped<GrainLedger.Api.Features.Exports.ExportResiduePropagation>();
+        services.AddScoped<ResidueRiskReadService>();
+        services.AddHostedService<ResiduePropagationWorker>();
         services.AddScoped<ProcurementLedgerPort>();
         services.AddScoped<CommodityLedgerPort>();
         return services;
