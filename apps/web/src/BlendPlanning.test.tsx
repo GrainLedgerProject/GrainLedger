@@ -127,6 +127,66 @@ describe('F14 planning workflow', () => {
     expect(requests[2]).toMatchObject({ previewReference: 'preview-2' });
   });
 
+  it('blocks saving during multi-lot edits and failed checks, then saves only the new passing reference', async () => {
+    const user = userEvent.setup();
+    const stock = [candidates.items[0],
+      { ...candidates.items[0], lotId: 'lot-2', lotCode: 'Lot B', locationId: 'store-2', availableKg: '500' },
+      { ...candidates.items[0], lotId: 'lot-3', lotCode: 'Lot C', locationId: 'store-3', availableKg: '100' }];
+    const initial = { ...preview, selection: { ...preview.selection, mode: 'BLEND_INPUT_STOCK', allocations: [
+      { ...preview.selection.allocations[0], quantityKg: '600' },
+      { lotId: 'lot-2', lotCode: 'Lot B', locationId: 'store-2', quantityKg: '399' },
+      { lotId: 'lot-3', lotCode: 'Lot C', locationId: 'store-3', quantityKg: '1' }
+    ] } };
+    let checks = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/blend-plans/plan-1') return json(plan);
+      if (path.endsWith('/proposal')) return json({}, 404);
+      if (path.includes('/history?')) return json(emptyPage);
+      if (path === '/api/ledger/lookups') return json({ facilities: [{ id: 'mill-1', name: 'Demo Mill' }], locations: [] });
+      if (path.includes('/candidates?')) {
+        const query = new URL(path, 'http://localhost').searchParams;
+        const page = Number(query.get('page'));
+        return json({ ...candidates, page, items: page === 1 ? stock.slice(0, 2) : stock.slice(2), hasMore: page === 1, totalCount: 3 });
+      }
+      if (path === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (path.endsWith('/preview')) {
+        const request = JSON.parse(String(init?.body));
+        if (!request.planAdjustment) return json(initial);
+        checks++;
+        expect(request.planAdjustment.previewReference).toBe('preview-1');
+        expect(request.planAdjustment.allocations).toEqual([
+          { lotId: 'lot-1', locationId: 'store-1', quantityKg: '600' },
+          { lotId: 'lot-2', locationId: 'store-2', quantityKg: '400' }
+        ]);
+        return json(checks === 1 ? { ...initial, canPropose: false, previewReference: null, assessmentStatus: 'FAIL',
+          assessmentFindings: [{ code: 'QUALITY_LIMIT', status: 'FAIL', actual: '15', limit: '14', unit: '%', reference: null }] }
+          : { ...initial, previewReference: 'manual-preview-2', selection: { ...initial.selection, allocations: [
+            { ...initial.selection.allocations[0], quantityKg: '600' }, { ...initial.selection.allocations[1], quantityKg: '400' }
+          ] } });
+      }
+      if (path.endsWith('/propose')) return json({ id: 'proposal-1' }, 201);
+      return json({}, 404);
+    });
+    render(<BlendPlanWorkspace planId="plan-1" userId="staff" canPropose canReadLedger onNavigate={vi.fn()} />);
+    await user.selectOptions(await screen.findByLabelText('Facility'), 'mill-1');
+    await user.click(await screen.findByRole('button', { name: 'Calculate plan' }));
+    await user.click(await screen.findByRole('button', { name: 'Edit allocations' }));
+    await user.click(await screen.findByRole('button', { name: 'Remove Lot C' }));
+    expect(screen.getByRole('button', { name: 'Save proposal' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Quantity for Lot B at store-2'), { target: { value: '400' } });
+    await user.click(screen.getByRole('button', { name: 'Check adjusted plan' }));
+    expect(await screen.findByText(/The adjusted plan did not pass/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save proposal' })).toBeDisabled();
+    expect(screen.getAllByText('FAIL').length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: 'Check adjusted plan' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save proposal' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Save proposal' }));
+    const saved = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/propose'));
+    expect(JSON.parse(String(saved?.[1]?.body))).toMatchObject({ previewReference: 'manual-preview-2' });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('page=2') && String(url).includes('pageSize=100'))).toBe(true);
+  });
+
   it('passes the selected moisture attribute from the specification to the preview', async () => {
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
@@ -152,6 +212,30 @@ describe('F14 planning workflow', () => {
     await user.selectOptions(screen.getByLabelText('Moisture attribute'), 'moisture');
     await user.click(screen.getByRole('button', { name: 'Calculate plan' }));
     expect(await screen.findByText('13.1 %')).toBeInTheDocument();
+  });
+
+  it('shows the required variety, actual lot variety and rejected other varieties', async () => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/blend-plans/plan-1') return json({ ...plan, demandSnapshot: JSON.stringify({ requiredRiceVarietyId: 'st25', requiredRiceVarietyName: 'ST25', limits: [] }) }, 200, { ETag: '"1"' });
+      if (path === '/api/blend-plans/plan-1/proposal') return json({}, 404);
+      if (path.includes('/history?')) return json(emptyPage);
+      if (path === '/api/ledger/lookups') return json({ facilities: [{ id: 'mill-1', name: 'Demo Mill' }], locations: [{ id: 'store-1', name: 'Dry Store', kind: 'STORE' }] });
+      if (path.includes('/candidates?')) return json({ ...candidates, items: candidates.items.map(x => ({ ...x, riceVarietyId: 'st25', riceVariety: 'ST25', varietyStatus: 'SINGLE' })) });
+      if (path === '/api/auth/csrf') return json({ token: 'csrf' });
+      if (path === '/api/blend-plans/plan-1/preview' && init?.method === 'POST') return json({ ...preview, selection: null, assessmentStatus: 'INCOMPLETE', previewReference: null, canPropose: false,
+        varietyExclusions: [{ lotId: 'other', lotCode: 'HDR-OM5451', riceVariety: 'OM5451', varietyStatus: 'SINGLE', code: 'VARIETY_MISMATCH' }] });
+      return json({}, 404);
+    });
+    const user = userEvent.setup();
+    render(<BlendPlanWorkspace planId="plan-1" userId="staff" canPropose canReadLedger onNavigate={vi.fn()} />);
+    await user.selectOptions(await screen.findByLabelText('Facility'), 'mill-1');
+    expect(await screen.findByRole('columnheader', { name: 'Rice variety' })).toBeInTheDocument();
+    expect(screen.getAllByText('ST25').length).toBeGreaterThanOrEqual(2);
+    await user.click(await screen.findByRole('button', { name: 'Calculate plan' }));
+    expect(await screen.findByText('Lots excluded by rice variety')).toBeInTheDocument();
+    expect(screen.getByText(/HDR-OM5451/)).toHaveTextContent('OM5451');
+    expect(screen.queryByRole('button', { name: 'Save proposal' })).not.toBeInTheDocument();
   });
 
   it('shows incomplete evidence and does not allow a proposal', async () => {

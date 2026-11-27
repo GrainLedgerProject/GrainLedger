@@ -136,4 +136,4 @@ public sealed record BlendPlanDraftDto(Guid Id, Guid OrderId, Guid ContainerId, 
 public sealed record PlanningDependency(string Code, string Description);
 public sealed record BlendPlanningContextDto(Guid ContainerId, int OrderVersion, int ContainerVersion,
     bool StorageReady, bool CanCreateDraft, bool CandidateReadReady, bool CompatibilityReadReady, bool CanPropose,
-    IReadOnlyList<PlanningDependency> MissingDependencies, IReadOnlyList<string> AllowedTargetProducts);
+    IReadOnlyList<PlanningDependency> MissingDependencies, IReadOnlyList<string> AllowedTargetProducts, string QuantityStepKg = "1");

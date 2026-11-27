@@ -14,11 +14,13 @@ internal sealed record PlanningCandidate(Guid LotId, string LotCode, Guid Locati
     Guid LedgerCommodityId, Guid CatalogCommodityId, string Stage, string ProductIdentity, decimal OnHandKg, decimal AvailableKg, string StockKind,
     bool IsCurrentPool, bool CustodyDerived, string? PoolRevision, string CandidateRevision,
     int SourceCount, bool LineageComplete, bool InventoryEligible, string[] Restrictions, string[] Reasons,
-    string? CatalogCommodityCode = null)
+    string? CatalogCommodityCode = null, Guid? RiceVarietyId = null, string? RiceVariety = null, string VarietyStatus = "UNKNOWN")
 {
-    public object ToResponse(string productCompatibility = "NOT_EVALUATED") => new
+    public object ToResponse(string productCompatibility = "NOT_EVALUATED", string? varietyExclusion = null) => new
     {
         lotId = LotId, lotCode = LotCode, locationId = LocationId, locationName = LocationName,
+        riceVarietyId = RiceVarietyId, riceVariety = RiceVariety, varietyStatus = VarietyStatus,
+        varietyCompatible = varietyExclusion is null, varietyExclusion,
         catalogCommodityId = CatalogCommodityId, stage = Stage, productIdentity = ProductIdentity, onHandKg = ExportRules.Text(OnHandKg),
         availableKg = ExportRules.Text(AvailableKg), stockKind = StockKind, isCurrentPool = IsCurrentPool,
         custodyDerived = CustodyDerived, poolRevision = PoolRevision, candidateRevision = CandidateRevision,
@@ -32,7 +34,7 @@ internal sealed record PlanningCandidateSnapshot(Guid ContainerId, Guid Facility
     int ContainerVersion, string ContainerStatus, Guid CatalogCommodityId, decimal TargetMassKg, DateTimeOffset ObservedAt,
     string ScopeRevision, JsonElement Ledger, JsonElement? Compatibilities,
     IReadOnlyList<PlanningCandidate> Candidates, string? OrderCommodityCode = null,
-    IReadOnlyDictionary<Guid, string>? CommodityCodes = null);
+    IReadOnlyDictionary<Guid, string>? CommodityCodes = null, Guid? RequiredRiceVarietyId = null, string? RequiredRiceVarietyName = null);
 
 internal sealed class CandidateDemandChangedException : Exception;
 
@@ -251,6 +253,7 @@ public static partial class ExportModule
             .SingleOrDefaultAsync(x => x.Id == id && x.CompanyId == company, ct);
         if (container is null) throw new KeyNotFoundException();
         var order = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == container.OrderId, ct);
+        var specification = await db.Specifications.AsNoTracking().SingleAsync(x => x.OrderId == order.Id && x.VersionNo == order.CurrentSpecificationVersion, ct);
         var orderCommodityCode = await db.Commodities.AsNoTracking()
             .Where(x => x.Id == order.CommodityId).Select(x => x.Code).SingleAsync(ct);
         var (data, compatibilities) = withCompatibility
@@ -310,9 +313,10 @@ public static partial class ExportModule
                 .First(x => x.GetProperty("locationId").GetGuid() == p.GetProperty("locationId").GetGuid())),
             mapping = p.GetProperty("catalogCommodityId"), restrictions = p.GetProperty("restrictions"),
             poolRevision = p.GetProperty("positionPoolRevision"), currentPool = p.GetProperty("isCurrentPoolAtLocation"),
-            cleared = p.GetProperty("locationCleared"), owner = p.GetProperty("locationOwnerId")
+            cleared = p.GetProperty("locationCleared"), owner = p.GetProperty("locationOwnerId"),
+            varietyStatus = p.GetProperty("varietyStatus"), riceVarietyId = p.GetProperty("riceVarietyId")
         }).OrderBy(x => x.lotId).ThenBy(x => x.locationId).ToArray();
-        var state = JsonSerializer.Serialize(new { orderVersion = order.Version, containerVersion = container.Version, order.CommodityId,
+        var state = JsonSerializer.Serialize(new { orderVersion = order.Version, containerVersion = container.Version, order.CommodityId, specification.RequiredRiceVarietyId,
             orderCommodityCode, commodityCodes = commodityCodes.Where(x => positionCommodityIds.Contains(x.Key))
                 .OrderBy(x => x.Key).ToArray(),
             container.TargetMassKg, facilityId, positions = canonicalPositions,
@@ -377,7 +381,9 @@ public static partial class ExportModule
                 CandidateHash(revision + ":" + lotId + ":" + locationId), composition.Length,
                 lineageComplete, reasons.Count == 0, restrictions, reasons.Distinct().ToArray(),
                 commodityCodes.GetValueOrDefault(p.GetProperty("catalogCommodityId").ValueKind == JsonValueKind.Null
-                    ? Guid.Empty : p.GetProperty("catalogCommodityId").GetGuid())));
+                    ? Guid.Empty : p.GetProperty("catalogCommodityId").GetGuid()),
+                p.GetProperty("riceVarietyId").ValueKind == JsonValueKind.String ? p.GetProperty("riceVarietyId").GetGuid() : null,
+                p.GetProperty("riceVariety").GetString(), p.GetProperty("varietyStatus").GetString() ?? "UNKNOWN"));
         }
         // Use the database clock for point-in-time evidence reads. An API host
         // clock a few milliseconds behind PostgreSQL can otherwise miss a
@@ -386,7 +392,7 @@ public static partial class ExportModule
             "SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct);
         return new PlanningCandidateSnapshot(id, facilityId, order.Version, container.Version, container.Status,
             order.CommodityId, container.TargetMassKg, observedAt, revision, data,
-            compatibilities, candidates, orderCommodityCode, commodityCodes);
+            compatibilities, candidates, orderCommodityCode, commodityCodes, specification.RequiredRiceVarietyId, specification.RequiredRiceVarietyName);
     }
 
     private static IResult CandidateFailure(Exception ex) => ex switch
@@ -450,20 +456,21 @@ public static partial class ExportModule
         var expected = http.Request.Query["scopeRevision"].ToString();
         if (expected.Length > 0 && expected != revision)
             return Problem(409, "CANDIDATE_SNAPSHOT_STALE", "Candidate inventory changed. Reload candidates.");
-        var eligible = snapshot.Candidates.Where(x => x.InventoryEligible).ToArray();
+        var eligible = snapshot.Candidates.Where(x => x.InventoryEligible && (plan is null || RiceVarietyEligibility.Reason(snapshot, x, targetProductIdentity!) is null)).ToArray();
         var filtered = bool.TryParse(http.Request.Query["includeExcluded"], out var include) && include
             ? snapshot.Candidates : eligible;
         if (plan is not null && bool.TryParse(http.Request.Query["productMatchOnly"], out var matchOnly) && matchOnly)
             filtered = filtered.Where(x => ProductCompatibility(x, targetProductIdentity!, snapshot) != "PRODUCT_MISMATCH").ToArray();
         var items = filtered.Skip((page - 1) * size).Take(size).Select(x => x.ToResponse(
-            plan is null ? "NOT_EVALUATED" : ProductCompatibility(x, targetProductIdentity!, snapshot))).ToArray();
+            plan is null ? "NOT_EVALUATED" : ProductCompatibility(x, targetProductIdentity!, snapshot),
+            plan is null ? null : RiceVarietyEligibility.Reason(snapshot, x, targetProductIdentity!))).ToArray();
         var eligibleMass = eligible.Sum(x => x.AvailableKg);
         var matchingMass = plan is null ? (decimal?)null : eligible
             .Where(x => ProductCompatibility(x, targetProductIdentity!, snapshot) == "DIRECT_MATCH")
             .Sum(x => x.AvailableKg);
         return Results.Ok(new
         {
-            containerId = id, facilityId, planId, targetProductIdentity,
+            containerId = id, facilityId, planId, targetProductIdentity, snapshot.RequiredRiceVarietyId, snapshot.RequiredRiceVarietyName,
             snapshot.OrderVersion, snapshot.ContainerVersion,
             snapshot.CatalogCommodityId, targetMassKg = ExportRules.Text(snapshot.TargetMassKg),
             snapshot.ObservedAt, scopeRevision = revision, scopeComplete = true,

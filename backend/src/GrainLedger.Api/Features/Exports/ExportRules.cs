@@ -10,10 +10,10 @@ public sealed record ExportLimitInput(Guid AttributeId, string? MinValue, string
 public sealed record ExportContainerInput(string? TargetMass, string? Unit);
 public sealed record CreateExportOrderRequest(Guid OperationId, Guid MarketId, Guid CommodityId,
     string? RequiredMass, string? Unit, DateOnly ShippingFrom, DateOnly ShippingTo,
-    IReadOnlyList<ExportLimitInput>? Limits, IReadOnlyList<ExportContainerInput>? Containers);
+    IReadOnlyList<ExportLimitInput>? Limits, IReadOnlyList<ExportContainerInput>? Containers, Guid? RequiredRiceVarietyId = null);
 public sealed record UpdateExportOrderRequest(Guid OperationId, Guid MarketId, Guid CommodityId,
     string? RequiredMass, string? Unit, DateOnly ShippingFrom, DateOnly ShippingTo);
-public sealed record AddExportSpecificationRequest(Guid OperationId, IReadOnlyList<ExportLimitInput>? Limits);
+public sealed record AddExportSpecificationRequest(Guid OperationId, IReadOnlyList<ExportLimitInput>? Limits, Guid? RequiredRiceVarietyId = null);
 public sealed record AddExportContainersRequest(Guid OperationId, IReadOnlyList<ExportContainerInput>? Containers);
 public sealed record UpdateExportContainerRequest(Guid OperationId, string? TargetMass, string? Unit);
 
@@ -27,9 +27,10 @@ public sealed record ExportOrderDto(Guid Id, string Code, Guid MarketId, Guid Co
     string RequiredMassKg, string OriginalMass, string OriginalUnit, DateOnly ShippingFrom,
     DateOnly ShippingTo, int Version, int SpecificationVersion, IReadOnlyList<ExportLimitDto> Limits,
     string AllocatedMassKg, string RemainingMassKg, string CompletedMassKg, string FulfillmentStatus,
-    bool CanEdit);
+    bool CanEdit, Guid? RequiredRiceVarietyId = null, string? RequiredRiceVarietyName = null);
 public sealed record ExportPage<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount, bool HasMore);
-public sealed record ExportSpecificationDto(int VersionNo, DateTimeOffset RecordedAt, IReadOnlyList<ExportLimitDto> Limits);
+public sealed record ExportSpecificationDto(int VersionNo, DateTimeOffset RecordedAt, IReadOnlyList<ExportLimitDto> Limits,
+    Guid? RequiredRiceVarietyId = null, string? RequiredRiceVarietyName = null);
 public sealed record ExportEventDto(string Action, DateTimeOffset RecordedAt, string Snapshot, string ActorName);
 
 public static class ExportRules

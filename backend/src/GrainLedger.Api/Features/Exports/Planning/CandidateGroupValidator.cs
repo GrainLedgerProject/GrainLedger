@@ -38,6 +38,8 @@ internal static class CandidateGroupValidator
                 findings.Add("POSITION_NOT_IN_SCOPE");
                 continue;
             }
+            var varietyReason = RiceVarietyEligibility.Reason(snapshot, position, targetProductIdentity);
+            if (varietyReason is not null) findings.Add(varietyReason);
             if (item.CandidateRevision != position.CandidateRevision)
                 findings.Add("CANDIDATE_SNAPSHOT_STALE");
             if (!position.InventoryEligible || !position.LineageComplete)
@@ -45,6 +47,8 @@ internal static class CandidateGroupValidator
             if (item.QuantityKg <= 0 || item.QuantityKg > MaxKg ||
                 decimal.Round(item.QuantityKg, 6) != item.QuantityKg)
                 findings.Add("QUANTITY_INVALID");
+            else if (decimal.Truncate(item.QuantityKg) != item.QuantityKg)
+                findings.Add("QUANTITY_WHOLE_KG_REQUIRED");
             else if (item.QuantityKg > position.AvailableKg)
                 findings.Add("QUANTITY_EXCEEDS_AVAILABLE");
             try { total = checked(total + item.QuantityKg); }

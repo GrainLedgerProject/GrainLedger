@@ -165,11 +165,24 @@ public sealed class ExportResiduePropagation(NpgsqlDataSource dataSource,
                     Findings = [.. assessment.Findings,
                     new("BLEND_OUTPUT_COMMODITY_MISMATCH","INCOMPLETE",null,null,null,null)]
                 };
+            var requiredVariety = ctx.TryGetProperty("requiredRiceVarietyId", out var requiredValue) && requiredValue.ValueKind == JsonValueKind.String ? requiredValue.GetGuid() : (Guid?)null;
+            var varietyIdentities = new List<RiceVarietyEligibility.LotIdentity>();
+            foreach (var item in selected.Where(x => x.QuantityKg > 0))
+            {
+                var actual = ctx.TryGetProperty("lotVarieties", out var identities) && identities.TryGetProperty(item.LotId.ToString(), out var identity) ? identity : default;
+                var actualId = actual.ValueKind == JsonValueKind.Object && actual.GetProperty("riceVarietyId").ValueKind == JsonValueKind.String ? actual.GetProperty("riceVarietyId").GetGuid() : (Guid?)null;
+                var actualStatus = actual.ValueKind == JsonValueKind.Object ? actual.GetProperty("varietyStatus").GetString() : "UNKNOWN";
+                varietyIdentities.Add(new(item.LotId, actualId, actualStatus ?? "UNKNOWN"));
+                var product = nodes.Single(x => x.LotId == item.LotId).ProductIdentity;
+                var reason = RiceVarietyEligibility.Reason(requiredVariety, actualId, actualStatus, product);
+                if (reason is not null) assessment = assessment with { Status = "INCOMPLETE", Findings = [.. assessment.Findings, new(reason, "INCOMPLETE", null, null, null, null)] };
+            }
             allFindings.AddRange(assessment.Findings);
             results.AddRange(bounds);
             sectionResults.Add(new { scope = section.GetProperty("scope").GetString(), assessment.Status, assessment.Findings });
-            evidenceSnapshot = new { applicableMrl = mrl, assessmentPolicy = policy, outputYieldRule = yield, residueBounds = bounds, qualityObservations = selectedQuality };
-            evidenceRevision = ExportRules.Hash("blend-assessment-dependencies", new { mrl, policy, yield, bounds, observations = selectedQuality });
+            var varieties = RiceVarietyEligibility.Basis(varietyIdentities);
+            evidenceSnapshot = new { applicableMrl = mrl, assessmentPolicy = policy, outputYieldRule = yield, residueBounds = bounds, qualityObservations = selectedQuality, RequiredRiceVarietyId = requiredVariety, varieties };
+            evidenceRevision = ExportRules.Hash("blend-assessment-dependencies", new { mrl, policy, yield, bounds, observations = selectedQuality, RequiredRiceVarietyId = requiredVariety, varieties });
         }
         if (sectionResults.Count == 0) allFindings.Add(new("EXPORT_CONTEXT_EMPTY", "INCOMPLETE", null, null, null, null));
         if (ctx.GetProperty("demandCurrent").ValueKind != JsonValueKind.True &&

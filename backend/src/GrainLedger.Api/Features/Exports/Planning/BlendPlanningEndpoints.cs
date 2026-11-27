@@ -205,6 +205,8 @@ public static partial class ExportModule
             return Invalid(new() { ["targetProductIdentity"] = ["Choose a product compatible with the order commodity."] });
         var spec = await db.Specifications.AsNoTracking().SingleAsync(x => x.OrderId == order.Id &&
             x.VersionNo == order.CurrentSpecificationVersion, ct);
+        if (RiceVarietyEligibility.Requires(request.TargetProductIdentity) && spec.RequiredRiceVarietyId is null)
+            return Problem(409, "VARIETY_REQUIREMENT_MISSING", "Add a specification with the required rice variety before planning.");
         var limits = await db.Limits.AsNoTracking().Where(x => x.SpecificationId == spec.Id)
             .OrderBy(x => x.AttributeCode).ToListAsync(ct);
         var version = (await db.BlendPlanDrafts.Where(x => x.ContainerId == id).MaxAsync(x => (int?)x.VersionNo, ct) ?? 0) + 1;
@@ -216,6 +218,7 @@ public static partial class ExportModule
             CreatedBy = scope.Value.Actor, CreatedAt = now,
             DemandSnapshot = JsonSerializer.Serialize(new
             {
+                requiredRiceVarietyId = spec.RequiredRiceVarietyId, requiredRiceVarietyName = spec.RequiredRiceVarietyName,
                 orderId = order.Id, orderVersion = order.Version, marketId = order.MarketId, commodityId = order.CommodityId,
                 shippingFrom = order.ShippingFrom, shippingTo = order.ShippingTo, containerId = id,
                 containerVersion = container.Version, targetMassKg = ExportRules.Text(planTarget), containerTargetMassKg = ExportRules.Text(container.TargetMassKg),

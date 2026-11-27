@@ -54,7 +54,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var orderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
-            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = scenario.RiceVarietyId, requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "10", unit = "KG" } }
         });
@@ -133,7 +133,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var orderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
-            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = scenario.RiceVarietyId, requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "10", unit = "KG" } }
         });
@@ -248,7 +248,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
-            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = scenario.RiceVarietyId, requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "10", unit = "KG" } }
         });
@@ -273,7 +273,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var otherOrderResponse = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = otherCommodity,
-            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = scenario.RiceVarietyId, requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "10", unit = "KG" } }
         });
@@ -385,7 +385,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
-            requiredMass = "20", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = scenario.RiceVarietyId, requiredMass = "20", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "20", unit = "KG" } }
         });
@@ -440,7 +440,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
-            requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = scenario.RiceVarietyId, requiredMass = "10", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "10", unit = "KG" } }
         });
@@ -507,7 +507,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = scenario.CatalogCommodityId,
-            requiredMass = "20", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = scenario.RiceVarietyId, requiredMass = "20", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "20", unit = "KG" } }
         });
@@ -554,7 +554,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = commodity,
-            requiredMass = "24", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = scenario.RiceVarietyId, requiredMass = "24", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "24", unit = "KG" } }
         });
@@ -829,7 +829,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = commodity,
-            requiredMass = "48", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = await OrderTestVarietyAsync(), requiredMass = "48", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "24", unit = "T" } }
         });
@@ -968,7 +968,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = commodity,
-            requiredMass = "0.001", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = await OrderTestVarietyAsync(), requiredMass = "0.001", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = "0.000000000001", maxValue = "0.0000001" } },
             containers = new[] { new { targetMass = "0.001", unit = "T" } }
         });
@@ -992,7 +992,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var created = await writer.PostAsJsonAsync("/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = market, commodityId = commodity,
-            requiredMass = "48", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = await OrderTestVarietyAsync(), requiredMass = "48", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "24", unit = "T" } }
         });
@@ -1051,7 +1051,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var payload = new
         {
             operationId = operation, marketId = market, commodityId = commodity,
-            requiredMass = "48", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = await OrderTestVarietyAsync(), requiredMass = "48", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "24", unit = "T" }, new { targetMass = "24", unit = "T" } }
         };
@@ -1084,7 +1084,7 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         var changed = new
         {
             operationId = operation, marketId = market, commodityId = commodity,
-            requiredMass = "49", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = await OrderTestVarietyAsync(), requiredMass = "49", unit = "T", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = attribute, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "24", unit = "T" } }
         };
@@ -1152,6 +1152,19 @@ public sealed class ExportOrderTests(ApiFactory factory) : IClassFixture<ApiFact
         rewrite.Parameters.AddWithValue(order.Id);
         var violation = await Assert.ThrowsAsync<PostgresException>(() => rewrite.ExecuteNonQueryAsync());
         Assert.Equal(PostgresErrorCodes.CheckViolation, violation.SqlState);
+    }
+
+    private async Task<Guid> OrderTestVarietyAsync()
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var variety = await db.RiceVarieties.SingleOrDefaultAsync(x => x.Code == "ORDERTESTST25");
+        if (variety is null)
+        {
+            variety = new RiceVariety { Id = Guid.NewGuid(), Code = "ORDERTESTST25", Name = "ST25" };
+            db.RiceVarieties.Add(variety); await db.SaveChangesAsync();
+        }
+        return variety.Id;
     }
 
     private async Task<(Guid Market, Guid Commodity, Guid Attribute)> CatalogAsync()

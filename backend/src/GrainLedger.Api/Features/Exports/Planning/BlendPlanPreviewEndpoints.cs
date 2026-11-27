@@ -13,7 +13,7 @@ namespace GrainLedger.Api.Features.Exports;
 
 public sealed record BlendRatioAdjustment(Guid PreviewReference, string FirstQuantityKg);
 public sealed record PreviewBlendPlanRequest(Guid FacilityId, string ScopeRevision,
-    int MaxIterations = 32, string? Objective = null, BlendRatioAdjustment? Adjustment = null, Guid? MoistureAttributeId = null);
+    int MaxIterations = 32, string? Objective = null, BlendRatioAdjustment? Adjustment = null, Guid? MoistureAttributeId = null, BlendPlanAdjustment? PlanAdjustment = null);
 
 public static partial class ExportModule
 {
@@ -36,6 +36,8 @@ public static partial class ExportModule
         var scope = await ScopeAsync(http, db, access, requiredPermission, ct);
         if (scope is null) return Results.Forbid();
         if (!await access.HasPermissionAsync(Permissions.ResidueEvaluate, ct)) return Results.Forbid();
+        if (request.Adjustment is not null && request.PlanAdjustment is not null)
+            return Invalid(new() { ["adjustment"] = ["Use one adjustment mode per request."] });
         if (request.FacilityId == Guid.Empty || string.IsNullOrWhiteSpace(request.ScopeRevision) ||
             request.MaxIterations is < 1 or > 256 || request.Objective is not
                 (null or "MIN_LOCATIONS" or "RETAIN_HEAD_RICE" or "MIN_LOTS" or "MIN_MOISTURE" or "MAX_RESIDUE_HEADROOM"))
@@ -52,11 +54,18 @@ public static partial class ExportModule
         var target = TargetProductFromSnapshot(plan.DemandSnapshot);
         if (string.IsNullOrWhiteSpace(target))
             return Problem(409, "PLAN_TARGET_MISSING", "Create a draft with a target product.");
+        if (RiceVarietyEligibility.Requires(target) && RiceVarietyEligibility.FromDemand(plan.DemandSnapshot) is null)
+            return Problem(409, "VARIETY_REQUIREMENT_MISSING", "Create a specification and draft with a required rice variety.");
         PlanningCandidateSnapshot snapshot;
         try { snapshot = await CandidateSnapshotAsync(plan.ContainerId, scope.Value.Company,
             request.FacilityId, db, ledger, ct, withCompatibility: true, ownReservations: ownReservations); }
         catch (Exception ex) when (ex is LedgerException or KeyNotFoundException or CandidateDemandChangedException)
         { return CandidateFailure(ex); }
+        if (RiceVarietyEligibility.Requires(target) && snapshot.RequiredRiceVarietyId != RiceVarietyEligibility.FromDemand(plan.DemandSnapshot))
+            return Problem(409, "PLAN_DEMAND_STALE", "The required rice variety changed. Create a current draft.");
+        var varietyExclusions = snapshot.Candidates.Where(c => c.InventoryEligible)
+            .Select(c => new { c.LotId, c.LotCode, c.RiceVarietyId, c.RiceVariety, c.VarietyStatus, code = RiceVarietyEligibility.Reason(snapshot, c, target) })
+            .Where(c => c.code is not null).ToArray();
         var revision = PlanScopeRevision(snapshot, plan, target);
         if (revision != request.ScopeRevision)
             return Problem(409, "CANDIDATE_SNAPSHOT_STALE", "Reload the candidates before previewing.");
@@ -163,10 +172,12 @@ public static partial class ExportModule
             if (selection.Mode == "BLEND_INPUT_STOCK")
                 assessment = BlendInputResidue.Apply(assessment, BlendInputResidue.Screen(snapshot,
                     selected.Select(x => x.LotId).Distinct().ToArray(), inputEvidence, assessmentRule, mrl));
+            var varieties = RiceVarietyEligibility.Basis(selected.Select(x => snapshot.Candidates.Single(c => c.LotId == x.LotId && c.LocationId == x.LocationId))
+                .Select(c => new RiceVarietyEligibility.LotIdentity(c.LotId, c.RiceVarietyId, c.VarietyStatus)));
             if (assessment.Status == "PASS")
             {
                 passingDependencyRevision = ExportRules.Hash("blend-assessment-dependencies",
-                    new { mrl, policy, yield, bounds, observations });
+                    new { mrl, policy, yield, bounds, observations, snapshot.RequiredRiceVarietyId, varieties });
                 passingQuality = observations;
                 passingEvidenceSnapshot = new
                 {
@@ -174,7 +185,7 @@ public static partial class ExportModule
                     assessmentPolicy = policy,
                     outputYieldRule = yield,
                     residueBounds = bounds,
-                    qualityObservations = observations
+                    qualityObservations = observations, snapshot.RequiredRiceVarietyId, varieties
                 };
             }
             return assessment;
@@ -195,7 +206,28 @@ public static partial class ExportModule
             _ => BlendPlanningObjective.None
         };
         AssessedMilpSearch.RatioRange? ratioRange = null;
-        if (savedSelection is null && request.Adjustment is { } adjustment)
+        if (savedSelection is null && request.PlanAdjustment is { } manual)
+        {
+            var basis = await db.BlendPlanPreviews.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.Id == manual.PreviewReference && x.CompanyId == scope.Value.Company &&
+                x.ActorId == scope.Value.Actor && x.PlanId == id && x.ExpiresAt > clock.GetUtcNow(), ct);
+            if (basis is null)
+                return Problem(409, "PLAN_PREVIEW_EXPIRED", "Calculate a new plan before adjusting it.");
+            var basisRequest = JsonSerializer.Deserialize<PreviewBlendPlanRequest>(basis.RequestJson);
+            var stored = ReadSavedBlendSelection(basis.SnapshotJson);
+            if (basisRequest?.ScopeRevision != revision || basisRequest.FacilityId != request.FacilityId ||
+                basisRequest.Objective != request.Objective || basisRequest.MoistureAttributeId != request.MoistureAttributeId || stored is null)
+                return Problem(409, "PLAN_ADJUSTMENT_STALE", "Calculate a current plan before adjusting it.");
+            var adjusted = ManualBlendAdjustment.Build(snapshot, stored.Value.Selection, manual.Allocations, target,
+                policyId => yieldByCompatibility.GetValueOrDefault(policyId) is not null, out var adjustmentError);
+            if (adjusted is null)
+                return Invalid(new() { ["planAdjustment"] = [adjustmentError!] });
+            var assessment = await AssessAsync(adjusted, ct);
+            method = "MANUAL_ADJUSTMENT";
+            // Manual edits are checked for feasibility; no optimality is claimed.
+            result = new(assessment.Status, 1, adjusted, assessment, []);
+        }
+        else if (savedSelection is null && request.Adjustment is { } adjustment)
         {
             var basis = await db.BlendPlanPreviews.AsNoTracking().SingleOrDefaultAsync(x =>
                 x.Id == adjustment.PreviewReference && x.CompanyId == scope.Value.Company &&
@@ -239,10 +271,10 @@ public static partial class ExportModule
         }
         else if (savedSelection is null)
         {
-            var searchSnapshot = snapshot;
+            var searchSnapshot = snapshot with { Candidates = snapshot.Candidates.Where(c => RiceVarietyEligibility.Reason(snapshot, c, target) is null).ToArray() };
             if (assessmentRule is { RequiredSubstances.Count: > 0 })
             {
-                var ids = snapshot.Candidates.Where(c => c.InventoryEligible && c.AvailableKg > 0)
+                var ids = searchSnapshot.Candidates.Where(c => c.InventoryEligible && c.AvailableKg > 0)
                     .Select(c => c.LotId).Distinct().ToArray();
                 if (ids.Length is > 0 and <= 100)
                 {
@@ -257,7 +289,7 @@ public static partial class ExportModule
                                     snapshot.OrderCommodityCode, snapshot.CommodityCodes, out _))
                                 .SelectMany(item => item.GetProperty("inputProducts").EnumerateArray().Select(key => key.GetString()))
                                 .ToHashSet(StringComparer.Ordinal);
-                            var blendIds = snapshot.Candidates.Where(c => c.InventoryEligible && c.AvailableKg > 0 &&
+                            var blendIds = searchSnapshot.Candidates.Where(c => c.InventoryEligible && c.AvailableKg > 0 &&
                                 (c.Stage is "HEAD_RICE" or "BROKEN_RICE" or "BLENDED_RICE") &&
                                 compatible.Contains($"{c.LedgerCommodityId}:{c.ProductIdentity}"))
                                 .Select(c => c.LotId).Distinct().ToArray();
@@ -268,7 +300,7 @@ public static partial class ExportModule
                                     inputs[0].SnapshotAt, deadline.Token);
                                 inputResidueExclusions = BlendInputResidue.Screen(snapshot, blendIds, inputs, assessmentRule, inputMrl);
                                 var blocked = inputResidueExclusions.Select(x => x.LotId).ToHashSet();
-                                searchSnapshot = snapshot with { Candidates = snapshot.Candidates.Where(c => !blocked.Contains(c.LotId)).ToArray() };
+                                searchSnapshot = searchSnapshot with { Candidates = searchSnapshot.Candidates.Where(c => !blocked.Contains(c.LotId)).ToArray() };
                             }
                         }
                         var quality = await ledger.ReadPlanningQualityObservationsAsync(
@@ -334,11 +366,16 @@ public static partial class ExportModule
             currentPlan.Version != plan.Version || currentPlan.Status != "DRAFT" ||
             !DemandIsCurrent(currentPlan, currentOrder, currentContainer))
             return Problem(409, "PLANNING_INPUT_STALE", "Planning inputs changed. Reload the draft and candidates.");
-        var snapshotResponse = new { planId = id, scopeRevision = revision,
+        var varietyShortfall = RiceVarietyEligibility.Requires(target) && result.Outcome != "PASS" &&
+            snapshot.Candidates.Where(c => c.InventoryEligible && RiceVarietyEligibility.Reason(snapshot, c, target) is null &&
+                ProductCompatibility(c, target, snapshot) is "DIRECT_MATCH" or "POSSIBLE_BLEND_INPUT").Sum(c => c.AvailableKg) < plan.TargetMassKg;
+        var varietyFindings = varietyShortfall ? new[] { new BlendAssessmentFinding("VARIETY_STOCK_INSUFFICIENT", "FAIL", null, null, "kg", snapshot.RequiredRiceVarietyId?.ToString()) } : [];
+        var snapshotResponse = new { planId = id, scopeRevision = revision, quantityStepKg = ExportRules.Text(BlendMilpSolver.Quantum),
+            snapshot.RequiredRiceVarietyId, snapshot.RequiredRiceVarietyName, varietyExclusions,
             outcome = result.Outcome, result.Iterations, result.Reasons,
             selection = result.Selection?.ToResponse(),
             assessmentStatus = result.Assessment?.Status ?? "INCOMPLETE",
-            assessmentFindings = result.Assessment?.Findings ?? [],
+            assessmentFindings = (result.Assessment?.Findings ?? []).Concat(varietyFindings).ToArray(),
             predictedOutputKg = result.Assessment?.PredictedOutputKg is { } kg ?
                 ExportRules.Text(kg) : null,
             calculationVersion = "F14_ASSESSMENT_V1",
@@ -413,6 +450,7 @@ public static partial class ExportModule
             http.RequestServices.GetRequiredService<IConfiguration>()
                 .GetValue("BlendPlanning:ShowCalculationSteps", true);
         return Results.Ok(new { snapshotResponse.planId, snapshotResponse.scopeRevision,
+            snapshotResponse.RequiredRiceVarietyId, snapshotResponse.RequiredRiceVarietyName, varietyExclusions,
             snapshotResponse.outcome, snapshotResponse.Iterations,
             snapshotResponse.Reasons, snapshotResponse.selection,
             snapshotResponse.assessmentStatus, snapshotResponse.assessmentFindings,
@@ -420,7 +458,7 @@ public static partial class ExportModule
             snapshotResponse.calculationVersion, snapshotResponse.evidence,
             snapshotFingerprint = ExportRules.Hash("blend-plan-preview", snapshotResponse),
             previewReference = reference, canPropose = reference is not null,
-            ratioRange = snapshotResponse.ratioRange,
+            ratioRange = snapshotResponse.ratioRange, snapshotResponse.quantityStepKg,
             substanceNames, ratioQuality, residueHeadroom, inputResidueExclusions,
             optimization = issueReference ? new { method, objective = request.Objective, positionsUsed, lotsUsed,
                 headRiceUsedKg, weightedMoisture, optimal } : null,
