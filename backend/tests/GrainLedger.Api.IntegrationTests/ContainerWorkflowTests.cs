@@ -25,11 +25,18 @@ public sealed class ContainerWorkflowTests(ApiFactory factory) : IClassFixture<A
     });
     private static async Task<JsonElement> Review(ContainerExecutionScenario f, string scope = "OUTPUT_ONLY", Guid? proposal = null) =>
         await SendAsync(f.Stock.Customer, HttpMethod.Post, Route(f) + "/reviews", new ContainerScopeReviewRequest(Guid.NewGuid(), await Version(f), proposal ?? f.ProposalId, scope, "APPROVED", "Synthetic scope review against current evidence"));
-    private static async Task<JsonElement> Load(ContainerExecutionScenario f, params ActualLoadLine[] lines)
+    private async Task<JsonElement> Load(ContainerExecutionScenario f, params ActualLoadLine[] lines)
     {
         var detail = (await f.Detail()).GetProperty("container"); var approval = detail.GetProperty("approval");
-        return await f.Post("loads", new ActualLoadRequest(Guid.NewGuid(), detail.GetProperty("version").GetInt32(), approval.GetProperty("proposalId").GetGuid(), approval.GetProperty("decisionVersion").GetInt32(), DateTimeOffset.UtcNow, lines));
+        return await f.Post("loads", new ActualLoadRequest(Guid.NewGuid(), detail.GetProperty("version").GetInt32(), approval.GetProperty("proposalId").GetGuid(), approval.GetProperty("decisionVersion").GetInt32(), await DatabaseNow(), lines));
     }
+    private async Task<DateTimeOffset> DatabaseNow()
+    {
+        await using var connection = new NpgsqlConnection(factory.OwnerConnectionString); await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("SELECT clock_timestamp()", connection);
+        return new DateTimeOffset((DateTime)(await command.ExecuteScalarAsync())!);
+    }
+
     private static async Task Close(ContainerExecutionScenario f)
     {
         var metadata = await f.Post("metadata", new ContainerMetadataRequest(Guid.NewGuid(), await Version(f), "SYNTHETIC-S2", "SYNTHETIC-SEAL"));
@@ -368,7 +375,7 @@ public sealed class ContainerWorkflowTests(ApiFactory factory) : IClassFixture<A
         var order = await SendAsync(f.Export, HttpMethod.Post, "/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = first.GetProperty("marketId").GetGuid(),
-            commodityId = first.GetProperty("commodityId").GetGuid(), requiredMass = "10", unit = "KG",
+            commodityId = first.GetProperty("commodityId").GetGuid(), requiredRiceVarietyId = f.Stock.RiceVarietyId, requiredMass = "10", unit = "KG",
             shippingFrom = "2026-11-23", shippingTo = "2026-11-25",
             limits = new[] { new { attributeId = f.QualityAttributeId, minValue = (string?)null, maxValue = "14" } },
             containers = new[] { new { targetMass = "10", unit = "KG" } }
@@ -389,6 +396,18 @@ public sealed class ContainerWorkflowTests(ApiFactory factory) : IClassFixture<A
     public async Task Assigned_mill_manager_sees_history_of_hold_and_response_before_loading()
     {
         using var f = await ContainerExecutionScenario.CreateAsync(factory);
+        // History visibility compares API proposal time with the DB HOLD timestamp.
+        // Docker and host clocks can differ slightly; establish the causal ordering
+        // this scenario requires before recording the HOLD (do not alter stored times).
+        await using (var connection = new NpgsqlConnection(factory.OwnerConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand("SELECT proposed_at FROM grainledger.exports_blend_plan_proposals WHERE id=$1", connection);
+            command.Parameters.AddWithValue(f.ProposalId);
+            var proposedAt = new DateTimeOffset((DateTime)(await command.ExecuteScalarAsync())!);
+            for (var attempt = 0; attempt < 100 && await DatabaseNow() < proposedAt; attempt++) await Task.Delay(50);
+            Assert.True(await DatabaseNow() >= proposedAt, "DB clock has not reached the proposal time.");
+        }
         var holdId = Guid.NewGuid();
         var held = await SendAsync(f.Stock.Customer, HttpMethod.Post, f.Route + "/holds",
             new ContainerHoldRequest(holdId, 1, "Synthetic planned HOLD", f.Stock.EvidenceId));

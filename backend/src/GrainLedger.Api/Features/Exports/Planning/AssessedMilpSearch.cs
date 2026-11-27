@@ -198,7 +198,7 @@ internal static class AssessedMilpSearch
     private static IEnumerable<Group> Groups(PlanningCandidateSnapshot snapshot, string target,
         Func<Guid, decimal?> yieldTarget)
     {
-        var eligible = snapshot.Candidates.Where(c => c.InventoryEligible && c.AvailableKg > 0)
+        var eligible = snapshot.Candidates.Where(c => c.InventoryEligible && c.AvailableKg >= BlendMilpSolver.Quantum && RiceVarietyEligibility.Reason(snapshot, c, target) is null)
             .OrderBy(c => c.LotId).ThenBy(c => c.LocationId).ToArray();
         yield return new("DIRECT_STOCK", null, null, null, snapshot.TargetMassKg, [],
             eligible.Where(c => ExportProductMatch.IsDirect(c, target, snapshot.CatalogCommodityId,
@@ -297,9 +297,15 @@ internal static class AssessedMilpSearch
         try
         {
             var yield = ResidueRational.Parse(fraction.ToString(CultureInfo.InvariantCulture));
-            var targetUnits = new BigInteger(target / BlendMilpSolver.Quantum);
-            var steps = (targetUnits + yield.Numerator - 1) / yield.Numerator;
-            return (decimal)(steps * yield.Denominator) * BlendMilpSolver.Quantum;
+            if (target <= 0) return null;
+            var demand = ResidueRational.Parse(target.ToString(CultureInfo.InvariantCulture));
+            // Input is integer kg. Keep predicted output representable by Ledger's
+            // micro-kg precision without rounding it below the requested mass.
+            var step = yield.Denominator / BigInteger.GreatestCommonDivisor(yield.Denominator, 1_000_000);
+            var numerator = demand.Numerator * yield.Denominator;
+            var denominator = demand.Denominator * yield.Numerator * step;
+            var steps = (numerator + denominator - 1) / denominator;
+            return (decimal)(steps * step);
         }
         catch (OverflowException) { return null; }
     }
@@ -334,7 +340,7 @@ internal static class AssessedMilpSearch
         var total = 0m;
         var count = 0;
         foreach (var capacity in candidates.GroupBy(c => useLotCount ? c.LotId : c.LocationId)
-            .Select(g => g.Sum(c => c.AvailableKg)).OrderDescending())
+            .Select(g => g.Sum(c => decimal.Floor(c.AvailableKg))).OrderDescending())
         {
             total += capacity;
             count++;

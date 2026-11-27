@@ -22,6 +22,8 @@ public sealed class ExportOrder
 
 public sealed class OrderSpecification
 {
+    public Guid? RequiredRiceVarietyId { get; set; }
+    public string? RequiredRiceVarietyName { get; set; }
     public Guid Id { get; set; }
     public Guid OrderId { get; set; }
     public Guid CompanyId { get; set; }
@@ -110,6 +112,8 @@ internal static class ExportModel
         m.Entity<OrderSpecification>(b =>
         {
             b.ToTable("exports_order_specifications"); b.HasKey(x => x.Id);
+            b.Property(x => x.RequiredRiceVarietyId).HasColumnName("required_rice_variety_id");
+            b.Property(x => x.RequiredRiceVarietyName).HasColumnName("required_rice_variety_name");
             b.Property(x => x.Id).HasColumnName("id"); b.Property(x => x.OrderId).HasColumnName("order_id");
             b.Property(x => x.CompanyId).HasColumnName("company_id"); b.Property(x => x.VersionNo).HasColumnName("version_no");
             b.Property(x => x.RecordedBy).HasColumnName("recorded_by"); b.Property(x => x.RecordedAt).HasColumnName("recorded_at");

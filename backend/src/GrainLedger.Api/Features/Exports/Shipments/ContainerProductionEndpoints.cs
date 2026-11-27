@@ -173,8 +173,12 @@ public static partial class ExportModule
         var qualityRules = policy.QualityRules.Select(q => new BlendQualityRule(policy.Id, policy.VersionNo, q.AttributeId, q.Unit, q.Calculation, policy.EvidenceReference)).ToArray();
         var assessment = BlendAssessment.Evaluate(output ? "DIRECT_STOCK" : "BLEND_INPUT_STOCK", assessmentTarget, selected,
             yield is null ? null : new BlendYieldRule(yield.Id, yield.VersionNo, decimal.Parse(yield.OutputFraction, CultureInfo.InvariantCulture), yield.EvidenceId.ToString()), rule, mrl, bounds, limits, qualityRules, observations);
-        var dependency = ExportRules.Hash("blend-assessment-dependencies", new { mrl, policy, yield, bounds, observations });
+        var specification = await db.Specifications.AsNoTracking().SingleAsync(x => x.Id == plan.SpecificationId, ct);
+        var identities = await ledger.ReadPlanningLotVarietiesAsync(selected.Select(x => x.LotId).Distinct().ToArray(), ct);
+        var varieties = RiceVarietyEligibility.Basis(identities.Select(x => new RiceVarietyEligibility.LotIdentity(x.LotId, x.RiceVarietyId, x.VarietyStatus)));
+        var dependency = ExportRules.Hash("blend-assessment-dependencies", new { mrl, policy, yield, bounds, observations, specification.RequiredRiceVarietyId, varieties });
         var findings = assessment.Findings.Where(f => f.Status != "PASS").Select(f => f.Code).ToList();
+        findings.AddRange(identities.Select(x => RiceVarietyEligibility.Reason(specification.RequiredRiceVarietyId, x.RiceVarietyId, x.VarietyStatus, x.ProductIdentity)).OfType<string>());
         if (!output && dependency != saved.DependencyRevision) findings.Add("APPROVAL_EVIDENCE_CHANGED");
         var status = findings.Count == 0 ? "PASS" : "INCOMPLETE";
         return JsonSerializer.SerializeToElement(new

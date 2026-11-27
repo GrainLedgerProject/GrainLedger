@@ -36,7 +36,7 @@ public sealed class ContainerSeasonBenchmarkTests(ApiFactory factory) : IClassFi
         var order = await SendAsync(f.Export, HttpMethod.Post, "/api/export-orders", new
         {
             operationId = Guid.NewGuid(), marketId = originalOrder.GetProperty("marketId").GetGuid(), commodityId = f.Stock.CatalogCommodityId,
-            requiredMass = "25000000", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
+            requiredRiceVarietyId = f.Stock.RiceVarietyId, requiredMass = "25000000", unit = "KG", shippingFrom = "2026-11-10", shippingTo = "2026-11-20",
             limits = new[] { new { attributeId = f.QualityAttributeId, maxValue = "14", minValue = (string?)null } }, containers = new[] { new { targetMass = "25000", unit = "KG" } }
         });
         var container = (await GetAsync(f.Export, $"/api/export-orders/{order.GetProperty("id").GetGuid()}/containers")).GetProperty("items")[0];

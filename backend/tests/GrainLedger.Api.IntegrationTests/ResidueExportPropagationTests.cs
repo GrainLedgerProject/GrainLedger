@@ -96,7 +96,7 @@ public sealed class ResidueExportPropagationTests
             operationId = Guid.NewGuid(),
             marketId = market,
             commodityId = policy.CommodityId,
-            requiredMass = "10",
+            requiredRiceVarietyId = s.RiceVarietyId, requiredMass = "10",
             unit = "KG",
             shippingFrom = "2026-11-10",
             shippingTo = "2026-11-20",
@@ -123,7 +123,8 @@ public sealed class ResidueExportPropagationTests
         await using var factory = new ApiFactory(); await factory.InitializeAsync();
         using var f = await ContainerExecutionScenario.CreateAsync(factory);
         var detail = (await f.Detail()).GetProperty("container");
-        await f.Post("loads", f.Load(detail.GetProperty("version").GetInt32(), close ? "10" : "4"));
+        var databaseNow = new DateTimeOffset((DateTime)(await Owner(factory, "SELECT clock_timestamp()"))!);
+        await f.Post("loads", f.Load(detail.GetProperty("version").GetInt32(), close ? "10" : "4") with { LoadedAt = databaseNow });
         if (close)
         {
             var current = (await f.Detail()).GetProperty("container");
@@ -222,12 +223,11 @@ public sealed class ResidueExportPropagationTests
     }
 
     [Fact]
-    public async Task Upgrade_backfills_export_contexts_of_completed_lot_jobs_without_rewriting_lot_evaluations()
+    public async Task Backfill_reopens_completed_lot_jobs_without_rewriting_lot_evaluations()
     {
-        await using var factory = new ApiFactory { MigrationTarget = "20261123030000_ResidueRiskReads" }; await factory.InitializeAsync();
-        // Current Capture writes a variety ID, but this historical schema predates that column.
-        // Remove the fixture-only column before migration so the real cutover sees the original schema.
-        await Owner(factory, "ALTER TABLE grainledger.capture_plot_seasons ADD COLUMN rice_variety_id uuid");
+        // Seed through current APIs, then use the retained LOT-only job implementation to
+        // reproduce orchestration completed before export discovery was introduced.
+        await using var factory = new ApiFactory(); await factory.InitializeAsync();
         using var f = await ContainerExecutionScenario.CreateAsync(factory);
         var job = (Guid)(await Owner(factory, """
             INSERT INTO grainledger.ledger_residue_changes(company_id,cause_kind,subject_id,subject_version,actor_id,origin,root_lot_ids,substance_ids)
@@ -244,15 +244,17 @@ public sealed class ResidueExportPropagationTests
                 var target = row.GetGuid(); var prepared = await runner.PrepareAsync(job, lease.Token, lease.Generation, target);
                 await runner.AppendAsync(job, lease.Token, lease.Generation, target, prepared);
             }
-            Assert.True((await Rpc(factory, lease, "ledger_residue_job", "FINISH")).GetProperty("completed").GetBoolean());
+            var finished = (string)(await Owner(factory, "SELECT grainledger.ledger_residue_lot_job($1,$2,$3,'FINISH',NULL,'{}')::text", job, lease.Token, lease.Generation))!;
+            Assert.True(JsonDocument.Parse(finished).RootElement.GetProperty("completed").GetBoolean());
         }
         var original = (string)(await Owner(factory, "SELECT jsonb_agg(to_jsonb(e) ORDER BY id)::text FROM grainledger.ledger_residue_evaluations e"))!;
-        await Owner(factory, "ALTER TABLE grainledger.capture_plot_seasons DROP COLUMN rice_variety_id");
-        var options = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(factory.OwnerConnectionString,
-            x => x.MigrationsHistoryTable("__EFMigrationsHistory", "grainledger")).Options;
-        await using (var db = new AppDbContext(options)) await db.Database.MigrateAsync();
-        await LedgerDatabase.ConfigureRuntimeRoleAsync(factory.OwnerConnectionString, "grainledger_test_runtime");
-        await LedgerDatabase.ValidateRuntimeAsync(factory.RuntimeConnectionString);
+        using var stream = typeof(AppDbContext).Assembly.GetManifestResourceStream("GrainLedger.Data.Sql.ResidueExportPropagation.sql")!;
+        using var reader = new StreamReader(stream);
+        var migrationSql = await reader.ReadToEndAsync();
+        var backfillStart = migrationSql.IndexOf("UPDATE grainledger.ledger_residue_changes SET state='PENDING'", StringComparison.Ordinal);
+        var backfillEnd = migrationSql.IndexOf(';', backfillStart);
+        await Owner(factory, migrationSql[backfillStart..(backfillEnd + 1)]);
+
         Assert.Equal("PENDING", await Owner(factory, "SELECT state FROM grainledger.ledger_residue_changes WHERE id=$1", job));
         await CompleteJob(factory, job);
         Assert.Equal(original, await Owner(factory, "SELECT jsonb_agg(to_jsonb(e) ORDER BY id)::text FROM grainledger.ledger_residue_evaluations e"));

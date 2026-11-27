@@ -11,7 +11,7 @@ namespace GrainLedger.Api.IntegrationTests;
 public sealed class BlendMilpSearchTests(ITestOutputHelper output)
 {
     private record Lot(decimal Kg, decimal? Moisture, decimal Broken, decimal? X = .020m,
-        decimal Y = .020m, bool Eligible = true, bool BrokenRice = false, int? Location = null);
+        decimal Y = .020m, bool Eligible = true, bool BrokenRice = false, int? Location = null, bool OtherVariety = false, string VarietyStatus = "SINGLE");
     private record Fixture(decimal Target, decimal MaxMoisture, decimal MaxBroken, Lot[] Lots,
         bool Pass = true, decimal Yield = 1, bool Direct = false, bool Compatibility = true,
         bool Minimize = false, bool TwoSubstances = false, bool RetainHeadRice = false,
@@ -99,6 +99,25 @@ public sealed class BlendMilpSearchTests(ITestOutputHelper output)
         }
     }
 
+    [Theory]
+    [InlineData((int)BlendPlanningObjective.None)]
+    [InlineData((int)BlendPlanningObjective.FewestLocations)]
+    [InlineData((int)BlendPlanningObjective.FewestLots)]
+    [InlineData((int)BlendPlanningObjective.LowestMoisture)]
+    [InlineData((int)BlendPlanningObjective.RetainHeadRice)]
+    [InlineData((int)BlendPlanningObjective.ResidueHeadroom)]
+    public async Task Every_objective_excludes_other_mixed_and_unknown_varieties(int objective)
+    {
+        var (result, _) = await RunAsync(new(100, 14, 5,
+            [new(100, 10, 1, .001m, OtherVariety: true),
+             new(100, 10, 1, .001m, VarietyStatus: "MIXED"),
+             new(100, 10, 1, .001m, VarietyStatus: "UNKNOWN"),
+             new(60, 13, 3), new(60, 13.5m, 4)], Priority: (BlendPlanningObjective)objective));
+        Assert.NotNull(result.Selection);
+        Assert.All(result.Selection!.Allocations, x => Assert.Contains(x.LotCode, new[] { "TEST-3", "TEST-4" }));
+        Assert.Equal(100m, result.Selection.Allocations.Sum(x => x.QuantityKg));
+    }
+
     [Fact]
     public async Task Shared_location_counts_once_with_different_lot_order_and_fractional_target()
     {
@@ -111,8 +130,8 @@ public sealed class BlendMilpSearchTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(5, "958.762887")]
-    [InlineData(4, "969.072165")]
+    [InlineData(5, "959")]
+    [InlineData(4, "970")]
     public async Task Retaining_head_rice_minimizes_kg_within_the_broken_limit(int maxBroken, string expectedKg)
     {
         var (milp, _) = await RunAsync(new(1000, 14, maxBroken,
@@ -179,7 +198,7 @@ public sealed class BlendMilpSearchTests(ITestOutputHelper output)
             return new PlanningCandidate(Guid.NewGuid(), $"TEST-{i}",
                 lot.Location is { } location ? new Guid(location, 0, 0, new byte[8]) : Guid.NewGuid(),
                 "Test store", ledgerCommodity, commodity, product, product, lot.Kg, lot.Kg,
-                "ORDINARY", false, false, null, "revision", 1, true, lot.Eligible, [], []);
+                "ORDINARY", false, false, null, "revision", 1, true, lot.Eligible, [], [], RiceVarietyId: lot.OtherVariety ? Guid.NewGuid() : commodity, VarietyStatus: lot.VarietyStatus);
         }).ToArray();
         var lots = candidates.Select((candidate, i) => (candidate.LotId, f.Lots[i]))
             .ToDictionary(item => item.LotId, item => item.Item2);
@@ -189,7 +208,7 @@ public sealed class BlendMilpSearchTests(ITestOutputHelper output)
             inputProducts = candidates.Select(c => $"{ledgerCommodity}:{c.ProductIdentity}").Distinct().ToArray()
         }} : []);
         var snapshot = new PlanningCandidateSnapshot(Guid.NewGuid(), Guid.NewGuid(), 1, 1, "PLANNED",
-            commodity, f.Target, DateTimeOffset.UtcNow, "revision", default, rules, candidates);
+            commodity, f.Target, DateTimeOffset.UtcNow, "revision", default, rules, candidates, RequiredRiceVarietyId: commodity);
         var policy = new BlendAssessmentRule(Guid.NewGuid(), 1, market, commodity, f.TwoSubstances ? [xId, yId] : [xId],
             .10m, "AS_RECEIVED", "test");
         var mrl = new ApplicableMrlResult("FOUND", Guid.NewGuid(), 1, null, null, null,
@@ -241,7 +260,8 @@ public sealed class BlendMilpSearchTests(ITestOutputHelper output)
         {
             var verified = await Assess(selection, CancellationToken.None);
             Assert.Equal("PASS", verified.Status);
-            Assert.Equal(f.Target, verified.PredictedOutputKg);
+            Assert.True(verified.PredictedOutputKg >= f.Target);
+            Assert.All(selection.Allocations, a => Assert.Equal(decimal.Truncate(a.QuantityKg), a.QuantityKg));
         }
         return (milp, greedy);
     }

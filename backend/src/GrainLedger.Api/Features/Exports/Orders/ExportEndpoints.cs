@@ -30,6 +30,7 @@ public static partial class ExportModule
         await db.Database.SqlQueryRaw<bool>("""
             SELECT COALESCE(
                 to_regnamespace('grainledger') IS NOT NULL
+                AND (SELECT count(*)=2 FROM information_schema.columns WHERE table_schema='grainledger' AND table_name='exports_order_specifications' AND column_name IN ('required_rice_variety_id','required_rice_variety_name'))
                 AND has_schema_privilege(current_user, to_regnamespace('grainledger'), 'USAGE')
                 AND (SELECT bool_and(
                     to_regclass('grainledger.exports_' || required.name) IS NOT NULL
@@ -135,7 +136,7 @@ public static partial class ExportModule
             .Where(x => x.OrderId == order.Id && x.VersionNo == order.CurrentSpecificationVersion)
             .Select(x => new
             {
-                x.Id,
+                x.Id, x.RequiredRiceVarietyId, x.RequiredRiceVarietyName,
                 Allocated = db.Containers.Where(c => c.OrderId == order.Id)
                     .Sum(c => (decimal?)c.TargetMassKg) ?? 0m
             }).SingleAsync(ct);
@@ -150,7 +151,7 @@ public static partial class ExportModule
             order.ShippingFrom, order.ShippingTo, order.Version, order.CurrentSpecificationVersion,
             limits.Select(ToDto).ToArray(),
             ExportRules.Text(allocated), ExportRules.Text(order.RequiredMassKg - allocated),
-            ExportRules.Text(completed), completed >= order.RequiredMassKg ? "COMPLETE" : "IN_PROGRESS", canEdit);
+            ExportRules.Text(completed), completed >= order.RequiredMassKg ? "COMPLETE" : "IN_PROGRESS", canEdit, spec.RequiredRiceVarietyId, spec.RequiredRiceVarietyName);
     }
 
     private static async Task<IResult> ListAsync(HttpContext http,
@@ -226,6 +227,8 @@ public static partial class ExportModule
         var catalogError = await CheckCatalogAsync(db, request.MarketId, request.CommodityId,
             request.Unit!, request.Limits!, request.Containers!, ct);
         if (catalogError.Count > 0) return Invalid(catalogError);
+        var varietyError = await ValidateOrderVarietyAsync(db, request.CommodityId, request.RequiredRiceVarietyId, ct);
+        if (varietyError is not null) return varietyError;
         var now = clock.GetUtcNow();
         var id = Guid.NewGuid();
         var order = new ExportOrder { Id = id, CompanyId = scope.Value.Company, Code = await CodeAsync(db,
@@ -234,7 +237,7 @@ public static partial class ExportModule
             ShippingFrom = request.ShippingFrom, ShippingTo = request.ShippingTo,
             CreatedBy = scope.Value.Actor, CreatedAt = now };
         db.Orders.Add(order);
-        await AddSpecificationRowsAsync(db, order, 1, request.Limits!, scope.Value.Actor, now, ct);
+        await AddSpecificationRowsAsync(db, order, 1, request.Limits!, scope.Value.Actor, now, ct, request.RequiredRiceVarietyId);
         await AddContainerRowsAsync(db, order, request.Containers!, now, ct);
         Event(db, order, scope.Value.Actor, "ORDER_CREATED", request, now);
         await db.SaveChangesAsync(ct);
@@ -273,6 +276,16 @@ public static partial class ExportModule
         return errors;
     }
 
+    private static async Task<IResult?> ValidateOrderVarietyAsync(AppDbContext db, Guid commodity, Guid? variety, CancellationToken ct)
+    {
+        var code = await db.Commodities.AsNoTracking().Where(x => x.Id == commodity).Select(x => x.Code).SingleOrDefaultAsync(ct);
+        if (variety == Guid.Empty || variety is { } id && !await db.RiceVarieties.AnyAsync(x => x.Id == id, ct))
+            return Invalid(new() { ["requiredRiceVarietyId"] = ["Choose a registered rice variety."] });
+        if (variety is null && code is "RICE" or "POLISHED-RICE" or "RICE_POLISHED")
+            return Invalid(new() { ["requiredRiceVarietyId"] = ["Choose the rice variety required by this order."] });
+        return null;
+    }
+
     private static async Task<bool> OrderExecutionStartedAsync(Guid actor, Guid order, AppDbContext db, CancellationToken ct)
     {
         var container = await db.Containers.AsNoTracking().Where(x => x.OrderId == order).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
@@ -302,10 +315,11 @@ public static partial class ExportModule
 
     private static async Task AddSpecificationRowsAsync(AppDbContext db,
         ExportOrder order, int version, IReadOnlyList<ExportLimitInput> input, Guid actor,
-        DateTimeOffset now, CancellationToken ct)
+        DateTimeOffset now, CancellationToken ct, Guid? requiredRiceVarietyId = null)
     {
+        var varietyName = requiredRiceVarietyId is { } variety ? await db.RiceVarieties.AsNoTracking().Where(x => x.Id == variety).Select(x => x.Name).SingleAsync(ct) : null;
         var spec = new OrderSpecification { Id = Guid.NewGuid(), OrderId = order.Id, CompanyId = order.CompanyId,
-            VersionNo = version, RecordedAt = now, RecordedBy = actor };
+            VersionNo = version, RecordedAt = now, RecordedBy = actor, RequiredRiceVarietyId = requiredRiceVarietyId, RequiredRiceVarietyName = varietyName };
         db.Specifications.Add(spec);
         var ids = input.Select(x => x.AttributeId).ToArray();
         var attributes = await db.QualityAttributes.AsNoTracking().Where(x => ids.Contains(x.Id))
@@ -360,7 +374,7 @@ public static partial class ExportModule
             .OrderBy(x => x.AttributeCode).ToListAsync(ct);
         return Results.Ok(new ExportPage<ExportSpecificationDto>(specs.Select(x =>
             new ExportSpecificationDto(x.VersionNo, x.RecordedAt,
-                limits.Where(y => y.SpecificationId == x.Id).Select(ToDto).ToArray())).ToArray(),
+                limits.Where(y => y.SpecificationId == x.Id).Select(ToDto).ToArray(), x.RequiredRiceVarietyId, x.RequiredRiceVarietyName)).ToArray(),
             page, size, total, (long)page * size < total));
     }
 
@@ -485,10 +499,14 @@ public static partial class ExportModule
             var stale = JsonSerializer.SerializeToElement(new { assessmentStatus = "INCOMPLETE", phase = "SPECIFICATION_REVISION", findings = new[] { "APPROVED_DEMAND_CHANGED" } });
             foreach (var container in containers) await InvalidateUnfinishedAuthorityAsync(scope.Value.Actor, container.Id, container.Version, stale, db, ct);
         }
+        var previousSpec = await db.Specifications.AsNoTracking().SingleAsync(x => x.OrderId == id && x.VersionNo == order.CurrentSpecificationVersion, ct);
+        var requiredVariety = request.RequiredRiceVarietyId ?? previousSpec.RequiredRiceVarietyId;
+        var varietyError = await ValidateOrderVarietyAsync(db, order.CommodityId, requiredVariety, ct);
+        if (varietyError is not null) return varietyError;
         order.CurrentSpecificationVersion++; order.Version++;
         var now = clock.GetUtcNow();
         await AddSpecificationRowsAsync(db, order, order.CurrentSpecificationVersion,
-            request.Limits!, scope.Value.Actor, now, ct);
+            request.Limits!, scope.Value.Actor, now, ct, requiredVariety);
         Event(db, order, scope.Value.Actor, "SPECIFICATION_VERSION_ADDED", request, now);
         await db.SaveChangesAsync(ct);
         var response = await DetailAsync(db, order, scope.Value.Actor, true, ct);

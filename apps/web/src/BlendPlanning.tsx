@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { AdjustBlendPlan, type AdjustedAllocation } from './AdjustBlendPlan';
 import { api, apiWithEtag, ApiError, errorMessage } from './api';
 
 type Page<T> = { items: T[]; page: number; totalCount: number; hasMore: boolean };
 type Context = { orderVersion: number; containerVersion: number; storageReady: boolean; canCreateDraft: boolean; candidateReadReady: boolean; compatibilityReadReady: boolean; missingDependencies: { code: string; description: string }[]; allowedTargetProducts: string[] };
 type Plan = { id: string; orderId: string; containerId: string; versionNo: number; version: number; status: string; targetMassKg: string; targetProductIdentity: string | null; demandSnapshot: string; createdAt: string; demandCurrent: boolean; demandChanged?: boolean; canCancel: boolean; hasProposal: boolean };
-type Candidate = { lotId: string; lotCode: string; locationId: string; locationName: string; availableKg: string; stockKind: string; productIdentity: string; productCompatibility: string; inventoryEligible: boolean; isCurrentPool: boolean; poolRevision: string | null; sourceCount: number; candidateRevision: string; restrictions: string[]; reasons: string[] };
+type Candidate = { riceVarietyId?: string | null; riceVariety?: string | null; varietyStatus?: string; varietyCompatible?: boolean; varietyExclusion?: string | null; lotId: string; lotCode: string; locationId: string; locationName: string; availableKg: string; stockKind: string; productIdentity: string; productCompatibility: string; inventoryEligible: boolean; isCurrentPool: boolean; poolRevision: string | null; sourceCount: number; candidateRevision: string; restrictions: string[]; reasons: string[] };
 type Candidates = Page<Candidate> & { scopeRevision: string; summary: { inventoryEligibleCount: number; excludedCount: number; inventoryEligibleMassKg: string; inventoryShortfallKg: string; directProductAvailableMassKg: string | null } };
 type Selection = { mode: string; selectedMassKg: string; allocations: { lotId: string; locationId: string; lotCode: string; quantityKg: string }[] };
 type Finding = { code: string; status: string; actual: string | null; limit: string | null; unit: string | null; reference: string | null };
@@ -15,7 +16,7 @@ type CalculationAttempt = {
   variables: number; constraints: number; elapsedMs: number; objective: number | null;
   bestBound: number | null; nodes: number | null; assessmentStatus: string | null;
 };
-type Preview = Assessment & { previewReference: string | null; canPropose: boolean;
+type Preview = Assessment & { quantityStepKg?: string; requiredRiceVarietyId?: string; requiredRiceVarietyName?: string; varietyExclusions?: { lotId: string; lotCode: string; riceVariety?: string; varietyStatus: string; code: string }[]; previewReference: string | null; canPropose: boolean;
   ratioRange?: { minimumKg: string; maximumKg: string } | null;
   optimization?: Optimization;
   calculationSteps?: { method: string; attempts: CalculationAttempt[] } | null;
@@ -31,7 +32,7 @@ function CalculationSteps({ preview }: { preview: Preview }) {
   if (!calculation) return null;
   const source = calculation.method === 'MILP' ? 'MILP'
     : calculation.method === 'GREEDY_FALLBACK' ? 'Greedy fallback'
-    : 'Recheck of the selected ratio';
+    : calculation.method === 'MANUAL_ADJUSTMENT' ? 'Manual adjustment verified by F14' : 'Recheck of the selected ratio';
   return <details className="export-details"><summary>Calculation steps (development)</summary>
     <ol>
       <li><strong>Build and solve the model</strong>
@@ -147,6 +148,7 @@ function displayFindingLimit(finding: Finding) {
   return `${concise(minimum)}–${concise(maximum)}`;
 }
 function findingArea(code: string) {
+  if (code.startsWith('VARIETY_')) return 'Rice variety';
   if (code.startsWith('SOURCE_LAB_') || code.includes('MRL') || code.startsWith('RESIDUE') || code.startsWith('ASSESSMENT')) return 'Residues and market';
   if (code.startsWith('QUALITY')) return 'Product quality';
   return 'Stock and output';
@@ -155,6 +157,8 @@ function findingAction(code: string, status: string) {
   if (status === 'PASS') return '—';
   if (code === 'ASSESSMENT_POLICY_MISSING') return 'Customer Manager: publish the market assessment policy.';
   if (code === 'APPLICABLE_MRL_MISSING') return 'MRL administrator: publish an applicable MRL version.';
+  if (code === 'QUANTITY_WHOLE_KG_REQUIRED') return 'Use whole kilograms and calculate a new plan.';
+  if (code.startsWith('VARIETY_')) return 'Use lots with the required registered rice variety. Unknown or mixed varieties cannot satisfy a single-variety order.';
   if (code === 'OUTPUT_YIELD_POLICY_MISSING') return 'Mill Manager: publish a facility yield rule.';
   if (code === 'QUALITY_RULE_MISSING') return 'Customer Manager: add a reviewed quality calculation rule.';
   if (code === 'QUALITY_EVIDENCE_MISSING') return 'Customer Manager: confirm finished-lot quality with Ledger evidence.';
@@ -428,6 +432,9 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
   const [lineageError, setLineageError] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewExpired, setPreviewExpired] = useState(false);
+  const [manualEditing, setManualEditing] = useState(false);
+  const [manualAssessment, setManualAssessment] = useState<Preview | null>(null);
+  useEffect(() => { setManualEditing(false); setManualAssessment(null); }, [preview]);
   const [objective, setObjective] = useState('');
   const [moistureAttributeId, setMoistureAttributeId] = useState('');
   const [testRatio, setTestRatio] = useState<string | null>(null);
@@ -509,6 +516,40 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
     catch (cause) { setLineageError(errorMessage(cause)); if (cause instanceof ApiError && cause.status === 409) refreshCandidates(); }
   }
   function refreshCandidates() { setCandidatePage(1); setCandidates(null); setPreview(null); setLineage(null); setStockError(''); setReload(n => n + 1); }
+  async function loadAdjustmentPositions() {
+    if (!plan || !candidates) throw new Error('Refresh stock before adjusting.');
+    const items: Candidate[] = [];
+    for (let page = 1; ; page++) {
+      const query = new URLSearchParams({ facilityId, planId, page: String(page), pageSize: '100',
+        includeExcluded: 'false', productMatchOnly: 'true', scopeRevision: candidates.scopeRevision });
+      const result = await api<Candidates>(`/api/export-containers/${plan.containerId}/candidates?${query}`);
+      if (result.scopeRevision !== candidates.scopeRevision) throw new Error('Stock changed. Refresh stock before adjusting.');
+      items.push(...result.items);
+      if (!result.hasMore) break;
+    }
+    const blocked = new Set(preview?.inputResidueExclusions?.map(row => row.lotId) ?? []);
+    return items.filter(row => row.inventoryEligible && row.varietyCompatible !== false && !row.varietyExclusion &&
+      !blocked.has(row.lotId) && row.restrictions.length === 0 && BigInt(row.availableKg.split('.')[0]) >= 1n);
+  }
+  async function checkAdjustedPlan(rows: AdjustedAllocation[]) {
+    if (busy || !preview?.previewReference || previewExpired || !candidates || !manualEditing) return;
+    setBusy(true); setPreviewError(''); setManualAssessment(null);
+    try {
+      const result = await api<Preview>(`/api/blend-plans/${planId}/preview`, { method: 'POST', body: JSON.stringify({
+        facilityId, scopeRevision: candidates.scopeRevision, objective: objective || undefined,
+        moistureAttributeId: objective === 'MIN_MOISTURE' ? moistureAttributeId : undefined,
+        planAdjustment: { previewReference: preview.previewReference,
+          allocations: rows.map(({ lotId, locationId, quantityKg }) => ({ lotId, locationId, quantityKg })) }
+      }) });
+      if (result.canPropose && result.previewReference && result.assessmentStatus === 'PASS') {
+        setPreview(result); setTestRatio(null); setPreviewExpired(false); setManualEditing(false);
+      } else {
+        setManualAssessment(result);
+        setPreviewError('The adjusted plan did not pass. Review the checks below and change the quantities.');
+      }
+    } catch (cause) { setPreviewError(errorMessage(cause)); if (cause instanceof ApiError && cause.status === 409) refreshCandidates(); }
+    finally { setBusy(false); }
+  }
   async function runPreview(firstQuantityKg?: string) {
     if (!candidates || !facilityId || busy) return;
     const adjust = firstQuantityKg !== undefined;
@@ -532,7 +573,7 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
     finally { setBusy(false); }
   }
   async function propose() {
-    if (busy || !pendingPropose && (!preview?.canPropose || previewExpired || testRatio !== null)) return;
+    if (busy || !pendingPropose && (!preview?.canPropose || previewExpired || testRatio !== null || manualEditing)) return;
     const request = pendingPropose ?? { route: `/api/blend-plans/${planId}/propose`, body: JSON.stringify({ operationId: crypto.randomUUID(), previewReference: preview!.previewReference }) };
     setBusy(true); setPreviewError(''); sessionStorage.setItem(proposeKey, JSON.stringify(request));
     try {
@@ -574,7 +615,7 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
     {!plan && !error && <p role="status">Loading plan…</p>}
     {plan && <><section className="panel export-section"><div className="section-toolbar"><h2>Demand snapshot</h2>{canPropose && plan.canCancel && !pendingCancel && !pendingPropose && <button className="secondary" disabled={busy} onClick={() => void cancel()}>Cancel draft</button>}</div>
       <Notice error={cancelError} />{pendingCancel && <p className="notice error">Cancellation outcome is uncertain. <button disabled={busy} onClick={() => void cancel()}>Retry same cancellation</button></p>}
-      <dl className="export-facts"><div><dt>Status</dt><dd>{plan.hasProposal || proposal ? 'Proposal saved' : label(plan.status)}</dd></div><div><dt>Target</dt><dd>{plan.targetMassKg} kg</dd></div><div><dt>Product</dt><dd>{label(plan.targetProductIdentity || 'Unknown')}</dd></div><div><dt>Demand</dt><dd>{(plan.demandChanged ?? !plan.demandCurrent) ? 'Changed since draft' : 'Current'}</dd></div></dl>
+      <dl className="export-facts"><div><dt>Status</dt><dd>{plan.hasProposal || proposal ? 'Proposal saved' : label(plan.status)}</dd></div><div><dt>Target</dt><dd>{plan.targetMassKg} kg</dd></div><div><dt>Required rice variety</dt><dd>{String(snapshot.requiredRiceVarietyName ?? 'Not specified')}</dd></div><div><dt>Product</dt><dd>{label(plan.targetProductIdentity || 'Unknown')}</dd></div><div><dt>Demand</dt><dd>{(plan.demandChanged ?? !plan.demandCurrent) ? 'Changed since draft' : 'Current'}</dd></div></dl>
       <p className="muted">Market: {marketName || 'Unavailable'} · Commodity: {commodityName || 'Unavailable'} · Shipping {String(snapshot.shippingFrom ?? '—')} to {String(snapshot.shippingTo ?? '—')}.</p>
       {plan.targetProductIdentity && !['HEAD_RICE', 'BROKEN_RICE', 'BLENDED_RICE', 'BAGGED_RICE'].includes(plan.targetProductIdentity) && <p className="notice pending" role="status">This product cannot complete the current F14 quality check. Ledger accepts confirmed planning-quality observations only for finished rice lots. To prepare an assessable proposal, first process stock into finished rice and use an order for the corresponding commodity.</p>}
       {Object.keys(snapshot).length === 0 && <p className="notice error" role="alert">This draft's demand snapshot could not be read. Open the container and create a new draft.</p>}
@@ -584,7 +625,7 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
     {proposalError && <p className="notice error" role="alert">Proposal status could not be checked: {proposalError}</p>}
     {pendingPropose && <section className="panel export-section"><h2>Proposal request</h2><Notice error={previewError} /><p className="notice error">Proposal outcome is uncertain. <button disabled={busy} onClick={() => void propose()}>Retry same proposal</button></p></section>}
     {proposal && <section className="panel export-section"><h2>Saved proposal</h2><p>Recorded {new Date(proposal.proposedAt).toLocaleString()} · Freshness: <strong>{proposal.freshness === 'NOT_RECHECKED' ? 'See decision' : proposal.freshness}</strong></p>{proposal.freshness === 'STALE' && <p className="notice error">Planning inputs changed: {(proposal.freshnessReasons ?? []).map(label).join(', ')}. <button className="text-button" onClick={() => onNavigate(`/export/containers/${plan.containerId}`)}>Open container to create a new draft</button></p>}<AssessmentView assessment={proposal.assessment} locations={locations} /><ProposalDecision key={`${userId}-${proposal.id}`} planId={planId} containerId={plan.containerId} proposal={proposal} userId={userId} canApprove={canApprove} proposalLoading={proposalLoading} reload={reload} onDecisionChange={() => { setHistoryPage(1); setReload(n => n + 1); }} /></section>}
-    {active && <section className="panel export-section"><h2>Stock and sources</h2><p className="muted">Facility is the mill. A location is a silo or store within it. A lot or mixed pool is stock at a location. Physical stock status does not confirm that its product matches this plan.</p>
+    {active && <section className="panel export-section"><h2>Stock and sources</h2><p className="muted">Plan input quantities use whole kilograms (1 kg steps). Each selected lot contributes at least 1 kg.</p><p className="muted">Facility is the mill. A location is a silo or store within it. A lot or mixed pool is stock at a location. Physical stock status does not confirm that its product matches this plan.</p>
       <Notice error={stockError} />
       {!canReadLedger && <p className="notice">Facility lookups are unavailable for this role.</p>}
       <div className="f14-actions"><label>Facility<select aria-label="Facility" value={facilityId} disabled={!canReadLedger} onChange={event => { setFacilityId(event.target.value); setCandidatePage(1); setCandidates(null); setPreview(null); setLineage(null); }}><option value="">Select facility</option>{facilities.map(facility => <option key={facility.id} value={facility.id}>{facility.name}</option>)}</select></label><label className="checkbox-label"><input type="checkbox" checked={showOtherProducts} onChange={event => { setShowOtherProducts(event.target.checked); setCandidatePage(1); setCandidates(null); setPreview(null); setLineage(null); }} /> Show other products</label><label className="checkbox-label"><input type="checkbox" checked={includeExcluded} onChange={event => { setIncludeExcluded(event.target.checked); setCandidatePage(1); setCandidates(null); setPreview(null); setLineage(null); }} /> Show excluded stock</label><button className="secondary" disabled={!facilityId} onClick={refreshCandidates}>Refresh stock</button></div>
@@ -592,7 +633,7 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
       {candidates && !candidateLoading && <><dl className="export-facts"><div><dt>Facility positions</dt><dd>{candidates.summary.inventoryEligibleCount}</dd></div><div><dt>Facility stock</dt><dd>{candidates.summary.inventoryEligibleMassKg} kg</dd></div><div><dt>Direct product match</dt><dd>{candidates.summary.directProductAvailableMassKg ?? '—'} kg</dd></div><div><dt>Excluded positions</dt><dd>{candidates.summary.excludedCount}</dd></div></dl>
         {candidates.summary.inventoryShortfallKg !== '0' && <p className="muted">Physical stock alone is {candidates.summary.inventoryShortfallKg} kg below the target. Product and compliance checks may reduce usable stock further.</p>}
         {candidates.summary.directProductAvailableMassKg === '0' && <p className="notice pending">No stock directly matches {label(plan.targetProductIdentity || 'this product')} in this facility.{plan.targetProductIdentity === 'BLENDED_RICE' ? ' Compatible input lots may still support a blend if an approved policy and complete evidence exist.' : ' Stock at an earlier processing stage must be processed in Ledger before it can supply this plan.'}</p>}
-        {candidates.items.length ? <div className="table-scroll"><table><thead><tr><th>Lot</th><th>Location</th><th>Available</th><th>Product</th><th>Plan fit</th><th>Physical status</th><th /></tr></thead><tbody>{candidates.items.map(item => <tr key={`${item.lotId}-${item.locationId}`}><td>{item.lotCode}{item.isCurrentPool && <small> · Mixed pool</small>}</td><td>{item.locationName}</td><td>{item.availableKg} kg</td><td>{label(item.productIdentity)}</td><td>{label(item.productCompatibility)}</td><td>{item.inventoryEligible ? 'In stock' : item.reasons.map(label).join(', ') || 'Excluded'}{item.restrictions.length > 0 && ` · ${item.restrictions.map(label).join(', ')}`}</td><td><button className="text-button" onClick={() => void openLineage(item)}>Sources</button></td></tr>)}</tbody></table></div> : <p className="empty">No stock matching this product is shown. Use Show other products to inspect the rest of the facility.</p>}
+        {candidates.items.length ? <div className="table-scroll"><table><thead><tr><th>Lot</th><th>Location</th><th>Available</th><th>Product</th><th>Rice variety</th><th>Plan fit</th><th>Physical status</th><th /></tr></thead><tbody>{candidates.items.map(item => <tr key={`${item.lotId}-${item.locationId}`}><td>{item.lotCode}{item.isCurrentPool && <small> · Mixed pool</small>}</td><td>{item.locationName}</td><td>{item.availableKg} kg</td><td>{label(item.productIdentity)}</td><td>{item.riceVariety ?? label(item.varietyStatus ?? 'UNKNOWN')}</td><td>{item.varietyExclusion ? label(item.varietyExclusion) : label(item.productCompatibility)}</td><td>{item.inventoryEligible ? 'In stock' : item.reasons.map(label).join(', ') || 'Excluded'}{item.restrictions.length > 0 && ` · ${item.restrictions.map(label).join(', ')}`}</td><td><button className="text-button" onClick={() => void openLineage(item)}>Sources</button></td></tr>)}</tbody></table></div> : <p className="empty">No stock matching this product is shown. Use Show other products to inspect the rest of the facility.</p>}
         <Pager page={candidatePage} count={candidates.totalCount} more={candidates.hasMore} onPage={page => { setCandidatePage(page); setPreview(null); setLineage(null); }} /></>}
       <Notice error={lineageError} />
       {lineage && <div className="f14-lineage"><div className="section-toolbar"><h3>Source composition</h3><button className="secondary" onClick={() => setLineage(null)}>Close</button></div><p>Lineage {lineage.lineage.complete ? 'complete' : 'incomplete'} · Position attribution {label(lineage.positionAttributionStatus)}</p><div className="table-scroll"><table><thead><tr><th>Source</th><th>Attributed mass</th></tr></thead><tbody>{lineage.composition.map((source, index) => <tr key={`${source.ledgerSourceLotId}-${index}`}><td>{source.captureSourceLotId ? <button className="text-button" onClick={() => onNavigate(`/capture/source-lots/${source.captureSourceLotId}`)}>Open source lot</button> : 'Ledger source'}</td><td>{source.lotAttributedKg} kg</td></tr>)}</tbody></table></div><details><summary>Processing and custody graph</summary><pre className="f14-json">{JSON.stringify(lineage.lineage, null, 2)}</pre></details></div>}
@@ -612,7 +653,7 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
       <button disabled={busy || !!pendingCancel || !!pendingPropose || (objective === 'MIN_MOISTURE' && !moistureAttributeId)} onClick={() => void runPreview()}>{busy ? 'Working…' : 'Calculate plan'}</button></>}</div>
       {!pendingPropose && <Notice error={previewError} />}
       {!canPropose && <p className="notice">Your role can inspect drafts but cannot calculate or propose a plan.</p>}
-      {preview && <>{!!preview.inputResidueExclusions?.length && <div className="notice pending" role="status">
+      {preview && <>{!!preview.varietyExclusions?.length && <div className="notice pending" role="status"><strong>Lots excluded by rice variety</strong><ul>{preview.varietyExclusions.map(row => <li key={row.lotId}>{row.lotCode} · {row.riceVariety ?? label(row.varietyStatus)} · {label(row.code)}</li>)}</ul></div>}{!!preview.inputResidueExclusions?.length && <div className="notice pending" role="status">
         <strong>Lots excluded by source evidence or input MRL checks</strong>
         <ul>{preview.inputResidueExclusions.map(row => <li key={`${row.lotId}:${row.substanceId}`}>
           {row.lotCode} · {preview.substanceNames?.[row.substanceId] ?? 'Required substance'} · {label(row.code)}
@@ -620,25 +661,32 @@ export function BlendPlanWorkspace({ planId, userId, canPropose, canApprove = fa
           {row.upper !== null && ` · ${row.upper} ${row.unit} upper bound / ${row.mrl} ${row.unit} MRL`}
         </li>)}</ul>
       </div>}
-      {preview.optimization?.positionsUsed != null && <p>Stock locations: <strong>{preview.optimization.positionsUsed}</strong>
+      {!manualEditing && preview.optimization?.positionsUsed != null && <p>Stock locations: <strong>{preview.optimization.positionsUsed}</strong>
         {preview.optimization.objective === 'MIN_LOCATIONS' && (preview.optimization.optimal ? ' · Optimal' : ' · Optimality not proven')}</p>}
-        {preview.optimization?.objective === 'MIN_LOTS' && preview.optimization.lotsUsed != null &&
+        {!manualEditing && preview.optimization?.objective === 'MIN_LOTS' && preview.optimization.lotsUsed != null &&
           <p>Lots used: <strong>{preview.optimization.lotsUsed}</strong> · {preview.optimization.optimal ? 'Optimal' : 'Optimality not proven'}</p>}
-        {preview.optimization?.weightedMoisture != null && testRatio === null &&
+        {preview.optimization?.weightedMoisture != null && testRatio === null && !manualEditing &&
           <p>Weighted moisture: <strong>{preview.optimization.weightedMoisture} %</strong> · {preview.optimization.optimal ? 'Optimal' : 'Optimality not proven'}</p>}
-        {preview.residueHeadroom && testRatio === null && <p>Closest residue to its limit: <strong>
+        {preview.residueHeadroom && testRatio === null && !manualEditing && <p>Closest residue to its limit: <strong>
           {preview.substanceNames?.[preview.residueHeadroom.substanceId] ?? 'Required substance'} · {(preview.residueHeadroom.ratio * 100).toFixed(2)}% of limit</strong>
           {preview.optimization?.objective === 'MAX_RESIDUE_HEADROOM' && (preview.optimization.optimal ? ' · Optimal' : ' · Optimality not proven')}</p>}
-        {preview.optimization?.headRiceUsedKg != null && testRatio === null && <p>Head rice used: <strong>{preview.optimization.headRiceUsedKg} kg</strong>
+        {preview.optimization?.headRiceUsedKg != null && testRatio === null && !manualEditing && <p>Head rice used: <strong>{preview.optimization.headRiceUsedKg} kg</strong>
           {preview.optimization.optimal ? ' · Optimal' : ' · Optimality not proven'}</p>}
-        {preview.previewReference && !previewExpired &&
+        {preview.previewReference && !previewExpired && !manualEditing &&
           <BlendRatioCard preview={preview} value={testRatio} busy={busy} attributeName={attributeName}
             onChange={setTestRatio} onCheck={kg => void runPreview(kg)} />}
-        {testRatio === null && <>
+        {canPropose && preview.canPropose && preview.previewReference && preview.selection && testRatio === null &&
+          <AdjustBlendPlan key={preview.previewReference} allocations={preview.selection.allocations}
+            totalKg={preview.selection.selectedMassKg} disabled={previewExpired || !!pendingPropose || !!pendingCancel}
+            busy={busy} loadPositions={loadAdjustmentPositions}
+            onEditing={editing => { setManualEditing(editing); setManualAssessment(null); setPreviewError(''); }}
+            onCheck={rows => void checkAdjustedPlan(rows)} onCancel={() => { setManualAssessment(null); setPreviewError(''); }} />}
+        {manualEditing && manualAssessment && <AssessmentView assessment={manualAssessment} locations={locations} substanceNames={manualAssessment.substanceNames} />}
+        {testRatio === null && !manualEditing && <>
           <AssessmentView assessment={preview} locations={locations} substanceNames={preview.substanceNames} />
           <CalculationSteps preview={preview} />
         </>}
-        {canPropose && preview.canPropose && preview.previewReference && <div className="f14-actions"><p className="muted">{previewExpired ? 'The preview has expired. Calculate the plan again.' : 'This preview reference expires after ten minutes. The server checks all inputs again when you propose.'}</p><button disabled={busy || previewExpired || testRatio !== null} onClick={() => void propose()}>Save proposal</button></div>}</>}
+        {canPropose && preview.canPropose && preview.previewReference && <div className="f14-actions"><p className="muted">{previewExpired ? 'The preview has expired. Calculate the plan again.' : 'This preview reference expires after ten minutes. The server checks all inputs again when you propose.'}</p><button disabled={busy || previewExpired || testRatio !== null || manualEditing} onClick={() => void propose()}>Save proposal</button></div>}</>}
     </section>}
     <section className="panel export-section"><h2>History</h2>{history ? <>{history.items.length ? <ul className="f14-history">{history.items.map((event, index) => <li key={`${event.recordedAt}-${index}`}><strong>{label(event.action)}</strong> · {event.actorName} · {new Date(event.recordedAt).toLocaleString()}</li>)}</ul> : <p>No history yet.</p>}<Pager page={historyPage} count={history.totalCount} more={history.hasMore} onPage={setHistoryPage} /></> : <p role="status">Loading history…</p>}</section></>}
   </>;

@@ -32,10 +32,11 @@ describe('Export order form', () => {
 
   it.each(['network', 'invalid-json', 'empty-body', 'missing-id'])('replays the exact create request after %s without allowing edits', async failure => {
     const navigate = vi.fn();
-    const requests: Array<{ operationId: string; requiredMass: string; limits: unknown[]; containers: unknown[] }> = [];
+    const requests: Array<{ operationId: string; requiredRiceVarietyId: string; requiredMass: string; limits: unknown[]; containers: unknown[] }> = [];
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
       if (path.startsWith('/api/markets?')) return json({ items: [{ id: 'market-1', code: 'EU', name: 'Europe' }], hasMore: false });
+      if (path.startsWith('/api/rice-varieties?')) return json({ items: [{ id: 'variety-1', code: 'ST25', name: 'ST25' }], hasMore: false });
       if (path.startsWith('/api/commodities?')) return json({ items: [{ id: 'commodity-1', code: 'RICE', name: 'Rice' }], hasMore: false });
       if (path.startsWith('/api/quality-attributes?')) return json({ items: [{ id: 'attribute-1', code: 'MOIST', name: 'Moisture', unit: '%' }], hasMore: false });
       if (path.startsWith('/api/measurement-units?')) return json({ items: [{ id: 'unit-t', code: 'T', name: 'Tonne', quantityKind: 'MASS' }], hasMore: false });
@@ -56,6 +57,7 @@ describe('Export order form', () => {
     const view = render(<ExportOrders canWrite path="/export/orders/new" onNavigate={navigate} />);
     await browser.selectOptions(await screen.findByLabelText('Export market'), 'market-1');
     await browser.selectOptions(await screen.findByLabelText('Commodity'), 'commodity-1');
+    await browser.selectOptions(await screen.findByLabelText('Required rice variety'), 'variety-1');
     await browser.type(screen.getByLabelText('Required mass'), '48');
     await screen.findAllByRole('option', { name: 'Tonne (T)' });
     await browser.selectOptions(screen.getAllByLabelText('Unit')[0], 'T');
@@ -78,6 +80,7 @@ describe('Export order form', () => {
     expect(requests).toHaveLength(2);
     expect(requests[1]).toEqual(requests[0]);
     expect(requests[0].operationId).toBe(requests[1].operationId);
+    expect(requests[0].requiredRiceVarietyId).toBe('variety-1');
     expect(requests[0].requiredMass).toBe('48');
     expect(requests[0].limits).toEqual([{ attributeId: 'attribute-1', minValue: null, maxValue: '14' }]);
     expect(requests[0].containers).toEqual([{ targetMass: '24', unit: 'T' }]);
@@ -188,6 +191,7 @@ describe('Export order form', () => {
       if (path === '/api/markets/market-1') return json({ id: 'market-1', code: 'EU', name: 'Europe' });
       if (path === '/api/commodities/commodity-1') return json({ id: 'commodity-1', code: 'RICE', name: 'Rice' });
       if (path.startsWith('/api/markets?')) return json({ items: [{ id: 'market-1', code: 'EU', name: 'Europe' }], hasMore: false });
+      if (path.startsWith('/api/rice-varieties?')) return json({ items: [{ id: 'variety-1', code: 'ST25', name: 'ST25' }], hasMore: false });
       if (path.startsWith('/api/commodities?')) return json({ items: [{ id: 'commodity-1', code: 'RICE', name: 'Rice' }], hasMore: false });
       if (path.startsWith('/api/measurement-units?')) return json({ items: [{ id: 'unit-t', code: 'T', name: 'Tonne', quantityKind: 'MASS' }, { id: 'unit-kg', code: 'KG', name: 'Kilogram', quantityKind: 'MASS', isDeleted: true }], hasMore: false });
       if (path === '/api/auth/csrf') return json({ token: 'csrf' });

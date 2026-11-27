@@ -16,7 +16,7 @@ public sealed class CandidateGroupValidatorTests
     private static PlanningCandidate Item(Guid lot, string product, Guid catalogCommodity, decimal available) =>
         new(lot, product, Location, "Store", OtherCommodity, catalogCommodity,
             product, product, available, available, "ORDINARY", false, false, null,
-            "candidate-r1", 1, true, true, [], []);
+            "candidate-r1", 1, true, true, [], [], RiceVarietyId: TargetCommodity, VarietyStatus: "SINGLE");
 
     private static PlanningCandidateSnapshot Snapshot() => new(Guid.NewGuid(), Guid.NewGuid(),
         1, 1, "PLANNED", TargetCommodity, 10m, DateTimeOffset.UtcNow, "scope-r1",
@@ -25,7 +25,7 @@ public sealed class CandidateGroupValidatorTests
             new { id = Policy, outputCatalogCommodityId = TargetCommodity,
                 inputProducts = new[] { $"{OtherCommodity}:HEAD_RICE", $"{OtherCommodity}:BROKEN_RICE" } }
         }), [Item(Head, "HEAD_RICE", OtherCommodity, 12m),
-            Item(Broken, "BROKEN_RICE", OtherCommodity, 18m)]);
+            Item(Broken, "BROKEN_RICE", OtherCommodity, 18m)], RequiredRiceVarietyId: TargetCommodity);
 
     [Fact]
     public void Cross_commodity_blend_checks_the_whole_policy_set_and_requires_output_yield()

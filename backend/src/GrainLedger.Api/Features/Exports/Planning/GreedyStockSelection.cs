@@ -6,7 +6,7 @@ namespace GrainLedger.Api.Features.Exports;
 // Ledger BLENDING operation must be assessed before a plan can be proposed.
 internal static class GreedyStockSelection
 {
-    private const decimal MassUnitKg = 0.000001m;
+    private const decimal MassUnitKg = BlendMilpSolver.Quantum;
 
     internal sealed record Allocation(Guid LotId, Guid LocationId, string LotCode,
         decimal QuantityKg, string CandidateRevision);
@@ -39,6 +39,8 @@ internal static class GreedyStockSelection
     private static Result Fill(decimal target, IEnumerable<PlanningCandidate> candidates,
         string mode, Guid? policyId, IReadOnlyList<Allocation>? initial = null)
     {
+        if (decimal.Truncate(target) != target)
+            return new("SEARCH_EXHAUSTED", mode, policyId, 0, target, [], ["WHOLE_KG_TARGET_REQUIRED"]);
         var allocations = initial?.ToList() ?? [];
         var remaining = target - allocations.Sum(x => x.QuantityKg);
         foreach (var candidate in Ordered(candidates))
@@ -46,7 +48,7 @@ internal static class GreedyStockSelection
             if (remaining == 0) break;
             var alreadySelected = allocations.Where(x => x.LotId == candidate.LotId &&
                 x.LocationId == candidate.LocationId).Sum(x => x.QuantityKg);
-            var quantity = Math.Min(remaining, candidate.AvailableKg - alreadySelected);
+            var quantity = Math.Min(remaining, decimal.Floor(candidate.AvailableKg) - alreadySelected);
             if (quantity <= 0) continue;
             var existing = allocations.FindIndex(x => x.LotId == candidate.LotId &&
                 x.LocationId == candidate.LocationId);
@@ -66,7 +68,7 @@ internal static class GreedyStockSelection
         IReadOnlyDictionary<Guid, string>? commodityCodes = null)
     {
         if (targetKg <= 0) throw new ArgumentOutOfRangeException(nameof(targetKg));
-        var eligible = candidates.Where(x => x.InventoryEligible && x.AvailableKg > 0).ToArray();
+        var eligible = candidates.Where(x => x.InventoryEligible && x.AvailableKg >= MassUnitKg).ToArray();
         var direct = Fill(targetKg, eligible.Where(x => ExportProductMatch.IsDirect(
                 x, targetProductIdentity, catalogCommodityId, orderCommodityCode)),
             "DIRECT_STOCK", null);
@@ -104,8 +106,8 @@ internal static class GreedyStockSelection
             }
 
             // Include every product in the exact Ledger set before filling the
-            // remaining mass greedily. This unit is storage precision, not a
-            // business blend ratio or a claim about output yield.
+            // remaining mass greedily. Each selected product needs at least 1 kg;
+            // it is not a fixed blend ratio or a claim about output yield.
             var anchors = keys.Select(key => Ordered(inputs.Where(x => ProductKey(x) == key)).First())
                 .Select(x => new Allocation(x.LotId, x.LocationId, x.LotCode,
                     MassUnitKg, x.CandidateRevision)).ToArray();

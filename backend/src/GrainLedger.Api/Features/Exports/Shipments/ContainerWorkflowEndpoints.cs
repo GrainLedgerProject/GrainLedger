@@ -289,6 +289,13 @@ public static partial class ExportModule
         Guid? compatibility, AppDbContext db, LedgerService ledger, ResidueEvaluationService residue, ApplicableMrlRead mrlReader, BlendAssessmentPolicyRead policyReader, CancellationToken ct,
         IReadOnlyDictionary<Guid, Guid>? lotFacilities = null, Func<DateTimeOffset, Task<JsonElement>>? handoffQuality = null)
     {
+        var varietySpecification = await db.Specifications.AsNoTracking().SingleAsync(x => x.OrderId == order.Id && x.VersionNo == order.CurrentSpecificationVersion, ct);
+        var identities = await ledger.ReadPlanningLotVarietiesAsync(selected.Where(x => x.QuantityKg > 0).Select(x => x.LotId).Distinct().ToArray(), ct);
+        foreach (var identity in identities)
+        {
+            var reason = RiceVarietyEligibility.Reason(varietySpecification.RequiredRiceVarietyId, identity.RiceVarietyId, identity.VarietyStatus, identity.ProductIdentity);
+            if (reason is not null) return IncompleteWorkflowAssessment(reason);
+        }
         var policy = await policyReader.ResolveAsync(order.CompanyId, order.MarketId, order.CommodityId, null, ct);
         if (policy is null) return IncompleteWorkflowAssessment("ASSESSMENT_POLICY_MISSING");
         PlanningYieldRule? yield = compatibility is Guid compatible ? await ledger.ReadPlanningYieldRuleAsync(order.CompanyId, facility, compatible, DateTimeOffset.UtcNow, ct) : null;
@@ -348,7 +355,8 @@ public static partial class ExportModule
                 retained.Add(new("OUTPUT_PRODUCT_IDENTITY_CHANGED", "INCOMPLETE", null, null, null, null));
             assessment = assessment with { Findings = retained, Status = retained.Any(x => x.Status == "FAIL") ? "FAIL" : retained.Any(x => x.Status == "INCOMPLETE") ? "INCOMPLETE" : "PASS" };
         }
-        var dependency = ExportRules.Hash("blend-assessment-dependencies", new { mrl, policy, yield, bounds, observations });
+        var varieties = RiceVarietyEligibility.Basis(identities.Select(x => new RiceVarietyEligibility.LotIdentity(x.LotId, x.RiceVarietyId, x.VarietyStatus)));
+        var dependency = ExportRules.Hash("blend-assessment-dependencies", new { mrl, policy, yield, bounds, observations, specification.RequiredRiceVarietyId, varieties });
         var status = assessment.Status; var findings = assessment.Findings.Where(f => f.Status != "PASS").Select(f => f.Code).ToArray();
         return JsonSerializer.SerializeToElement(new
         {

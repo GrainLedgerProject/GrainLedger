@@ -143,7 +143,7 @@ internal sealed class ContainerExecutionScenario : IDisposable
             operationId = Guid.NewGuid(),
             marketId = market,
             commodityId = stock.CatalogCommodityId,
-            requiredMass = production ? "20" : "10",
+            requiredRiceVarietyId = stock.RiceVarietyId, requiredMass = production ? "20" : "10",
             unit = "KG",
             shippingFrom = "2026-11-10",
             shippingTo = "2026-11-20",
